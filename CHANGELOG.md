@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.6.127] - 2026-10-13
+
+- fix(api): v2 facade 正确转换 prompt parts 为 text/files/agents (1fc4d28b)
+- feat(api): 支持 opencode v2（/api/*）协议 (bbc416b3)
+
 ## [v0.6.126] - 2026-10-13
 
 - feat(markdown): Mermaid 图表支持全屏查看，ESC 退出 (459889a3)
