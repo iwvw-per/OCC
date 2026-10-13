@@ -131,7 +131,11 @@ export function buildCacheKey(serverId?: string): string {
   const baseUrl = serverId ? serverStore.getServerBaseUrl(serverId) : serverStore.getActiveBaseUrl()
   const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
   const authPart = auth?.password ? `${auth.username}:${auth.password}` : ''
-  return `${baseUrl}|${authPart}`
+  const resolvedServerId = serverId ?? serverStore.getActiveServerId()
+  const apiVersion = resolvedServerId ? serverStore.getApiVersion(resolvedServerId) : undefined
+  // apiVersion 参与 key：服务器从 v1 迁移到 v2 后（或首次探测完成），缓存自动失效，
+  // 避免启动时按 v1 建的 client 被永久复用而把 /api/* 打成本地 SPA 的 HTML。
+  return `${baseUrl}|${authPart}|${apiVersion ?? 'unknown'}`
 }
 
 export function buildHeaders(serverId?: string): Record<string, string> {

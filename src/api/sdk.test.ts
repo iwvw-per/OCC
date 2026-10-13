@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { createOpencodeClientMock, getActiveBaseUrlMock, getActiveAuthMock, isTauriMock } = vi.hoisted(() => ({
-  createOpencodeClientMock: vi.fn((config: unknown) => ({ config })),
-  getActiveBaseUrlMock: vi.fn(() => 'http://127.0.0.1:4096'),
-  getActiveAuthMock: vi.fn(() => null),
-  isTauriMock: vi.fn(() => false),
-}))
+const { createOpencodeClientMock, createV2FacadeMock, getActiveBaseUrlMock, getActiveAuthMock, isTauriMock, getApiVersionMock, getServerBaseUrlMock, getServerAuthMock, getActiveServerIdMock } =
+  vi.hoisted(() => ({
+    createOpencodeClientMock: vi.fn((config: unknown) => ({ config, kind: 'v1-path' })),
+    createV2FacadeMock: vi.fn(() => ({ kind: 'v2-facade' })),
+    getActiveBaseUrlMock: vi.fn(() => 'http://127.0.0.1:4096'),
+    getActiveAuthMock: vi.fn(() => null),
+    isTauriMock: vi.fn(() => false),
+    getApiVersionMock: vi.fn(() => undefined),
+    getServerBaseUrlMock: vi.fn(() => 'http://127.0.0.1:4096'),
+    getServerAuthMock: vi.fn(() => null),
+    getActiveServerIdMock: vi.fn(() => 'srv-1'),
+  }))
 
 vi.mock('@opencode-ai/sdk/v2/client', () => ({
   createOpencodeClient: createOpencodeClientMock,
@@ -16,9 +22,15 @@ vi.mock('../store/serverStore', () => ({
   serverStore: {
     getActiveBaseUrl: getActiveBaseUrlMock,
     getActiveAuth: getActiveAuthMock,
-    getActiveServerId: vi.fn(() => undefined),
-    getApiVersion: vi.fn(() => undefined),
+    getActiveServerId: getActiveServerIdMock,
+    getServerBaseUrl: getServerBaseUrlMock,
+    getServerAuth: getServerAuthMock,
+    getApiVersion: getApiVersionMock,
   },
+}))
+
+vi.mock('./clientFacade', () => ({
+  createV2Facade: createV2FacadeMock,
 }))
 
 vi.mock('../utils/tauri', () => ({
@@ -37,6 +49,10 @@ describe('sdk request lifecycle', () => {
     getActiveBaseUrlMock.mockReturnValue('http://127.0.0.1:4096')
     getActiveAuthMock.mockReturnValue(null)
     isTauriMock.mockReturnValue(false)
+    getApiVersionMock.mockReturnValue(undefined)
+    getServerBaseUrlMock.mockReturnValue('http://127.0.0.1:4096')
+    getServerAuthMock.mockReturnValue(null)
+    getActiveServerIdMock.mockReturnValue('srv-1')
     const { abortInFlightApiRequests, invalidateSDKClient } = await import('./sdk')
     abortInFlightApiRequests('reset test state')
     invalidateSDKClient()
@@ -73,5 +89,22 @@ describe('sdk request lifecycle', () => {
       name: 'AbortError',
     })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('rebuilds the v2 facade when version detection flips to v2 after a v1-path client was cached', async () => {
+    const { getSDKClient } = await import('./sdk')
+
+    // 启动阶段版本未探测：先按 v1 路径建 client 并缓存。
+    getApiVersionMock.mockReturnValue(undefined)
+    const first = getSDKClient() as unknown as { kind: string }
+    expect(first.kind).toBe('v1-path')
+
+    // 健康检查随后探测到 v2：缓存必须失效，重建为 v2 facade。
+    getApiVersionMock.mockReturnValue('v2')
+    const second = getSDKClient() as unknown as { kind: string }
+    expect(second.kind).toBe('v2-facade')
+
+    // v2 结果稳定后不重复重建。
+    expect(getSDKClient()).toBe(second)
   })
 })
