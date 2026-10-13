@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.6.128] - 2026-10-13
+
+- fix(api): v2 facade 修正 message.list 的 limit 上限与分页语义 (72dfeeba)
+
 ## [v0.6.127] - 2026-10-13
 
 - fix(api): v2 facade 正确转换 prompt parts 为 text/files/agents (1fc4d28b)
