@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { clearMermaidRenderCache } from './mermaidRenderCache'
+import { FullscreenProvider } from '../contexts'
 
 const mermaidMocks = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -1309,6 +1310,29 @@ $$`
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset diagram view' }))
     expect(diagram).toHaveStyle({ transform: 'translate(0px, 0px) scale(1)' })
+  })
+
+  it('opens the diagram in a fullscreen viewer and closes it on Escape', async () => {
+    render(
+      <FullscreenProvider>
+        <MarkdownRenderer content={'```mermaid\ngraph TD\n  A-->B\n```'} />
+      </FullscreenProvider>,
+    )
+
+    await screen.findByRole('img', { name: 'Mermaid diagram' })
+    const fullscreenButton = screen.getByRole('button', { name: 'View diagram fullscreen' })
+
+    fireEvent.click(fullscreenButton)
+
+    expect(screen.getByTestId('fullscreen-viewer-header')).toBeInTheDocument()
+    expect(screen.getAllByRole('img', { name: 'Mermaid diagram' })).toHaveLength(2)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('fullscreen-viewer-header')).not.toBeInTheDocument()
+    })
+    expect(screen.getAllByRole('img', { name: 'Mermaid diagram' })).toHaveLength(1)
   })
 
   it('marks streaming markdown chunk boundaries for stable spacing', () => {

@@ -12,11 +12,12 @@ import {
 import morphdom from 'morphdom'
 import { useTranslation } from 'react-i18next'
 import { CodeBlock } from './CodeBlock'
-import { CodeIcon, EyeIcon, HandIcon, RetryIcon, ZoomInIcon, ZoomOutIcon } from './Icons'
+import { CodeIcon, EyeIcon, HandIcon, MaximizeIcon, RetryIcon, ZoomInIcon, ZoomOutIcon } from './Icons'
 import { CopyButton } from './ui'
 import { Spinner } from './ui/Spinner'
 import { useTheme } from '../hooks/useTheme'
 import { useInputCapabilities } from '../hooks/useInputCapabilities'
+import { useOptionalFullscreen } from '../contexts'
 import { detectLanguage } from '../utils/languageUtils'
 import { isTauri } from '../utils/tauri'
 import { marked } from 'marked'
@@ -260,14 +261,24 @@ function getOrderedListPadding(start: number, itemCount: number): string {
 
 // ─── Mermaid ────────────────────────────────────────────────────
 
-const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { code: string; isIncomplete?: boolean }) {
+interface MermaidSurfaceProps {
+  scopedSvg: string
+  copyText: string
+  supportsTouchGestures: boolean
+  preferTouchUi: boolean
+  fill?: boolean
+  onFullscreen?: () => void
+}
+
+const MermaidZoomableSurface = memo(function MermaidZoomableSurface({
+  scopedSvg,
+  copyText,
+  supportsTouchGestures,
+  preferTouchUi,
+  fill = false,
+  onFullscreen,
+}: MermaidSurfaceProps) {
   const { t } = useTranslation('components')
-  const { resolvedTheme } = useTheme()
-  const mermaidTheme = resolvedTheme === 'dark' ? 'dark' : 'default'
-  const { hasCoarsePointer, hasTouch, preferTouchUi } = useInputCapabilities()
-  const supportsTouchGestures = hasCoarsePointer || hasTouch
-  const renderPrefix = useId()
-  const instanceSvgId = `mermaid-instance-${renderPrefix.replace(/[^a-zA-Z0-9_-]/g, '')}`
   const dragRef = useRef<{
     pointerId: number
     startX: number
@@ -277,8 +288,6 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
   } | null>(null)
   const touchPointersRef = useRef<Map<number, DiagramPointer>>(new Map())
   const pinchRef = useRef<PinchGesture | null>(null)
-  const [svg, setSvg] = useState(() => (isIncomplete ? '' : (getCachedMermaidSvg(`${mermaidTheme}:${code}`) ?? '')))
-  const [error, setError] = useState('')
   const [scale, setScale] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [isTouchPanEnabled, setIsTouchPanEnabled] = useState(false)
@@ -287,7 +296,6 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
     setScale(1)
     setOffset({ x: 0, y: 0 })
   }, [])
-  const scopedSvg = useMemo(() => scopeMermaidSvg(svg, instanceSvgId), [instanceSvgId, svg])
 
   const zoomBy = useCallback((delta: number) => {
     setScale(current => clampMermaidScale(current + delta))
@@ -409,67 +417,9 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
     }
   }, [])
 
-  useEffect(() => {
-    if (isIncomplete || !code.trim()) {
-      return
-    }
-
-    let cancelled = false
-
-    async function renderDiagram() {
-      try {
-        const cached = getCachedMermaidSvg(`${mermaidTheme}:${code}`)
-        setSvg(cached ?? '')
-        setError('')
-        resetView()
-        if (cached !== undefined) return
-        const result = await getMermaidSvg(code, mermaidTheme, renderPrefix)
-        if (!cancelled) setSvg(result)
-      } catch (err) {
-        if (import.meta.env.DEV) {
-          console.warn('[Markdown] Mermaid render failed:', err)
-        }
-        if (!cancelled) {
-          setSvg('')
-          setError(err instanceof Error ? err.message : 'Failed to render Mermaid diagram')
-        }
-      }
-    }
-
-    void renderDiagram()
-
-    return () => {
-      cancelled = true
-    }
-  }, [code, isIncomplete, mermaidTheme, renderPrefix, resetView])
-
-  if (isIncomplete) {
-    return <CodeBlock code={code} language="mermaid" deferHighlight />
-  }
-
-  if (error) {
-    return (
-      <div className="my-4 first:mt-0 last:mb-0 rounded-md border border-danger-100/30 bg-danger-bg/40 p-3">
-        <p className="mb-2 text-[length:var(--fs-sm)] font-medium text-danger-100">{t('markdown.renderFailed')}</p>
-        <CodeBlock code={code} language="mermaid" />
-      </div>
-    )
-  }
-
-  if (!svg) {
-    return (
-      <div
-        className="my-4 first:mt-0 last:mb-0 flex min-h-40 items-center justify-center"
-        aria-label={t('markdown.renderingDiagram')}
-      >
-        <Spinner size="lg" tone="muted" />
-      </div>
-    )
-  }
-
   return (
     <div
-      className={`group/mermaid relative my-4 first:mt-0 last:mb-0 overflow-hidden ${preferTouchUi ? 'focus:outline-none' : ''}`}
+      className={`group/mermaid relative ${fill ? 'h-full w-full' : 'my-4 first:mt-0 last:mb-0'} overflow-hidden ${preferTouchUi ? 'focus:outline-none' : ''}`}
       tabIndex={preferTouchUi ? 0 : undefined}
       onClick={preferTouchUi ? handleContainerClick : undefined}
       onBlur={preferTouchUi ? handleContainerBlur : undefined}
@@ -478,7 +428,18 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
         className={`absolute right-2 top-2 z-10 flex items-center gap-1 opacity-0 transition-opacity group-hover/mermaid:opacity-100 group-focus-within/mermaid:opacity-100 ${preferTouchUi ? '[@media(hover:none)]:opacity-0' : '[@media(hover:none)]:opacity-100'}`}
         onMouseDown={event => event.preventDefault()}
       >
-        <CopyButton text={code} position="static" className={`!h-8 !w-8 !p-2 ${MERMAID_CONTROL_BUTTON_BASE_CLASS}`} />
+        <CopyButton text={copyText} position="static" className={`!h-8 !w-8 !p-2 ${MERMAID_CONTROL_BUTTON_BASE_CLASS}`} />
+        {onFullscreen && (
+          <button
+            type="button"
+            className={MERMAID_CONTROL_BUTTON_CLASS}
+            onClick={onFullscreen}
+            title={t('markdown.enterFullscreen')}
+            aria-label={t('markdown.enterFullscreenLabel')}
+          >
+            <MaximizeIcon />
+          </button>
+        )}
         {preferTouchUi && (
           <button
             type="button"
@@ -526,7 +487,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
         </button>
       </div>
       <div
-        className={`mermaid-diagram min-h-40 min-w-fit select-none overflow-hidden p-1 [&_svg]:max-w-full [&_svg]:h-auto ${supportsTouchGestures && !isTouchPanEnabled ? 'cursor-default touch-pan-y' : 'cursor-grab touch-none active:cursor-grabbing'}`}
+        className={`mermaid-diagram ${fill ? 'h-full w-full' : 'min-h-40 min-w-fit'} select-none overflow-hidden p-1 [&_svg]:max-w-full [&_svg]:h-auto ${supportsTouchGestures && !isTouchPanEnabled ? 'cursor-default touch-pan-y' : 'cursor-grab touch-none active:cursor-grabbing'}`}
         role="img"
         aria-label={t('markdown.diagramLabel')}
         onPointerDown={handlePointerDown}
@@ -540,6 +501,121 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
         dangerouslySetInnerHTML={{ __html: scopedSvg }}
       />
     </div>
+  )
+})
+
+const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { code: string; isIncomplete?: boolean }) {
+  const { t } = useTranslation('components')
+  const { resolvedTheme } = useTheme()
+  const mermaidTheme = resolvedTheme === 'dark' ? 'dark' : 'default'
+  const { hasCoarsePointer, hasTouch, preferTouchUi } = useInputCapabilities()
+  const supportsTouchGestures = hasCoarsePointer || hasTouch
+  const renderPrefix = useId()
+  const instanceSvgId = `mermaid-instance-${renderPrefix.replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const fullscreen = useOptionalFullscreen()
+  const fullscreenId = `mermaid:${instanceSvgId}`
+  const [svg, setSvg] = useState(() => (isIncomplete ? '' : (getCachedMermaidSvg(`${mermaidTheme}:${code}`) ?? '')))
+  const [error, setError] = useState('')
+
+  const scopedSvg = useMemo(() => scopeMermaidSvg(svg, instanceSvgId), [instanceSvgId, svg])
+
+  const fullscreenContent = useMemo(() => {
+    if (!scopedSvg) return null
+    return (
+      <div className="flex h-full items-center justify-center">
+        <MermaidZoomableSurface
+          scopedSvg={scopedSvg}
+          copyText={code}
+          supportsTouchGestures={supportsTouchGestures}
+          preferTouchUi={preferTouchUi}
+          fill
+        />
+      </div>
+    )
+  }, [code, preferTouchUi, scopedSvg, supportsTouchGestures])
+
+  const fullscreenLayer = useMemo(() => {
+    if (!fullscreenContent) return null
+    return {
+      id: fullscreenId,
+      title: t('markdown.diagramLabel'),
+      content: fullscreenContent,
+    }
+  }, [fullscreenContent, fullscreenId, t])
+
+  const openFullscreen = useCallback(() => {
+    if (!fullscreen || !fullscreenLayer) return
+    fullscreen.openFullscreen(fullscreenLayer)
+  }, [fullscreen, fullscreenLayer])
+
+  const handleOpenFullscreen = fullscreen ? openFullscreen : undefined
+
+  useEffect(() => {
+    if (isIncomplete || !code.trim()) {
+      return
+    }
+
+    let cancelled = false
+
+    async function renderDiagram() {
+      try {
+        const cached = getCachedMermaidSvg(`${mermaidTheme}:${code}`)
+        setSvg(cached ?? '')
+        setError('')
+        if (cached !== undefined) return
+        const result = await getMermaidSvg(code, mermaidTheme, renderPrefix)
+        if (!cancelled) setSvg(result)
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('[Markdown] Mermaid render failed:', err)
+        }
+        if (!cancelled) {
+          setSvg('')
+          setError(err instanceof Error ? err.message : 'Failed to render Mermaid diagram')
+        }
+      }
+    }
+
+    void renderDiagram()
+
+    return () => {
+      cancelled = true
+    }
+  }, [code, isIncomplete, mermaidTheme, renderPrefix])
+
+  if (isIncomplete) {
+    return <CodeBlock code={code} language="mermaid" deferHighlight />
+  }
+
+  if (error) {
+    return (
+      <div className="my-4 first:mt-0 last:mb-0 rounded-md border border-danger-100/30 bg-danger-bg/40 p-3">
+        <p className="mb-2 text-[length:var(--fs-sm)] font-medium text-danger-100">{t('markdown.renderFailed')}</p>
+        <CodeBlock code={code} language="mermaid" />
+      </div>
+    )
+  }
+
+  if (!svg) {
+    return (
+      <div
+        className="my-4 first:mt-0 last:mb-0 flex min-h-40 items-center justify-center"
+        aria-label={t('markdown.renderingDiagram')}
+      >
+        <Spinner size="lg" tone="muted" />
+      </div>
+    )
+  }
+
+  return (
+    <MermaidZoomableSurface
+      key={`${mermaidTheme}:${code}`}
+      scopedSvg={scopedSvg}
+      copyText={code}
+      supportsTouchGestures={supportsTouchGestures}
+      preferTouchUi={preferTouchUi}
+      onFullscreen={handleOpenFullscreen}
+    />
   )
 })
 

@@ -211,7 +211,9 @@
     "renderHtml": "渲染 HTML",
     "zoomInLabel": "放大图表",
     "zoomOutLabel": "缩小图表",
-    "resetViewLabel": "重置图表视图"
+    "resetViewLabel": "重置图表视图",
+    "enterFullscreen": "全屏查看",
+    "enterFullscreenLabel": "全屏查看图表"
   },
   "codeSearch": {
     "find": "查找",

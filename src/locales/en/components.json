@@ -214,7 +214,9 @@
     "renderHtml": "Render HTML",
     "zoomInLabel": "Zoom in diagram",
     "zoomOutLabel": "Zoom out diagram",
-    "resetViewLabel": "Reset diagram view"
+    "resetViewLabel": "Reset diagram view",
+    "enterFullscreen": "Fullscreen",
+    "enterFullscreenLabel": "View diagram fullscreen"
   },
   "codeSearch": {
     "find": "Find",

@@ -9,6 +9,10 @@ export function useFullscreen(): FullscreenContextValue {
   return context
 }
 
+export function useOptionalFullscreen(): FullscreenContextValue | null {
+  return useContext(FullscreenContext)
+}
+
 export function useFullscreenLayer(layer: FullscreenLayer | null) {
   const { activeId, openFullscreen, updateFullscreen, closeFullscreen } = useFullscreen()
   const isOpen = !!layer && activeId === layer.id
