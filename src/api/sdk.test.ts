@@ -16,6 +16,8 @@ vi.mock('../store/serverStore', () => ({
   serverStore: {
     getActiveBaseUrl: getActiveBaseUrlMock,
     getActiveAuth: getActiveAuthMock,
+    getActiveServerId: vi.fn(() => undefined),
+    getApiVersion: vi.fn(() => undefined),
   },
 }))
 

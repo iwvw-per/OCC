@@ -10,6 +10,7 @@
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2/client'
 import { serverStore, makeAuthHeader } from '../store/serverStore'
 import { isTauri } from '../utils/tauri'
+import { createV2Facade } from './clientFacade'
 
 // Tauri fetch 缓存
 let _tauriFetch: typeof globalThis.fetch | null = null
@@ -17,7 +18,7 @@ let _tauriFetchLoading: Promise<typeof globalThis.fetch> | null = null
 let _apiRequestGeneration = 0
 const _apiRequestControllers = new Set<AbortController>()
 
-async function getTauriFetch(): Promise<typeof globalThis.fetch> {
+export async function getTauriFetch(): Promise<typeof globalThis.fetch> {
   if (_tauriFetch) return _tauriFetch
   if (_tauriFetchLoading) return _tauriFetchLoading
   _tauriFetchLoading = import('@tauri-apps/plugin-http').then(mod => {
@@ -60,7 +61,7 @@ function createAbortError(message: string) {
 /** 请求超时：服务端半死时避免请求永久挂起，超时后按瞬态错误重试。 */
 const API_REQUEST_TIMEOUT_MS = 30_000
 
-async function trackedFetch(input: RequestInfo | URL, init: RequestInit | undefined, generation: number): Promise<Response> {
+export async function trackedFetch(input: RequestInfo | URL, init: RequestInit | undefined, generation: number): Promise<Response> {
   const controller = new AbortController()
   const externalSignal = init?.signal
   const abortFromExternal = () => controller.abort(externalSignal?.reason)
@@ -104,6 +105,11 @@ async function trackedFetch(input: RequestInfo | URL, init: RequestInit | undefi
   }
 }
 
+/** 当前 API 请求代次。供其它客户端工厂（如 v2 SDK）在构造 fetch 时捕获。 */
+export function getApiRequestGeneration(): number {
+  return _apiRequestGeneration
+}
+
 export function abortInFlightApiRequests(reason = 'Server endpoint changed'): void {
   _apiRequestGeneration++
   for (const controller of _apiRequestControllers) {
@@ -121,14 +127,14 @@ interface CachedClientEntry {
 
 const _cachedClients = new Map<string | undefined, CachedClientEntry>()
 
-function buildCacheKey(serverId?: string): string {
+export function buildCacheKey(serverId?: string): string {
   const baseUrl = serverId ? serverStore.getServerBaseUrl(serverId) : serverStore.getActiveBaseUrl()
   const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
   const authPart = auth?.password ? `${auth.username}:${auth.password}` : ''
   return `${baseUrl}|${authPart}`
 }
 
-function buildHeaders(serverId?: string): Record<string, string> {
+export function buildHeaders(serverId?: string): Record<string, string> {
   const headers: Record<string, string> = {}
   const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
   if (auth?.token || auth?.password) {
@@ -148,6 +154,16 @@ export function getSDKClient(serverId?: string): OpencodeClient {
   const cached = _cachedClients.get(serverId)
   if (cached && cached.key === key) {
     return cached.client
+  }
+
+  // v2 服务器：返回对 v1 SDK 形状的 facade（内部走 @opencode/client 并适配响应）。
+  // 版本由 serverStore 健康检查探测并缓存；未探测到时按 v1 处理（默认路径）。
+  const resolvedServerId = serverId ?? serverStore.getActiveServerId()
+  const apiVersion = resolvedServerId ? serverStore.getApiVersion(resolvedServerId) : undefined
+  if (apiVersion === 'v2') {
+    const facade = createV2Facade(serverId)
+    _cachedClients.set(serverId, { key, client: facade })
+    return facade
   }
 
   const baseUrl = serverId ? serverStore.getServerBaseUrl(serverId) : serverStore.getActiveBaseUrl()

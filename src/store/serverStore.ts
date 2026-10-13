@@ -4,6 +4,7 @@
 
 import { API_BASE_URL } from '../constants'
 import { isTauri } from '../utils/tauri'
+import { detectServerVersion, type ApiVersion } from '../api/serverVersion'
 import i18n from '../i18n'
 
 // Tauri plugin-http fetch 缓存（避免重复 dynamic import）
@@ -56,6 +57,8 @@ export interface ServerHealth {
   error?: string // 错误信息
   details?: string // 原始诊断信息
   version?: string // 服务器版本
+  /** opencode API 代次（v1 根路径 / v2 /api/* 前缀），探测不到时缺省 */
+  apiVersion?: ApiVersion
 }
 
 export interface ServerSettingsBackup {
@@ -607,6 +610,27 @@ class ServerStore {
     return request
   }
 
+  /**
+   * 探测服务器 API 版本（v1/v2）。供健康检查在 /global/health 返回 HTML 时调用。
+   * 探测失败返回 undefined，由调用方按原错误路径处理。
+   */
+  private async detectVersion(
+    server: ServerConfig,
+    headers: Record<string, string>,
+  ): Promise<{ apiVersion: ApiVersion; version?: string } | undefined> {
+    try {
+      const f = await getUnifiedFetch()
+      return await detectServerVersion({ baseUrl: server.url, headers, fetch: f, timeoutMs: 5000 })
+    } catch {
+      return undefined
+    }
+  }
+
+  /** 读取某服务器上次探测到的 API 版本（无记录返回 undefined） */
+  getApiVersion(serverId: string): ApiVersion | undefined {
+    return this.healthMap.get(serverId)?.apiVersion
+  }
+
   /** 健康检查的实际网络逻辑（由 checkHealth 做在途合并后调用） */
   private async performHealthCheck(
     serverId: string,
@@ -661,6 +685,22 @@ class ServerStore {
       if (response.ok) {
         const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
         if (!contentType.includes('application/json')) {
+          // v2 的根路径 /global/health 被前端 SPA 接管返回 HTML。此时按 v1 判定
+          // 会误报「非 OpenCode 服务器」；改用版本探测识别 v2，识别成功即视为在线。
+          if (contentType.includes('text/html')) {
+            const detected = await this.detectVersion(server, headers)
+            if (detected) {
+              const health: ServerHealth = {
+                status: 'online',
+                latency,
+                lastCheck: Date.now(),
+                version: detected.version,
+                apiVersion: detected.apiVersion,
+                details,
+              }
+              return commitHealth(health)
+            }
+          }
           const health: ServerHealth = {
             status: 'error',
             latency,
@@ -703,6 +743,7 @@ class ServerStore {
           latency,
           lastCheck: Date.now(),
           version: data.version,
+          apiVersion: 'v1',
           details,
         }
         return commitHealth(health)

@@ -12,6 +12,8 @@ import { getApiBaseUrl, getAuthHeader } from './http'
 import { createSseTextParser } from './sse'
 import { parseAndCoalesce } from './sseEvents'
 import { normalizeTodoItems } from './todo'
+import { getV2Client } from './sdkV2'
+import { v2EventToGlobalEvent } from './v2/events'
 import { isTauri } from '../utils/tauri'
 import { createSseEventPump } from '../lib/sseWorkerClient'
 import { serverStore } from '../store/serverStore'
@@ -254,6 +256,14 @@ function connectServer(serverId: string) {
   // 注册生命周期监听器（首次连接时）
   registerLifecycleListeners()
 
+  // v2 服务器：事件流走 @opencode/client 的 event.subscribe()（AsyncIterable），
+  // 与 v1 的 /global/event SSE 是两条不同通道。
+  const resolvedServerId = serverId
+  if (serverStore.getApiVersion(resolvedServerId) === 'v2') {
+    connectViaV2(conn)
+    return
+  }
+
   if (isTauri()) {
     connectViaTauri(conn)
   } else {
@@ -376,6 +386,53 @@ async function connectViaTauri(conn: ServerConnection) {
     updateConnectionState(serverId, { state: 'error', error: errorMsg })
     scheduleReconnect(conn)
   }
+}
+
+// ============================================
+// v2 event stream (via @opencode/client event.subscribe)
+// ============================================
+
+function connectViaV2(conn: ServerConnection) {
+  conn.controller = new AbortController()
+  const myGeneration = conn.generation
+  const serverId = conn.serverId
+  const client = getV2Client(serverId)
+
+  ;(async () => {
+    try {
+      const stream = client.event.subscribe({ signal: conn.controller?.signal })
+
+      finalizeConnectionAttempt(conn, myGeneration)
+      updateConnectionState(serverId, { state: 'connected', reconnectAttempt: 0, error: undefined })
+      resetHeartbeat(conn)
+      if (import.meta.env.DEV) console.log(`[SSE/v2] ${serverId} connected`)
+
+      const reason = serverSwitchFlags.get(serverId) ? ('server-switch' as const) : ('network' as const)
+      serverSwitchFlags.delete(serverId)
+      broadcastReconnected(conn, reason)
+
+      for await (const event of stream) {
+        if (myGeneration !== conn.generation) break
+        resetHeartbeat(conn)
+        const globalEvent = v2EventToGlobalEvent(event)
+        if (globalEvent) broadcastEvent(conn, globalEvent)
+      }
+
+      // 流正常结束：按断连处理并重连。
+      if (myGeneration === conn.generation) {
+        updateConnectionState(serverId, { state: 'disconnected' })
+        scheduleReconnect(conn)
+      }
+    } catch (error) {
+      if (!finalizeConnectionAttempt(conn, myGeneration)) return
+      if (error instanceof Error && error.name === 'AbortError') return
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      if (import.meta.env.DEV) console.warn(`[SSE/v2] ${serverId} error:`, errorMsg)
+      updateConnectionState(serverId, { state: 'error', error: errorMsg })
+      conn.subscribers.forEach(cb => cb.onError?.(error instanceof Error ? error : new Error(errorMsg)))
+      scheduleReconnect(conn)
+    }
+  })()
 }
 
 // ============================================
