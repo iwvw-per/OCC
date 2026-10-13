@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.6.126] - 2026-10-13
+
+- feat(markdown): Mermaid 图表支持全屏查看，ESC 退出 (459889a3)
+
 ## [v0.6.125] - 2026-10-10
 
 - feat(update): canary 版本也能检测并自更新 (578a321a)
