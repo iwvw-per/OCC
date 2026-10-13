@@ -145,12 +145,17 @@ export function adaptMessage(raw: unknown): MessageWithParts {
   }
 }
 
-/** v2 message.list 响应 → 内部 messages + 游标 */
-export function adaptMessagePage(raw: unknown): { messages: MessageWithParts[]; nextCursor?: string } {
+/** v2 message.list 响应 → 内部 messages + 双向游标 */
+export function adaptMessagePage(raw: unknown): {
+  messages: MessageWithParts[]
+  nextCursor?: string
+  prevCursor?: string
+} {
   const r = rec(raw)
   const cursor = rec(r.cursor)
   return {
     messages: list(r.data).map(adaptMessage),
     nextCursor: str(cursor.next) ?? undefined,
+    prevCursor: str(cursor.previous) ?? undefined,
   }
 }

@@ -37,6 +37,9 @@ function unsupported(method: string): never {
   throw new Error(`opencode v2 暂不支持 ${method}`)
 }
 
+/** v2 的 message.list limit 硬上限（超过会被服务端拒绝：Expected <= 200）。 */
+const V2_MESSAGE_PAGE_MAX = 200
+
 function v2(serverId?: string) {
   return getV2Client(serverId)
 }
@@ -161,13 +164,27 @@ export function createV2Facade(serverId?: string): OpencodeClient {
         unsupported('session.todo')
       },
       async messages(input: { sessionID: string; directory?: string; limit?: number; before?: string }) {
-        const res = await client.message.list({
+        // v2 的 message.list：limit 上限 200，默认 order=desc，且 cursor 不能与
+        // order 同用。v1 调用方（沿用 v1 常量）可能传超大 limit（如 100000）或
+        // 期望升序，这里做钳制与归一：
+        //   - 首页（无 before）：order=desc 取最新 limit 条；
+        //   - 翻页（before 为 v2 游标）：只传 cursor，方向由游标自带；
+        //   - 统一按时间升序返回，nextCursor 用 v2 的 next（指向更早）。
+        const limit = Math.min(input.limit ?? V2_MESSAGE_PAGE_MAX, V2_MESSAGE_PAGE_MAX)
+        const params: { sessionID: string; limit: number; cursor?: string; order?: 'desc' } = {
           sessionID: input.sessionID,
-          limit: input.limit,
-          cursor: input.before,
-        })
-        const page = adaptMessagePage(res)
-        return ok(page.messages, page.nextCursor ? { 'X-Next-Cursor': page.nextCursor } : undefined)
+          limit,
+        }
+        if (input.before) {
+          params.cursor = input.before
+        } else {
+          params.order = 'desc'
+        }
+        const page = adaptMessagePage(await client.message.list(params))
+        const messages = [...page.messages].sort(
+          (a, b) => (a.info.time?.created ?? 0) - (b.info.time?.created ?? 0),
+        )
+        return ok(messages, page.nextCursor ? { 'X-Next-Cursor': page.nextCursor } : undefined)
       },
       async prompt(input: { sessionID: string; parts?: unknown[]; text?: string; model?: { providerID: string; modelID: string }; agent?: string; messageID?: string; variant?: string }) {
         if (input.agent) await client.session.switchAgent({ sessionID: input.sessionID, agent: input.agent })

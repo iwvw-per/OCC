@@ -72,4 +72,30 @@ describe('v2 client facade', () => {
     const result = await facade.session.messages({ sessionID: 'ses_1', limit: 10 })
     expect(result.response?.headers.get('X-Next-Cursor')).toBe('c1')
   })
+
+  it('clamps limit to v2 max (200) and requests newest first', async () => {
+    const { createV2Facade } = await import('./clientFacade')
+    const facade = createV2Facade('s1') as unknown as {
+      session: { messages: (input: unknown) => Promise<unknown> }
+    }
+    messageListMock.mockClear()
+    await facade.session.messages({ sessionID: 'ses_1', limit: 100000 })
+    const arg = (messageListMock.mock.calls[0] as unknown[])[0] as { limit: number; order?: string; cursor?: string }
+    expect(arg.limit).toBe(200)
+    expect(arg.order).toBe('desc')
+    expect(arg.cursor).toBeUndefined()
+  })
+
+  it('uses cursor (no order) when paging before', async () => {
+    const { createV2Facade } = await import('./clientFacade')
+    const facade = createV2Facade('s1') as unknown as {
+      session: { messages: (input: unknown) => Promise<unknown> }
+    }
+    messageListMock.mockClear()
+    await facade.session.messages({ sessionID: 'ses_1', limit: 30, before: 'CUR' })
+    const arg = (messageListMock.mock.calls[0] as unknown[])[0] as { limit: number; order?: string; cursor?: string }
+    expect(arg.limit).toBe(30)
+    expect(arg.cursor).toBe('CUR')
+    expect(arg.order).toBeUndefined()
+  })
 })
