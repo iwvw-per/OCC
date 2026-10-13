@@ -16,6 +16,7 @@ import { getV2Client } from './sdkV2'
 import { adaptSession, adaptDataList, adaptEnvelope } from './v2/session'
 import { adaptMessagePage } from './v2/message'
 import { adaptPermission, adaptAgent, adaptPty } from './v2/entities'
+import { rec, str } from './v2/adapt'
 
 interface Envelope<T> {
   data?: T
@@ -38,6 +39,40 @@ function unsupported(method: string): never {
 
 function v2(serverId?: string) {
   return getV2Client(serverId)
+}
+
+/**
+ * 把 v1 形状的 prompt parts 转成 v2 的 prompt 入参。
+ * v1 用 parts[]（text/file/agent），v2 用 { text, files[], agents[] }。
+ */
+function buildV2Prompt(input: {
+  text?: string
+  parts?: unknown[]
+}): { text: string; files?: Array<{ uri: string; name?: string }>; agents?: Array<{ name: string }> } {
+  const textChunks: string[] = []
+  const files: Array<{ uri: string; name?: string }> = []
+  const agents: Array<{ name: string }> = []
+  for (const raw of input.parts ?? []) {
+    const p = rec(raw)
+    const type = str(p.type)
+    if (type === 'text') {
+      const t = str(p.text)
+      if (t) textChunks.push(t)
+    } else if (type === 'file') {
+      const uri = str(p.url) ?? str(p.uri)
+      if (uri) files.push({ uri, name: str(p.filename) ?? str(p.name) })
+    } else if (type === 'agent') {
+      const name = str(p.name)
+      if (name) agents.push({ name })
+    }
+  }
+  // v1 的 prompt 参数里 text 与 parts 二选一：有 parts 时以 parts 为准。
+  const text = textChunks.length > 0 ? textChunks.join('\n') : (input.text ?? '')
+  return {
+    text,
+    files: files.length > 0 ? files : undefined,
+    agents: agents.length > 0 ? agents : undefined,
+  }
 }
 
 /**
@@ -137,20 +172,26 @@ export function createV2Facade(serverId?: string): OpencodeClient {
       async prompt(input: { sessionID: string; parts?: unknown[]; text?: string; model?: { providerID: string; modelID: string }; agent?: string; messageID?: string; variant?: string }) {
         if (input.agent) await client.session.switchAgent({ sessionID: input.sessionID, agent: input.agent })
         if (input.model) await client.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID } })
+        const prompt = buildV2Prompt(input)
         await client.session.prompt({
           sessionID: input.sessionID,
-          text: input.text ?? '',
           id: input.messageID,
+          text: prompt.text,
+          files: prompt.files,
+          agents: prompt.agents,
         })
         return ok({ info: {}, parts: [] })
       },
       async promptAsync(input: { sessionID: string; parts?: unknown[]; text?: string; model?: { providerID: string; modelID: string }; agent?: string; messageID?: string }) {
         if (input.agent) await client.session.switchAgent({ sessionID: input.sessionID, agent: input.agent })
         if (input.model) await client.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID } })
+        const prompt = buildV2Prompt(input)
         await client.session.prompt({
           sessionID: input.sessionID,
-          text: input.text ?? '',
           id: input.messageID,
+          text: prompt.text,
+          files: prompt.files,
+          agents: prompt.agents,
         })
         return ok(true)
       },
