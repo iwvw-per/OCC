@@ -37,7 +37,7 @@
     "notification": null,
     "updater": {
       "endpoints": ["https://github.com/iwvw-per/OCC/releases/latest/download/latest.json"],
-      "pubkey": "ZFc1MGNuVnpkR1ZrSUdOdmJXMWxiblE2SUcxcGJtbHphV2R1SUhCMVlteHBZeUJyWlhrNklEVXdOalJFUVRNd09UTTBNRVpGT1VZS1VsZFRaaTlyUTFSTlRuQnJWVVZ0T1cxVWExSnpkVnB5Wmpab05EQlBibVpRVkhoblJXWlNjMVJpVWs1eFQxSjBlVWhRTkROUksxa0s="
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUwNjREQTMwOTM0MEZFOUYKUldTZi9rQ1RNTnBrVUVtOW1Ua1JzdVpyZjZoNDBPbmZQVHhnRWZSc1RiUk5xT1J0eUhQNDNRK1kK"
     }
   },
   "bundle": {
