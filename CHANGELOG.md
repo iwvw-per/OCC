@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.6.129] - 2026-10-14
+
+- fix(test): sdk 缓存回归测试的 getApiVersion mock 类型标注 (72cb29da)
+- feat(rename): AI 会话重命名（临时会话隔离 + 本地 AI 重命名 + 设置项） (99cadec0)
+- fix(api): SDK client 缓存 key 纳入 apiVersion，v2 探测完成后失效 v1 路径 client (d74a71f4)
+
 ## [v0.6.128] - 2026-10-13
 
 - fix(api): v2 facade 修正 message.list 的 limit 上限与分页语义 (72dfeeba)
