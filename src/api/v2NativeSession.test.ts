@@ -3,7 +3,14 @@
 
 import { describe, expect, it } from 'vitest'
 import { serverStore } from '../store/serverStore'
-import { nativeListSessions, nativeGetSession, nativeCreateSession } from './v2NativeSession'
+import {
+  nativeListSessions,
+  nativeGetSession,
+  nativeCreateSession,
+  nativeUpdateSession,
+  nativeRemoveSession,
+  nativeInterruptSession,
+} from './v2NativeSession'
 
 const URL = import.meta.env.VITE_V2_SANDBOX_URL as string | undefined
 const PWD = import.meta.env.VITE_V2_SANDBOX_PASSWORD as string | undefined
@@ -36,5 +43,25 @@ describeIf('v2 原生 session 访问层', () => {
 
     const got = await nativeGetSession(SERVER_ID, created.id)
     expect(got.id).toBe(created.id)
+  })
+
+  it('nativeUpdateSession 更新标题', async () => {
+    serverStore.removeServer(SERVER_ID)
+    serverStore.addServerWithId(SERVER_ID, { name: 'v2-native', url: URL!, auth: { username: 'opencode', password: PWD! } })
+    await serverStore.ensureApiVersion(SERVER_ID)
+
+    const created = await nativeCreateSession(SERVER_ID, { title: 'orig' })
+    const updated = await nativeUpdateSession(SERVER_ID, { sessionID: created.id, title: 'renamed' })
+    expect(updated.id).toBe(created.id)
+  })
+
+  it('nativeRemoveSession 删除会话', async () => {
+    serverStore.removeServer(SERVER_ID)
+    serverStore.addServerWithId(SERVER_ID, { name: 'v2-native', url: URL!, auth: { username: 'opencode', password: PWD! } })
+    await serverStore.ensureApiVersion(SERVER_ID)
+
+    const created = await nativeCreateSession(SERVER_ID, { title: 'to-delete' })
+    const ok = await nativeRemoveSession(SERVER_ID, created.id)
+    expect(ok).toBe(true)
   })
 })

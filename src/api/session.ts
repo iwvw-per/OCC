@@ -4,7 +4,21 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
-import { nativeListSessions, nativeGetSession, nativeCreateSession } from './v2NativeSession'
+import { getV2Client } from './sdkV2'
+import {
+  nativeListSessions,
+  nativeGetSession,
+  nativeCreateSession,
+  nativeUpdateSession,
+  nativeRemoveSession,
+  nativeInterruptSession,
+  nativeRevertMessage,
+  nativeUnrevertSession,
+  nativeForkSession,
+  nativeCompactSession,
+  nativeListChildSessions,
+  nativeActiveSessions,
+} from './v2NativeSession'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { normalizeTodoItems } from './todo'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
@@ -53,6 +67,9 @@ export async function getSessionStatus(directory?: string, serverId?: string): P
   return microCache(
     `status:${sid}:${directoryCacheKey(directory)}`,
     async () => {
+      if (serverStore.getApiVersion(sid) === 'v2') {
+        return nativeActiveSessions(sid) as unknown as SessionStatusMap
+      }
       const sdk = getSDKClient(serverId)
       return unwrap(await sdk.session.status({ directory: formatPathForApi(directory, serverId) }))
     },
@@ -75,6 +92,11 @@ export async function getSessionDiff(
   messageId?: string,
 ): Promise<FileDiff[]> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    const client = getV2Client(target.serverId)
+    const res = await client.session.diff({ sessionID: target.sessionId })
+    return normalizeFileDiffs(res as unknown as FileDiff[])
+  }
   const sdk = getSDKClient(target.serverId)
   return normalizeFileDiffs(
     unwrap(
@@ -291,6 +313,16 @@ export async function updateSession(
   serverId?: string,
 ): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    const session = await nativeUpdateSession(target.serverId, {
+      sessionID: target.sessionId,
+      title: params.title,
+      archived: params.time?.archived,
+    })
+    invalidateSessionMetaCache(target.serverId, target.sessionId)
+    invalidateSessionListCache(target.serverId)
+    return session
+  }
   const sdk = getSDKClient(target.serverId)
   const session = unwrap(
     await sdk.session.update({
@@ -309,6 +341,12 @@ export async function updateSession(
  */
 export async function deleteSession(sessionId: string, directory?: string, serverId?: string): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    const ok = await nativeRemoveSession(target.serverId, target.sessionId)
+    invalidateSessionMetaCache(target.serverId, target.sessionId)
+    invalidateSessionListCache(target.serverId)
+    return ok
+  }
   const sdk = getSDKClient(target.serverId)
   unwrap(
     await sdk.session.delete({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
@@ -327,6 +365,9 @@ export async function deleteSession(sessionId: string, directory?: string, serve
  */
 export async function abortSession(sessionId: string, directory?: string, serverId?: string): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    return nativeInterruptSession(target.serverId, target.sessionId)
+  }
   const sdk = getSDKClient(target.serverId)
   unwrap(
     await sdk.session.abort({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
@@ -345,6 +386,11 @@ export async function revertMessage(
   serverId?: string,
 ): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    const session = await nativeRevertMessage(target.serverId, { sessionID: target.sessionId, messageID: messageId })
+    invalidateSessionMetaCache(target.serverId, target.sessionId)
+    return session
+  }
   const sdk = getSDKClient(target.serverId)
   const session = unwrap(
     await sdk.session.revert({
@@ -363,6 +409,11 @@ export async function revertMessage(
  */
 export async function unrevertSession(sessionId: string, directory?: string, serverId?: string): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    const session = await nativeUnrevertSession(target.serverId, target.sessionId)
+    invalidateSessionMetaCache(target.serverId, target.sessionId)
+    return session
+  }
   const sdk = getSDKClient(target.serverId)
   const session = unwrap(
     await sdk.session.unrevert({
@@ -406,6 +457,9 @@ export async function forkSession(
   serverId?: string,
 ): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    return nativeForkSession(target.serverId, { sessionID: target.sessionId, messageID: messageId })
+  }
   const sdk = getSDKClient(target.serverId)
   return unwrap(
     await sdk.session.fork({
@@ -426,6 +480,9 @@ export async function summarizeSession(
   serverId?: string,
 ): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    return nativeCompactSession(target.serverId, target.sessionId)
+  }
   const sdk = getSDKClient(target.serverId)
   unwrap(
     await sdk.session.summarize({
@@ -446,6 +503,9 @@ export async function getSessionChildren(
   serverId?: string,
 ): Promise<ApiSession[]> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    return nativeListChildSessions(target.serverId, target.sessionId)
+  }
   const sdk = getSDKClient(target.serverId)
   return unwrap(
     await sdk.session.children({
