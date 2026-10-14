@@ -1054,7 +1054,17 @@ export function subscribeToServerEvents(serverId: string, callbacks: EventCallba
 
   // 如果是第一个订阅者，启动连接
   if (conn.subscribers.size === 1) {
-    connectServer(serverId)
+    // 版本未知（首次同步的实例）：先探测 API 代次再连。v1 的 /global/event
+    // 在 v2 服务器上同样被 SPA 兜底（text/html），探测完成后 connectServer
+    // 会走 connectViaV2。ensureApiVersion 与首屏数据初始化路径共享健康检查
+    // 在途合并，不会多花一次网络；探测失败不阻塞，按原「未知即 v1」回退。
+    if (serverStore.getApiVersion(serverId)) {
+      connectServer(serverId)
+    } else {
+      void serverStore.ensureApiVersion(serverId).then(() => {
+        if (conn.subscribers.size > 0) connectServer(serverId)
+      })
+    }
   }
 
   // 返回取消订阅函数

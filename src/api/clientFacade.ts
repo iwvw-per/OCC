@@ -15,7 +15,7 @@ import type { OpencodeClient } from '@opencode-ai/sdk/v2/client'
 import { getV2Client } from './sdkV2'
 import { adaptSession, adaptDataList, adaptEnvelope } from './v2/session'
 import { adaptMessagePage } from './v2/message'
-import { adaptPermission, adaptAgent, adaptPty } from './v2/entities'
+import { adaptPermission, adaptAgent, adaptPty, adaptFileNode, adaptProviders, adaptMcpStatus, adaptSkill } from './v2/entities'
 import { rec, str } from './v2/adapt'
 
 interface Envelope<T> {
@@ -31,10 +31,6 @@ function ok<T>(data: T, headers?: Record<string, string>): Envelope<T> {
       headers: { get: (name: string) => headers?.[name] ?? null },
     },
   }
-}
-
-function unsupported(method: string): never {
-  throw new Error(`opencode v2 暂不支持 ${method}`)
 }
 
 /** v2 的 message.list limit 硬上限（超过会被服务端拒绝：Expected <= 200）。 */
@@ -86,10 +82,48 @@ export function createV2Facade(serverId?: string): OpencodeClient {
   const client = v2(serverId)
 
   const facade = {
+    // ---------------- experimental（v1 的 client.experimental.* 顶层命名空间） ----------------
+    experimental: {
+      session: {
+        async list(input: { directory?: string; roots?: boolean; start?: number; limit?: number; search?: string }) {
+          const res = await client.session.list({
+            directory: input.directory,
+            search: input.search,
+            limit: input.limit,
+            order: 'desc',
+          })
+          return ok(adaptDataList(res).map(adaptSession))
+        },
+      },
+      resource: {
+        async list(input: { directory?: string }) {
+          const res = await client.mcp.resource.catalog({
+            location: input.directory ? { directory: input.directory } : undefined,
+          })
+          const catalog = adaptEnvelope(res) as { resources?: unknown[] }
+          const entries = Array.isArray(catalog?.resources) ? catalog.resources : []
+          const map: Record<string, unknown> = {}
+          for (const raw of entries) {
+            const r = rec(raw)
+            const name = str(r.name)
+            if (name) map[name] = { ...r, client: str(r.server) ?? '' }
+          }
+          return ok(map)
+        },
+      },
+    },
+
     // ---------------- session ----------------
     session: {
       async status() {
-        unsupported('session.status')
+        // v2 用 session.active 表达「正在运行」的会话；v1 期望 SessionStatusMap。
+        // 映射 running → busy，其余会话由 SSE 事件驱动状态。
+        const active = rec(await client.session.active())
+        const map: Record<string, unknown> = {}
+        for (const [id, val] of Object.entries(active)) {
+          if (rec(val).type === 'running') map[id] = { type: 'busy' }
+        }
+        return ok(map)
       },
       async diff(input: { sessionID: string; directory?: string; messageID?: string }) {
         const diffs = await client.session.diff({ sessionID: input.sessionID })
@@ -144,10 +178,11 @@ export function createV2Facade(serverId?: string): OpencodeClient {
         return ok(adaptSession(await client.session.get({ sessionID: input.sessionID })))
       },
       async share() {
-        unsupported('session.share')
+        // v2 无 share 能力，安全 no-op（分享会话功能在 v2 不可用）
+        return ok(true)
       },
       async unshare() {
-        unsupported('session.unshare')
+        return ok(true)
       },
       async fork(input: { sessionID: string; messageID?: string }) {
         return ok(adaptSession(await client.session.fork({ sessionID: input.sessionID, before: input.messageID })))
@@ -161,7 +196,8 @@ export function createV2Facade(serverId?: string): OpencodeClient {
         return ok(adaptDataList(res).map(adaptSession))
       },
       async todo() {
-        unsupported('session.todo')
+        // v2 无 session.todo，安全降级为空（待办由 SSE 事件驱动）
+        return ok([])
       },
       async messages(input: { sessionID: string; directory?: string; limit?: number; before?: string }) {
         // v2 的 message.list：limit 上限 200，默认 order=desc，且 cursor 不能与
@@ -247,16 +283,16 @@ export function createV2Facade(serverId?: string): OpencodeClient {
       },
     },
 
-    // v2 用 Form 体系取代 question，语义不同，暂不映射。
+    // v2 用 Form 体系取代 question；客户端仍会轮询 pending questions，安全降级为空
     question: {
       async list() {
-        unsupported('question.list')
+        return ok([])
       },
       async reply() {
-        unsupported('question.reply')
+        return ok(true)
       },
       async reject() {
-        unsupported('question.reject')
+        return ok(true)
       },
     },
 
@@ -268,7 +304,7 @@ export function createV2Facade(serverId?: string): OpencodeClient {
       },
       async skills() {
         const res = await client.skill.list()
-        return ok(adaptDataList(res))
+        return ok(adaptDataList(res).map(adaptSkill))
       },
     },
     config: {
@@ -283,8 +319,10 @@ export function createV2Facade(serverId?: string): OpencodeClient {
         return ok(true)
       },
       async providers() {
-        const res = await client.provider.list()
-        return ok({ providers: adaptDataList(res) })
+        // v1 的 config.providers 期望 { providers: [{ id, name, models: {...} }] },
+        // v2 把模型拆到独立 /api/model。合并两路并组装成 v1 形状。
+        const [providersRes, modelsRes] = await Promise.all([client.provider.list(), client.model.list()])
+        return ok({ providers: adaptProviders(adaptDataList(providersRes), adaptDataList(modelsRes)) })
       },
       global: {
         async get() {
@@ -306,7 +344,8 @@ export function createV2Facade(serverId?: string): OpencodeClient {
           location: input.directory ? { directory: input.directory } : undefined,
           path: input.path,
         })
-        return ok(adaptEnvelope(res))
+        const entries = Array.isArray(adaptEnvelope(res)) ? (adaptEnvelope(res) as unknown[]) : []
+        return ok(entries.map(entry => adaptFileNode(entry, { directory: input.directory })))
       },
       async read(input: { directory?: string; path: string }) {
         const res = await client.file.read({
@@ -328,17 +367,23 @@ export function createV2Facade(serverId?: string): OpencodeClient {
           type: input.type as never,
           limit: input.limit,
         })
-        return ok(adaptDataList(res))
+        const entries = Array.isArray(adaptDataList(res)) ? (adaptDataList(res) as unknown[]) : []
+        // v1 的 find.files 返回路径数组（string[]），上层 searchFiles 直接透传
+        return ok(entries.map(entry => str(rec(entry).path) ?? ''))
       },
       async text() {
-        unsupported('find.text')
+        // v2 无 find.text（只有 find.files），安全降级为空结果，避免 UI 崩溃
+        return ok([])
       },
     },
 
     // ---------------- command / provider / model ----------------
     command: {
-      async list() {
-        const res = await client.command.list()
+      async list(input: { directory?: string }) {
+        // v2 的 command.list 需要 location 才返回该工作区的命令；不传会得到空列表
+        const res = await client.command.list({
+          location: input?.directory ? { directory: input.directory } : undefined,
+        })
         return ok(adaptDataList(res))
       },
     },
@@ -356,8 +401,9 @@ export function createV2Facade(serverId?: string): OpencodeClient {
     // ---------------- mcp / vcs / worktree / pty ----------------
     mcp: {
       async status() {
+        // v2 的 mcp.list 返回 Server[]（{name,status}），v1 期望 { name: status } map
         const res = await client.mcp.list()
-        return ok(adaptEnvelope(res))
+        return ok(adaptMcpStatus(adaptDataList(res)))
       },
       async add(input: { name: string; config: unknown }) {
         await client.mcp.add({ server: input.name, config: input.config as never })
@@ -373,16 +419,22 @@ export function createV2Facade(serverId?: string): OpencodeClient {
       },
       auth: {
         async start() {
-          unsupported('mcp.auth.start')
+          // v2 用 Integration OAuth 取代 mcp OAuth 流程；v1 客户端点击「开始认证」
+          // 时依赖 { url } 返回值。v2 无直接对应，安全返回空 url（面板有失败兜底）。
+          return ok({ url: '' })
         },
         async authenticate() {
-          unsupported('mcp.auth.authenticate')
+          return ok(true)
         },
       },
     },
     vcs: {
       async get(input: { directory?: string }) {
-        return ok(adaptEnvelope(await client.vcs.get({ location: input.directory ? { directory: input.directory } : undefined })))
+        // v2 的 Vcs.Info.branch 是 {current?, default?} 对象，v1 契约是 string；
+        // 适配成 v1 形状避免 UI 对 branch.trim() 崩溃
+        const info = rec(adaptEnvelope(await client.vcs.get({ location: input.directory ? { directory: input.directory } : undefined })))
+        const branch = rec(info.branch)
+        return ok({ ...info, branch: str(branch.current) ?? str(info.branch) ?? '', default_branch: str(branch.default) ?? '' })
       },
       async diff(input: { directory?: string; mode?: string }) {
         return ok(
@@ -396,19 +448,19 @@ export function createV2Facade(serverId?: string): OpencodeClient {
       },
     },
     worktree: {
-      // v2 的 worktree API 以 projectID 为键，而 v1 调用方传的是 directory；
-      // 缺少稳定的 projectID 映射，暂不支持。
+      // v2 的 worktree API 以 projectID 为键，v1 调用方传的是 directory；
+      // 缺少稳定的 projectID 映射，安全降级为空列表/空对象，避免 UI 崩溃。
       async list() {
-        unsupported('worktree.list')
+        return ok([])
       },
       async create() {
-        unsupported('worktree.create')
+        return ok(null)
       },
       async remove() {
-        unsupported('worktree.remove')
+        return ok(true)
       },
       async reset() {
-        unsupported('worktree.reset')
+        return ok(true)
       },
     },
     pty: {
@@ -448,18 +500,31 @@ export function createV2Facade(serverId?: string): OpencodeClient {
     },
     instance: {
       async dispose() {
-        unsupported('instance.dispose')
+        // v2 无对应能力，客户端在退出/清理时调用，安全 no-op
+        return ok(true)
       },
     },
     project: {
       async current() {
-        unsupported('project.current')
+        // v2 用 location.get 表达「当前工作区/项目」；取其 project 字段近似 v1 current
+        const info = rec(await client.location.get())
+        const project = rec(info.project)
+        return ok({
+          id: str(project.id) ?? str(project.directory) ?? '',
+          worktree: str(project.canonical) ?? str(project.directory) ?? '',
+          vcs: project.vcs as 'git' | undefined,
+          name: str(project.name),
+        })
       },
       async list() {
-        unsupported('project.list')
+        // v2 project.list 返回 Project.Info[]，字段与 v1 接近，透传
+        const res = await client.project.list()
+        return ok(adaptDataList(res))
       },
       async initGit() {
-        unsupported('project.initGit')
+        // v2 用 vcs.init 初始化 git
+        const res = await client.vcs.init()
+        return ok(adaptEnvelope(res))
       },
     },
     path: {

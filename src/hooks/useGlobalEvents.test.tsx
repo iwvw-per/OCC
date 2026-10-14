@@ -140,6 +140,10 @@ vi.mock('../store', () => ({
     getServer: getServerMock,
     checkHealth: checkHealthMock,
     onServerChange: onServerChangeMock,
+    // fetchAndInitialize 会先确认 API 版本；已连接场景一律视为 v1，
+    // 保证数据拉取不排在探测之后
+    getApiVersion: vi.fn(() => 'v1'),
+    ensureApiVersion: vi.fn(() => Promise.resolve('v1' as const)),
     // collectActiveServerIds 遍历所有「已启用」服务器并订阅其变化
     getEnabledServers: () => [],
     subscribe: () => () => {},

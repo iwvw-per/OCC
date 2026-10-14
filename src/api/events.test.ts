@@ -10,6 +10,17 @@ vi.mock('../utils/tauri', () => ({
   isTauri: () => false,
 }))
 
+// 订阅路径会先确认 API 版本：这里让版本已知（v1），SSE 走原同步 connect 分支，
+// 测试只断言事件解析，不掺入探测时序。
+vi.mock('../store/serverStore', () => ({
+  serverStore: {
+    getActiveServerId: () => 'local',
+    getApiVersion: () => 'v1',
+    ensureApiVersion: vi.fn(() => Promise.resolve('v1' as const)),
+    onServerChange: () => () => {},
+  },
+}))
+
 const encoder = new TextEncoder()
 
 function concatBytes(...parts: Uint8Array[]): Uint8Array {

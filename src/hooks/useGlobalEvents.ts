@@ -494,41 +494,57 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       fetchVersions.set(serverId, currentVersion)
       activeFetchVersions.set(serverId, currentVersion)
       const serverDirectories = directoriesFor(serverId)
-      void fetchActiveScopeData(serverDirectories, serverId)
-        .then(({ statusMap, permissions, questions, sessionMetaEntries }) => {
-          if (disposed || currentVersion !== fetchVersions.get(serverId)) return
-          if (effectiveStrategy === 'merge') {
-            activeSessionStore.mergeStatusRefresh(statusMap)
-            activeSessionStore.mergePendingRequests(permissions, questions)
-          } else {
-            // 传 serverId：按服务器作用域替换，多台服务器并发首次连接时不互相清空
-            activeSessionStore.initialize(statusMap, serverId)
-            activeSessionStore.initializePendingRequests(permissions, questions, serverId)
-          }
-          const currentDirectories = serverDirectories
-          const currentScopeKey = getScopeKey(currentDirectories)
-          for (const pending of latePendingRequests.values()) {
-            // 只处理属于该 server 的 pending（复合 key 前缀）
-            if (!pending.sessionId.startsWith(`${serverId}::`)) continue
-            const matchesScope = pending.directory
-              ? !currentDirectories || currentDirectories.length === 0 || currentDirectories.includes(pending.directory)
-              : pending.scopeKey === currentScopeKey
-            if (!matchesScope) continue
-            activeSessionStore.addPendingRequest(pending.requestId, pending.sessionId, pending.type, pending.description)
-            // 已消费的条目立即移除，避免下次重连重复处理
-            latePendingRequests.delete(pending.requestId)
-          }
-          pruneLatePendingRequests(latePendingRequests)
-          activeSessionStore.setSessionMetaBulk(sessionMetaEntries)
+
+      const startFetch = () => {
+        void fetchActiveScopeData(serverDirectories, serverId)
+          .then(({ statusMap, permissions, questions, sessionMetaEntries }) => {
+            if (disposed || currentVersion !== fetchVersions.get(serverId)) return
+            if (effectiveStrategy === 'merge') {
+              activeSessionStore.mergeStatusRefresh(statusMap)
+              activeSessionStore.mergePendingRequests(permissions, questions)
+            } else {
+              // 传 serverId：按服务器作用域替换，多台服务器并发首次连接时不互相清空
+              activeSessionStore.initialize(statusMap, serverId)
+              activeSessionStore.initializePendingRequests(permissions, questions, serverId)
+            }
+            const currentDirectories = serverDirectories
+            const currentScopeKey = getScopeKey(currentDirectories)
+            for (const pending of latePendingRequests.values()) {
+              // 只处理属于该 server 的 pending（复合 key 前缀）
+              if (!pending.sessionId.startsWith(`${serverId}::`)) continue
+              const matchesScope = pending.directory
+                ? !currentDirectories || currentDirectories.length === 0 || currentDirectories.includes(pending.directory)
+                : pending.scopeKey === currentScopeKey
+              if (!matchesScope) continue
+              activeSessionStore.addPendingRequest(pending.requestId, pending.sessionId, pending.type, pending.description)
+              // 已消费的条目立即移除，避免下次重连重复处理
+              latePendingRequests.delete(pending.requestId)
+            }
+            pruneLatePendingRequests(latePendingRequests)
+            activeSessionStore.setSessionMetaBulk(sessionMetaEntries)
+          })
+          .catch(() => {
+            // best effort: 下次目录切换或 SSE 重连会再拉一次
+          })
+          .finally(() => {
+            if (currentVersion === fetchVersions.get(serverId)) {
+              activeFetchVersions.set(serverId, 0)
+            }
+          })
+      }
+
+      // 版本未知（首次同步的 v2 实例、或旧版本没留下 apiVersion 记录）：先探测
+      // 再拉数据。否则 getSDKClient 按 v1 建 client，首屏 /session、/agent、/path
+      // 打在 v2 服务器的 SPA 兜底上（text/html），列表直接加载失败。
+      // ensureApiVersion 与 SSE/健康轮询共享健康检查在途合并，不多花一次网络；
+      // 探测失败不阻塞，照常走原回退路径。
+      if (serverStore.getApiVersion(serverId)) {
+        startFetch()
+      } else {
+        void serverStore.ensureApiVersion(serverId).then(() => {
+          if (!disposed) startFetch()
         })
-        .catch(() => {
-          // best effort: 下次目录切换或 SSE 重连会再拉一次
-        })
-        .finally(() => {
-          if (currentVersion === fetchVersions.get(serverId)) {
-            activeFetchVersions.set(serverId, 0)
-          }
-        })
+      }
     }
 
     const refreshServerHealth = (serverId: string) => {

@@ -139,6 +139,7 @@ function formatExceptionDiagnostics(url: string, err: unknown): string {
 
 const STORAGE_KEY = 'opencode-servers'
 const ACTIVE_SERVER_KEY = 'opencode-active-server'
+const API_VERSIONS_KEY = 'opencode-server-api-versions'
 export const LOCAL_SERVER_ID = 'local'
 
 /**
@@ -153,6 +154,16 @@ class ServerStore {
   /** 每台服务器的在途健康检查：并发触发只发一次网络 */
   private healthInflight = new Map<string, Promise<ServerHealth>>()
   private clockCalibrationMap = new Map<string, ServerClockCalibration>()
+  /**
+   * 探测到的 API 版本（v1/v2），持久化到 localStorage。
+   *
+   * healthMap 是内存态，应用重启即清空。笔电上 v2 服务器「重启后首请求走 v1
+   * 根路径 → text/html」正是这个窗口造成的：版本未知时 getSDKClient 按 v1
+   * 处理，首屏 /session、/agent 打在 v2 服务器的 SPA 兜底上。把探测结果持久化，
+   * 重启后启动瞬间版本已知，client 工厂直接产出正确代次的客户端。
+   * 服务器升级/降级导致版本变化时，下一次 checkHealth 会覆盖本表。
+   */
+  private apiVersionMap = new Map<string, ApiVersion>()
   private listeners: Set<Listener> = new Set()
   private localServerUrlOverride: string | null = null
 
@@ -169,6 +180,7 @@ class ServerStore {
 
   constructor() {
     this.loadFromStorage()
+    this.loadApiVersions()
     this.updateSnapshots()
   }
 
@@ -232,6 +244,29 @@ class ServerStore {
         sessionStorage.setItem(ACTIVE_SERVER_KEY, this.activeServerId)
         localStorage.setItem(ACTIVE_SERVER_KEY, this.activeServerId)
       }
+    } catch {
+      // ignore
+    }
+  }
+
+  /** 读取持久化的 API 版本表（损坏/非对象按空处理，下次健康检查会重建） */
+  private loadApiVersions(): void {
+    try {
+      const stored = localStorage.getItem(API_VERSIONS_KEY)
+      if (!stored) return
+      const parsed: unknown = JSON.parse(stored)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+      for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (value === 'v1' || value === 'v2') this.apiVersionMap.set(id, value)
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  private persistApiVersions(): void {
+    try {
+      localStorage.setItem(API_VERSIONS_KEY, JSON.stringify(Object.fromEntries(this.apiVersionMap)))
     } catch {
       // ignore
     }
@@ -533,6 +568,8 @@ class ServerStore {
     this.healthCheckSeqMap.delete(id)
     this.healthInflight.delete(id)
     this.clockCalibrationMap.delete(id)
+    this.apiVersionMap.delete(id)
+    this.persistApiVersions()
 
     // 如果删除的是当前选中的，切换到默认
     const wasActive = this.activeServerId === id
@@ -626,9 +663,33 @@ class ServerStore {
     }
   }
 
-  /** 读取某服务器上次探测到的 API 版本（无记录返回 undefined） */
+  /** 读取某服务器的 API 版本（无记录返回 undefined）。
+   *
+   * 优先取 healthMap 里本次健康检查的结论；healthMap 是内存态，重启后为空，
+   * 此时回退到持久化的 apiVersionMap —— 它记录了上次真实探测到的版本。
+   * 离线/检查失败（health.apiVersion 缺失）同样回退：服务器短暂不可达不应让
+   * 客户端退回 v1 根路径，否则对 v2 服务器会打出 text/html。
+   */
   getApiVersion(serverId: string): ApiVersion | undefined {
-    return this.healthMap.get(serverId)?.apiVersion
+    return this.healthMap.get(serverId)?.apiVersion ?? this.apiVersionMap.get(serverId)
+  }
+
+  /**
+   * 确保某服务器的 API 版本已知：已有结论（内存或持久化）立即返回；未知时
+   * 跑一次健康检查探测。供数据初始化/SSE 连接前调用，避免版本未知的窗口里
+   * getSDKClient 按 v1 建 client，首屏 /session、/agent、/global/event 打在
+   * v2 服务器的 SPA 兜底上（text/html）。探测失败不抛：保持原「版本未知按 v1
+   * 处理」的回退，由调用方照常继续。
+   */
+  async ensureApiVersion(serverId: string): Promise<ApiVersion | undefined> {
+    const known = this.getApiVersion(serverId)
+    if (known) return known
+    try {
+      const health = await this.checkHealth(serverId, { silent: true })
+      return health.apiVersion
+    } catch {
+      return undefined
+    }
   }
 
   /** 健康检查的实际网络逻辑（由 checkHealth 做在途合并后调用） */
@@ -645,6 +706,10 @@ class ServerStore {
     const commitHealth = (health: ServerHealth) => {
       if (this.healthCheckSeqMap.get(serverId) === checkSeq) {
         this.healthMap.set(serverId, health)
+        if (health.apiVersion && this.apiVersionMap.get(serverId) !== health.apiVersion) {
+          this.apiVersionMap.set(serverId, health.apiVersion)
+          this.persistApiVersions()
+        }
         this.notify()
       }
       return health

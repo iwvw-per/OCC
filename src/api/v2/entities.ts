@@ -45,3 +45,141 @@ export function adaptPty(raw: unknown): Pty {
     size: { rows: 24, cols: 80 },
   } as Pty
 }
+
+/**
+ * v2 FileSystem.Entry → v1 FileNode。
+ *
+ * v1 的 /file/list 返回 {name, path, absolute, type, ignored}；v2 只给
+ * {path, type}（path 为相对路径）。UI（ProjectDialog / useFileExplorer 等）
+ * 依赖 name 做排序（localeCompare），缺 name 直接崩溃，必须在适配层补上
+ * name/absolute/ignored。
+ */
+export function adaptFileNode(
+  raw: unknown,
+  options: { directory?: string },
+): { name: string; path: string; absolute: string; type: 'file' | 'directory'; ignored: boolean } {
+  const e = rec(raw)
+  const relPath = str(e.path) ?? ''
+  const isDir = e.type === 'directory'
+  const name = relPath.split('/').filter(Boolean).pop() ?? relPath
+  const directory = options.directory?.replace(/\/+$/, '') ?? ''
+  const absolute = relPath === '' ? directory : directory ? `${directory}/${relPath}` : relPath
+  return {
+    name,
+    path: relPath,
+    absolute,
+    type: isDir ? 'directory' : 'file',
+    ignored: false,
+  }
+}
+
+/**
+ * v2 Model.Info → v1 Provider.models[modelID]。v2 模型用独立 /api/model，
+ * v1 客户端期望嵌套在 provider.models 下且带 status/limit/capabilities。
+ */
+export function adaptModelToProviderEntry(raw: unknown): Record<string, unknown> {
+  const m = rec(raw)
+  const capabilities = rec(m.capabilities)
+  const inputList: string[] = Array.isArray(capabilities.input) ? (capabilities.input as string[]) : []
+  const variantsRaw = Array.isArray(m.variants) ? (m.variants as unknown[]) : []
+  const variants: Record<string, unknown> = {}
+  for (const v of variantsRaw) {
+    const id = str(rec(v).id)
+    if (id) variants[id] = v
+  }
+  return {
+    id: String(m.id ?? m.modelID ?? ''),
+    providerID: str(m.providerID) ?? '',
+    name: str(m.name) ?? str(m.modelID) ?? '',
+    status: str(m.status) ?? 'active',
+    limit: {
+      context: num(rec(m.limit).context) ?? 0,
+      output: num(rec(m.limit).output) ?? 0,
+    },
+    capabilities: {
+      reasoning: inputList.includes('reasoning'),
+      attachment: inputList.includes('image') || inputList.includes('pdf') || inputList.includes('audio') || inputList.includes('video'),
+      toolcall: capabilities.tools === true,
+      input: {
+        text: inputList.includes('text'),
+        audio: inputList.includes('audio'),
+        image: inputList.includes('image'),
+        video: inputList.includes('video'),
+        pdf: inputList.includes('pdf'),
+      },
+    },
+    variants,
+  }
+}
+
+/**
+ * 组装 v1 形状的 config.providers 响应：把 provider.list + model.list 合并成
+ * { providers: [{ id, name, models: { modelId: {...} } }] }，供 getActiveModels 消费。
+ */
+export function adaptProviders(providersRaw: unknown, modelsRaw: unknown): Array<Record<string, unknown>> {
+  const providers = Array.isArray(providersRaw) ? providersRaw : []
+  const models = Array.isArray(modelsRaw) ? modelsRaw : []
+  const modelsByProvider = new Map<string, Array<Record<string, unknown>>>()
+  for (const raw of models) {
+    const m = rec(raw)
+    const providerID = str(m.providerID)
+    if (!providerID) continue
+    const list = modelsByProvider.get(providerID) ?? []
+    list.push(adaptModelToProviderEntry(raw))
+    modelsByProvider.set(providerID, list)
+  }
+  return providers.map(p => {
+    const provider = rec(p)
+    const pid = str(provider.id) ?? ''
+    const modelsMap: Record<string, unknown> = {}
+    for (const entry of modelsByProvider.get(pid) ?? []) {
+      const key = String(entry.id ?? '')
+      if (key) modelsMap[key] = entry
+    }
+    return {
+      id: str(provider.id) ?? '',
+      name: str(provider.name) ?? str(provider.id) ?? '',
+      models: modelsMap,
+    }
+  })
+}
+
+/**
+ * v2 Skill.Info → v1 AppSkills 条目。v2 用 path 字段，v1 UI 依赖 location 展示。
+ */
+export function adaptSkill(raw: unknown): Record<string, unknown> {
+  const s = rec(raw)
+  return {
+    name: str(s.name) ?? '',
+    description: str(s.description),
+    slash: s.slash === true,
+    location: str(s.path) ?? str(s.location) ?? '',
+    content: str(s.content) ?? '',
+  }
+}
+
+/**
+ * v2 mcp.list（{name,status}[]）→ v1 mcp.status（{ name: status } map）。
+ * v2 用 status 字段名，v1 用 MCPStatus 联合类型；pending 映射为 connected 近似。
+ */
+export function adaptMcpStatus(serversRaw: unknown): Record<string, unknown> {
+  const servers = Array.isArray(serversRaw) ? serversRaw : []
+  const map: Record<string, unknown> = {}
+  for (const raw of servers) {
+    const s = rec(raw)
+    const name = str(s.name)
+    if (!name) continue
+    const status = str(rec(s.status).status)
+    const error = str(rec(s.status).error)
+    if (status === 'failed') {
+      map[name] = { status: 'failed', error: error ?? '' }
+    } else if (status === 'needs_auth') {
+      map[name] = { status: 'needs_auth' }
+    } else {
+      map[name] = { status: status === 'disabled' ? 'disabled' : 'connected' }
+    }
+  }
+  return map
+}
+
+

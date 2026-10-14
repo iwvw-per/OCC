@@ -313,6 +313,73 @@ describe('serverStore health check', () => {
     await silent
     expect(serverStore.getHealth('local')?.version).toBe('1.17.0')
   })
+
+  it('persists the detected apiVersion across store re-instantiation', async () => {
+    // v2 探测：/global/health 返回 HTML（含 detectServerVersion 的二次探测）
+    // → /api/info 得 JSON → 判定 v2
+    vi.mocked(fetch).mockImplementation(async input => {
+      const url = String(input)
+      if (url.includes('/api/info')) return jsonResponse({ version: '2.0.28' })
+      return new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } })
+    })
+
+    const { serverStore } = await import('./serverStore')
+    const health = await serverStore.checkHealth('local')
+    expect(health.apiVersion).toBe('v2')
+
+    // 模拟应用重启：store 重建（内存 healthMap 清空），localStorage 保留
+    vi.resetModules()
+    const reloaded = await import('./serverStore')
+    expect(reloaded.serverStore.getApiVersion('local')).toBe('v2')
+  })
+
+  it('does not downgrade the persisted apiVersion when a probe fails', async () => {
+    vi.mocked(fetch).mockImplementation(async input => {
+      const url = String(input)
+      if (url.includes('/api/info')) return jsonResponse({ version: '2.0.28' })
+      return new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } })
+    })
+
+    const { serverStore } = await import('./serverStore')
+    await serverStore.checkHealth('local')
+    expect(serverStore.getApiVersion('local')).toBe('v2')
+
+    // 服务器下线：健康检查失败，health 无 apiVersion，但持久化结论不回退
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const offline = await serverStore.checkHealth('local')
+    expect(offline.status).toBe('offline')
+    expect(offline.apiVersion).toBeUndefined()
+    expect(serverStore.getApiVersion('local')).toBe('v2')
+  })
+
+  it('ensureApiVersion probes only when the version is unknown', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ healthy: true, version: '1.18.34' }))
+    const { serverStore } = await import('./serverStore')
+
+    expect(await serverStore.ensureApiVersion('local')).toBe('v1')
+
+    // 已知版本：不再触发任何网络请求
+    const callsBefore = vi.mocked(fetch).mock.calls.length
+    expect(await serverStore.ensureApiVersion('local')).toBe('v1')
+    expect(vi.mocked(fetch).mock.calls.length).toBe(callsBefore)
+  })
+
+  it('drops the persisted apiVersion when the server is removed', async () => {
+    vi.mocked(fetch).mockImplementation(async input => {
+      const url = String(input)
+      if (url.includes('/api/info')) return jsonResponse({ version: '2.0.28' })
+      return new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } })
+    })
+
+    const { serverStore } = await import('./serverStore')
+    const remote = serverStore.addServer({ name: 'Remote', url: 'http://remote.test' })
+    await serverStore.checkHealth(remote.id)
+    expect(serverStore.getApiVersion(remote.id)).toBe('v2')
+    expect(localStorage.getItem('opencode-server-api-versions')).toContain(remote.id)
+
+    serverStore.removeServer(remote.id)
+    expect(localStorage.getItem('opencode-server-api-versions')).not.toContain(remote.id)
+  })
 })
 
 describe('serverStore enable/disable', () => {
