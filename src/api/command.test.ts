@@ -26,6 +26,14 @@ vi.mock('./skill', () => ({
   getSkills: async () => skillList,
 }))
 
+vi.mock('./v2NativeCommand', () => ({
+  nativeListCommands: async () => {
+    const r = listMock()
+    return Array.isArray(r) ? r : (r?.data ?? [])
+  },
+  nativeListSkills: async () => skillList,
+}))
+
 describe('getCommands', () => {
   beforeEach(() => {
     listMock.mockReset()

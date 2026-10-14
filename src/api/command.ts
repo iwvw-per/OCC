@@ -3,10 +3,10 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeListCommands, nativeListSkills } from './v2NativeCommand'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
-import { getSkills } from './skill'
 import i18n from '../i18n'
 
 export interface Command {
@@ -47,10 +47,15 @@ async function fetchCommands(directory?: string, serverId?: string): Promise<Com
 }
 
 async function fetchApiCommands(directory?: string, serverId?: string): Promise<ApiCommand[]> {
+  const isV2 = serverStore.getApiVersion(serverId ?? serverStore.getActiveServerId()) === 'v2'
   let apiCommands: ApiCommand[] = []
   try {
-    const sdk = getSDKClient(serverId)
-    apiCommands = unwrap(await sdk.command.list({ directory: formatPathForApi(directory, serverId) })) ?? []
+    if (isV2) {
+      apiCommands = await nativeListCommands(serverId, { directory })
+    } else {
+      const sdk = getSDKClient(serverId)
+      apiCommands = unwrap(await sdk.command.list({ directory: formatPathForApi(directory, serverId) })) ?? []
+    }
   } catch {
     // Backend unreachable — frontend commands still available
   }
@@ -58,13 +63,12 @@ async function fetchApiCommands(directory?: string, serverId?: string): Promise<
   // v1 的 /command 会把 slash skill（source:'skill'）一起返回；v2 把 command 与
   // skill 拆开（/api/command 只返回纯命令）。这里对 v2 服务器额外合并 skill，
   // 使 slash 面板能继续通过 / 调出 skill。
-  const isV2 = serverStore.getApiVersion(serverId ?? serverStore.getActiveServerId()) === 'v2'
   if (!isV2) return apiCommands
 
   const existingNames = new Set(apiCommands.map(c => c.name))
   const skillCommands: ApiCommand[] = []
   try {
-    const skills = await getSkills(directory, serverId)
+    const skills = await nativeListSkills(serverId, { directory })
     for (const skill of skills) {
       if (!skill || typeof skill !== 'object') continue
       const name = (skill as { name?: string }).name
