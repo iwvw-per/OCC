@@ -58,15 +58,140 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         data: data.error,
       })
 
-    case 'session.text.delta':
-    case 'session.reasoning.delta':
+    // ============================================================
+    // v2 消息流事件 → v1 Message 事件
+    //
+    // v2 没有 message.updated / message.part.updated / message.part.delta，
+    // 消息生命周期由细粒度 session.* 事件表达，且字段是 assistantMessageID
+    // （不是 messageID）+ ordinal（区分同消息内多段文本/推理）。
+    // 这里把它们合成为 v1 形状，使 messageStore 能建立消息骨架并流式渲染。
+    //
+    // partID 约定：`${assistantMessageID}-${ordinal}`（text/reasoning），
+    // tool 用 v2 的 callID。与 v2/message.ts 的 adaptAssistantParts 保持一致，
+    // 保证「事件流建立的 part」与「历史快照拉取的 part」用同一 id 匹配。
+    // ============================================================
+
+    case 'session.step.started': {
+      // 建立 assistant 消息骨架（此时尚无 part，由后续 text.*/tool.* 填充）。
+      const messageID = str(data.assistantMessageID) ?? ''
+      if (!messageID) return null
+      const model = rec(data.model)
+      const time = num(data.time) ?? num(e.created) ?? 0
+      return globalEvent(directory, EventTypes.MESSAGE_UPDATED, {
+        info: {
+          id: messageID,
+          sessionID,
+          role: 'assistant',
+          time: { created: time },
+          parentID: '',
+          modelID: str(model.id) ?? '',
+          providerID: str(model.providerID) ?? '',
+          mode: '',
+          agent: str(data.agent) ?? '',
+          path: { cwd: '', root: '' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      })
+    }
+
+    case 'session.text.started': {
+      const messageID = str(data.assistantMessageID) ?? ''
+      const ordinal = num(data.ordinal) ?? 0
+      if (!messageID) return null
+      return globalEvent(directory, EventTypes.MESSAGE_PART_UPDATED, {
+        part: {
+          id: `${messageID}-text-${ordinal}`,
+          sessionID,
+          messageID,
+          type: 'text',
+          text: '',
+          synthetic: false,
+        },
+      })
+    }
+
+    case 'session.text.delta': {
+      const messageID = str(data.assistantMessageID) ?? str(data.messageID) ?? ''
+      const ordinal = num(data.ordinal) ?? 0
+      if (!messageID) return null
       return globalEvent(directory, EventTypes.MESSAGE_PART_DELTA, {
         sessionID,
-        messageID: str(data.messageID) ?? '',
-        partID: str(data.partID) ?? str(data.id) ?? '',
-        field: type === 'session.reasoning.delta' ? 'reasoning' : 'text',
+        messageID,
+        partID: `${messageID}-text-${ordinal}`,
+        field: 'text',
         delta: str(data.delta) ?? str(data.text) ?? '',
       })
+    }
+
+    case 'session.reasoning.started': {
+      const messageID = str(data.assistantMessageID) ?? ''
+      const ordinal = num(data.ordinal) ?? 0
+      if (!messageID) return null
+      return globalEvent(directory, EventTypes.MESSAGE_PART_UPDATED, {
+        part: {
+          id: `${messageID}-reasoning-${ordinal}`,
+          sessionID,
+          messageID,
+          type: 'reasoning',
+          text: '',
+          time: { start: num(e.created) ?? 0 },
+        },
+      })
+    }
+
+    case 'session.reasoning.delta': {
+      const messageID = str(data.assistantMessageID) ?? str(data.messageID) ?? ''
+      const ordinal = num(data.ordinal) ?? 0
+      if (!messageID) return null
+      return globalEvent(directory, EventTypes.MESSAGE_PART_DELTA, {
+        sessionID,
+        messageID,
+        partID: `${messageID}-reasoning-${ordinal}`,
+        field: 'reasoning',
+        delta: str(data.delta) ?? str(data.text) ?? '',
+      })
+    }
+
+    case 'session.text.ended': {
+      const messageID = str(data.assistantMessageID) ?? ''
+      const ordinal = num(data.ordinal) ?? 0
+      if (!messageID) return null
+      return globalEvent(directory, EventTypes.MESSAGE_PART_UPDATED, {
+        part: {
+          id: `${messageID}-text-${ordinal}`,
+          sessionID,
+          messageID,
+          type: 'text',
+          text: str(data.text) ?? '',
+          synthetic: false,
+          time: { start: 0, end: num(e.created) ?? 0 },
+        },
+      })
+    }
+
+    case 'session.tool.called': {
+      // 工具调用开始：建立 tool part（running）。
+      const messageID = str(data.assistantMessageID) ?? ''
+      const callID = str(data.id) ?? ''
+      if (!messageID || !callID) return null
+      const input = data.input ?? {}
+      return globalEvent(directory, EventTypes.MESSAGE_PART_UPDATED, {
+        part: {
+          id: callID,
+          sessionID,
+          messageID,
+          type: 'tool',
+          callID,
+          tool: str(data.name) ?? '',
+          state: {
+            status: 'running',
+            input,
+            time: { start: num(e.created) ?? 0 },
+          },
+        },
+      })
+    }
 
     case 'session.tool.success':
       return globalEvent(directory, EventTypes.SESSION_NEXT_TOOL_SUCCESS, {

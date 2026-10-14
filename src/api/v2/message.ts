@@ -47,12 +47,13 @@ function adaptAssistantParts(raw: Record<string, unknown>): Part[] {
   const id = String(raw.id ?? '')
   const sessionID = str(raw.sessionID) ?? ''
   const parts: Part[] = []
-  let index = 0
+  let textOrdinal = 0
+  let reasoningOrdinal = 0
   for (const item of list(raw.content)) {
     const c = rec(item)
     const type = str(c.type)
-    const partID = `${id}-${index++}`
     if (type === 'text') {
+      const partID = `${id}-text-${textOrdinal++}`
       parts.push({
         id: partID,
         sessionID,
@@ -63,6 +64,7 @@ function adaptAssistantParts(raw: Record<string, unknown>): Part[] {
       } as TextPart)
     } else if (type === 'reasoning') {
       const time = rec(c.time)
+      const partID = `${id}-reasoning-${reasoningOrdinal++}`
       parts.push({
         id: partID,
         sessionID,
