@@ -1,5 +1,14 @@
 # Changelog
 
+## [v2.0.2] - 2026-10-14
+
+修复连接 opencode v2 后端时的会话标题、完成收尾、侧栏运行态问题，并统一品牌名为 OCC。
+
+- fix(v2): 会话标题不更新 — v2 `session.renamed` 只带 `{sessionID, title}`，此前按完整 session 解析被丢弃；新增 `SESSION_RENAMED` 事件按 id 打补丁 (88f9ce9b)
+- fix(v2): 回复完却一直「进行中」 — v2 不发 `session.idle`，成功结束只有 `session.execution.succeeded`，此前未映射导致流式消息永不收尾 (88f9ce9b)
+- fix(v2): 侧栏无运行态动态图标 — v2 不发 `session.status`，补映射 `session.execution.started` → busy (88f9ce9b)
+- fix: 品牌名统一为 OCC — 网页标题/PWA 名称/Android 应用名/窗口标题/侧栏文案/Windows 右键菜单 (88f9ce9b)
+
 ## [v2.0.1] - 2026-10-14
 
 修复连接 opencode v2 后端时的对话问题（消息顺序、重复、崩溃）及一批 v2 事件映射缺陷。
