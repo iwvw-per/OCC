@@ -3,6 +3,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeListPtySessions, nativeCreatePtySession, nativeUpdatePtySession, nativeRemovePtySession } from './v2NativePty'
 import { getApiBaseUrl, getAuthHeader, buildQueryString } from './http'
 import { formatPathForApi } from '../utils/directoryUtils'
 import { serverStore, getUnifiedFetch } from '../store/serverStore'
@@ -42,6 +43,10 @@ function normalizePty(pty: LegacyPty): Pty {
  * 获取所有 PTY 会话列表
  */
 export async function listPtySessions(directory?: string, serverId?: string): Promise<Pty[]> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeListPtySessions(sid, { directory })
+  }
   const sdk = getSDKClient(serverId)
   return unwrap(await sdk.pty.list({ directory: formatPathForApi(directory, serverId) })).map(pty =>
     normalizePty(pty as LegacyPty),
@@ -60,6 +65,10 @@ export async function listAvailableShells(directory?: string, serverId?: string)
  * 创建新的 PTY 会话
  */
 export async function createPtySession(params: PtyCreateParams, directory?: string, serverId?: string): Promise<Pty> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeCreatePtySession(sid, { directory, ...params })
+  }
   const sdk = getSDKClient(serverId)
   return normalizePty(unwrap(await sdk.pty.create({ directory: formatPathForApi(directory, serverId), ...params })) as LegacyPty)
 }
@@ -73,6 +82,10 @@ export async function updatePtySession(
   directory?: string,
   serverId?: string,
 ): Promise<Pty> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeUpdatePtySession(sid, { ptyID: ptyId, ...params })
+  }
   const sdk = getSDKClient(serverId)
   return normalizePty(
     unwrap(await sdk.pty.update({ ptyID: ptyId, directory: formatPathForApi(directory, serverId), ...params })) as LegacyPty,
@@ -83,6 +96,10 @@ export async function updatePtySession(
  * 删除 PTY 会话
  */
 export async function removePtySession(ptyId: string, directory?: string, serverId?: string): Promise<boolean> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeRemovePtySession(sid, ptyId)
+  }
   const sdk = getSDKClient(serverId)
   unwrap(await sdk.pty.remove({ ptyID: ptyId, directory: formatPathForApi(directory, serverId) }))
   return true
