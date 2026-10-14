@@ -1,5 +1,18 @@
 # Changelog
 
+## [v2.0.1] - 2026-10-14
+
+修复连接 opencode v2 后端时的对话问题（消息顺序、重复、崩溃）及一批 v2 事件映射缺陷。
+
+- fix(v2): 消息顺序 — v2 `message.list` 默认 desc（最新在前），此前误当升序，导致用户/助手消息反序 (bed5d440)
+- fix(v2): 用户消息重复 — canonical part id 为 `${messageID}-text`，此前只识别 v1 的 `prt` 前缀，乐观占位未清除 (bed5d440)
+- fix(v2): 对话崩溃/卡死 — assistant 消息 tokens 缺省时读取 `undefined.input` 报错 (bed5d440)
+- fix(v2): 工具卡片名字空白 — `session.tool.input.started` 携带的工具名未映射 (bed5d440)
+- fix(v2): 工具输出丢失 — `session.tool.success` 正文在 `content[]`，此前误读 `output` 字段 (bed5d440)
+- fix(v2): 停止后永久转圈 — v2 不发 `session.idle`，`session.execution.interrupted` 未映射 (bed5d440)
+- fix(v2): 错误语义丢失 — v2 用 `error.type`（如 provider.quota），此前误读 `error.name` (bed5d440)
+- fix(v2): 流式 tokens/费用不更新 — `session.step.ended` 未映射 (bed5d440)
+
 ## [v2.0.0] - 2026-10-14
 
 - feat(v2): 消息渲染层迁移到 v2 content[] 原生模型 (5bd03c8d)
