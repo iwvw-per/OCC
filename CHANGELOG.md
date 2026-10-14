@@ -1,5 +1,29 @@
 # Changelog
 
+## [v2.0.0] - 2026-10-14
+
+- feat(v2): 消息渲染层迁移到 v2 content[] 原生模型 (5bd03c8d)
+- feat(v2): session share/unshare/todos 原生化 - 不再依赖 facade (de8bdf31)
+- fix(v2): 清理 v2NativeSession.test.ts 未使用 import (f86e4297)
+- feat(v2): session 全量原生化 + global 原生化 - 全部走 v2 原生 (cc943462)
+- feat(v2): worktree 模块原生化 - 走 v2 原生调用 (b81dbf62)
+- feat(v2): message 消息读取原生化 - getSessionMessagePage 走 v2 原生 (3120c5ab)
+- feat(v2): pty 模块原生化 - 走 v2 原生调用 (045ab6cf)
+- feat(v2): agent/mcp/vcs/permission 模块原生化 - 走 v2 原生调用 (09c0be04)
+- feat(v2): file 模块原生化 - 走 v2 原生调用 (0fbe67c6)
+- feat(v2): project 模块原生化 - 走 v2 原生调用 (6e3fbdc2)
+- feat(v2): config 模块原生化 - 走 v2 原生调用 (09b1df67)
+- feat(v2): command/skill 模块原生化 - 走 v2 原生调用 (da43fd49)
+- feat(v2): message 模块原生化 - sendMessage/sendMessageAsync 走 v2 原生 prompt (94245757)
+- feat(v2): session 模块原生化 - 建立 DTA 层与 v2 原生访问层 (d90b779c)
+- feat(v2): v2 沙盒真实连接集成测试 + config.providers 对 model 失败容错 (16aa9c6a)
+- fix(v2): config.providers / provider.list / model.list 传 location (d5675dcf)
+- feat(v2): 命令面板合并 slash skill (6d64bb48)
+- fix(v2): 修正 tool part 回退 id（删除全局 index 后不再引用失效的 partID） (a5172d88)
+- test(v2): 集成验证 v2 事件流 → messageStore 对话流式渲染 (c16beb45)
+- fix(v2): 修复消息流式渲染 - 正确合成 v2 session.* 事件为 v1 消息事件 (1cd60b5a)
+- fix(v2): 补齐 v2 适配契约并持久化 apiVersion (02b002ce)
+
 ## [v0.6.129] - 2026-10-14
 
 - fix(test): sdk 缓存回归测试的 getApiVersion mock 类型标注 (72cb29da)
