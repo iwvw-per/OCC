@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ApiVersion } from './serverVersion'
 
 const { createOpencodeClientMock, createV2FacadeMock, getActiveBaseUrlMock, getActiveAuthMock, isTauriMock, getApiVersionMock, getServerBaseUrlMock, getServerAuthMock, getActiveServerIdMock } =
   vi.hoisted(() => ({
@@ -7,7 +8,7 @@ const { createOpencodeClientMock, createV2FacadeMock, getActiveBaseUrlMock, getA
     getActiveBaseUrlMock: vi.fn(() => 'http://127.0.0.1:4096'),
     getActiveAuthMock: vi.fn(() => null),
     isTauriMock: vi.fn(() => false),
-    getApiVersionMock: vi.fn(() => undefined),
+    getApiVersionMock: vi.fn<(serverId: string) => ApiVersion | undefined>(() => undefined),
     getServerBaseUrlMock: vi.fn(() => 'http://127.0.0.1:4096'),
     getServerAuthMock: vi.fn(() => null),
     getActiveServerIdMock: vi.fn(() => 'srv-1'),
