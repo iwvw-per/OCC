@@ -3,16 +3,19 @@
 //
 // 与 MessageRenderer.tsx 分离：该文件只导出组件，本文件放类型与纯函数，
 // 满足 Fast Refresh 对「组件文件只导出组件」的要求。
+//
+// v2 content[] 模型下只有 text / reasoning / tool 三种，没有 v1 的
+// step-start/step-finish/snapshot/patch/subtask 等基础设施 part，
+// 因此分组逻辑只做「连续工具折叠为 tool-group」与「尾部最终 text 拆分」。
 // ============================================
 
 import {
-  isToolPart,
-  isVisibleReasoningPart,
-  isVisibleTextPart,
+  isToolContent,
+  isVisibleReasoningContent,
+  isVisibleTextContent,
   type Message,
-  type Part,
-  type StepFinishPart,
-  type ToolPart,
+  type Content,
+  type ToolContent,
 } from '../../types/message'
 
 /**
@@ -25,8 +28,8 @@ import {
 export type ProcessContentScope = 'all' | 'process' | 'final' | 'inline'
 
 export type RenderItem =
-  | { type: 'single'; part: Part }
-  | { type: 'tool-group'; parts: ToolPart[]; stepFinish?: StepFinishPart }
+  | { type: 'single'; content: Content }
+  | { type: 'tool-group'; contents: ToolContent[] }
 
 export type ProcessSplit = {
   processItems: RenderItem[]
@@ -35,64 +38,38 @@ export type ProcessSplit = {
   hasFinal: boolean
 }
 
-/** parts[from..] 跳过基础设施和空内容后，下一个有意义的 part 是否为 tool */
-function hasMoreToolsAhead(parts: Part[], from: number): boolean {
-  for (let k = from; k < parts.length; k++) {
-    const part = parts[k]
-    if (part.type === 'step-start' || part.type === 'step-finish' || part.type === 'snapshot' || part.type === 'patch')
-      continue
-    if (part.type === 'text' && !isVisibleTextPart(part)) continue
-    if (part.type === 'reasoning' && !isVisibleReasoningPart(part)) continue
-    return part.type === 'tool'
-  }
-  return false
-}
-
-export function groupPartsForRender(parts: Part[]): RenderItem[] {
+export function groupContentsForRender(contents: Content[]): RenderItem[] {
   const result: RenderItem[] = []
-  let toolGroup: ToolPart[] = []
-  let stepFinish: StepFinishPart | undefined
+  let toolGroup: ToolContent[] = []
 
-  const flushToolGroup = (sf?: StepFinishPart) => {
+  const flushToolGroup = () => {
     if (toolGroup.length === 0) return
-    result.push({ type: 'tool-group', parts: toolGroup, stepFinish: sf })
+    result.push({ type: 'tool-group', contents: toolGroup })
     toolGroup = []
-    stepFinish = undefined
   }
 
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]
+  for (let i = 0; i < contents.length; i++) {
+    const content = contents[i]
 
-    // 跳过不渲染的 parts
-    if (part.type === 'step-start' || part.type === 'snapshot' || part.type === 'patch') continue
-    if (part.type === 'text' && !isVisibleTextPart(part)) continue
-    if (part.type === 'reasoning' && !isVisibleReasoningPart(part)) continue
+    // 跳过不渲染的 content
+    if (content.type === 'text' && !isVisibleTextContent(content)) continue
+    if (content.type === 'reasoning' && !isVisibleReasoningContent(content)) continue
 
-    if (isToolPart(part)) {
-      toolGroup.push(part)
-    } else if (part.type === 'step-finish') {
-      if (toolGroup.length > 0 && hasMoreToolsAhead(parts, i + 1)) {
-        // 中间 step-finish：后面还有 tool，暂存不 flush
-        stepFinish = part
-      } else if (toolGroup.length > 0) {
-        // 最后一个 step-finish，结束 tool group
-        flushToolGroup(part)
-      } else {
-        result.push({ type: 'single', part })
-      }
+    if (isToolContent(content)) {
+      toolGroup.push(content)
     } else {
-      flushToolGroup(stepFinish)
-      result.push({ type: 'single', part })
+      flushToolGroup()
+      result.push({ type: 'single', content })
     }
   }
 
-  flushToolGroup(stepFinish)
+  flushToolGroup()
   return result
 }
 
 /**
  * 把 render items 拆成「过程」和「最终回答」。
- * 最终回答 = 消息中最后一段连续 text + 紧随的独立 step-finish。
+ * 最终回答 = 消息中最后一段连续 text。
  * reasoning / tool 永远进过程。
  */
 export function splitProcessRenderItems(items: RenderItem[]): ProcessSplit {
@@ -103,11 +80,10 @@ export function splitProcessRenderItems(items: RenderItem[]): ProcessSplit {
   let lastTextIdx = -1
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i]
-    if (item.type === 'single' && item.part.type === 'text') {
+    if (item.type === 'single' && item.content.type === 'text') {
       lastTextIdx = i
       break
     }
-    if (item.type === 'single' && item.part.type === 'step-finish') continue
     break
   }
 
@@ -123,40 +99,21 @@ export function splitProcessRenderItems(items: RenderItem[]): ProcessSplit {
   let textRunStart = lastTextIdx
   while (textRunStart > 0) {
     const prev = items[textRunStart - 1]
-    if (prev.type === 'single' && prev.part.type === 'text') {
+    if (prev.type === 'single' && prev.content.type === 'text') {
       textRunStart -= 1
       continue
     }
     break
   }
 
-  let textRunEnd = lastTextIdx
-  while (textRunEnd + 1 < items.length) {
-    const next = items[textRunEnd + 1]
-    if (next.type === 'single' && next.part.type === 'step-finish') {
-      textRunEnd += 1
-      continue
-    }
-    break
-  }
-
-  const finalItems = items.slice(textRunStart, textRunEnd + 1)
-  const before = items.slice(0, textRunStart)
-  const after = items.slice(textRunEnd + 1)
-  const afterProcess = after.filter(
-    item => !(item.type === 'single' && item.part.type === 'step-finish'),
-  )
-  const afterStepFinish = after.filter(
-    item => item.type === 'single' && item.part.type === 'step-finish',
-  )
-  const processItems = afterProcess.length > 0 ? [...before, ...afterProcess] : before
-  const mergedFinal = afterStepFinish.length > 0 ? [...finalItems, ...afterStepFinish] : finalItems
+  const finalItems = items.slice(textRunStart)
+  const processItems = items.slice(0, textRunStart)
 
   return {
     processItems,
-    finalItems: mergedFinal,
+    finalItems,
     hasProcess: processItems.length > 0,
-    hasFinal: mergedFinal.length > 0,
+    hasFinal: finalItems.length > 0,
   }
 }
 
@@ -170,7 +127,7 @@ export function messageStillStreamingProcess(message: Message): boolean {
 export function messageHasProcessContent(message: Message): boolean {
   if (message.info.role !== 'assistant') return false
   if (messageStillStreamingProcess(message)) return true
-  const items = groupPartsForRender(message.parts)
+  const items = groupContentsForRender(message.content)
   if (items.length === 0) return false
   return splitProcessRenderItems(items).hasProcess
 }
@@ -179,5 +136,5 @@ export function messageHasProcessContent(message: Message): boolean {
 export function messageHasFinalContent(message: Message): boolean {
   if (message.info.role !== 'assistant') return false
   if (messageStillStreamingProcess(message)) return false
-  return splitProcessRenderItems(groupPartsForRender(message.parts)).hasFinal
+  return splitProcessRenderItems(groupContentsForRender(message.content)).hasFinal
 }

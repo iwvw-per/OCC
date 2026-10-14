@@ -20,7 +20,7 @@ async function ensureServer() {
 describeIf('v2 原生 agent/mcp/vcs 访问层', () => {
   it('nativeListAgents 返回 agent', async () => {
     await ensureServer()
-    const agents = await nativeListAgents(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const agents = await nativeListAgents(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(Array.isArray(agents)).toBe(true)
   })
 
@@ -32,7 +32,7 @@ describeIf('v2 原生 agent/mcp/vcs 访问层', () => {
 
   it('nativeGetVcsInfo 返回 vcs 信息', async () => {
     await ensureServer()
-    const vcs = await nativeGetVcsInfo(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const vcs = await nativeGetVcsInfo(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(vcs).toBeDefined()
   })
 })

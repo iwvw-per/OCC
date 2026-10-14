@@ -20,7 +20,7 @@ async function ensureServer() {
 describeIf('v2 原生 worktree 访问层', () => {
   it('nativeListWorktrees 返回列表（或空，不抛错）', async () => {
     await ensureServer()
-    const list = await nativeListWorktrees(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const list = await nativeListWorktrees(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(Array.isArray(list)).toBe(true)
   })
 })

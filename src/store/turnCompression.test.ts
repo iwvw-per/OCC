@@ -41,12 +41,12 @@ describe('compressMessageParts', () => {
   it('drops reasoning parts and counts them', () => {
     const result = compressMessageParts([reasoningPart('r1'), reasoningPart('r2'), textPart('t1', 'answer')])
     expect(result.reasoningCount).toBe(2)
-    expect(result.parts.map(p => p.type)).toEqual(['text'])
+    expect(result.content.map(p => p.type)).toEqual(['text'])
   })
 
   it('strips heavy tool state fields while keeping file stats for changed-files', () => {
     const result = compressMessageParts([toolPart()])
-    const part = result.parts[0] as ToolPart
+    const part = result.content[0] as ToolPart
     expect(result.stepCount).toBe(1)
 
     const state = part.state as unknown as Record<string, unknown>
@@ -63,7 +63,7 @@ describe('compressMessageParts', () => {
   it('returns the original parts reference when nothing is compressible', () => {
     const parts = [textPart('t1', 'hello')]
     const result = compressMessageParts(parts)
-    expect(result.parts).toBe(parts)
+    expect(result.content).toBe(parts)
     expect(result.reasoningCount).toBe(0)
     expect(result.stepCount).toBe(0)
   })

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MessageRenderer } from './MessageRenderer'
 import { messageHasFinalContent, messageHasProcessContent, splitProcessRenderItems } from './messageRenderLogic'
-import type { Message, Part, StepFinishPart, TextPart, ToolPart } from '../../types/message'
+import type { Message, Content, TextPart, ToolPart } from '../../types/message'
 
 let mockRenderUserMarkdown = false
 let mockCollapseUserMessages = false
@@ -50,13 +50,7 @@ vi.mock('./parts', () => ({
   TextPartView: ({ part }: { part: { text: string } }) => <div>{part.text}</div>,
   ReasoningPartView: () => null,
   ToolPartView: () => null,
-  FilePartView: () => null,
-  AgentPartView: () => null,
   SyntheticTextPartView: () => null,
-  StepFinishPartView: () => null,
-  SubtaskPartView: () => null,
-  RetryPartView: () => null,
-  CompactionPartView: () => <div>History compacted</div>,
   MessageErrorView: () => null,
 }))
 
@@ -81,7 +75,7 @@ function createAssistantMessage(): Message {
       },
       time: { created: 1 },
     },
-    parts: [
+    content: [
       {
         id: 'text-1',
         sessionID: 'session-1',
@@ -104,14 +98,14 @@ function createUserMessage(): Message {
       agent: 'build',
       model: { modelID: 'model-1', providerID: 'provider-1' },
     },
-    parts: [],
+    content: [],
     isStreaming: false,
   }
 }
 
 function createUserTextMessage(text: string): Message {
   const message = createUserMessage()
-  message.parts = [
+  message.content = [
     {
       id: 'text-user-1',
       sessionID: 'session-1',
@@ -145,7 +139,7 @@ describe('MessageRenderer assistant fork', () => {
   it('hides fork when the assistant message has no copyable text', () => {
     const onFork = vi.fn()
     const message = createAssistantMessage()
-    message.parts = [
+    message.content = [
       {
         id: 'text-blank',
         sessionID: 'session-1',
@@ -159,23 +153,6 @@ describe('MessageRenderer assistant fork', () => {
 
     expect(screen.queryByRole('button', { name: /fork|分叉/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /copy/i })).toBeNull()
-  })
-
-  it('renders compaction parts inside user messages', () => {
-    const message = createUserMessage()
-    message.parts = [
-      {
-        id: 'compaction-1',
-        sessionID: 'session-1',
-        messageID: 'user-1',
-        type: 'compaction',
-        auto: true,
-      },
-    ]
-
-    render(<MessageRenderer message={message} />)
-
-    expect(screen.getByText('History compacted')).toBeInTheDocument()
   })
 
   it('keeps user text plain by default', () => {
@@ -222,7 +199,7 @@ describe('MessageRenderer assistant fork', () => {
 })
 
 describe('process content split', () => {
-  function createCompletedAssistant(parts: Part[]): Message {
+  function createCompletedAssistant(content: Content[]): Message {
     return {
       info: {
         id: 'assistant-1',
@@ -243,7 +220,7 @@ describe('process content split', () => {
         },
         time: { created: 1, completed: 2 },
       },
-      parts,
+      content,
       isStreaming: false,
     }
   }
@@ -295,20 +272,6 @@ describe('process content split', () => {
         type: 'text',
         text: 'done',
       } satisfies TextPart,
-      {
-        id: 'step-1',
-        sessionID: 'session-1',
-        messageID: 'assistant-1',
-        type: 'step-finish',
-        reason: 'stop',
-        cost: 0,
-        tokens: {
-          input: 0,
-          output: 0,
-          reasoning: 0,
-          cache: { read: 0, write: 0 },
-        },
-      } satisfies StepFinishPart,
     ])
 
     expect(messageHasProcessContent(message)).toBe(true)

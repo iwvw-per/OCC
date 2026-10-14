@@ -78,8 +78,8 @@ describe('v2 事件流 → messageStore 集成（对话流式渲染）', () => {
     expect(msg.info.id).toBe('msg_asst_1')
     expect(msg.info.role).toBe('assistant')
     expect(msg.info.agent).toBe('build')
-    expect(msg.parts).toHaveLength(1)
-    expect(msg.parts[0]).toMatchObject({ id: 'msg_asst_1-text-0', type: 'text', text: '你好，世界' })
+    expect(msg.content).toHaveLength(1)
+    expect(msg.content[0]).toMatchObject({ id: 'msg_asst_1-text-0', type: 'text', text: '你好，世界' })
   })
 
   it('多段文本（不同 ordinal）生成独立 part，互不串扰', () => {
@@ -90,7 +90,7 @@ describe('v2 事件流 → messageStore 集成（对话流式渲染）', () => {
     dispatchToStore(v2EventToGlobalEvent(v2TextDelta('msg_asst_1', 1, '第二段'))!)
 
     const state = messageStore.getSessionState(SESSION_ID)
-    const parts = state!.messages[0].parts
+    const parts = state!.messages[0].content
     expect(parts).toHaveLength(2)
     expect(parts[0]).toMatchObject({ id: 'msg_asst_1-text-0', text: '第一段' })
     expect(parts[1]).toMatchObject({ id: 'msg_asst_1-text-1', text: '第二段' })

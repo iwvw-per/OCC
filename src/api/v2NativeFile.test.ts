@@ -20,13 +20,13 @@ async function ensureServer() {
 describeIf('v2 原生 file 访问层', () => {
   it('nativeListDirectory 返回文件列表', async () => {
     await ensureServer()
-    const files = await nativeListDirectory(SERVER_ID, { directory: 'C:\\Users\\DSUK', path: '' })
+    const files = await nativeListDirectory(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir', path: '' })
     expect(Array.isArray(files)).toBe(true)
   })
 
   it('nativeFindFiles 返回路径', async () => {
     await ensureServer()
-    const paths = await nativeFindFiles(SERVER_ID, { directory: 'C:\\Users\\DSUK', query: 'package' })
+    const paths = await nativeFindFiles(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir', query: 'package' })
     expect(Array.isArray(paths)).toBe(true)
   })
 })

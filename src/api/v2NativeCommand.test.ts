@@ -20,13 +20,13 @@ async function ensureServer() {
 describeIf('v2 原生 command/skill 访问层', () => {
   it('nativeListCommands 返回命令', async () => {
     await ensureServer()
-    const commands = await nativeListCommands(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const commands = await nativeListCommands(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(Array.isArray(commands)).toBe(true)
   })
 
   it('nativeListSkills 返回 skill', async () => {
     await ensureServer()
-    const skills = await nativeListSkills(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const skills = await nativeListSkills(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(Array.isArray(skills)).toBe(true)
   })
 })

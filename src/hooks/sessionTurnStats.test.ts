@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { computeSessionTurnStats, computeSessionTurnStatsCached, mergeIntervalMs, EMPTY_SESSION_TURN_STATS } from './sessionTurnStats'
-import type { Message, Part } from '../types/message'
+import type { Message, Content, Part } from '../types/message'
 
 function userMessage(created: number): Message {
   return {
     info: { role: 'user', time: { created } } as Message['info'],
-    parts: [],
+    content: [],
   }
 }
 
@@ -23,13 +23,13 @@ interface AssistantOptions {
 
 function assistantMessage(options: AssistantOptions): Message {
   const { created, completed, textWindows = [], tools = [] } = options
-  const parts: Part[] = []
+  const content: Content[] = []
 
   for (const window of textWindows) {
-    parts.push({ type: 'text', text: 'x', time: window } as Part)
+    content.push({ type: 'text', text: 'x', time: window } as Part)
   }
   for (const window of tools) {
-    parts.push({
+    content.push({
       type: 'tool',
       callID: `call-${window.start}`,
       tool: 'bash',
@@ -49,7 +49,7 @@ function assistantMessage(options: AssistantOptions): Message {
       },
       cost: 0,
     } as Message['info'],
-    parts,
+    content,
   }
 }
 
@@ -177,7 +177,7 @@ describe('computeSessionTurnStats', () => {
 
   it('uses the earliest part start when reasoning precedes text', () => {
     const message = assistantMessage({ created: 1000, completed: 5000 })
-    message.parts = [
+    message.content = [
       { type: 'reasoning', text: 'thinking', time: { start: 1200, end: 2000 } } as Part,
       { type: 'text', text: 'answer', time: { start: 2000, end: 4900 } } as Part,
     ]

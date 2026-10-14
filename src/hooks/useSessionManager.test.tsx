@@ -105,10 +105,10 @@ describe('useSessionManager', () => {
   it('loads history by turn batch with the store cursor', async () => {
     const apiMessage = {
       info: { id: 'message-0', role: 'user', time: { created: 1 } },
-      parts: [],
+      content: [], parts: [],
     }
     messageStoreMock.getSessionState.mockReturnValue({
-      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, parts: [] }],
+      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, content: [], parts: [] }],
       directory: '/workspace/demo',
       hasMoreHistory: true,
       historyCursor: 'cursor-1',
@@ -136,12 +136,12 @@ describe('useSessionManager', () => {
   it('loads older history by turn batch when the server returns no cursor', async () => {
     const apiMessage = {
       info: { id: 'message-0', role: 'user', time: { created: 1 } },
-      parts: [],
+      content: [], parts: [],
     }
     messageStoreMock.getSessionState.mockReturnValue({
       messages: [
-        { info: { id: 'message-1', role: 'user', time: { created: 2 } }, parts: [] },
-        { info: { id: 'message-2', role: 'assistant', time: { created: 3 } }, parts: [] },
+        { info: { id: 'message-1', role: 'user', time: { created: 2 } }, content: [], parts: [] },
+        { info: { id: 'message-2', role: 'assistant', time: { created: 3 } }, content: [], parts: [] },
       ],
       directory: '/workspace/demo',
       hasMoreHistory: true,
@@ -168,14 +168,14 @@ describe('useSessionManager', () => {
   })
 
   it('loads forward until the target message is in memory', async () => {
-    const target = { info: { id: 'target', role: 'user', time: { created: 1 } }, parts: [] }
+    const target = { info: { id: 'target', role: 'user', time: { created: 1 } }, content: [], parts: [] }
     let state: {
-      messages: Array<{ info: Record<string, unknown>; parts: unknown[] }>
+      messages: Array<{ info: Record<string, unknown>; content: unknown[]; parts: unknown[] }>
       directory: string
       hasMoreHistory: boolean
       historyCursor: string | undefined
     } = {
-      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, parts: [] }],
+      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, content: [], parts: [] }],
       directory: '/workspace/demo',
       hasMoreHistory: true,
       historyCursor: 'cursor-1',
@@ -200,7 +200,7 @@ describe('useSessionManager', () => {
 
   it('does not request history when the session is already at the earliest message', async () => {
     messageStoreMock.getSessionState.mockReturnValue({
-      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, parts: [] }],
+      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, content: [], parts: [] }],
       loadState: 'loaded',
       isStale: false,
       directory: '/workspace/demo',
@@ -221,7 +221,7 @@ describe('useSessionManager', () => {
 
   it('does not re-arm hasMoreHistory when a no-cursor refetch yields no older messages', async () => {
     // 大会话「一次拉全」后被裁剪：服务端说没有更早历史，本地存在缺口。
-    const kept = { info: { id: 'message-kept', role: 'assistant', time: { created: 9 } }, parts: [] }
+    const kept = { info: { id: 'message-kept', role: 'assistant', time: { created: 9 } }, content: [], parts: [] }
     messageStoreMock.getSessionState.mockReturnValue({
       messages: [kept],
       loadState: 'loaded',
@@ -254,8 +254,8 @@ describe('useSessionManager', () => {
   })
 
   it('keeps hasMoreHistory when a no-cursor refetch does bring older messages', async () => {
-    const kept = { info: { id: 'message-kept', role: 'assistant', time: { created: 9 } }, parts: [] }
-    const older = { info: { id: 'message-older', role: 'user', time: { created: 1 } }, parts: [] }
+    const kept = { info: { id: 'message-kept', role: 'assistant', time: { created: 9 } }, content: [], parts: [] }
+    const older = { info: { id: 'message-older', role: 'user', time: { created: 1 } }, content: [], parts: [] }
     messageStoreMock.getSessionState.mockReturnValue({
       messages: [kept],
       loadState: 'loaded',
@@ -287,8 +287,8 @@ describe('useSessionManager', () => {
     // 场景：首屏一次拉全后被内存预算裁掉最旧一段。若不主动补，
     // 缺口只能靠用户手动上滑 —— 而那条路径还有 userScrolled 判定问题，
     // 实际表现就是「会话最前面几轮永远看不到」。
-    const kept = { info: { id: 'msg-kept', role: 'assistant', time: { created: 9 } }, parts: [] }
-    const older = { info: { id: 'msg-older', role: 'user', time: { created: 1 } }, parts: [] }
+    const kept = { info: { id: 'msg-kept', role: 'assistant', time: { created: 9 } }, content: [], parts: [] }
+    const older = { info: { id: 'msg-older', role: 'user', time: { created: 1 } }, content: [], parts: [] }
 
     messageStoreMock.getSessionState.mockReturnValue({
       messages: [kept],
@@ -349,7 +349,7 @@ describe('useSessionManager', () => {
     // ChatPane 用 loadState === 'loaded' 决定是否挂载 ChatArea，一旦回落，
     // 已渲染的对话会被卸载、闪一次全屏 loading、再重挂，滚动位置丢失。
     messageStoreMock.getSessionState.mockReturnValue({
-      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, parts: [] }],
+      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, content: [], parts: [] }],
       loadState: 'loaded',
       isStale: false,
       isStreaming: false,
@@ -358,7 +358,7 @@ describe('useSessionManager', () => {
       historyCursor: undefined,
     })
     getSessionTurnPageMock.mockResolvedValue({
-      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, parts: [] }],
+      messages: [{ info: { id: 'message-1', role: 'user', time: { created: 2 } }, content: [], parts: [] }],
     })
 
     const { result } = renderHook(() =>
@@ -468,9 +468,9 @@ describe('useSessionManager', () => {
       messages: [
         {
           info: { id: 'message-1', role: 'user', time: { created: 1 }, model: { providerID: 'p', modelID: 'm' }, agent: 'build' },
-          parts: [],
+          content: [], parts: [],
         },
-        { info: { id: 'message-2', role: 'assistant', time: { created: 2 } }, parts: [] },
+        { info: { id: 'message-2', role: 'assistant', time: { created: 2 } }, content: [], parts: [] },
       ],
       directory: '/workspace/demo',
     })

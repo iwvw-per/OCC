@@ -90,7 +90,7 @@ export function estimateMessageRenderWeight(message: Message): number {
 
   let weight = message.info.role === 'user' ? 1 : 2
 
-  for (const part of message.parts) {
+  for (const part of message.content) {
     switch (part.type) {
       case 'text':
         weight += part.synthetic ? 1 : estimateTextRenderWeight(part.text)
@@ -103,20 +103,6 @@ export function estimateMessageRenderWeight(message: Message): number {
         weight += 4 + Math.min(8, Math.floor(outputLength / 4000))
         break
       }
-      case 'file':
-        weight += 2
-        break
-      case 'subtask':
-        weight += 3
-        break
-      case 'step-finish':
-      case 'retry':
-        weight += 2
-        break
-      case 'agent':
-      case 'compaction':
-        weight += 1
-        break
       default:
         break
     }
@@ -129,9 +115,9 @@ export function estimateMessageRenderWeight(message: Message): number {
 
 function estimateMessageHeight(message: Message): number {
   if (message.info.role === 'user') {
-    return Math.max(72, message.parts.length * 40)
+    return Math.max(72, message.content.length * 40)
   }
-  return Math.max(160, message.parts.length * 80)
+  return Math.max(160, message.content.length * 80)
 }
 
 function estimateGroupHeight(messages: Message[]): number {
@@ -813,7 +799,7 @@ export function reuseProcessTimelineItems(
 function assistantHasLiveWork(message: Message): boolean {
   if (message.info.role !== 'assistant') return false
   if (message.info.time.completed == null || message.isStreaming) return true
-  return message.parts.some(
+  return message.content.some(
     p => p.type === 'tool' && (p.state.status === 'running' || p.state.status === 'pending'),
   )
 }
@@ -832,7 +818,7 @@ function resolveTurnDurationMs(
   for (const m of assistants) {
     const completed = m.info.time.completed
     if (completed != null && (latestEnd == null || completed > latestEnd)) latestEnd = completed
-    for (const p of m.parts) {
+    for (const p of m.content) {
       if (p.type !== 'tool') continue
       const toolEnd = p.state.time?.end
       if (toolEnd != null && (latestEnd == null || toolEnd > latestEnd)) latestEnd = toolEnd
@@ -1037,7 +1023,7 @@ export function collectTurnChangedFiles(messages: Message[]): ChangedFile[] {
   }
   const toolParts: ToolPart[] = []
   for (const m of byId.values()) {
-    for (const part of m.parts) {
+    for (const part of m.content) {
       if (part.type === 'tool') toolParts.push(part)
     }
   }

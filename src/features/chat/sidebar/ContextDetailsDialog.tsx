@@ -191,7 +191,7 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
                 {isExpanded && (
                   <div className="p-3 bg-bg-000 border-t border-border-200/50">
                     <CodeBlock
-                      code={JSON.stringify({ message: msg.info, parts: msg.parts }, null, 2)}
+                      code={JSON.stringify({ message: msg.info, parts: msg.content }, null, 2)}
                       language="json"
                       maxHeight={420}
                       className="select-text"

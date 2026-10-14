@@ -44,7 +44,7 @@ export function useTokenRate(sessionId: string | null): TokenRateState {
         // 不含 reasoning（推理另计）与工具调用等待——混进来会把输出速度摊薄
         const tokens = info.tokens.output
         const intervals: { start: number; end: number }[] = []
-        for (const part of message.parts) {
+        for (const part of message.content) {
           if (part.type !== 'text') continue
           const start = part.time?.start
           const end = part.time?.end

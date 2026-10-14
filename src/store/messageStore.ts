@@ -9,7 +9,7 @@
 // 4. RAF 批量通知 React 组件更新
 
 import i18n from '../i18n'
-import type { Message, MessageError, Part, FilePart, AgentPart } from '../types/message'
+import type { Message, MessageError, Content, TextContent } from '../types/message'
 import type { ApiMessageWithParts, ApiMessage, ApiPart, ApiSession, Attachment } from '../api/types'
 import { logger } from '../utils/logger'
 import { isUserUIMessage, toUIMessage, toUIMessageInfo, toUIPart } from '../utils/messageConversion'
@@ -98,12 +98,12 @@ class MessageStore {
   /**
    * id→索引缓存，消除高频事件路径上的线性 find。
    *
-   * 缓存绑定在 state.messages / message.parts 的**数组引用**上：只有引用变了才
+   * 缓存绑定在 state.messages / message.content 的**数组引用**上：只有引用变了才
    * 重建（每帧 flush 最多一次），同一帧内的多个 delta 共用同一份索引，把每个
    * token 的 O(m)+O(p) 扫描降为 O(1)。
    */
   private messageIndexCache = new Map<string, { messages: Message[]; byId: Map<string, number> }>()
-  private partIndexCache = new Map<string, Map<string, { parts: Part[]; byId: Map<string, number> }>>()
+  private partIndexCache = new Map<string, Map<string, { parts: Content[]; byId: Map<string, number> }>>()
   /**
    * delta 乱序缓冲（D5）。
    *
@@ -255,19 +255,19 @@ class MessageStore {
         const message = (newMessages ?? state.messages)[msgIndex]
         if (!message) continue
 
-        const partIndex = this.getPartIndex(sessionId, messageId, message.parts)
+        const partIndex = this.getPartIndex(sessionId, messageId, message.content)
         let partsChanged = false
-        const newParts = message.parts.slice()
+        const newContent = message.content.slice()
         for (const partId of dirtyPartIds) {
           const partIndexInMessage = partIndex.get(partId)
           if (partIndexInMessage === undefined) continue
-          newParts[partIndexInMessage] = { ...message.parts[partIndexInMessage] }
+          newContent[partIndexInMessage] = { ...message.content[partIndexInMessage] }
           partsChanged = true
         }
         if (!partsChanged) continue
 
         if (!newMessages) newMessages = state.messages.slice()
-        newMessages[msgIndex] = { ...message, parts: newParts }
+        newMessages[msgIndex] = { ...message, content: newContent }
       }
 
       if (newMessages) {
@@ -393,7 +393,7 @@ class MessageStore {
   }
 
   /** 返回某条消息内 part id→index 映射，绑定当前 parts 数组引用。 */
-  private getPartIndex(sessionId: string, messageId: string, parts: Part[]): Map<string, number> {
+  private getPartIndex(sessionId: string, messageId: string, parts: Content[]): Map<string, number> {
     let perMessage = this.partIndexCache.get(sessionId)
     if (!perMessage) {
       perMessage = new Map()
@@ -762,7 +762,7 @@ class MessageStore {
       if (!previous || !shouldPreserveLiveParts(previous, next)) return next
       return {
         ...next,
-        parts: mergePartsPreferLiveText(previous.parts, next.parts),
+        content: mergePartsPreferLiveText(previous.content, next.content),
         isStreaming: previous.isStreaming || next.isStreaming,
       }
     })
@@ -895,10 +895,10 @@ class MessageStore {
       if (message.isStreaming || message.info.time.completed == null) continue
       if (message.isCompressed) continue
 
-      const { parts, reasoningCount, stepCount } = compressMessageParts(message.parts)
+      const { content, reasoningCount, stepCount } = compressMessageParts(message.content)
       nextMessages[i] = {
         ...message,
-        parts,
+        content,
         isCompressed: true,
         compressedStats: { reasoningCount, stepCount },
       }
@@ -1023,7 +1023,7 @@ class MessageStore {
         const optimisticIndex = state.messages.findIndex(message => {
           // D19：用显式乐观 id 集合识别，而非永不命中的 msg-local- 前缀
           if (!this.optimisticMessageIds.has(message.info.id) || message.info.role !== 'user') return false
-          return message.parts.some(part => part.type === 'text' && part.text === incomingText)
+          return message.content.some(part => part.type === 'text' && part.text === incomingText)
         })
         if (optimisticIndex >= 0) {
           this.optimisticMessageIds.delete(state.messages[optimisticIndex].info.id)
@@ -1046,7 +1046,7 @@ class MessageStore {
     } else {
       const newMsg: Message = {
         info: toUIMessageInfo(apiMsg),
-        parts: [],
+        content: [],
         isStreaming: apiMsg.role === 'assistant',
       }
       state.messages = [...state.messages, newMsg]
@@ -1070,7 +1070,7 @@ class MessageStore {
     if (msgIndex === undefined && apiPart.type === 'text') {
       const text = (apiPart as ApiPart & { text?: string }).text
       const optimisticIndex = typeof text === 'string'
-        ? state.messages.findIndex(message => this.optimisticMessageIds.has(message.info.id) && message.info.role === 'user' && message.parts.some(part => part.type === 'text' && part.text === text))
+        ? state.messages.findIndex(message => this.optimisticMessageIds.has(message.info.id) && message.info.role === 'user' && message.content.some(part => part.type === 'text' && part.text === text))
         : -1
       if (optimisticIndex >= 0) {
         const optimistic = state.messages[optimisticIndex]
@@ -1084,14 +1084,16 @@ class MessageStore {
     if (msgIndex === undefined) return
 
     const oldMessage = state.messages[msgIndex]
-    let newParts = [...oldMessage.parts]
-    const existingPartIndex = this.getPartIndex(sessionKey, apiPart.messageID, oldMessage.parts).get(apiPart.id)
+    let newContent = [...oldMessage.content]
+    const existingPartIndex = this.getPartIndex(sessionKey, apiPart.messageID, oldMessage.content).get(apiPart.id)
     const incoming = toUIPart(apiPart)
+    // v2 content 模型只有 text/reasoning/tool：v1 专有 part（file/agent/step-* 等）折叠为空
+    if (!incoming) return
 
     if (existingPartIndex !== undefined) {
-      const existing = newParts[existingPartIndex]
+      const existing = newContent[existingPartIndex]
       // 未定稿：兼容前缀时不回退；已 completed：强制服务端定稿
-      newParts[existingPartIndex] = shouldPreserveLiveParts(oldMessage)
+      newContent[existingPartIndex] = shouldPreserveLiveParts(oldMessage)
         ? mergePartPreferLiveText(existing, incoming)
         : incoming
     } else {
@@ -1099,12 +1101,12 @@ class MessageStore {
       // （如 `${messageId}:text`）。同一消息内出现服务端 part 时，先清掉同类型的本地
       // 占位 part，避免正文重复（乐观文本 + 服务端文本）。
       if (isServerPartId(apiPart.id)) {
-        newParts = newParts.filter(part => isServerPartId(part.id) || part.type !== incoming.type)
+        newContent = newContent.filter(part => isServerPartId(part.id) || part.type !== incoming.type)
       }
-      newParts.push(incoming)
+      newContent.push(incoming)
     }
 
-    const newMessage = { ...oldMessage, parts: newParts }
+    const newMessage = { ...oldMessage, content: newContent }
     state.messages = [...state.messages.slice(0, msgIndex), newMessage, ...state.messages.slice(msgIndex + 1)]
     this.notify([sessionKey])
     // D5：part 建立后，回放此前因乱序而暂存的 delta
@@ -1124,13 +1126,13 @@ class MessageStore {
     }
     const msg = state.messages[msgIndex]
 
-    const partIndex = this.getPartIndex(sessionKey, data.messageID, msg.parts).get(data.partID)
+    const partIndex = this.getPartIndex(sessionKey, data.messageID, msg.content).get(data.partID)
     if (partIndex === undefined) {
       // D5：part 尚未建立（delta 先于 part.updated 到达），暂存待回放
       this.bufferPendingDelta(sessionKey, data)
       return
     }
-    const part = msg.parts[partIndex]
+    const part = msg.content[partIndex]
 
     if (!(data.field === 'text' && 'text' in part))
       return // Mutable 修改：直接拼接 text，不做不可变拷贝。
@@ -1197,12 +1199,12 @@ class MessageStore {
         continue
       }
       const msg = state.messages[msgIndex]
-      const partIndex = this.getPartIndex(sessionKey, messageID, msg.parts).get(partID)
+      const partIndex = this.getPartIndex(sessionKey, messageID, msg.content).get(partID)
       if (partIndex === undefined) {
         remaining.set(key, delta)
         continue
       }
-      const part = msg.parts[partIndex]
+      const part = msg.content[partIndex]
       if (!('text' in part)) continue
       ;(part as { text: string }).text += delta
       let dirtyPartsByMessage = this.dirtyPartsBySession.get(sessionKey)
@@ -1233,9 +1235,9 @@ class MessageStore {
     if (msgIndex === undefined) return
 
     const oldMessage = state.messages[msgIndex]
-    if (!oldMessage.parts.some(p => p.id === data.partID)) return
+    if (!oldMessage.content.some(p => p.id === data.partID)) return
 
-    const newMessage = { ...oldMessage, parts: oldMessage.parts.filter(p => p.id !== data.partID) }
+    const newMessage = { ...oldMessage, content: oldMessage.content.filter(p => p.id !== data.partID) }
     state.messages = [...state.messages.slice(0, msgIndex), newMessage, ...state.messages.slice(msgIndex + 1)]
     this.notify([sessionKey])
   }
@@ -1341,7 +1343,7 @@ class MessageStore {
     if (!state?.revertState) return null
 
     return {
-      messages: state.messages.map(m => ({ ...m, parts: [...m.parts] })),
+      messages: state.messages.map(m => ({ ...m, content: [...m.content] })),
       revertState: {
         ...state.revertState,
         history: state.revertState.history.map(item => ({ ...item, attachments: [...item.attachments] })),
@@ -1354,7 +1356,7 @@ class MessageStore {
     const state = this.sessions.get(sessionId)
     if (!state) return
 
-    state.messages = snapshot.messages.map(m => ({ ...m, parts: [...m.parts] }))
+    state.messages = snapshot.messages.map(m => ({ ...m, content: [...m.content] }))
     state.revertState = snapshot.revertState
       ? {
           ...snapshot.revertState,
@@ -1439,59 +1441,14 @@ class MessageStore {
   // Private Helpers
   // ============================================
   private extractUserText(message: Message): string {
-    return message.parts
-      .filter((p): p is Part & { type: 'text' } => p.type === 'text' && !p.synthetic)
+    return message.content
+      .filter((p): p is TextContent => p.type === 'text' && !p.synthetic)
       .map(p => p.text)
       .join('\n')
   }
 
   private extractUserAttachments(message: Message): Attachment[] {
-    const attachments: Attachment[] = []
-
-    for (const part of message.parts) {
-      if (part.type === 'file') {
-        const fp = part as FilePart
-        const isFolder = fp.mime === 'application/x-directory'
-        const sourcePath =
-          fp.source && 'path' in fp.source
-            ? fp.source.path
-            : fp.source && 'uri' in fp.source
-              ? fp.source.uri
-              : undefined
-        attachments.push({
-          id: fp.id || crypto.randomUUID(),
-          type: isFolder ? 'folder' : 'file',
-          displayName: fp.filename || sourcePath || 'file',
-          url: fp.url,
-          mime: fp.mime,
-          relativePath: sourcePath,
-          textRange: fp.source?.text
-            ? {
-                value: fp.source.text.value,
-                start: fp.source.text.start,
-                end: fp.source.text.end,
-              }
-            : undefined,
-        })
-      } else if (part.type === 'agent') {
-        const ap = part as AgentPart
-        attachments.push({
-          id: ap.id || crypto.randomUUID(),
-          type: 'agent',
-          displayName: ap.name,
-          agentName: ap.name,
-          textRange: ap.source
-            ? {
-                value: ap.source.value,
-                start: ap.source.start,
-                end: ap.source.end,
-              }
-            : undefined,
-        })
-      }
-    }
-
-    return attachments
+    return message.info.role === 'user' ? (message.info.attachments ?? []) : []
   }
 }
 

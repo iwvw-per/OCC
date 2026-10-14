@@ -1,4 +1,4 @@
-import type { AssistantMessageInfo, Message, Part } from '../types/message'
+import type { AssistantMessageInfo, Content, Message } from '../types/message'
 import type { SessionStats } from './sessionStatsTypes'
 
 const COMPACTED_TOOL_PLACEHOLDER = '[Old tool result content cleared]'
@@ -7,27 +7,23 @@ function estimateTokens(chars: number): number {
   return Math.ceil(chars / 4)
 }
 
-function charsFromUserPart(part: Part): number {
-  if (part.type === 'text') return part.text.length
-  if (part.type === 'file') return part.source?.text.value.length ?? 0
-  if (part.type === 'agent') return part.source?.value.length ?? 0
-  if (part.type === 'compaction') return 'What did we do so far?'.length
-  if (part.type === 'subtask') return 'The following tool was executed by the user'.length
+function charsFromUserContent(content: Content): number {
+  if (content.type === 'text') return content.text.length
   return 0
 }
 
-function charsFromAssistantPart(part: Part): { assistant: number; tool: number } {
-  if (part.type === 'text') return { assistant: part.text.length, tool: 0 }
-  if (part.type === 'reasoning') return { assistant: part.text.length, tool: 0 }
-  if (part.type !== 'tool') return { assistant: 0, tool: 0 }
+function charsFromAssistantContent(content: Content): { assistant: number; tool: number } {
+  if (content.type === 'text') return { assistant: content.text.length, tool: 0 }
+  if (content.type === 'reasoning') return { assistant: content.text.length, tool: 0 }
+  if (content.type !== 'tool') return { assistant: 0, tool: 0 }
 
-  const inputSize = Object.keys(part.state.input ?? {}).length * 16
-  if (part.state.status === 'pending') return { assistant: 0, tool: inputSize + (part.state.raw?.length ?? 0) }
-  if (part.state.status === 'completed') {
-    const outputText = part.state.time?.compacted ? COMPACTED_TOOL_PLACEHOLDER : (part.state.output ?? '')
+  const inputSize = Object.keys(content.state.input ?? {}).length * 16
+  if (content.state.status === 'pending') return { assistant: 0, tool: inputSize + (content.state.raw?.length ?? 0) }
+  if (content.state.status === 'completed') {
+    const outputText = content.state.time?.compacted ? COMPACTED_TOOL_PLACEHOLDER : (content.state.output ?? '')
     return { assistant: 0, tool: inputSize + outputText.length }
   }
-  if (part.state.status === 'error') return { assistant: 0, tool: inputSize + (part.state.error?.length ?? 0) }
+  if (content.state.status === 'error') return { assistant: 0, tool: inputSize + (content.state.error?.length ?? 0) }
   return { assistant: 0, tool: inputSize }
 }
 
@@ -45,13 +41,14 @@ function estimateCurrentContext(messages: Message[]): number {
 
   for (const message of messages) {
     if (message.info.role === 'user') {
-      for (const part of message.parts) userChars += charsFromUserPart(part)
+      for (const content of message.content) userChars += charsFromUserContent(content)
+      for (const attachment of message.info.attachments ?? []) userChars += attachment.displayName?.length ?? 0
       continue
     }
 
     if (message.info.role !== 'assistant') continue
-    for (const part of message.parts) {
-      const next = charsFromAssistantPart(part)
+    for (const content of message.content) {
+      const next = charsFromAssistantContent(content)
       assistantChars += next.assistant
       toolChars += next.tool
     }
@@ -76,7 +73,6 @@ function shouldUseEstimatedContext(
 
   for (let i = Math.max(0, lastAssistantWithTokensIndex + 1); i < messages.length; i++) {
     const msg = messages[i]
-    if (msg.parts.some(part => part.type === 'compaction')) return true
     if (msg.info.role === 'assistant' && (msg.info as AssistantMessageInfo).summary) return true
   }
 

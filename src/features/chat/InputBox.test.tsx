@@ -11,7 +11,7 @@ let messagesMock: Message[] = []
 function createHistoryMessage(text: string): Message {
   return {
     info: { role: 'user' },
-    parts: [{ type: 'text', text, synthetic: false }],
+    content: [{ type: 'text', text, synthetic: false }],
   } as unknown as Message
 }
 

@@ -1,4 +1,4 @@
-import type { MessageWithParts, Part, TextPart, ReasoningPart, ToolPart } from '../../types'
+import type { MessageWithParts, Part, TextPart, ReasoningPart, ToolPart, FilePart, AgentPart } from '../../types'
 import { rec, str, num, list } from './adapt'
 
 function adaptToolState(raw: unknown): ToolPart['state'] {
@@ -92,22 +92,58 @@ function adaptAssistantParts(raw: Record<string, unknown>): Part[] {
 function adaptUserParts(raw: Record<string, unknown>): Part[] {
   const id = String(raw.id ?? '')
   const sessionID = str(raw.sessionID) ?? ''
+  const parts: Part[] = []
   const text = str(raw.text)
-  if (text === undefined) return []
-  return [
-    {
+  if (text !== undefined) {
+    parts.push({
       id: `${id}-text`,
       sessionID,
       messageID: id,
       type: 'text',
       text,
       synthetic: false,
-    } as TextPart,
-  ]
+    } as TextPart)
+  }
+  // v2 user message 的 files[]/agents[] → v1 file/agent part。
+  // 前端 messageConversion.foldPartsToContent 会把它们折成 info.attachments。
+  let ordinal = 0
+  for (const rawFile of list(raw.files)) {
+    const f = rec(rawFile)
+    const mime = str(f.mime) ?? 'text/plain'
+    const source = rec(f.source)
+    const uri = source.type === 'uri' ? str(source.uri) : ''
+    parts.push({
+      id: `${id}-file-${ordinal++}`,
+      sessionID,
+      messageID: id,
+      type: 'file',
+      mime,
+      filename: str(f.name),
+      url: uri,
+      source: uri
+        ? {
+            type: 'file',
+            path: uri,
+            text: { value: '', start: 0, end: 0 },
+          }
+        : undefined,
+    } as unknown as FilePart)
+  }
+  for (const rawAgent of list(raw.agents)) {
+    const a = rec(rawAgent)
+    parts.push({
+      id: `${id}-agent-${ordinal++}`,
+      sessionID,
+      messageID: id,
+      type: 'agent',
+      name: str(a.name) ?? '',
+    } as unknown as AgentPart)
+  }
+  return parts
 }
 
-/** v2 单条 SessionMessageInfo → v1 MessageWithParts */
-export function adaptMessage(raw: unknown): MessageWithParts {
+/** v2 单条 SessionMessageInfo → v1 MessageWithParts；非 user/assistant 的消息返回 null */
+export function adaptMessage(raw: unknown): MessageWithParts | null {
   const m = rec(raw)
   const id = String(m.id ?? '')
   const sessionID = str(m.sessionID) ?? ''
@@ -134,6 +170,10 @@ export function adaptMessage(raw: unknown): MessageWithParts {
       parts: adaptAssistantParts(m),
     }
   }
+  // 只把真正的 user 消息映射为用户消息；idle / model-switched / agent-switched /
+  // synthetic / system / skill / shell / compaction 等系统消息一律丢弃，
+  // 避免它们污染对话流导致用户/助手位置错乱。
+  if (type !== 'user') return null
   return {
     info: {
       id,
@@ -156,7 +196,9 @@ export function adaptMessagePage(raw: unknown): {
   const r = rec(raw)
   const cursor = rec(r.cursor)
   return {
-    messages: list(r.data).map(adaptMessage),
+    messages: list(r.data)
+      .map(adaptMessage)
+      .filter((m): m is MessageWithParts => m != null),
     nextCursor: str(cursor.next) ?? undefined,
     prevCursor: str(cursor.previous) ?? undefined,
   }

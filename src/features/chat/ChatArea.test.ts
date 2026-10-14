@@ -19,7 +19,7 @@ import {
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
 import { buildVisibleMessageEntries, getVisibleMessageForkTargetId } from './chatAreaVisibility'
 import { buildChatPageViewModel } from './useChatPageViewModel'
-import type { Message, MessageError, Part, ToolPart, ReasoningPart } from '../../types/message'
+import type { Message, MessageError, Part, Content, ToolPart, ReasoningPart } from '../../types/message'
 
 function createUserMessage(id: string, created: number): Message {
   return {
@@ -31,14 +31,14 @@ function createUserMessage(id: string, created: number): Message {
       model: { providerID: 'openai', modelID: 'gpt-4.1' },
       time: { created },
     },
-    parts: [],
+    content: [],
     isStreaming: false,
   }
 }
 
 function createAssistantMessage(
   id: string,
-  parts: Part[],
+  content: Content[],
   created = 1,
   completed?: number,
   error?: MessageError,
@@ -64,7 +64,7 @@ function createAssistantMessage(
       time: completed == null ? { created } : { created, completed },
       error,
     },
-    parts,
+    content,
     isStreaming: false,
   }
 }
@@ -107,7 +107,7 @@ describe('buildVisibleMessageEntries', () => {
 
     expect(entries).toHaveLength(1)
     expect(entries[0].sourceIds).toEqual(['assistant-1', 'assistant-2'])
-    expect(entries[0].message.parts).toHaveLength(2)
+    expect(entries[0].message.content).toHaveLength(2)
   })
 
   it('merges when first message ends with tool followed by empty reasoning', () => {
@@ -161,7 +161,7 @@ describe('buildVisibleMessageEntries', () => {
     expect(previous.visibleMessages[0].info.id).toBe('assistant-1')
     expect(next.visibleMessages[0].info.id).toBe('assistant-1')
     expect(next.visibleMessageEntries[0].sourceIds).toEqual(['assistant-older', 'assistant-1', 'assistant-2'])
-    expect(next.visibleMessages[0].parts).toHaveLength(3)
+    expect(next.visibleMessages[0].content).toHaveLength(3)
     expect(next.pageRecords.map(page => page.key)).toEqual(previous.pageRecords.map(page => page.key))
   })
 
@@ -205,7 +205,7 @@ describe('buildChatPageViewModel', () => {
     const messages = Array.from({ length: 12 }, (_unused, index) => [
       {
         ...createUserMessage(`user-${index}`, index * 2 + 1),
-        parts: [createTextPart(`user-text-${index}`, `user-${index}`, `prompt ${index}`)],
+        content: [createTextPart(`user-text-${index}`, `user-${index}`, `prompt ${index}`)],
       },
       createAssistantMessage(
         `assistant-${index}`,
@@ -220,7 +220,7 @@ describe('buildChatPageViewModel', () => {
       ...messages.slice(0, -1),
       {
         ...streamingMessage,
-        parts: [{ ...streamingMessage.parts[0], text: 'hello world' }],
+        content: [{ ...streamingMessage.content[0], text: 'hello world' }],
       },
     ]
 
@@ -239,7 +239,7 @@ describe('buildChatPageViewModel', () => {
     const messages = Array.from({ length: 8 }, (_unused, index) => [
       {
         ...createUserMessage(`user-${index}`, index * 2 + 1),
-        parts: [createTextPart(`user-text-${index}`, `user-${index}`, `prompt ${index}`)],
+        content: [createTextPart(`user-text-${index}`, `user-${index}`, `prompt ${index}`)],
       },
       createAssistantMessage(
         `assistant-${index}`,
@@ -253,7 +253,7 @@ describe('buildChatPageViewModel', () => {
       ...messages,
       {
         ...createUserMessage('user-next', 100),
-        parts: [createTextPart('user-text-next', 'user-next', '# large markdown prompt')],
+        content: [createTextPart('user-text-next', 'user-next', '# large markdown prompt')],
       },
     ]
 
@@ -269,7 +269,7 @@ describe('buildChatPageViewModel', () => {
     const messages = Array.from({ length: 12 }, (_unused, index) => [
       {
         ...createUserMessage(`user-${index}`, index * 2 + 1),
-        parts: [createTextPart(`user-text-${index}`, `user-${index}`, `prompt ${index}`)],
+        content: [createTextPart(`user-text-${index}`, `user-${index}`, `prompt ${index}`)],
       },
       createAssistantMessage(
         `assistant-${index}`,
@@ -282,7 +282,7 @@ describe('buildChatPageViewModel', () => {
     const olderMessages = Array.from({ length: 12 }, (_unused, index) => [
       {
         ...createUserMessage(`older-user-${index}`, index * 2 + 1),
-        parts: [createTextPart(`older-user-text-${index}`, `older-user-${index}`, `older prompt ${index}`)],
+        content: [createTextPart(`older-user-text-${index}`, `older-user-${index}`, `older prompt ${index}`)],
       },
       createAssistantMessage(
         `older-assistant-${index}`,
@@ -301,7 +301,7 @@ describe('buildChatPageViewModel', () => {
   it('reuses page objects without preserving a stale page order', () => {
     const messages = Array.from({ length: 40 }, (_unused, index) => ({
       ...createUserMessage(`user-${index}`, index),
-      parts: [createTextPart(`text-${index}`, `user-${index}`, `prompt ${index}`)],
+      content: [createTextPart(`text-${index}`, `user-${index}`, `prompt ${index}`)],
     }))
     const first = buildChatPageViewModel(messages)
     const reordered = buildChatPageViewModel([...messages.slice(20), ...messages.slice(0, 20)], first)
@@ -314,13 +314,13 @@ describe('buildChatPageViewModel', () => {
   it('starts a new stable page after twenty visible messages', () => {
     const messages = Array.from({ length: 20 }, (_unused, index) => ({
       ...createUserMessage(`user-${index}`, index),
-      parts: [createTextPart(`text-${index}`, `user-${index}`, `prompt ${index}`)],
+      content: [createTextPart(`text-${index}`, `user-${index}`, `prompt ${index}`)],
     }))
     const first = buildChatPageViewModel(messages)
 
     const nextMessage = {
       ...createUserMessage('user-20', 20),
-      parts: [createTextPart('text-20', 'user-20', 'prompt 20')],
+      content: [createTextPart('text-20', 'user-20', 'prompt 20')],
     }
     const next = buildChatPageViewModel([...messages, nextMessage], first)
 
@@ -365,7 +365,7 @@ describe('buildChatPageViewModel', () => {
   it('keeps a growing streaming assistant in the current stable page', () => {
     const user = {
       ...createUserMessage('user-1', 1),
-      parts: [createTextPart('user-text', 'user-1', 'prompt')],
+      content: [createTextPart('user-text', 'user-1', 'prompt')],
     }
     const first = buildChatPageViewModel([user])
     const streaming = {
@@ -380,7 +380,7 @@ describe('buildChatPageViewModel', () => {
         user,
         {
           ...streaming,
-          parts: [createTextPart('assistant-text', 'assistant-1', 'hello '.repeat(10000))],
+          content: [createTextPart('assistant-text', 'assistant-1', 'hello '.repeat(10000))],
         },
       ],
       next,
@@ -511,14 +511,14 @@ describe('getTimelineRowYClass', () => {
 
 describe('reuseProcessTimelineItems', () => {
   const hasProcess = (message: Message) =>
-    message.parts.some(p => p.type === 'tool' || p.type === 'reasoning')
-  const hasFinal = (message: Message) => message.parts.some(p => p.type === 'text')
+    message.content.some(p => p.type === 'tool' || p.type === 'reasoning')
+  const hasFinal = (message: Message) => message.content.some(p => p.type === 'text')
 
   it('keeps historical timeline item identity when only the last message streams', () => {
     const messages = [
       {
         ...createUserMessage('user-1', 1),
-        parts: [createTextPart('user-text-1', 'user-1', 'prompt')],
+        content: [createTextPart('user-text-1', 'user-1', 'prompt')],
       },
       createAssistantMessage(
         'assistant-1',
@@ -528,7 +528,7 @@ describe('reuseProcessTimelineItems', () => {
       ),
       {
         ...createUserMessage('user-2', 4),
-        parts: [createTextPart('user-text-2', 'user-2', 'next')],
+        content: [createTextPart('user-text-2', 'user-2', 'next')],
       },
       createAssistantMessage(
         'assistant-2',
@@ -550,7 +550,7 @@ describe('reuseProcessTimelineItems', () => {
       ...messages.slice(0, -1),
       {
         ...streaming,
-        parts: [{ ...streaming.parts[0], text: 'hello world' }],
+        content: [{ ...streaming.content[0], text: 'hello world' }],
       },
     ]
     const rebuilt = buildProcessTimeline(nextMessages, {
@@ -573,7 +573,7 @@ describe('reuseProcessTimelineItems', () => {
     const messages = [
       {
         ...createUserMessage('user-1', 1),
-        parts: [createTextPart('user-text-1', 'user-1', 'prompt')],
+        content: [createTextPart('user-text-1', 'user-1', 'prompt')],
       },
       createAssistantMessage(
         'assistant-1',
@@ -600,9 +600,9 @@ describe('reuseProcessTimelineItems', () => {
 
 describe('buildProcessTimeline', () => {
   const hasProcess = (message: Message) =>
-    message.parts.some(p => p.type === 'tool' || p.type === 'reasoning')
+    message.content.some(p => p.type === 'tool' || p.type === 'reasoning')
   const hasFinal = (message: Message) =>
-    message.parts.some(p => p.type === 'text')
+    message.content.some(p => p.type === 'text')
 
   it('delays empty Working shell until entry-ready gate opens', () => {
     const messages = [createUserMessage('user-1', 1000)]
@@ -1356,7 +1356,7 @@ describe('reconcileStableChatPages', () => {
     const currentMessages = Array.from({ length: 8 }, (_unused, index) => [
       {
         ...createUserMessage(`user-${index + 2}`, (index + 2) * 2),
-        parts: [createTextPart(`user-text-${index + 2}`, `user-${index + 2}`, `prompt ${index + 2}`)],
+        content: [createTextPart(`user-text-${index + 2}`, `user-${index + 2}`, `prompt ${index + 2}`)],
       },
       createAssistantMessage(
         `assistant-${index + 2}`,
@@ -1369,12 +1369,12 @@ describe('reconcileStableChatPages', () => {
     const olderMessages = [
       {
         ...createUserMessage('user-0', 0),
-        parts: [createTextPart('user-text-0', 'user-0', 'older prompt 0')],
+        content: [createTextPart('user-text-0', 'user-0', 'older prompt 0')],
       },
       createAssistantMessage('assistant-0', [createTextPart('text-0', 'assistant-0', 'older answer 0')], 1, 2),
       {
         ...createUserMessage('user-1', 3),
-        parts: [createTextPart('user-text-1', 'user-1', 'older prompt 1')],
+        content: [createTextPart('user-text-1', 'user-1', 'older prompt 1')],
       },
       createAssistantMessage('assistant-1', [createTextPart('text-1', 'assistant-1', 'older answer 1')], 4, 5),
     ]
@@ -1440,7 +1440,7 @@ describe('collectTurnChangedFiles', () => {
   })
 
   it('ignores non-assistant messages', () => {
-    const user = { ...createUserMessage('user-1', 1), parts: [editToolPart('t1', 'user-1', 'src/a.ts', 'x\n', 'x\ny\n')] }
+    const user = { ...createUserMessage('user-1', 1), content: [editToolPart('t1', 'user-1', 'src/a.ts', 'x\n', 'x\ny\n')] }
     const files = collectTurnChangedFiles([user])
     expect(files).toEqual([])
   })

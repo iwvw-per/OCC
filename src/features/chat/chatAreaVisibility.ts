@@ -1,38 +1,37 @@
-import type { Message, Part } from '../../types/message'
-import { hasRenderableParts, isAbortedMessage, isVisibleReasoningPart, isVisibleTextPart } from '../../types/message'
+import type { Message, Content } from '../../types/message'
+import { hasRenderableContent, isAbortedMessage, isVisibleReasoningContent, isVisibleTextContent } from '../../types/message'
 
 function messageHasContent(message: Message): boolean {
-  const hasRenderable = hasRenderableParts(message)
+  const hasRenderable = hasRenderableContent(message)
   // 有非 abort 错误的助手消息始终可见（展示错误信息）。
   // abort 只有在已经产生可见内容时才显示；空 abort 不占信息流位置。
   if (message.info.role === 'assistant' && 'error' in message.info && message.info.error) {
     return isAbortedMessage(message.info) ? hasRenderable : true
   }
-  if (message.parts.length === 0) {
+  if (message.content.length === 0) {
     // 任何角色的空消息都不可见：没有内容可展示
-    // part 到达后自动进入可见列表；abort 后永远不会有 part → 永远不可见
+    // content 到达后自动进入可见列表；abort 后永远不会有 content → 永远不可见
     return false
   }
   return hasRenderable
 }
 
-function isVisibleThinking(part: Part): boolean {
-  return isVisibleReasoningPart(part)
+function isVisibleThinking(content: Content): boolean {
+  return isVisibleReasoningContent(content)
 }
 
-function isVisibleText(part: Part): boolean {
-  return isVisibleTextPart(part)
+function isVisibleText(content: Content): boolean {
+  return isVisibleTextContent(content)
 }
 
 function endsWithTool(msg: Message): boolean {
-  if (msg.info.role !== 'assistant' || msg.parts.length === 0) return false
-  for (let i = msg.parts.length - 1; i >= 0; i--) {
-    const p = msg.parts[i]
-    if (p.type === 'snapshot' || p.type === 'patch' || p.type === 'step-start' || p.type === 'step-finish') continue
+  if (msg.info.role !== 'assistant' || msg.content.length === 0) return false
+  for (let i = msg.content.length - 1; i >= 0; i--) {
+    const c = msg.content[i]
     // skip empty reasoning / empty text — they carry no visible content
-    if (p.type === 'reasoning' && !isVisibleReasoningPart(p)) continue
-    if (p.type === 'text' && !isVisibleTextPart(p)) continue
-    return p.type === 'tool'
+    if (c.type === 'reasoning' && !isVisibleReasoningContent(c)) continue
+    if (c.type === 'text' && !isVisibleTextContent(c)) continue
+    return c.type === 'tool'
   }
   return false
 }
@@ -40,11 +39,9 @@ function endsWithTool(msg: Message): boolean {
 function isToolOnlyFollowUp(msg: Message): boolean {
   if (msg.info.role !== 'assistant') return false
   let sawTool = false
-  for (const p of msg.parts) {
-    if (p.type === 'snapshot' || p.type === 'patch' || p.type === 'step-start' || p.type === 'step-finish') continue
-    if (isVisibleThinking(p) || isVisibleText(p)) return false
-    if (p.type === 'tool') sawTool = true
-    else if (p.type === 'subtask' || p.type === 'retry' || p.type === 'compaction') return false
+  for (const c of msg.content) {
+    if (isVisibleThinking(c) || isVisibleText(c)) return false
+    if (c.type === 'tool') sawTool = true
   }
   return sawTool
 }
@@ -53,18 +50,16 @@ function isMergeableTrailing(msg: Message): boolean {
   if (msg.info.role !== 'assistant') return false
   let sawTool = false
   let sawVisibleText = false
-  for (const p of msg.parts) {
-    if (p.type === 'snapshot' || p.type === 'patch' || p.type === 'step-start' || p.type === 'step-finish') continue
-    if (isVisibleThinking(p)) return false
-    if (p.type === 'tool') {
+  for (const c of msg.content) {
+    if (isVisibleThinking(c)) return false
+    if (c.type === 'tool') {
       sawTool = true
       continue
     }
-    if (isVisibleText(p)) {
+    if (isVisibleText(c)) {
       sawVisibleText = true
       continue
     }
-    if (p.type === 'subtask' || p.type === 'retry' || p.type === 'compaction') return false
   }
   return sawTool && sawVisibleText
 }
@@ -120,11 +115,11 @@ export function buildVisibleMessageEntries(messages: Message[]): VisibleMessageE
       result.push({ message: msg, sourceIds })
     } else {
       const mergedMessages = filteredMessages.slice(i + 1, j)
-      const tailParts = mergedMessages.flatMap(message => message.parts)
+      const tailContent = mergedMessages.flatMap(message => message.content)
       // 合并后如果任何源消息在 streaming，合并结果也应该是 streaming
       const anyStreaming = msg.isStreaming || mergedMessages.some(m => m.isStreaming)
       result.push({
-        message: { ...msg, parts: [...msg.parts, ...tailParts], isStreaming: anyStreaming },
+        message: { ...msg, content: [...msg.content, ...tailContent], isStreaming: anyStreaming },
         sourceIds,
       })
       i = j - 1

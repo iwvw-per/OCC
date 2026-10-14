@@ -1,5 +1,5 @@
 import type { Message } from '../types/message'
-import { getMessageText, hasRenderableParts, isAbortedMessage, isUserMessage } from '../types/message'
+import { getMessageText, hasRenderableContent, isAbortedMessage, isUserMessage } from '../types/message'
 
 const FULL_TITLE_MAX = 80
 
@@ -37,11 +37,11 @@ function normalizeWhitespace(s: string): string {
 }
 
 function messageHasContent(msg: Message): boolean {
-  const hasRenderable = hasRenderableParts(msg)
+  const hasRenderable = hasRenderableContent(msg)
   if (msg.info.role === 'assistant' && 'error' in msg.info && msg.info.error) {
     return isAbortedMessage(msg.info) ? hasRenderable : true
   }
-  if (msg.parts.length === 0) return true
+  if (msg.content.length === 0) return true
   return hasRenderable
 }
 

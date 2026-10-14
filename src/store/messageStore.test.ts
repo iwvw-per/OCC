@@ -86,8 +86,8 @@ describe('messageStore', () => {
 
     const state = messageStore.getSessionState('session-1')
     expect(state?.messages).toHaveLength(1)
-    expect(state?.messages[0].parts).toHaveLength(1)
-    expect(state?.messages[0].parts[0]).toMatchObject({ id: 'part-1', type: 'text', text: 'hello' })
+    expect(state?.messages[0].content).toHaveLength(1)
+    expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-1', type: 'text', text: 'hello' })
   })
 
   it('silently drops a part update when the message does not exist yet', () => {
@@ -121,7 +121,7 @@ describe('messageStore', () => {
     messageStore.handlePartUpdated(createTextPart('part-1', 'message-1', ''))
 
     const state = messageStore.getSessionState('session-1')
-    expect(state?.messages[0].parts[0]).toMatchObject({ id: 'part-1', text: 'hello world' })
+    expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-1', text: 'hello world' })
   })
 
   it('replays a delta that arrives before its message is created (D5)', () => {
@@ -141,7 +141,7 @@ describe('messageStore', () => {
 
     const state = messageStore.getSessionState('session-1')
     const msg2 = state?.messages.find(m => m.info.id === 'message-2')
-    expect(msg2?.parts[0]).toMatchObject({ id: 'part-2', text: 'queued' })
+    expect(msg2?.content[0]).toMatchObject({ id: 'part-2', text: 'queued' })
   })
 
   it('marks cached sessions stale after reconnect and clears the flag after a fresh load', () => {
@@ -167,7 +167,7 @@ describe('messageStore', () => {
     const state = messageStore.getSessionState('session-1')
     expect(state?.messages).toHaveLength(1)
     expect(state?.messages[0].info.id).toBe('message-1')
-    expect(state?.messages[0].parts[0]).toMatchObject({ id: 'part-message-1', type: 'text', text: 'hello' })
+    expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-message-1', type: 'text', text: 'hello' })
   })
 
   it('truncates messages after revert point', () => {
@@ -199,7 +199,7 @@ describe('messageStore', () => {
     })
 
     const state = messageStore.getSessionState('session-1')
-    expect(state?.messages[0].parts).toHaveLength(0)
+    expect(state?.messages[0].content).toHaveLength(0)
   })
 
   it('deduplicates messages in prependMessages', () => {
@@ -264,7 +264,7 @@ describe('messageStore', () => {
       ...createTextPart('part-message-1', 'message-1', 'hello'),
     })
 
-    expect(messageStore.getSessionState('session-1')?.messages[0].parts[0]).toMatchObject({
+    expect(messageStore.getSessionState('session-1')?.messages[0].content[0]).toMatchObject({
       text: 'hello world',
     })
   })
@@ -277,7 +277,7 @@ describe('messageStore', () => {
 
     messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello world')])
 
-    expect(messageStore.getSessionState('session-1')?.messages[0].parts[0]).toMatchObject({
+    expect(messageStore.getSessionState('session-1')?.messages[0].content[0]).toMatchObject({
       text: 'hello world',
     })
   })
@@ -306,7 +306,7 @@ describe('messageStore', () => {
       },
     ])
 
-    expect(messageStore.getSessionState('session-1')?.messages[0].parts[0]).toMatchObject({
+    expect(messageStore.getSessionState('session-1')?.messages[0].content[0]).toMatchObject({
       text: 'hello world',
     })
   })
@@ -332,7 +332,7 @@ describe('messageStore', () => {
     }
     messageStore.setMessages('session-1', [completed])
 
-    expect(messageStore.getSessionState('session-1')?.messages[0].parts[0]).toMatchObject({
+    expect(messageStore.getSessionState('session-1')?.messages[0].content[0]).toMatchObject({
       text: 'hello world',
     })
   })
@@ -348,7 +348,7 @@ describe('messageStore', () => {
       ...createTextPart('part-message-1', 'message-1', 'hello world'),
     })
 
-    expect(messageStore.getSessionState('session-1')?.messages[0].parts[0]).toMatchObject({
+    expect(messageStore.getSessionState('session-1')?.messages[0].content[0]).toMatchObject({
       text: 'hello world',
     })
   })
@@ -391,8 +391,8 @@ describe('messageStore', () => {
     const afterMessage1 = messageStore.getSessionState('session-1')?.messages[0]
     const afterMessage2 = messageStore.getSessionState('session-2')?.messages[0]
 
-    expect(afterMessage1?.parts[0]).toMatchObject({ text: 'hello!' })
-    expect(afterMessage2?.parts[0]).toMatchObject({ text: 'world?' })
+    expect(afterMessage1?.content[0]).toMatchObject({ text: 'hello!' })
+    expect(afterMessage2?.content[0]).toMatchObject({ text: 'world?' })
     expect(afterMessage1).not.toBe(beforeMessage1)
     expect(afterMessage2).not.toBe(beforeMessage2)
   })
@@ -409,8 +409,8 @@ describe('messageStore', () => {
     messageStore.setMessages('session-1', [message])
 
     const beforeMessage = messageStore.getSessionState('session-1')?.messages[0]
-    const beforeSettledPart = beforeMessage?.parts[0]
-    const beforeLivePart = beforeMessage?.parts[1]
+    const beforeSettledPart = beforeMessage?.content[0]
+    const beforeLivePart = beforeMessage?.content[1]
 
     messageStore.handlePartDelta({
       sessionID: 'session-1',
@@ -423,9 +423,9 @@ describe('messageStore', () => {
 
     const afterMessage = messageStore.getSessionState('session-1')?.messages[0]
     expect(afterMessage).not.toBe(beforeMessage)
-    expect(afterMessage?.parts[0]).toBe(beforeSettledPart)
-    expect(afterMessage?.parts[1]).not.toBe(beforeLivePart)
-    expect(afterMessage?.parts[1]).toMatchObject({ text: 'live text' })
+    expect(afterMessage?.content[0]).toBe(beforeSettledPart)
+    expect(afterMessage?.content[1]).not.toBe(beforeLivePart)
+    expect(afterMessage?.content[1]).toMatchObject({ text: 'live text' })
   })
 
   it('preserves references of untouched messages when flushing a delta', () => {
@@ -457,7 +457,7 @@ describe('messageStore', () => {
     // 未脏消息复用引用，只有热消息换新
     expect(afterMessages?.[0]).toBe(beforeFirst)
     expect(afterMessages?.[1]).not.toBe(beforeSecond)
-    expect(afterMessages?.[1].parts[0]).toMatchObject({ text: 'second!' })
+    expect(afterMessages?.[1].content[0]).toMatchObject({ text: 'second!' })
   })
 
   it('resolves deltas by id after the message array is replaced', () => {
@@ -498,7 +498,7 @@ describe('messageStore', () => {
     rafCallbacks[1]?.(0)
 
     const messages = messageStore.getSessionState('session-1')?.messages
-    expect(messages?.[2].parts[0]).toMatchObject({ text: 'c!' })
+    expect(messages?.[2].content[0]).toMatchObject({ text: 'c!' })
   })
 
   it('ignores deltas for parts that do not exist', () => {
@@ -602,13 +602,13 @@ describe('messageStore', () => {
     messageStore.handlePartUpdated(createRunningToolPart('tool-1', 'message-1'))
 
     const before = messageStore.getSessionState('session-1')
-    const beforeTool = before?.messages[0].parts.find(p => p.type === 'tool') as { state: { status: string } }
+    const beforeTool = before?.messages[0].content.find(p => p.type === 'tool') as { state: { status: string } }
     expect(beforeTool.state.status).toBe('running')
 
     messageStore.handleSessionIdle('session-1')
 
     const after = messageStore.getSessionState('session-1')
-    const toolPart = after?.messages[0].parts.find(p => p.type === 'tool') as {
+    const toolPart = after?.messages[0].content.find(p => p.type === 'tool') as {
       state: { status: string; metadata?: Record<string, unknown>; time?: { end?: number } }
     }
     expect(toolPart.state.status).toBe('interrupted')
@@ -623,7 +623,7 @@ describe('messageStore', () => {
     messageStore.handleSessionError('session-1')
 
     const state = messageStore.getSessionState('session-1')
-    const toolPart = state?.messages[0].parts.find(p => p.type === 'tool') as { state: { status: string } }
+    const toolPart = state?.messages[0].content.find(p => p.type === 'tool') as { state: { status: string } }
     expect(toolPart.state.status).toBe('interrupted')
   })
 
@@ -638,7 +638,7 @@ describe('messageStore', () => {
     messageStore.handleSessionIdle('session-1')
 
     const state = messageStore.getSessionState('session-1')
-    const toolPart = state?.messages[0].parts.find(p => p.type === 'tool') as { state: { status: string } }
+    const toolPart = state?.messages[0].content.find(p => p.type === 'tool') as { state: { status: string } }
     expect(toolPart.state.status).toBe('completed')
   })
 
@@ -671,7 +671,7 @@ describe('messageStore', () => {
     messageStore.settleToolByCallID('session-1', 'call-abc', { status: 'completed', output: 'done' })
 
     const state = messageStore.getSessionState('session-1')
-    const toolPart = state?.messages[0].parts.find(p => p.type === 'tool') as { state: { status: string; output?: string } }
+    const toolPart = state?.messages[0].content.find(p => p.type === 'tool') as { state: { status: string; output?: string } }
     expect(toolPart.state.status).toBe('completed')
     expect(toolPart.state.output).toBe('done')
   })
@@ -686,7 +686,7 @@ describe('messageStore', () => {
     messageStore.settleToolByCallID('session-1', 'call-abc', { status: 'error', error: 'stale' })
 
     const state = messageStore.getSessionState('session-1')
-    const toolPart = state?.messages[0].parts.find(p => p.type === 'tool') as { state: { status: string; output?: string } }
+    const toolPart = state?.messages[0].content.find(p => p.type === 'tool') as { state: { status: string; output?: string } }
     expect(toolPart.state.status).toBe('completed')
     expect(toolPart.state.output).toBe('server-result')
   })
@@ -744,10 +744,10 @@ describe('messageStore', () => {
     const state = messageStore.getSessionState('session-1')!
     const byId = new Map(state.messages.map(m => [m.info.id, m]))
     expect(byId.get('a1')!.isCompressed).toBe(true)
-    expect(byId.get('a1')!.parts).toHaveLength(0)
+    expect(byId.get('a1')!.content).toHaveLength(0)
     expect(byId.get('a1')!.compressedStats).toEqual({ reasoningCount: 1, stepCount: 0 })
     expect(byId.get('a2')!.isCompressed).toBeUndefined()
-    expect(byId.get('a2')!.parts).toHaveLength(1)
+    expect(byId.get('a2')!.content).toHaveLength(1)
   })
 
   it('does not compress when within the recent window', () => {
@@ -785,8 +785,8 @@ describe('messageStore', () => {
 
     const message = messageStore.getSessionState('session-1')!.messages[1]
     expect(message.isCompressed).toBeUndefined()
-    expect(message.parts).toHaveLength(1)
-    expect((message.parts[0] as { text: string }).text).toBe('restored thinking')
+    expect(message.content).toHaveLength(1)
+    expect((message.content[0] as { text: string }).text).toBe('restored thinking')
   })
 })
 
@@ -820,7 +820,7 @@ describe('multi-prefix session coalescing', () => {
     expect(ids).toContain('m3')
     // m2 的 part 也归并进来（不是被丢到另一个 bucket）
     const m2 = state.messages.find(m => m.info.id === 'm2')!
-    expect(m2.parts.some(p => p.id === 'part-m2')).toBe(true)
+    expect(m2.content.some(p => p.id === 'part-m2')).toBe(true)
 
     // 另一个前缀读取到的是同一份状态（归并）
     expect(messageStore.getSessionState(TUNNEL)!.messages).toBe(state.messages)
@@ -868,7 +868,7 @@ describe('optimistic user message reconciliation by id', () => {
         agent: 'build',
         model: { providerID: 'p', modelID: 'm' },
       },
-      parts: [
+      content: [
         {
           id: `${MSG_ID}:text`,
           sessionID: 'ses_dup',
@@ -899,7 +899,7 @@ describe('optimistic user message reconciliation by id', () => {
       .messages.filter(m => m.info.role === 'user')
     expect(userRows).toHaveLength(1)
     // 乐观 part 被保留（canonical 事件不带 parts）
-    expect(userRows[0].parts).toHaveLength(1)
+    expect(userRows[0].content).toHaveLength(1)
   })
 
   it('drops the local placeholder part when the canonical part arrives', () => {
@@ -915,7 +915,7 @@ describe('optimistic user message reconciliation by id', () => {
     } as ApiPart & { sessionID: string; messageID: string })
 
     const row = messageStore.getSessionState(KEY)!.messages.find(m => m.info.id === MSG_ID)!
-    const textParts = row.parts.filter(p => p.type === 'text')
+    const textParts = row.content.filter(p => p.type === 'text')
     expect(textParts).toHaveLength(1)
     expect(textParts[0].id).toBe('prt_0001')
   })

@@ -152,7 +152,7 @@ function mergeWithLocalStreamingMessages(
     if (!preserve) return apiMessage
     return {
       ...apiMessage,
-      parts: mergePartsForReload(local.parts as ApiMessageWithParts['parts'], apiMessage.parts),
+      parts: mergePartsForReload(local.content as ApiMessageWithParts['parts'], apiMessage.parts),
     }
   })
 

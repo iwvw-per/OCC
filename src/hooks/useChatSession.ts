@@ -347,7 +347,7 @@ export function useChatSession({
       model: { providerID: string; modelID: string; variant?: string }
       createdAt: number
     }): UIMessage => {
-      const parts: UIMessage['parts'] = [
+      const content: UIMessage['content'] = [
         {
           id: `${input.messageId}:text`,
           type: 'text',
@@ -358,47 +358,11 @@ export function useChatSession({
         },
       ]
 
+      const attachments: Attachment[] = []
       for (const attachment of input.attachments) {
-        if (attachment.type === 'agent') {
-          parts.push({
-            id: attachment.id || `${input.messageId}:agent:${parts.length}`,
-            type: 'agent',
-            name: attachment.agentName || attachment.displayName,
-            source: attachment.textRange
-              ? {
-                  value: attachment.textRange.value,
-                  start: attachment.textRange.start,
-                  end: attachment.textRange.end,
-                }
-              : undefined,
-            sessionID: input.sessionId,
-            messageID: input.messageId,
-          })
-          continue
+        if (attachment.type === 'agent' || attachment.type === 'file' || attachment.type === 'folder') {
+          attachments.push(attachment)
         }
-
-        if (attachment.type !== 'file' && attachment.type !== 'folder') continue
-
-        parts.push({
-          id: attachment.id || `${input.messageId}:file:${parts.length}`,
-          type: 'file',
-          mime: attachment.mime || (attachment.type === 'folder' ? 'application/x-directory' : 'text/plain'),
-          filename: attachment.displayName,
-          url: attachment.url || '',
-          source: attachment.textRange
-            ? {
-                type: 'file',
-                path: attachment.relativePath || attachment.displayName,
-                text: {
-                  value: attachment.textRange.value,
-                  start: attachment.textRange.start,
-                  end: attachment.textRange.end,
-                },
-              }
-            : undefined,
-          sessionID: input.sessionId,
-          messageID: input.messageId,
-        })
       }
 
       return {
@@ -409,8 +373,9 @@ export function useChatSession({
           time: { created: input.createdAt },
           agent: input.agent || '',
           model: input.model,
+          attachments,
         },
-        parts,
+        content,
         isStreaming: false,
       }
     },

@@ -84,7 +84,7 @@ function sameStringList(a: readonly string[], b: readonly string[]) {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-function sameParts(a: Message['parts'], b: Message['parts']) {
+function sameParts(a: Message['content'], b: Message['content']) {
   return a.length === b.length && a.every((part, index) => part === b[index])
 }
 
@@ -93,7 +93,7 @@ function sameVisibleEntry(a: VisibleMessageEntry, b: VisibleMessageEntry) {
     sameStringList(a.sourceIds, b.sourceIds) &&
     a.message.info === b.message.info &&
     a.message.isStreaming === b.message.isStreaming &&
-    sameParts(a.message.parts, b.message.parts)
+    sameParts(a.message.content, b.message.content)
   )
 }
 
@@ -167,7 +167,7 @@ function stabilizeMergedVisibleEntries(
       message: {
         ...entry.message,
         info: previousEntry.message.info,
-        parts: entry.message.parts,
+        parts: entry.message.content,
         isStreaming: entry.message.isStreaming,
       },
     }

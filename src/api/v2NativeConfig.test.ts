@@ -20,13 +20,13 @@ async function ensureServer() {
 describeIf('v2 原生 config 访问层', () => {
   it('nativeGetConfig 返回配置', async () => {
     await ensureServer()
-    const config = await nativeGetConfig(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const config = await nativeGetConfig(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(config).toBeDefined()
   })
 
   it('nativeGetProviders 返回 providers', async () => {
     await ensureServer()
-    const providers = await nativeGetProviders(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const providers = await nativeGetProviders(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(Array.isArray(providers.providers)).toBe(true)
   })
 })

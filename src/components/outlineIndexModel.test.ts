@@ -13,7 +13,7 @@ function userMessage(id: string, text: string, created: number, summaryTitle?: s
       model: { providerID: 'p', modelID: 'm' },
       summary: summaryTitle ? { title: summaryTitle } : undefined,
     } as UserMessageInfo,
-    parts: [{ id: `part-${id}`, sessionID: 'ses-1', messageID: id, type: 'text', text }],
+    content: [{ id: `part-${id}`, sessionID: 'ses-1', messageID: id, type: 'text', text }],
   }
 }
 
@@ -32,7 +32,7 @@ describe('outlineIndexModel', () => {
   it('extracts turn outline entries with createdAt and skips empty titles', () => {
     const entries = extractTurnOutlineEntries([
       userMessage('u1', 'hello', 10),
-      { info: { id: 'a1', sessionID: 'ses-1', role: 'assistant', time: { created: 11 } } as never, parts: [] },
+      { info: { id: 'a1', sessionID: 'ses-1', role: 'assistant', time: { created: 11 } } as never, content: [] },
       userMessage('u2', '   ', 20),
     ])
     expect(entries).toEqual([{ messageId: 'u1', title: 'hello', createdAt: 10 }])

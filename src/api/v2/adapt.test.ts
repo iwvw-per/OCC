@@ -35,7 +35,7 @@ describe('v2 message adapter', () => {
         { type: 'reasoning', text: 'thinking', time: { created: 11, completed: 12 } },
         { type: 'tool', id: 'call_1', name: 'bash', state: { status: 'completed', input: {}, content: [{ text: 'ok' }], time: { start: 13, end: 14 } } },
       ],
-    })
+    })!
     expect(msg.info.role).toBe('assistant')
     expect(msg.parts.map(p => p.type)).toEqual(['text', 'reasoning', 'tool'])
     const tool = msg.parts[2] as { state: { status: string; output: string } }
@@ -44,10 +44,16 @@ describe('v2 message adapter', () => {
   })
 
   it('maps user text to a single text part', () => {
-    const msg = adaptMessage({ id: 'u1', sessionID: 's', type: 'user', time: { created: 1 }, text: 'hi' })
+    const msg = adaptMessage({ id: 'u1', sessionID: 's', type: 'user', time: { created: 1 }, text: 'hi' })!
     expect(msg.info.role).toBe('user')
     expect(msg.parts).toHaveLength(1)
     expect((msg.parts[0] as { text: string }).text).toBe('hi')
+  })
+
+  it('drops non user/assistant system messages (idle / agent-switched / model-switched)', () => {
+    expect(adaptMessage({ id: 'x1', sessionID: 's', type: 'idle', time: { created: 1 } })).toBeNull()
+    expect(adaptMessage({ id: 'x2', sessionID: 's', type: 'agent-switched', time: { created: 1 } })).toBeNull()
+    expect(adaptMessage({ id: 'x3', sessionID: 's', type: 'model-switched', time: { created: 1 } })).toBeNull()
   })
 
   it('reads next cursor from body', () => {

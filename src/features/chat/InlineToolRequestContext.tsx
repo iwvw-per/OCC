@@ -114,13 +114,13 @@ interface ToolPartLike {
  */
 export function findUnmatchedQuestions(
   pendingQuestions: ApiQuestionRequest[],
-  messages: { parts: { type: string }[] }[],
+  messages: { content: { type: string }[] }[],
 ): ApiQuestionRequest[] {
   if (pendingQuestions.length === 0) return []
 
   const matched = new Set<string>()
   for (const message of messages) {
-    for (const rawPart of message.parts) {
+    for (const rawPart of message.content) {
       if (rawPart.type !== 'tool') continue
       const part = rawPart as unknown as ToolPartLike
       const childSessionId =

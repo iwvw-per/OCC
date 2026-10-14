@@ -34,13 +34,7 @@ import {
   TextPartView,
   ReasoningPartView,
   ToolPartView,
-  FilePartView,
-  AgentPartView,
   SyntheticTextPartView,
-  StepFinishPartView,
-  SubtaskPartView,
-  RetryPartView,
-  CompactionPartView,
   MessageErrorView,
 } from './parts'
 import { ToolIconStrip } from './parts/ToolIconStrip'
@@ -51,7 +45,7 @@ import { MSG_SPACING } from './messageSpacing'
 import { MessageExpandPanel } from './messageExpand'
 import { useMessageExpandRender } from './messageExpandShared'
 import {
-  groupPartsForRender,
+  groupContentsForRender,
   messageStillStreamingProcess,
   splitProcessRenderItems,
   type ProcessContentScope,
@@ -61,10 +55,7 @@ import type {
   Message,
   TextPart,
   ToolPart,
-  FilePart,
-  AgentPart,
-  StepFinishPart,
-  CompactionPart,
+  TextContent,
   AssistantMessageInfo,
 } from '../../types/message'
 import {
@@ -666,7 +657,8 @@ const UserMessageView = memo(function UserMessageView({
   sessionId,
 }: UserMessageViewProps) {
   const { t } = useTranslation('message')
-  const { parts, info } = message
+  // content[] 里只有 text（含 synthetic）；用户附件挂在 info.attachments
+  const { content, info } = message
   const [showSystemContext, setShowSystemContext] = useUiDisclosureState(
     `message:${info.id}:user-system-context`,
     false,
@@ -682,12 +674,9 @@ const UserMessageView = memo(function UserMessageView({
 
   const wrapperRef = useEntryGrowAnimation(info.time.created, true, info.id, onEntryGrowComplete)
 
-  // 分离不同类型的 parts
-  const textParts = parts.filter((p): p is TextPart => p.type === 'text' && !p.synthetic)
-  const syntheticParts = parts.filter((p): p is TextPart => p.type === 'text' && !!p.synthetic)
-  const fileParts = parts.filter((p): p is FilePart => p.type === 'file')
-  const agentParts = parts.filter((p): p is AgentPart => p.type === 'agent')
-  const compactionParts = parts.filter((p): p is CompactionPart => p.type === 'compaction')
+  const textParts = content.filter((c): c is TextContent => c.type === 'text' && !c.synthetic)
+  const syntheticParts = content.filter((c): c is TextContent => c.type === 'text' && !!c.synthetic)
+  const attachments = info.role === 'user' ? (info as import('../../types/message').UserMessageInfo).attachments ?? [] : []
 
   const hasSystemContext = syntheticParts.length > 0
   const messageText = textParts.map(p => p.text).join('')
@@ -712,13 +701,10 @@ const UserMessageView = memo(function UserMessageView({
         )}
 
         {/* 用户附件 */}
-        {(fileParts.length > 0 || agentParts.length > 0) && (
+        {attachments.length > 0 && (
           <div className="mt-1 flex max-w-full min-w-0 flex-wrap gap-2 justify-end">
-            {fileParts.map(part => (
-              <FilePartView key={part.id} part={part} />
-            ))}
-            {agentParts.map(part => (
-              <AgentPartView key={part.id} part={part} />
+            {attachments.map(attachment => (
+              <UserAttachmentChip key={attachment.id} attachment={attachment} />
             ))}
           </div>
         )}
@@ -757,14 +743,6 @@ const UserMessageView = memo(function UserMessageView({
           </div>
         )}
 
-        {compactionParts.length > 0 && (
-          <div className="w-full mt-1">
-            {compactionParts.map(part => (
-              <CompactionPartView key={part.id} part={part} />
-            ))}
-          </div>
-        )}
-
         {/* Action buttons — PC 悬浮消息显示；触控设备始终显示 */}
         <div className={actionBarClass} data-message-actions>
           {/* Undo button */}
@@ -785,6 +763,26 @@ const UserMessageView = memo(function UserMessageView({
         </div>
       </div>
     </div>
+  )
+})
+
+// ============================================
+// User Attachment Chip (read-only)
+// ============================================
+const UserAttachmentChip = memo(function UserAttachmentChip({
+  attachment,
+}: {
+  attachment: import('../../features/attachment/types').Attachment
+}) {
+  return (
+    <span
+      data-user-attachment
+      title={attachment.displayName}
+      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border-200 bg-bg-100 px-2.5 py-1 text-[length:var(--fs-xs)] text-text-300"
+    >
+      <span className="shrink-0 text-text-400">{attachment.type === 'agent' ? 'agent' : 'file'}</span>
+      <span className="truncate">{attachment.displayName}</span>
+    </span>
   )
 })
 
@@ -816,7 +814,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
   turnFiles?: ChangedFile[]
 }) {
   const { t } = useTranslation('message')
-  const { parts, isStreaming, info } = message
+  const { content, isStreaming, info } = message
   const { stepFinishDisplay, completedAtFormat, actionsOnLatestAssistantOnly } = useTheme()
   // 整轮最新 assistant 才允许显示 step 完成信息（latestOnly 时中间 assistant 全隐藏）
   const allowStepFinishOnMessage = !stepFinishDisplay.latestOnly || isTurnLatestAssistant
@@ -833,14 +831,14 @@ const AssistantMessageView = memo(function AssistantMessageView({
   const wrapperRef = useEntryGrowAnimation(info.time.created, allowEntryGrow)
 
   useEffect(() => {
-    if (parts.length === 0 && onEnsureParts) {
+    if (content.length === 0 && onEnsureParts) {
       onEnsureParts(message.info.id)
     }
-  }, [parts.length, onEnsureParts, message.info.id])
+  }, [content.length, onEnsureParts, message.info.id])
 
-  // 收集连续的 tool parts 合并渲染；过程折叠时按 scope 拆分
+  // 收集连续的 tool content 合并渲染；过程折叠时按 scope 拆分
   const renderItems = useMemo(() => {
-    const items = groupPartsForRender(parts)
+    const items = groupContentsForRender(content)
     if (processContentScope === 'all' || processContentScope === 'inline') return items
     // 流式未完成：整袋当 process，不拆 final
     if (messageStillStreamingProcess(message)) {
@@ -850,35 +848,32 @@ const AssistantMessageView = memo(function AssistantMessageView({
     if (processContentScope === 'process') return split.processItems
     if (processContentScope === 'final') return split.finalItems
     return items
-  }, [parts, processContentScope, message])
+  }, [content, processContentScope, message])
 
-  // 判断哪些 reasoning part 已经结束（后面出现了任何非基础设施 part）
-  // 直接检查源 parts 数组，而非 renderItems，因为 renderItems 会过滤掉空 text，
-  // 但空 text part 的存在本身就说明模型已经进入了下一输出阶段
+  // 判断哪些 reasoning content 已经结束（后面出现了任何非空 content）
+  // 直接检查源 content 数组，而非 renderItems，因为 renderItems 会过滤掉空 text，
+  // 但空 text content 的存在本身就说明模型已经进入了下一输出阶段
   const endedReasoningIds = useMemo(() => {
     const ended = new Set<string>()
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].type !== 'reasoning') continue
-      for (let j = i + 1; j < parts.length; j++) {
-        const t = parts[j].type
-        // snapshot/patch 是纯内部状态，不代表内容流转
-        if (t === 'snapshot' || t === 'patch') continue
-        // 任何其他 part 类型（包括空 text、step-start、tool 等）都说明思考已结束
-        ended.add(parts[i].id)
+    for (let i = 0; i < content.length; i++) {
+      if (content[i].type !== 'reasoning') continue
+      for (let j = i + 1; j < content.length; j++) {
+        // 任何其他 content 类型（包括空 text、tool 等）都说明思考已结束
+        ended.add(content[i].id)
         break
       }
     }
     return ended
-  }, [parts])
+  }, [content])
 
-  // 计算完整文本用于复制（缓存：parts 引用未变时复用，避免流式每帧重算字符串拼接）
+  // 计算完整文本用于复制（缓存：content 引用未变时复用，避免流式每帧重算字符串拼接）
   const fullText = useMemo(
     () =>
-      parts
+      content
         .filter((p): p is TextPart => p.type === 'text' && !p.synthetic)
         .map(p => p.text)
         .join(''),
-    [parts],
+    [content],
   )
   const hasCopyableText = fullText.trim().length > 0
 
@@ -886,26 +881,18 @@ const AssistantMessageView = memo(function AssistantMessageView({
   const messageError = (info as AssistantMessageInfo).error
 
   // 消息总耗时
-  const { created, completed } = info.time
-  const duration = completed != null ? completed - created : undefined
+  const completed = info.time.completed
 
-  // agent / model（仅 assistant 消息）
-  const assistantInfo = info.role === 'assistant' ? (info as AssistantMessageInfo) : null
-  const agent = assistantInfo?.agent || undefined
-  const modelLabel = assistantInfo?.modelID || undefined
-
-  const hasStepFinishPart = parts.some(part => part.type === 'step-finish')
   const showTurnDurationFooter =
     allowStepFinishOnMessage &&
     !isStreaming &&
-    !hasStepFinishPart &&
     stepFinishDisplay.turnDuration &&
     turnDuration != null &&
     turnDuration > 0
   const showCompletedAtFooter =
-    allowStepFinishOnMessage && !isStreaming && !hasStepFinishPart && stepFinishDisplay.completedAt && completed != null
+    allowStepFinishOnMessage && !isStreaming && stepFinishDisplay.completedAt && completed != null
 
-  if (!isStreaming && parts.length === 0) {
+  if (!isStreaming && content.length === 0) {
     // process/final 空内容时不占位
     if (processContentScope === 'process' || processContentScope === 'final') return null
     // 有错误时直接显示错误信息
@@ -916,8 +903,8 @@ const AssistantMessageView = memo(function AssistantMessageView({
         </div>
       )
     }
-    // parts 尚未 hydrate — 保留最小占位减少 CLS，不显示骨架/loading 文字
-    // onEnsureParts 已在上方 useEffect 中触发 hydrate，parts 到位后自动 re-render
+    // content 尚未 hydrate — 保留最小占位减少 CLS，不显示骨架/loading 文字
+    // onEnsureParts 已在上方 useEffect 中触发 hydrate，content 到位后自动 re-render
     return <div className="w-full min-h-[40px]" />
   }
 
@@ -931,36 +918,18 @@ const AssistantMessageView = memo(function AssistantMessageView({
       {/* 流式增高走自然撑开 + 贴底 scroll，默认不做 height 补间，避免每帧 layout/remeasure */}
       <SmoothHeight isActive={!!isStreaming && allowStreamingLayoutAnimation && processContentScope === 'all'}>
         <div className={`flex flex-col ${MSG_SPACING.stack}`}>
-          {renderItems.map((item: RenderItem, idx: number) => {
-            // 本消息内最后一个含 stepFinish 的 item（耗时/完成时刻只挂这里）
-            const isLastStepFinish =
-              idx ===
-              renderItems.findLastIndex(it =>
-                it.type === 'tool-group' ? !!it.stepFinish : it.part.type === 'step-finish',
-              )
-            // latestOnly 开：整轮最后一条 assistant 的最后一个 step 才显示
-            // latestOnly 关：本消息所有 step-finish 都显示（旧行为）
-            const showStepFinish = allowStepFinishOnMessage && (!stepFinishDisplay.latestOnly || isLastStepFinish)
-            // duration / turnDuration / completedAt 始终只挂在本消息最后一个 step
-            const showTiming = showStepFinish && isLastStepFinish
-
+          {renderItems.map((item: RenderItem) => {
             if (item.type === 'tool-group') {
               return (
                 <ToolGroup
-                  key={item.parts[0].id}
-                  parts={item.parts}
-                  stepFinish={showStepFinish ? item.stepFinish : undefined}
-                  duration={showTiming ? duration : undefined}
-                  turnDuration={showTiming ? turnDuration : undefined}
+                  key={item.contents[0].id}
+                  parts={item.contents}
                   isStreaming={isStreaming}
-                  agent={showStepFinish ? agent : undefined}
-                  modelLabel={showStepFinish ? modelLabel : undefined}
-                  completedAt={showTiming ? completed : undefined}
                 />
               )
             }
 
-            const part = item.part
+            const part = item.content
             switch (part.type) {
               case 'text':
                 return <TextPartView key={part.id} part={part} isStreaming={isStreaming} />
@@ -968,26 +937,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
                 const reasoningDone = endedReasoningIds.has(part.id)
                 return <ReasoningPartView key={part.id} part={part} isStreaming={isStreaming && !reasoningDone} />
               }
-              case 'step-finish':
-                if (!showStepFinish) return null
-                // 独立 step-finish 靠 stack gap 取距；与 ToolGroup 内 MSG_SPACING.finish 等距
-                return (
-                  <StepFinishPartView
-                    key={part.id}
-                    part={part}
-                    duration={showTiming ? duration : undefined}
-                    turnDuration={showTiming ? turnDuration : undefined}
-                    agent={agent}
-                    modelLabel={modelLabel}
-                    completedAt={showTiming ? completed : undefined}
-                  />
-                )
-              case 'subtask':
-                return <SubtaskPartView key={part.id} part={part} />
-              case 'retry':
-                return <RetryPartView key={part.id} part={part} />
-              case 'compaction':
-                return <CompactionPartView key={part.id} part={part} />
               default:
                 return null
             }
@@ -1041,13 +990,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
 
 interface ToolGroupProps {
   parts: ToolPart[]
-  stepFinish?: StepFinishPart
-  duration?: number
-  turnDuration?: number
   isStreaming?: boolean
-  agent?: string
-  modelLabel?: string
-  completedAt?: number
 }
 
 /** 用户需要阅读/交互的工具：沉浸模式下这些工具完成后保持展开 */
@@ -1059,13 +1002,7 @@ function isReadableTool(toolName: string): boolean {
 
 const ToolGroup = memo(function ToolGroup({
   parts,
-  stepFinish,
-  duration,
-  turnDuration,
   isStreaming,
-  agent,
-  modelLabel,
-  completedAt,
 }: ToolGroupProps) {
   const { t } = useTranslation('message')
   const { descriptiveToolSteps, inlineToolRequests, immersiveMode, processCollapseEnabled } = useTheme()
@@ -1253,11 +1190,6 @@ const ToolGroup = memo(function ToolGroup({
                     ? t('stepsCount', { done: totalCount, total: totalCount })
                     : t('stepsCount', { done: doneCount, total: totalCount })}
                 </span>
-                {!effectiveExpanded && stepFinish && (
-                  <span className="text-[length:var(--fs-sm)] text-text-500 font-mono opacity-70">
-                    {formatTokens(stepFinish.tokens, t)}
-                  </span>
-                )}
               </span>
             }
             meta={!effectiveExpanded ? <ToolIconStrip parts={parts} /> : undefined}
@@ -1278,23 +1210,10 @@ const ToolGroup = memo(function ToolGroup({
         <div className="flex flex-col">{toolParts}</div>
       )}
 
-      {/* 改动文件概览：始终显示在 tool 步骤与统计（stepFinish）之间 */}
+      {/* 改动文件概览 */}
       {changedFiles.length > 0 && (
         <div className={MSG_SPACING.finish}>
           <DiffChips files={changedFiles} />
-        </div>
-      )}
-
-      {stepFinish && (
-        <div className={MSG_SPACING.finish}>
-          <StepFinishPartView
-            part={stepFinish}
-            duration={duration}
-            turnDuration={turnDuration}
-            agent={agent}
-            modelLabel={modelLabel}
-            completedAt={completedAt}
-          />
         </div>
       )}
     </div>
@@ -1304,17 +1223,6 @@ const ToolGroup = memo(function ToolGroup({
 // ============================================
 // Helpers
 // ============================================
-
-function formatTokens(
-  tokens: StepFinishPart['tokens'],
-  t: (key: string, opts?: Record<string, unknown>) => string,
-): string {
-  const total = tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
-  if (total >= 1000) {
-    return t('tokensK', { count: (total / 1000).toFixed(1) })
-  }
-  return `${total} ${t('tokens')}`
-}
 
 type ToolSummaryCategory =
   | 'execute'

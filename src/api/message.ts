@@ -15,9 +15,6 @@ import { TURN_FETCH_MAX_PAGES, TURN_FETCH_MESSAGE_LIMIT } from '../constants/pag
 import type {
   ApiMessageWithParts,
   AgentPartInput,
-  ApiAgentPart,
-  ApiTextPart,
-  ApiFilePart,
   Attachment,
   FilePartInput,
   RevertedMessage,
@@ -25,6 +22,7 @@ import type {
   SendMessageResponse,
   TextPartInput,
 } from './types'
+import type { Message, TextContent } from '../types/message'
 
 /** 判定是否为「传输层把响应体截断」导致的解析失败：
  * 大响应在 Tauri-plugin-http 上有 340KB 级截断的抖动，会抛未闭合字符串的 JSON 解析错误。
@@ -54,28 +52,6 @@ async function getWithTruncationRetry<T>(fn: () => Promise<T>, retries = 3, dela
 }
 
 type PromptParams = Parameters<ReturnType<typeof getSDKClient>['session']['prompt']>[0]
-type UserContentSource = {
-  parts: Array<
-    | ApiTextPart
-    | ApiFilePart
-    | ApiAgentPart
-    | {
-        type: string
-      }
-  >
-}
-
-function isTextUserContentPart(part: UserContentSource['parts'][number]): part is ApiTextPart {
-  return part.type === 'text' && 'text' in part
-}
-
-function isFileUserContentPart(part: UserContentSource['parts'][number]): part is ApiFilePart {
-  return part.type === 'file' && 'mime' in part && 'url' in part
-}
-
-function isAgentUserContentPart(part: UserContentSource['parts'][number]): part is ApiAgentPart {
-  return part.type === 'agent' && 'name' in part
-}
 
 // ============================================
 // Message Query
@@ -486,56 +462,17 @@ export async function getSessionTurnPage(
 // ============================================
 
 /**
- * 从 API 消息中提取用户消息内容（文本+附件）
+ * 从消息中提取用户消息内容（文本+附件）。
+ * 前端领域模型为 v2 content[]：文本在 content[]，附件在 info.attachments。
  */
-export function extractUserMessageContent(message: UserContentSource): RevertedMessage {
-  const { parts } = message
+export function extractUserMessageContent(message: Pick<Message, 'info' | 'content'>): RevertedMessage {
+  const text = message.content
+    .filter((c): c is TextContent => c.type === 'text' && !c.synthetic)
+    .map(c => c.text)
+    .join('\n')
 
-  const textParts = parts.filter((part): part is ApiTextPart => isTextUserContentPart(part) && !part.synthetic)
-  const text = textParts.map(p => p.text).join('\n')
-
-  const attachments: Attachment[] = []
-
-  const getSourcePath = (source: ApiFilePart['source']): string | undefined => {
-    if (!source || !('path' in source)) return undefined
-    return source.path
-  }
-
-  for (const part of parts) {
-    if (isFileUserContentPart(part)) {
-      const isFolder = part.mime === 'application/x-directory'
-      const sourcePath = getSourcePath(part.source)
-      attachments.push({
-        id: part.id || crypto.randomUUID(),
-        type: isFolder ? 'folder' : 'file',
-        displayName: part.filename || sourcePath || 'file',
-        url: part.url,
-        mime: part.mime,
-        relativePath: sourcePath,
-        textRange: part.source?.text
-          ? {
-              value: part.source.text.value,
-              start: part.source.text.start,
-              end: part.source.text.end,
-            }
-          : undefined,
-      })
-    } else if (isAgentUserContentPart(part)) {
-      attachments.push({
-        id: part.id || crypto.randomUUID(),
-        type: 'agent',
-        displayName: part.name,
-        agentName: part.name,
-        textRange: part.source
-          ? {
-              value: part.source.value,
-              start: part.source.start,
-              end: part.source.end,
-            }
-          : undefined,
-      })
-    }
-  }
+  const attachments: Attachment[] =
+    message.info.role === 'user' ? (message.info.attachments ?? []) : []
 
   return { text, attachments }
 }

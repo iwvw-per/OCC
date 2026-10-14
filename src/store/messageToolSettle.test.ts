@@ -7,7 +7,7 @@ import {
   computeTrimCount,
   estimateMessageBytes,
 } from './messageToolSettle'
-import type { Message, ToolPart } from '../types/message'
+import type { Message, ToolPart, ToolContent } from '../types/message'
 
 const toolPart = (
   callID: string,
@@ -23,7 +23,7 @@ const toolPart = (
   state: { status, input: {}, ...extra },
 })
 
-const assistantMessage = (parts: ToolPart[], isStreaming = false): Message =>
+const assistantMessage = (content: ToolContent[], isStreaming = false): Message =>
   ({
     info: {
       id: 'm1',
@@ -38,7 +38,7 @@ const assistantMessage = (parts: ToolPart[], isStreaming = false): Message =>
       cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     },
-    parts,
+    content,
     isStreaming,
   }) as unknown as Message
 
@@ -58,7 +58,7 @@ describe('reconcileInFlightTools', () => {
     const { messages: next, changed } = reconcileInFlightTools(messages, 1000)
 
     expect(changed).toBe(true)
-    const [p1, p2] = next[0].parts as ToolPart[]
+    const [p1, p2] = next[0].content as ToolPart[]
     expect(p1.state.status).toBe('interrupted')
     expect(p1.state.metadata?.interrupted).toBe(true)
     expect(p1.state.time?.end).toBe(1000)
@@ -72,13 +72,13 @@ describe('reconcileInFlightTools', () => {
 
     expect(changed).toBe(false)
     expect(next).toBe(messages)
-    expect(next[0].parts[0]).toBe(settled)
+    expect(next[0].content[0]).toBe(settled)
   })
 
   it('preserves an existing start time', () => {
     const messages = [assistantMessage([toolPart('c1', 'running', { time: { start: 500 } })])]
     const { messages: next } = reconcileInFlightTools(messages, 1000)
-    expect((next[0].parts[0] as ToolPart).state.time?.start).toBe(500)
+    expect((next[0].content[0] as ToolPart).state.time?.start).toBe(500)
   })
 })
 
@@ -93,7 +93,7 @@ describe('settleToolByCallID', () => {
     )
 
     expect(changed).toBe(true)
-    const [p1, p2] = next[0].parts as ToolPart[]
+    const [p1, p2] = next[0].content as ToolPart[]
     expect(p1.state.status).toBe('completed')
     expect(p1.state.output).toBe('done')
     // 未匹配的 callID 不受影响
@@ -108,7 +108,7 @@ describe('settleToolByCallID', () => {
       { status: 'error', error: 'boom', errorFallback: 'fb' },
       2000,
     )
-    const part = next[0].parts[0] as ToolPart
+    const part = next[0].content[0] as ToolPart
     expect(part.state.status).toBe('error')
     expect(part.state.error).toBe('boom')
   })
@@ -121,7 +121,7 @@ describe('settleToolByCallID', () => {
       { status: 'error', errorFallback: 'fallback text' },
       2000,
     )
-    expect((next[0].parts[0] as ToolPart).state.error).toBe('fallback text')
+    expect((next[0].content[0] as ToolPart).state.error).toBe('fallback text')
   })
 
   it('reports no change when the callID is not found or already settled', () => {

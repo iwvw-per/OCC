@@ -16,7 +16,7 @@ import { sessionErrorHandler } from '../../../../utils'
 import { formatToolName } from '../../../../utils/formatUtils'
 import type { ToolRendererProps } from '../types'
 import type { Message, TextPart, ToolPart } from '../../../../types/message'
-import { isVisibleTextPart } from '../../../../types/message'
+import { isVisibleTextContent } from '../../../../types/message'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -358,8 +358,8 @@ const SubSessionView = memo(function SubSessionView({ sessionId, serverId }: Sub
 
   // 过滤有内容的消息
   const visibleMessages = messages.filter((msg: Message) =>
-    msg.parts.some((part: Message['parts'][0]) => {
-      if (part.type === 'text') return isVisibleTextPart(part)
+    msg.content.some((part: Message['content'][0]) => {
+      if (part.type === 'text') return isVisibleTextContent(part)
       if (part.type === 'tool') return true
       if (part.type === 'reasoning') return true
       return false
@@ -401,11 +401,11 @@ interface MessageItemProps {
 }
 
 const MessageItem = memo(function MessageItem({ message, isLast }: MessageItemProps) {
-  const { info, parts } = message
+  const { info, content } = message
   const isUser = info.role === 'user'
 
-  const textParts = parts.filter((p): p is TextPart => p.type === 'text' && !!p.text?.trim())
-  const toolParts = parts.filter((p): p is ToolPart => p.type === 'tool')
+  const textParts = content.filter((p): p is TextPart => p.type === 'text' && !!p.text?.trim())
+  const toolParts = content.filter((p): p is ToolPart => p.type === 'tool')
 
   const textContent = textParts
     .map(p => p.text)

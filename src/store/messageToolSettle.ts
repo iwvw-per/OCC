@@ -79,7 +79,7 @@ export function reconcileInFlightTools(
   let changed = false
   const next = messages.map(message => {
     let partsChanged = false
-    const parts = message.parts.map(part => {
+    const content = message.content.map(part => {
       if (!isUnsettledToolPart(part)) return part
       partsChanged = true
       changed = true
@@ -94,7 +94,7 @@ export function reconcileInFlightTools(
         },
       } as ToolPart
     })
-    return partsChanged ? { ...message, parts } : message
+    return partsChanged ? { ...message, content } : message
   })
   return { messages: changed ? next : messages, changed }
 }
@@ -120,7 +120,7 @@ export function settleToolByCallID(
   let changed = false
   const next = messages.map(message => {
     let partsChanged = false
-    const parts = message.parts.map(part => {
+    const content = message.content.map(part => {
       if (part.type !== 'tool' || part.callID !== callID) return part
       if (!isUnsettledToolPart(part)) return part
       partsChanged = true
@@ -147,7 +147,7 @@ export function settleToolByCallID(
         },
       } as ToolPart
     })
-    return partsChanged ? { ...message, parts } : message
+    return partsChanged ? { ...message, content } : message
   })
   return { messages: changed ? next : messages, changed }
 }

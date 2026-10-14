@@ -39,9 +39,12 @@ function makeAssistantMessage(options: {
       time: { created: BASE + options.createdOffset, completed: BASE + options.completedOffset },
       tokens: { input: 10, output: options.output, reasoning: options.reasoning, cache: { read: 0, write: 0 } },
     },
-    parts: options.parts.map((part, index) => ({
+    content: options.parts.map((part, index) => ({
       id: `part-${index}`,
+      sessionID: 'session-1',
+      messageID: 'msg-1',
       type: part.type,
+      text: 'x',
       time:
         part.start !== undefined && part.end !== undefined
           ? { start: BASE + part.start, end: BASE + part.end }
@@ -59,7 +62,7 @@ function makeStreamingMessage(): Message {
       time: { created: BASE + 2000 },
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     },
-    parts: [],
+    content: [],
   } as unknown as Message
 }
 

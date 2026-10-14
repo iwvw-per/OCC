@@ -16,7 +16,7 @@
 // 展开对应过程折叠块时按需回拉完整 parts（见 messageStore.hydrateMessages）。
 // ============================================
 
-import type { Part, ToolPart } from '../types/message'
+import type { Content, ToolContent } from '../types/message'
 
 /** tool.state 中体积最大、渲染折叠态不需要的字段 */
 const HEAVY_TOOL_STATE_KEYS = ['output', 'error', 'raw', 'attachments'] as const
@@ -25,13 +25,13 @@ const HEAVY_METADATA_KEYS = ['diff', 'output'] as const
 /** metadata.filediff 内的大字段 */
 const HEAVY_FILEDIFF_KEYS = ['patch', 'before', 'after', 'diff'] as const
 
-export interface CompressedMessageParts {
-  parts: Part[]
+export interface CompressedMessageContent {
+  content: Content[]
   reasoningCount: number
   stepCount: number
 }
 
-function stripToolState(state: ToolPart['state']): ToolPart['state'] {
+function stripToolState(state: ToolContent['state']): ToolContent['state'] {
   const next: Record<string, unknown> = { ...(state as unknown as Record<string, unknown>) }
   for (const key of HEAVY_TOOL_STATE_KEYS) delete next[key]
 
@@ -60,20 +60,20 @@ function stripToolState(state: ToolPart['state']): ToolPart['state'] {
     next.metadata = nextMetadata
   }
 
-  return next as unknown as ToolPart['state']
+  return next as unknown as ToolContent['state']
 }
 
 /**
- * 压缩单条 assistant 消息的 parts。
- * 返回原 parts 引用表示没有可压缩内容（避免无谓拷贝）。
+ * 压缩单条 assistant 消息的 content。
+ * 返回原 content 引用表示没有可压缩内容（避免无谓拷贝）。
  */
-export function compressMessageParts(parts: Part[]): CompressedMessageParts {
+export function compressMessageParts(content: Content[]): CompressedMessageContent {
   let reasoningCount = 0
   let stepCount = 0
   let changed = false
 
-  const next: Part[] = []
-  for (const part of parts) {
+  const next: Content[] = []
+  for (const part of content) {
     if (part.type === 'reasoning') {
       reasoningCount += 1
       changed = true
@@ -92,7 +92,7 @@ export function compressMessageParts(parts: Part[]): CompressedMessageParts {
   }
 
   return {
-    parts: changed ? next : parts,
+    content: changed ? next : content,
     reasoningCount,
     stepCount,
   }

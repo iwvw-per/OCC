@@ -14,7 +14,7 @@ describe('computeSessionStats', () => {
             agent: 'build',
             model: { providerID: 'p', modelID: 'm' },
           },
-          parts: [{ type: 'text', text: 'hello world', id: 'p1', sessionID: 's1', messageID: 'user-1' }],
+          content: [{ type: 'text', text: 'hello world', id: 'p1', sessionID: 's1', messageID: 'user-1' }],
         },
         {
           info: {
@@ -31,7 +31,7 @@ describe('computeSessionStats', () => {
             cost: 0,
             tokens: { input: 12000, output: 800, reasoning: 200, cache: { read: 0, write: 0 } },
           },
-          parts: [{ type: 'text', text: 'long reply', id: 'p2', sessionID: 's1', messageID: 'assistant-1' }],
+          content: [{ type: 'text', text: 'long reply', id: 'p2', sessionID: 's1', messageID: 'assistant-1' }],
         },
         {
           info: {
@@ -42,7 +42,7 @@ describe('computeSessionStats', () => {
             agent: 'build',
             model: { providerID: 'p', modelID: 'm' },
           },
-          parts: [{ type: 'compaction', id: 'p3', sessionID: 's1', messageID: 'user-2', auto: false }],
+          content: [],
         },
         {
           info: {
@@ -60,7 +60,7 @@ describe('computeSessionStats', () => {
             summary: true,
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           },
-          parts: [{ type: 'text', text: 'short summary', id: 'p4', sessionID: 's1', messageID: 'assistant-2' }],
+          content: [{ type: 'text', text: 'short summary', id: 'p4', sessionID: 's1', messageID: 'assistant-2' }],
         },
       ],
       200000,

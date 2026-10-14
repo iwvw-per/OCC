@@ -29,7 +29,7 @@ function createMessageWithParts(id: string, sessionId: string, text: string, cre
 }
 
 function textOf(message: Message): string {
-  const part = message.parts[0]
+  const part = message.content[0]
   return part && part.type === 'text' ? part.text : ''
 }
 

@@ -125,7 +125,7 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
     let firstPartStart: number | null = null
     const textIntervals: { start: number; end: number }[] = []
 
-    for (const part of message.parts) {
+    for (const part of message.content) {
       if (part.type === 'tool') {
         const start = part.state.time?.start
         const end = part.state.time?.end

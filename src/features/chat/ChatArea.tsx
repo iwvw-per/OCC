@@ -85,7 +85,7 @@ function processStepCount(children: ProcessShellChild[]): number {
       count += child.message.compressedStats.stepCount
       continue
     }
-    for (const part of child.message.parts) {
+    for (const part of child.message.content) {
       if (part.type === 'tool') count++
     }
   }
@@ -99,7 +99,7 @@ function processReasoningCount(children: ProcessShellChild[]): number {
       count += child.message.compressedStats.reasoningCount
       continue
     }
-    for (const part of child.message.parts) {
+    for (const part of child.message.content) {
       if (part.type === 'reasoning' && part.text?.trim()) count++
     }
   }

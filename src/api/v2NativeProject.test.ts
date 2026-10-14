@@ -20,13 +20,13 @@ async function ensureServer() {
 describeIf('v2 原生 project 访问层', () => {
   it('nativeListProjects 返回项目列表', async () => {
     await ensureServer()
-    const projects = await nativeListProjects(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const projects = await nativeListProjects(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(Array.isArray(projects)).toBe(true)
   })
 
   it('nativeGetCurrentProject 返回当前项目', async () => {
     await ensureServer()
-    const project = await nativeGetCurrentProject(SERVER_ID, { directory: 'C:\\Users\\DSUK' })
+    const project = await nativeGetCurrentProject(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir' })
     expect(project).toBeDefined()
     expect(typeof project.id).toBe('string')
   })
