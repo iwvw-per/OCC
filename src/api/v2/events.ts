@@ -92,7 +92,6 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
 
     case 'session.created':
     case 'session.updated':
-    case 'session.renamed':
     case 'session.metadata.updated':
     case 'session.moved': {
       const session = data.session ?? data
@@ -100,6 +99,13 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         info: session,
       })
     }
+    // v2 的 session.renamed payload 只有 {sessionID, title}（无完整 session）。
+    // 若归入 SESSION_UPDATED 会因缺 id/directory 被消费方丢弃，标题永远不更新。
+    case 'session.renamed':
+      return globalEvent(directory, EventTypes.SESSION_RENAMED, {
+        sessionID,
+        title: str(data.title) ?? '',
+      })
     case 'session.deleted':
       return globalEvent(directory, EventTypes.SESSION_DELETED, { sessionID })
     case 'session.idle':
@@ -114,11 +120,17 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         data: messageError.data,
       })
     }
-    // 主动停止：v2 不发 session.idle，只发 execution.interrupted（+ step.failed aborted）。
-    // 若不映射，会话会永久停在 Working、消息一直转圈。执行确已停止，归一为 IDLE：
+    // v2 完成信号：成功结束只有 execution.succeeded（**不发 session.idle**）；
+    // 主动停止发 execution.interrupted（+ step.failed aborted），同样不发 idle。
+    // 两者都归一为 IDLE：若不映射，流式消息永不收尾、会话永久停在 Working。
     // 上层 handleSessionIdle 会定稿流式消息、落定悬空 tool、移除 Working 状态。
+    case 'session.execution.succeeded':
     case 'session.execution.interrupted':
       return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID })
+    // v2 运行态：execution.started 表示开始，映射为 busy 以便侧栏显示动态图标
+    // （v2 不发 session.status，若只靠 /session/active 轮询则侧栏不实时）。
+    case 'session.execution.started':
+      return globalEvent(directory, EventTypes.SESSION_STATUS, { sessionID, status: { type: 'busy' } })
 
     // ============================================================
     // v2 消息流事件 → v1 Message 事件

@@ -1,6 +1,6 @@
 {
-  "name": "OpenCode",
-  "short_name": "OpenCode",
+  "name": "OCC",
+  "short_name": "OCC",
   "description": "AI Coding Assistant",
   "start_url": ".",
   "display": "standalone",

@@ -761,6 +761,14 @@ function broadcastEvent(conn: ServerConnection, globalEvent: GlobalEvent) {
 }
 
 function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: EventCallbacks) {
+  // v2 扩展事件：session.renamed 不在 v1 SDK 的事件联合里，先于 switch 处理。
+  if ((payload.type as string) === EventTypes.SESSION_RENAMED) {
+    const props = (payload as { properties?: { sessionID?: unknown; title?: unknown } }).properties
+    const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
+    const title = typeof props?.title === 'string' ? props.title : ''
+    if (sessionID) callbacks.onSessionRenamed?.({ sessionID, title })
+    return
+  }
   switch (payload.type) {
     case EventTypes.MESSAGE_UPDATED: {
       const message = getMessageInfo(payload.properties)

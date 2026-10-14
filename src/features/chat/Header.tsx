@@ -178,9 +178,9 @@ export function Header({
   const isMobileLayout = isTauriMobile()
 
   useEffect(() => {
-    document.title = currentSessionTitle ? `${currentSessionTitle} - OpenCode` : 'OpenCode'
+    document.title = currentSessionTitle ? `${currentSessionTitle} - OCC` : 'OCC'
     return () => {
-      document.title = 'OpenCode'
+      document.title = 'OCC'
     }
   }, [currentSessionTitle])
 

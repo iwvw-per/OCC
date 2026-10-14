@@ -46,6 +46,36 @@ describe('v2 event → GlobalEvent', () => {
     expect(info?.agent).toBe('build')
   })
 
+  it('maps session.renamed to SESSION_RENAMED with sessionID + title (not full session)', () => {
+    const p = payloadOf({
+      type: 'session.renamed',
+      data: { sessionID: 'ses_1', title: '递归定义与示例' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_RENAMED)
+    expect(p?.properties).toEqual({ sessionID: 'ses_1', title: '递归定义与示例' })
+  })
+
+  it('maps execution.succeeded to SESSION_IDLE (v2 has no session.idle)', () => {
+    const p = payloadOf({
+      type: 'session.execution.succeeded',
+      data: { sessionID: 's' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_IDLE)
+    expect(p?.properties.sessionID).toBe('s')
+  })
+
+  it('maps execution.started to SESSION_STATUS busy (drives sidebar activity)', () => {
+    const p = payloadOf({
+      type: 'session.execution.started',
+      data: { sessionID: 's' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_STATUS)
+    expect((p?.properties.status as { type: string }).type).toBe('busy')
+  })
+
   it('maps text.started to MESSAGE_PART_UPDATED text part', () => {
     const p = payloadOf({
       type: 'session.text.started',

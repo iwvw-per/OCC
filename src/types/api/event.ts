@@ -94,6 +94,12 @@ export const EventTypes = {
   // Session events
   SESSION_CREATED: 'session.created',
   SESSION_UPDATED: 'session.updated',
+  /**
+   * 会话重命名（v2）。payload 只有 {sessionID, title}，不含完整 session，
+   * 因此单独成事件，由消费方按 id 打补丁，而非走 SESSION_UPDATED 的整条替换。
+   * 注：v1 SDK 的事件类型联合不含此名，故用 EXTRA 常量承载。
+   */
+  SESSION_RENAMED: 'session.renamed',
   SESSION_DELETED: 'session.deleted',
   SESSION_IDLE: 'session.idle',
   SESSION_ERROR: 'session.error',
@@ -165,7 +171,7 @@ export const EventTypes = {
   PTY_UPDATED: 'pty.updated',
   PTY_EXITED: 'pty.exited',
   PTY_DELETED: 'pty.deleted',
-} as const satisfies Record<string, SDKGlobalEvent['payload']['type']>
+} as const satisfies Record<string, SDKGlobalEvent['payload']['type'] | 'session.renamed'>
 
 export type EventType = SDKGlobalEvent['payload']['type']
 
@@ -181,6 +187,8 @@ export interface EventCallbacks {
   onServerConnected?: (data: ServerConnectedPayload) => void
   onSessionCreated?: (session: Session) => void
   onSessionUpdated?: (session: Session) => void
+  /** 会话重命名（v2）：仅有 {sessionID, title}，消费方按 id 更新标题，不做整条替换 */
+  onSessionRenamed?: (data: { sessionID: string; title: string }) => void
   onSessionDeleted?: (sessionId: string) => void
   onSessionIdle?: (data: SessionIdlePayload) => void
   onSessionError?: (data: SessionErrorPayload) => void

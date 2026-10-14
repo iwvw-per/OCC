@@ -285,6 +285,24 @@ class SessionListIndexStore {
   }
 
   /**
+   * 跨该服务器所有桶对指定会话做字段补丁（重命名等只带部分字段的增量事件）。
+   * 只改已存在条目的字段，不新增成员、不动位置。
+   */
+  patchAll(serverId: string, sessionId: string, patch: Partial<ApiSession>): void {
+    let changed = false
+    for (const bucket of this.buckets.values()) {
+      if (bucket.key.serverId !== serverId) continue
+      const index = bucket.items.findIndex(session => session.id === sessionId)
+      if (index === -1) continue
+      bucket.items[index] = { ...bucket.items[index], ...patch }
+      bucket.contentRevision++
+      bucket.touchedAt = Date.now()
+      changed = true
+    }
+    if (changed) this.emit()
+  }
+
+  /**
    * 本地字段补丁（重命名等乐观更新）。只改已有条目的字段，不动位置。
    * 返回是否命中并更新。
    */

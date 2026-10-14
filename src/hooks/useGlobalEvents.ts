@@ -25,7 +25,7 @@ import type { EventCallbacks } from '../types/api/event'
 import { replyPermission } from '../api/permission'
 import { stripMessageSummaryDiffs, sanitizeStreamPart } from '../api/sanitize'
 import { autoApproveStore } from '../store/autoApproveStore'
-import type { ApiMessage, ApiPart, ApiPermissionRequest, ApiQuestionRequest } from '../api/types'
+import type { ApiMessage, ApiPart, ApiPermissionRequest, ApiQuestionRequest, ApiSession } from '../api/types'
 import type { SessionStatusMap } from '../types/api/session'
 
 // ============================================
@@ -832,6 +832,19 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 同步标题到 messageStore，让 Header 等依赖 messageStore 的组件实时更新
           if (session.title && messageStore.getSessionState(scopedId)) {
             messageStore.updateSessionMetadata(scopedId, { title: session.title })
+          }
+        },
+
+        // v2：会话重命名事件只带 {sessionID, title}。按 id 打补丁更新侧栏索引、
+        // activeSessionStore meta 与 messageStore 标题，避免整条替换（会因缺字段被丢弃）。
+        onSessionRenamed: ({ sessionID, title }) => {
+          if (isEphemeralSession(sessionID) || !title) return
+          const scopedId = scope(sessionID)
+          const patch: Partial<ApiSession> = { id: sessionID, title }
+          sessionListIndexStore.patchAll(serverId, sessionID, patch)
+          activeSessionStore.setSessionMeta(scopedId, title, undefined)
+          if (messageStore.getSessionState(scopedId)) {
+            messageStore.updateSessionMetadata(scopedId, { title })
           }
         },
 

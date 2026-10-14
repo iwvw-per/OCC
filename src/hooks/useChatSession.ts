@@ -200,7 +200,7 @@ export function useChatSession({
       const session = sessions.find(s => s.id === sessionId)
       if (session?.title) return session.title
       if (sessionId) return i18n.t('chat:header.sessionFallback', { id: sessionId.slice(0, 6) })
-      return 'OpenCode'
+      return 'OCC'
     },
     [sessions],
   )
