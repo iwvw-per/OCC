@@ -99,7 +99,7 @@
     "caution": "Caution"
   },
   "errorBoundary": {
-    "title": "OpenCode UI ran into a problem",
+    "title": "OCC ran into a problem",
     "renderFailed": "The chat view could not render this response.",
     "openSettings": "Open server settings",
     "tryAgain": "Try again",

@@ -209,7 +209,7 @@ fn create_hidden_content_window(
         label,
         tauri::WebviewUrl::App("index.html".into()),
     ))
-    .title("OCV2")
+    .title("OCC")
     .inner_size(800.0, 600.0);
 
     builder.visible(false).build()

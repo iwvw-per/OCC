@@ -99,7 +99,7 @@
     "caution": "小心"
   },
   "errorBoundary": {
-    "title": "OpenCode UI 遇到问题",
+    "title": "OCC 遇到问题",
     "renderFailed": "聊天视图无法渲染此回复。",
     "openSettings": "打开服务器设置",
     "tryAgain": "重试",

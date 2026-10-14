@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "OCV2",
+  "productName": "OCC",
   "version": "2.0.0",
-  "identifier": "com.opencodeui.ocv2",
+  "identifier": "com.opencodeui.occ",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5176",
@@ -15,7 +15,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "OCV2",
+        "title": "OCC",
         "width": 800,
         "height": 600,
         "titleBarStyle": "Overlay",
@@ -36,7 +36,7 @@
   "plugins": {
     "notification": null,
     "updater": {
-      "endpoints": ["https://github.com/iwvw-per/OpenCodeUI/releases/latest/download/latest.json"],
+      "endpoints": ["https://github.com/iwvw/OCC/releases/latest/download/latest.json"],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNFMjlFRkU5NjIzM0RDNkEKUldScTNETmk2ZThwUHJRRnlvbHNBd0FnRzQ5SllQZ1B5QTRTNkdjTFpKdCs4TE1URVFrc0E2SUUK"
     }
   },
