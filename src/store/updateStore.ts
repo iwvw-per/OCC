@@ -45,6 +45,9 @@ const RELEASES_ROOT_URL = 'https://api.github.com/repos/iwvw-per/OpenCodeUI/rele
 // canary 通道用列表接口拉取最近若干个 release，取语义最大的 prerelease。
 // 单次响应约 27KB/release，per_page 取最小可用值控制流量。
 const CANARY_RELEASE_SCAN_LIMIT = 5
+// 产品线隔离后，稳定通道也必须走列表接口（/latest 只返回最新一个、无法按主版本
+// 过滤）。per_page 需要能覆盖该主版本的全部 release，取 20 以兼顾 v1/v2 各迭代。
+const STABLE_RELEASE_SCAN_LIMIT = 20
 export const RELEASES_API_URL = `${RELEASES_ROOT_URL}/latest`
 export const RELEASES_PAGE_URL = 'https://github.com/iwvw-per/OpenCodeUI/releases/latest'
 
@@ -57,6 +60,14 @@ const PRERELEASE_RE = /-(?:canary|alpha|beta)(?:\.|$)/i
 /** 去掉开头的 v，保留 prerelease 后缀（semver 比较需要它） */
 export function normalizeVersion(version: string): string {
   return version.trim().replace(/^v/i, '')
+}
+
+/**
+ * 取版本号的主版本号（"2.0.0-canary.1" → "2"）。
+ * 用于 updater 产品线隔离：v1(1.x) 与 v2(2.x) 各自只在自己主版本内更新。
+ */
+export function majorVersion(version: string): string {
+  return normalizeVersion(version).split('.')[0] || '0'
 }
 
 /** 版本号是否为预发布（canary/alpha/beta）——决定更新通道 */
@@ -199,10 +210,14 @@ function parseRelease(payload: unknown): UpdateRelease {
  * - canary 通道：预发布与正式版都接受，取语义最大者——canary 用户既该收到
  *   更新的 canary（0.6.125-canary.2 > canary.1），也该在该号 stable 发布后
  *   升级到正式版（0.6.125 > 0.6.125-canary.2）。
+ *
+ * 产品线隔离：只在与 currentVersion 主版本相同的 release 内选择，使 v1(1.x)
+ * 与 v2(2.x) 各自独立更新、不互相跨大版本提示升级。
  */
-function pickRelease(payload: unknown, channel: UpdateChannel): UpdateRelease | null {
+function pickRelease(payload: unknown, channel: UpdateChannel, currentVersion: string): UpdateRelease | null {
   if (!Array.isArray(payload)) throw new Error('Invalid release list payload')
 
+  const currentMajor = majorVersion(currentVersion)
   let best: UpdateRelease | null = null
   for (const entry of payload) {
     if (!isPlainObject(entry) || entry.draft === true) continue
@@ -213,6 +228,8 @@ function pickRelease(payload: unknown, channel: UpdateChannel): UpdateRelease | 
     } catch {
       continue
     }
+    // 产品线隔离：主版本不一致的 release 不属于本更新线，直接跳过。
+    if (majorVersion(release.version) !== currentMajor) continue
     if (!best || compareVersions(release.version, best.version) > 0) best = release
   }
   return best
@@ -299,12 +316,12 @@ export class UpdateStore {
 
     this.inflightCheck = (async () => {
       try {
-        // canary 通道：列表接口拉最近若干个 release，取语义最大的 prerelease。
-        // （/releases/latest 只返回正式版，永远解析不到 canary。）
-        const isCanary = this.state.currentChannel === 'canary'
-        const requestUrl = isCanary
-          ? `${RELEASES_ROOT_URL}?per_page=${CANARY_RELEASE_SCAN_LIMIT}`
-          : RELEASES_API_URL
+        // 稳定通道也必须走列表接口：产品线隔离需要按主版本过滤，
+        // /releases/latest 只返回最新一个、无法区分 v1(1.x)/v2(2.x)。
+        // canary 通道取预发布与正式版的最大者（/latest 解析不到 prerelease）。
+        const scanLimit =
+          this.state.currentChannel === 'canary' ? CANARY_RELEASE_SCAN_LIMIT : STABLE_RELEASE_SCAN_LIMIT
+        const requestUrl = `${RELEASES_ROOT_URL}?per_page=${scanLimit}`
 
         const response = await fetch(requestUrl, {
           headers: { Accept: 'application/vnd.github+json' },
@@ -314,8 +331,13 @@ export class UpdateStore {
         }
 
         const payload = await response.json()
-        // stable 通道列表接口只用于兜底；正常走 latest 单对象端点。
-        const release = Array.isArray(payload) ? pickRelease(payload, this.state.currentChannel) : parseRelease(payload)
+        const release = Array.isArray(payload)
+          ? pickRelease(payload, this.state.currentChannel, this.state.currentVersion)
+          : // 兜底：单个 release 对象时视为与当前主版本一致（仅当主版本匹配才接受）
+            majorVersion((payload as { tag_name?: string })?.tag_name ?? '') ===
+              majorVersion(this.state.currentVersion)
+            ? parseRelease(payload)
+            : null
         this.applyRelease(release, now)
       } catch (error) {
         this.state = {

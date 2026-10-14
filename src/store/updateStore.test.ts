@@ -110,21 +110,46 @@ describe('UpdateStore', () => {
     expect(localStorage.getItem('opencode:update-check')).toContain('0.5.2')
   })
 
-  it('stable 通道走 latest 单对象端点', async () => {
+  it('stable 通道走列表接口并按主版本过滤（产品线隔离）', async () => {
+    // v1 用户（1.0.1）：即使存在更高的 v2.0.0，也只看自己主版本(1.x)的更新。
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ tag_name: 'v0.6.125', html_url: 'https://example.com', prerelease: false }),
+      json: async () => [
+        { tag_name: 'v2.0.0', html_url: 'https://example.com/v2', prerelease: false, draft: false },
+        { tag_name: 'v1.0.1', html_url: 'https://example.com/v1', prerelease: false, draft: false },
+        { tag_name: 'v1.0.2', html_url: 'https://example.com/v1-2', prerelease: false, draft: false },
+      ],
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const store = new UpdateStore('0.6.124')
+    const store = new UpdateStore('1.0.1')
     await store.checkForUpdates({ force: true })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.github.com/repos/iwvw-per/OpenCodeUI/releases/latest',
+      'https://api.github.com/repos/iwvw-per/OpenCodeUI/releases?per_page=20',
       expect.anything(),
     )
-    expect(store.getSnapshot().latestRelease?.version).toBe('0.6.125')
+    // v2.0.0 语义最大但主版本(2)与当前(1)不同 → 被产品线隔离过滤，选 1.x 最大者
+    expect(store.getSnapshot().latestRelease?.version).toBe('1.0.2')
+    expect(hasUpdateAvailable(store.getSnapshot())).toBe(true)
+  })
+
+  it('v2 用户只在自己主版本内更新，不被 v1 release 干扰', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { tag_name: 'v2.0.0', html_url: 'https://example.com/v2', prerelease: false, draft: false },
+        { tag_name: 'v2.0.1-canary.1', html_url: 'https://example.com/c', prerelease: true, draft: false },
+        { tag_name: 'v1.9.9', html_url: 'https://example.com/v1', prerelease: false, draft: false },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const store = new UpdateStore('2.0.0')
+    await store.checkForUpdates({ force: true })
+
+    expect(store.getSnapshot().latestRelease?.version).toBe('2.0.0')
+    expect(hasUpdateAvailable(store.getSnapshot())).toBe(false)
   })
 
   it('canary 版本走列表接口并取语义最大的 prerelease', async () => {
