@@ -36,7 +36,7 @@
   "plugins": {
     "notification": null,
     "updater": {
-      "endpoints": ["https://github.com/iwvw/OCC/releases/latest/download/latest.json"],
+      "endpoints": ["https://github.com/iwvw-per/OCC/releases/latest/download/latest.json"],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNFMjlFRkU5NjIzM0RDNkEKUldScTNETmk2ZThwUHJRRnlvbHNBd0FnRzQ5SllQZ1B5QTRTNkdjTFpKdCs4TE1URVFrc0E2SUUK"
     }
   },
