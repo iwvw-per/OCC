@@ -74,7 +74,7 @@ function adaptAssistantParts(raw: Record<string, unknown>): Part[] {
         time: { start: num(time.created) ?? 0, end: num(time.completed) },
       } as ReasoningPart)
     } else if (type === 'tool') {
-      const toolID = str(c.id) ?? partID
+      const toolID = str(c.id) ?? `${id}-tool-${parts.length}`
       parts.push({
         id: toolID,
         sessionID,
