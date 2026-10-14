@@ -4,6 +4,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeListSessions, nativeGetSession, nativeCreateSession } from './v2NativeSession'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { normalizeTodoItems } from './todo'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
@@ -167,7 +168,14 @@ export async function getSessions(
   if (cached) return cached.filter(session => !isEphemeralSession(session.id))
 
   return dedupeSessionListRequest(cacheServerId, cacheQuery, async () => {
-    const sessions = normalizeSessionList(unwrap(await sdk.experimental.session.list(sdkQuery)))
+    const isV2 = serverStore.getApiVersion(cacheServerId) === 'v2'
+    const sessions = isV2
+      ? (await nativeListSessions(cacheServerId, {
+          directory: formatPathForApi(directory, cacheServerId),
+          search,
+          limit,
+        })).sessions
+      : normalizeSessionList(unwrap(await sdk.experimental.session.list(sdkQuery)))
     const filtered = archivedOnly
       ? sessions.filter(session => Boolean(session.time?.archived))
       : includeArchived
@@ -232,6 +240,8 @@ export async function getSession(sessionId: string, directory?: string, serverId
   const session = await singleFlight(
     `session:${target.serverId}:${target.sessionId}:${directoryCacheKey(directory)}`,
     async () => {
+      const isV2 = serverStore.getApiVersion(target.serverId) === 'v2'
+      if (isV2) return nativeGetSession(target.serverId, target.sessionId)
       const sdk = getSDKClient(target.serverId)
       return unwrap(
         await sdk.session.get({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
@@ -255,13 +265,17 @@ export async function createSession(
 ): Promise<ApiSession> {
   const sdk = getSDKClient(serverId)
   const { directory, title, parentID } = params
-  const session = unwrap(
-    await sdk.session.create({
-      directory: formatPathForApi(directory, serverId),
-      title,
-      parentID,
-    }),
-  )
+  const sid = serverId ?? serverStore.getActiveServerId()
+  const isV2 = serverStore.getApiVersion(sid) === 'v2'
+  const session = isV2
+    ? await nativeCreateSession(sid, { directory, title, parentID })
+    : unwrap(
+        await sdk.session.create({
+          directory: formatPathForApi(directory, serverId),
+          title,
+          parentID,
+        }),
+      )
   // 无显式 serverId 时按活动服务器失效，避免误伤其它服务器的列表缓存
   invalidateSessionListCache(serverId ?? serverStore.getActiveServerId())
   return session
