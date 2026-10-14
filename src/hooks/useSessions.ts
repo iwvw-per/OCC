@@ -17,6 +17,7 @@ import {
 } from '../store/sessionListIndexStore'
 import { autoDetectPathStyle } from '../utils'
 import { normalizeForComparison } from '../utils/directoryUtils'
+import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { sortSessionsByAnchor } from '../store/sessionActivityStore'
 import i18n from '../i18n'
 
@@ -418,12 +419,14 @@ try {
 
     const unsubscribe = subscribe({
       onSessionCreated: session => {
+        if (isEphemeralSession(session.id)) return
         if (session.parentID) return
         if (!searchRef.current) return // 索引路径由 useGlobalEvents 维护
         if (!dirMatch(session)) return
         void fetchSessionsRef.current({ search: searchRef.current || undefined })
       },
       onSessionUpdated: session => {
+        if (isEphemeralSession(session.id)) return
         if (session.parentID) return
         if (!searchRef.current) return
         if (session.time?.archived) {
@@ -437,6 +440,7 @@ try {
         }
       },
       onSessionDeleted: sessionId => {
+        if (isEphemeralSession(sessionId)) return
         if (!searchRef.current) return
         setSearchState(prev => ({ ...prev, sessions: prev.sessions.filter(item => item.id !== sessionId) }))
       },

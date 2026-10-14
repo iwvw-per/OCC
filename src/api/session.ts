@@ -8,6 +8,7 @@ import { resolveSessionTarget } from '../utils/sessionKey'
 import { normalizeTodoItems } from './todo'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { getSessionMessages } from './message'
+import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { normalizeFileDiffs } from '../types/api/file'
 import { INITIAL_MESSAGE_LIMIT } from '../constants/pagination'
 import { serverStore } from '../store/serverStore'
@@ -160,8 +161,10 @@ export async function getSessions(
   const cacheServerId = serverId ?? serverStore.getActiveServerId()
   const cached = readSessionListCache(cacheServerId, cacheQuery)
   // 返回浅拷贝：调用方（如 getArchivedSessions 的 sort）可能就地修改数组，
-  // 直接返回缓存引用会把缓存内容改坏
-  if (cached) return cached.slice()
+  // 直接返回缓存引用会把缓存内容改坏。
+  // 命中缓存也要再过滤临时会话：AI 重命名期间服务端列表可能带临时会话，
+  // 且它写进缓存后才被删除，读侧过滤保证它绝不露面。
+  if (cached) return cached.filter(session => !isEphemeralSession(session.id))
 
   return dedupeSessionListRequest(cacheServerId, cacheQuery, async () => {
     const sessions = normalizeSessionList(unwrap(await sdk.experimental.session.list(sdkQuery)))
@@ -170,9 +173,12 @@ export async function getSessions(
       : includeArchived
         ? sessions
         : sessions.filter(session => !session.time?.archived)
+    // 内部临时会话（如 AI 重命名用的临时会话）不进入任何用户可见列表。
+    // 列表读侧与 SSE 增量读侧共用同一登记，见 utils/ephemeralSessions。
+    const visible = filtered.filter(session => !isEphemeralSession(session.id))
     // 列表渲染不需要 summary.diffs / revert 快照 / permission 详情，
     // 这些字段单条可达数百 KB，且会被缓存 30s，去掉后缓存占用同步下降。
-    const result = filtered.map(stripSessionListDetails)
+    const result = visible.map(stripSessionListDetails)
 
     writeSessionListCache(cacheServerId, cacheQuery, result)
     return result.slice()

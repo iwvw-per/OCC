@@ -56,6 +56,7 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     'chat.showInputStatusBar',
     'chat.sendMode',
     'chat.thinkingDisplay',
+    'chat.aiRenameModel',
     'chat.latestOnly',
     'chat.agent',
     'chat.model',

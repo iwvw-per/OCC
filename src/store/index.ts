@@ -78,6 +78,8 @@ export type { ServiceSettingsBackup } from './serviceStore'
 
 export { modelVisibilityStore, useHiddenModelKeys } from './modelVisibilityStore'
 
+export { aiRenameModelStore, useAiRenameModelKey, AI_RENAME_MODEL_STORAGE_KEY } from './aiRenameModelStore'
+
 export { soundStore, useSoundSettings, exportSoundBackup, importSoundBackup } from './soundStore'
 export type { SoundBackup, SoundSettings, EventSoundConfig } from './soundStore'
 

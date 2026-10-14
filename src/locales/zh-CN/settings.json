@@ -176,7 +176,12 @@
     "completedAtFormat": "完成时刻格式",
     "completedAtFormatDesc": "选择只显示时间，或显示完整日期和时间",
     "completedAtTimeOnly": "仅时间",
-    "completedAtDateTime": "日期时间"
+    "completedAtDateTime": "日期时间",
+    "aiRenameModel": "AI 重命名模型",
+    "aiRenameModelDesc": "用于「使用 AI 重命名」自动生成会话标题的模型",
+    "aiRenameModelPick": "偏好模型",
+    "aiRenameModelPickDesc": "选择「使用 AI 重命名」时使用的模型。保持「自动」会跟随当前对话所选模型。",
+    "aiRenameAuto": "自动（当前模型）"
   },
   "agent": {
     "behavior": "Agent 行为",

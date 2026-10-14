@@ -19,6 +19,7 @@ import { sessionErrorHandler, normalizeToForwardSlash, autoDetectPathStyle, isSa
 import { makeSessionKey } from '../utils/sessionKey'
 import { sortSessionsByAnchor } from '../store/sessionActivityStore'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
+import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
 
 const DEFAULT_LIMIT = 30
@@ -220,15 +221,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribe = subscribeToEvents({
       onSessionCreated: session => {
-        // 忽略子 session（有 parentID 的是子 agent 创建的）
-        if (session.parentID) return
+        // 忽略子 session（有 parentID 的是子 agent 创建的）与内部临时会话
+        if (session.parentID || isEphemeralSession(session.id)) return
         if (!searchRef.current) return
         if (!matchesCurrentDirectory(session)) return
         // 搜索态下交给服务端重新给出结果，避免本地过滤和服务端逻辑不一致
         void fetchSessionsRef.current({ search: searchRef.current || undefined })
       },
       onSessionUpdated: session => {
-        if (session.parentID) return
+        if (session.parentID || isEphemeralSession(session.id)) return
         if (!searchRef.current) return
 
         if (session.time?.archived) {
@@ -252,6 +253,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       },
       onSessionDeleted: sessionId => {
         clearSessionRuntimeState(sessionId)
+        if (isEphemeralSession(sessionId)) return
         if (searchRef.current) {
           setSearchSessions(prev => prev.filter(s => s.id !== sessionId))
         }

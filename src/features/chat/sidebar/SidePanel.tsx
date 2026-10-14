@@ -668,12 +668,14 @@ export function SidePanel({
     () => folderProjects.filter(p => expandedProjectNames.includes(projectExpandKey(p))).map(p => p.id),
     [folderProjects, expandedProjectNames],
   )
-  // 全部可展开项目是否都已展开：用于把「全部收起/展开」做成一个切换按钮。
+  // 全部可展开项目是否都已收起：驱动「收起优先」的切换按钮。
+  // 默认点击收起全部；只有全部已收起时，按钮才转为「展开全部」。
   // 派生项目（isDerived，未保存的当前项目）不参与，与自动展开逻辑保持一致。
-  const allProjectsExpanded = useMemo(() => {
-    const ids = folderProjects.filter(p => !p.isDerived).map(p => p.id)
-    return ids.length > 0 && ids.every(id => expandedRecentProjectIds.includes(id))
-  }, [folderProjects, expandedRecentProjectIds])
+  const allProjectIds = useMemo(() => folderProjects.filter(p => !p.isDerived).map(p => p.id), [folderProjects])
+  const allProjectsCollapsed = useMemo(
+    () => allProjectIds.length > 0 && allProjectIds.every(id => !expandedRecentProjectIds.includes(id)),
+    [allProjectIds, expandedRecentProjectIds],
+  )
   const setExpandedRecentProjectIds = useCallback(
     (updater: SetStateAction<string[]>) => {
       const currentIds = folderProjects.filter(p => expandedProjectNames.includes(projectExpandKey(p))).map(p => p.id)
@@ -1203,21 +1205,20 @@ export function SidePanel({
                 >
                   {activeServer?.name}
                 </span>
-                {/* 全部收起/展开切换 + 排序 + 管理 */}
+                {/* 收起优先：默认先收起全部；全部收起后点击才展开全部 */}
                 <div className="ml-auto shrink-0 flex items-center gap-1.5 md:gap-0.5">
                   <IconButton
                     size="sm"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      const allIds = folderProjects.filter(p => !p.isDerived).map(p => p.id)
-                      setExpandedRecentProjectIds(allProjectsExpanded ? [] : allIds)
+                      setExpandedRecentProjectIds(allProjectsCollapsed ? allProjectIds : [])
                     }}
                     aria-label={
-                      allProjectsExpanded ? t('sidebar.collapseAllProjects') : t('sidebar.expandAllProjects')
+                      allProjectsCollapsed ? t('sidebar.expandAllProjects') : t('sidebar.collapseAllProjects')
                     }
-                    title={allProjectsExpanded ? t('sidebar.collapseAllProjects') : t('sidebar.expandAllProjects')}
+                    title={allProjectsCollapsed ? t('sidebar.expandAllProjects') : t('sidebar.collapseAllProjects')}
                   >
-                    {allProjectsExpanded ? <CollapseAllIcon size={14} /> : <ExpandAllIcon size={14} />}
+                    {allProjectsCollapsed ? <ExpandAllIcon size={14} /> : <CollapseAllIcon size={14} />}
                   </IconButton>
                   <SessionSortMenu />
                   <IconButton

@@ -25,6 +25,7 @@
 import type { ApiSession } from '../api/types'
 import { normalizeForComparison } from '../utils/directoryUtils'
 import { stripSessionListDetails } from '../api/sanitize'
+import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { sessionActivityStore, sortSessionsByAnchor, insertSessionByAnchor } from './sessionActivityStore'
 
 /** 视图分桶：活跃（不含归档）/ 归档 */
@@ -341,8 +342,28 @@ class SessionListIndexStore {
    * 创建 / 更新事件：按会话的 directory 与归档态路由到对应桶。
    *
    * 子会话（有 parentID）不进列表：列表按 roots 拉，子会话归 childSessionStore。
+   *
+   * 内部临时会话（AI 重命名等）一律不进列表：若事件先于创建方登记到达、
+   * 已被插进桶里，这里把它摘掉（含墓碑，挡住晚归的在途响应）。
    */
   applySessionChanged(serverId: string, session: ApiSession): void {
+    if (isEphemeralSession(session.id)) {
+      let changed = false
+      for (const bucket of this.buckets.values()) {
+        if (bucket.key.serverId !== serverId) continue
+        bucket.tombstones.add(session.id)
+        const index = bucket.items.findIndex(item => item.id === session.id)
+        if (index !== -1) {
+          bucket.items.splice(index, 1)
+          bucket.contentRevision++
+          bucket.membershipRevision++
+          bucket.touchedAt = Date.now()
+          changed = true
+        }
+      }
+      if (changed) this.emit()
+      return
+    }
     if (session.parentID) return
 
     const dir = normalizeForComparison(session.directory)
@@ -421,6 +442,7 @@ class SessionListIndexStore {
    * 已存在则就地替换（位置不变）；否则按锚点插入到正确位置。
    */
   private writeIntoBucket(bucket: Bucket, session: ApiSession): boolean {
+    if (isEphemeralSession(session.id)) return false
     const stripped = stripSessionListDetails(session)
     const index = bucket.items.findIndex(item => item.id === session.id)
 

@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PathAutoIcon, PathUnixIcon, PathWindowsIcon } from '../../../components/Icons'
-import { usePathMode, useTheme } from '../../../hooks'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/Select'
+import { usePathMode, useTheme, useModels } from '../../../hooks'
 import { themeStore, type ReasoningDisplayMode, type CompletedAtFormat } from '../../../store/themeStore'
 import { useLayoutStore, layoutStore } from '../../../store/layoutStore'
+import { useHiddenModelKeys, aiRenameModelStore, useAiRenameModelKey } from '../../../store'
 import { largeTextPasteStore, useLargeTextPasteSettings, type LargeTextPasteBehavior } from '../../../store/largeTextPasteStore'
+import { getModelKey } from '../../../utils/modelUtils'
 import { Toggle, SegmentedControl, SettingRow, SettingsSection, SettingsCardRow } from './SettingsUI'
 import type { PathMode } from '../../../utils/directoryUtils'
 
@@ -39,6 +42,9 @@ export function ChatSettings() {
   } = useTheme()
   const { sendOnEnter } = useLayoutStore()
   const { behavior: largePasteBehavior } = useLargeTextPasteSettings()
+  const { models, isLoading: modelsLoading } = useModels()
+  const hiddenModelKeys = useHiddenModelKeys()
+  const aiRenameModelKey = useAiRenameModelKey()
   const [collapseUserMessages, setCollapseUserMessages] = useState(themeStore.collapseUserMessages)
   const [stepFinishDisplay, setStepFinishDisplay] = useState(themeStore.stepFinishDisplay)
   const [completedAtFormat, setCompletedAtFormat] = useState(themeStore.completedAtFormat)
@@ -193,6 +199,34 @@ export function ChatSettings() {
               }}
             />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title={t('chat.aiRenameModel')} description={t('chat.aiRenameModelDesc')}>
+        <SettingRow label={t('chat.aiRenameModelPick')} description={t('chat.aiRenameModelPickDesc')}>
+          <Select
+            value={aiRenameModelKey ?? 'auto'}
+            onValueChange={value => aiRenameModelStore.set(value === 'auto' ? null : value)}
+          >
+            <SelectTrigger className="w-64">
+              <SelectValue placeholder={t('chat.aiRenameAuto')} />
+            </SelectTrigger>
+            <SelectContent position="popper">
+              <SelectItem value="auto">{t('chat.aiRenameAuto')}</SelectItem>
+              {models
+                .filter(model => !hiddenModelKeys.includes(getModelKey(model)))
+                .map(model => (
+                  <SelectItem key={getModelKey(model)} value={getModelKey(model)}>
+                    {model.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        {modelsLoading && (
+          <SettingsCardRow>
+            <p className="text-[length:var(--fs-xs)] text-text-400">{t('models.loading')}</p>
+          </SettingsCardRow>
+        )}
       </SettingsSection>
 
       <SettingsSection title={t('chat.stepFinishInfo')}>

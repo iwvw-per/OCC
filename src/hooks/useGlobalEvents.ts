@@ -16,6 +16,7 @@ import { notificationStore } from '../store/notificationStore'
 import { soundStore } from '../store/soundStore'
 import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
+import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
 import { subscribeToServerEvents, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
 import { invalidateSessionListCache } from '../api/sessionListCache'
@@ -705,6 +706,9 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         // ============================================
 
         onSessionCreated: session => {
+          // 内部临时会话（AI 重命名等）不进入任何用户可见视图：
+          // 不进列表索引、不注册子会话、不写 session meta、不弹通知。
+          if (isEphemeralSession(session.id)) return
           const scopedId = scope(session.id)
           // 根会话出现会改变列表成员；子会话（parentID）频繁创建且只影响子会话列表，
           // 不做失效以免缓存被子 agent 抖动反复冲掉。
@@ -739,6 +743,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         },
 
         onSessionIdle: data => {
+          if (isEphemeralSession(data.sessionID)) return
           const scopedId = scope(data.sessionID)
           messageStore.handleSessionIdle(scopedId)
           childSessionStore.markIdle(scopedId)
@@ -752,6 +757,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         },
 
         onSessionError: error => {
+          if (isEphemeralSession(error.sessionID ?? '')) return
           const isAbort = error.name === 'MessageAbortedError' || error.name === 'AbortError'
           if (!isAbort && import.meta.env.DEV) {
             console.warn('[GlobalEvents] Session error:', error)
@@ -784,6 +790,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         },
 
         onSessionUpdated: session => {
+          if (isEphemeralSession(session.id)) return
           const scopedId = scope(session.id)
           // 列表索引增量：含「归档迁移」——本桶与归档桶之间移动由 store 内部处理，
           // 因此不再需要整片失效缓存（原来注释说的 30s TTL 兜底已被索引取代）。
@@ -814,6 +821,14 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
 
         onSessionDeleted: sessionId => {
           const scopedId = scope(sessionId)
+          // 内部临时会话：不进用户列表，但需清运行时状态；若曾在事件竞态中
+          // 进过索引桶，delete 事件也照常从桶中移除并记墓碑。
+          if (isEphemeralSession(sessionId)) {
+            clearSessionRuntimeState(scopedId)
+            childSessionStore.removeSession(scopedId)
+            sessionListIndexStore.applyDeleted(serverId, sessionId)
+            return
+          }
           // 删除改变列表成员，失效缓存避免切回时复活已删除项
           invalidateSessionListCache(serverId)
           // 列表索引增量：该服务器所有桶移除 + 记墓碑（挡住晚归的在途响应）
@@ -959,6 +974,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         // ============================================
 
         onSessionStatus: data => {
+          if (isEphemeralSession(data.sessionID)) return
           const scopedId = scope(data.sessionID)
 
           // idle 与 session.idle 走同一落定逻辑，避免重复提示、保证数量下降

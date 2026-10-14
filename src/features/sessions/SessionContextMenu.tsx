@@ -33,7 +33,7 @@ import { pinnedSessionsStore } from '../../store/pinnedSessionsStore'
 import { serverStore } from '../../store/serverStore'
 import { copyTextToClipboard } from '../../utils/clipboard'
 import { exportSessionAsMarkdown } from '../../utils/sessionExport'
-import { generateSessionTitle } from '../../utils/sessionRename'
+import { generateSessionTitle, resolveAiRenameModel } from '../../utils/sessionRename'
 import { getActiveModels } from '../../api/client'
 import { sessionKeyToServerId } from '../../utils/sessionKey'
 import { uiErrorHandler } from '../../utils/errorHandling'
@@ -93,7 +93,7 @@ export function SessionContextMenu({
   const handleAiRename = () =>
     run(async () => {
       const models = await getActiveModels(session.directory, serverId)
-      const model = models[0]
+      const model = resolveAiRenameModel(models, serverId)
       if (!model) throw new Error('No model available')
       const title = await generateSessionTitle(session, { directory: session.directory, serverId, model })
       if (title) onChanged?.()

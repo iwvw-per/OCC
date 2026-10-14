@@ -176,7 +176,12 @@
     "completedAtFormat": "Completion Time Format",
     "completedAtFormatDesc": "Choose whether to show only time or full date and time",
     "completedAtTimeOnly": "Time Only",
-    "completedAtDateTime": "Date & Time"
+    "completedAtDateTime": "Date & Time",
+    "aiRenameModel": "AI Rename Model",
+    "aiRenameModelDesc": "Model used to auto-generate conversation titles for AI rename",
+    "aiRenameModelPick": "Preferred model",
+    "aiRenameModelPickDesc": "Pick the model used by the AI rename action. Leave on Auto to follow your currently selected model.",
+    "aiRenameAuto": "Auto (current model)"
   },
   "agent": {
     "behavior": "Agent Behavior",
