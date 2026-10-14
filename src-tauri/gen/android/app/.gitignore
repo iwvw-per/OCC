@@ -1,4 +1,4 @@
-/src/main/java/com/opencodeui/app/generated
+/src/main/java/com/opencodeui/occ/generated
 /src/main/jniLibs/**/*.so
 /src/main/assets/tauri.conf.json
 /tauri.build.gradle.kts

@@ -1,4 +1,4 @@
-package com.opencodeui.app
+package com.opencodeui.occ
 
 import android.app.Service
 import android.content.Context
