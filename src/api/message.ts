@@ -118,7 +118,7 @@ export async function getSessionMessagePage(
             limit: limit ? Math.min(limit, 200) : undefined,
             cursor: before,
           })
-          // v2 返回升序（时间），无需重排；v1 需要重排为时间升序。
+          // nativeListMessages 已把 v2 的 desc 结果反转为时间升序；v1 分支同样重排为升序。
           const messages = project ? projectPageMessages(page.messages) : page.messages
           return { messages, nextCursor: page.nextCursor }
         }

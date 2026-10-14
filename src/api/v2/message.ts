@@ -151,6 +151,10 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
   const type = str(m.type)
   if (type === 'assistant') {
     const model = rec(m.model)
+    // v2 assistant 在流式/出错时可能不带 tokens；归一为完整 TokenUsage 形状，
+    // 避免下游（统计/速率/上下文详情）读取 undefined.input 崩溃。
+    const tokens = rec(m.tokens)
+    const cache = rec(tokens.cache)
     return {
       info: {
         id,
@@ -164,7 +168,12 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
         agent: str(m.agent) ?? '',
         path: { cwd: '', root: '' },
         cost: num(m.cost) ?? 0,
-        tokens: m.tokens as never,
+        tokens: {
+          input: num(tokens.input) ?? 0,
+          output: num(tokens.output) ?? 0,
+          reasoning: num(tokens.reasoning) ?? 0,
+          cache: { read: num(cache.read) ?? 0, write: num(cache.write) ?? 0 },
+        },
         finish: str(m.finish),
       } as never,
       parts: adaptAssistantParts(m),

@@ -49,10 +49,48 @@ export function mergePartPreferLiveText(local: Part | undefined, incoming: Part)
   return { ...incoming, text } as Part
 }
 
+/**
+ * 合并 tool part：v2 的事件是分片到达的——工具名只在 `session.tool.input.started`
+ * 里，之后的 `session.tool.called` 不带 name。若直接用 incoming 覆盖，会丢掉名字。
+ * 同理，状态从 pending→running 时保留已有 input。
+ *
+ * 不降级：一旦本地已落定为终态（completed/error），后续迟到的 running/pending 事件
+ * 不得把它改回进行中（否则工具卡片会从「已完成」倒退回转圈）。
+ */
+export function mergeToolPart(local: Part | undefined, incoming: Part): Part {
+  if (!local || local.id !== incoming.id) return incoming
+  if (local.type !== 'tool' || incoming.type !== 'tool') return incoming
+  const localTool = local as Part & { tool?: string; state?: { status?: string; input?: Record<string, unknown> } }
+  const incomingTool = incoming as Part & { tool?: string; state?: { status?: string; input?: Record<string, unknown> } }
+  const localStatus = localTool.state?.status
+  const incomingStatus = incomingTool.state?.status
+  const settled = localStatus === 'completed' || localStatus === 'error' || localStatus === 'interrupted'
+  if (settled && (incomingStatus === 'pending' || incomingStatus === 'running')) {
+    // 仅补名字，不改状态/输入
+    const tool = incomingTool.tool || localTool.tool || ''
+    return tool === localTool.tool ? local : ({ ...local, tool } as Part)
+  }
+  const tool = incomingTool.tool || localTool.tool || ''
+  const localInput = localTool.state?.input
+  const incomingInput = incomingTool.state?.input
+  const input =
+    incomingInput && Object.keys(incomingInput).length > 0 ? incomingInput : (localInput ?? incomingInput)
+  if (tool === incomingTool.tool && input === incomingInput) return incoming
+  return {
+    ...incoming,
+    tool,
+    state: { ...(incoming as { state?: object }).state, input },
+  } as Part
+}
+
 export function mergePartsPreferLiveText(localParts: Part[], incomingParts: Part[]): Part[] {
   if (localParts.length === 0) return incomingParts
   const localById = new Map(localParts.map(part => [part.id, part]))
-  return incomingParts.map(part => mergePartPreferLiveText(localById.get(part.id), part))
+  return incomingParts.map(part => {
+    const local = localById.get(part.id)
+    if (part.type === 'tool') return mergeToolPart(local, part)
+    return mergePartPreferLiveText(local, part)
+  })
 }
 
 export interface IncompleteMessageLike {
@@ -77,7 +115,15 @@ export function shouldPreserveLiveParts(
   return messageIsIncomplete(previous)
 }
 
-/** 服务端 canonical part 的 id 以 `prt` 开头；乐观本地占位 part 不是。 */
+/**
+ * 是否为服务端/canonical part 的 id。
+ *
+ * 乐观本地占位 part 使用冒号分隔的本地形式（如 `${messageId}:text`）；
+ * v2 后端 / 适配层的 canonical part id 或以 `prt` 开头，或复用消息 id
+ * 派生（如 `${messageId}-text`、`${messageId}-text-0`）。这两者都应被视为
+ * 权威 part，用于替换同消息内同类型的本地占位 part，避免正文重复。
+ * 因此仅把「含冒号的本地占位 id」判为非服务端，其余一律视为 canonical。
+ */
 export function isServerPartId(id: string): boolean {
-  return id.startsWith('prt')
+  return !id.includes(':')
 }

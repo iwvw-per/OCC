@@ -158,12 +158,13 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
       ttftSamples += 1
     }
 
+    // v2 assistant 消息在流式/出错时 tokens 可能缺省；防御性读取避免崩溃。
     const tokens = info.tokens
-    const cached = tokens.cache?.read ?? 0
-    const written = tokens.cache?.write ?? 0
+    const cached = tokens?.cache?.read ?? 0
+    const written = tokens?.cache?.write ?? 0
     cacheReadTokens += cached
-    inputTokens += tokens.input + cached + written
-    outputTokens += tokens.output
+    inputTokens += (tokens?.input ?? 0) + cached + written
+    outputTokens += tokens?.output ?? 0
 
     // 输出速度分母：文本 part 合并窗口；缺时间窗口时退回整条消息时长
     const textMs = mergeIntervalMs(textIntervals)

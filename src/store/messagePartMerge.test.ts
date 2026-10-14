@@ -5,6 +5,7 @@ import {
   preferCompatibleText,
   mergePartPreferLiveText,
   mergePartsPreferLiveText,
+  mergeToolPart,
   messageIsIncomplete,
   shouldPreserveLiveParts,
   isServerPartId,
@@ -18,6 +19,18 @@ const textPart = (id: string, text: string): Part => ({
   type: 'text',
   text,
 })
+
+const toolPart = (id: string, tool: string, status: string, input: Record<string, unknown> = {}): Part =>
+  ({
+    id,
+    sessionID: 's1',
+    messageID: 'm1',
+    type: 'tool',
+    callID: id,
+    tool,
+    state: { status, input: Object.keys(input).length ? input : undefined },
+  }) as unknown as Part
+
 
 describe('serverIdOfSessionKey / rawSessionIdOfKey', () => {
   it('splits a composite key', () => {
@@ -122,6 +135,35 @@ describe('messageIsIncomplete / shouldPreserveLiveParts', () => {
 describe('isServerPartId', () => {
   it('recognizes server part ids', () => {
     expect(isServerPartId('prt_0001')).toBe(true)
+    // v2 服务端 / 适配层派生的 part id（dash 分隔）也视为 canonical
+    expect(isServerPartId('msg_x-text')).toBe(true)
+    expect(isServerPartId('msg_x-text-0')).toBe(true)
+    // 乐观本地占位 part（colon 分隔）不是
     expect(isServerPartId('msg_x:text')).toBe(false)
+  })
+})
+
+describe('mergeToolPart', () => {
+  it('keeps the tool name when a later event omits it', () => {
+    // input.started 落下名字，tool.called 只有 input 没有 name
+    const pending = toolPart('call_1', 'read', 'pending')
+    const running = toolPart('call_1', '', 'running', { path: '/x' })
+    const merged = mergeToolPart(pending, running) as { tool: string; state: { status: string; input: unknown } }
+    expect(merged.tool).toBe('read')
+    expect(merged.state.status).toBe('running')
+    expect(merged.state.input).toEqual({ path: '/x' })
+  })
+
+  it('does not regress a settled tool back to running/pending', () => {
+    const completed = toolPart('call_1', 'read', 'completed', { path: '/x' })
+    const lateRunning = toolPart('call_1', 'read', 'running', { path: '/x' })
+    const merged = mergeToolPart(completed, lateRunning) as { state: { status: string } }
+    expect(merged.state.status).toBe('completed')
+  })
+
+  it('returns incoming for a different id', () => {
+    const a = toolPart('call_1', 'read', 'running')
+    const b = toolPart('call_2', 'write', 'completed')
+    expect(mergeToolPart(a, b)).toBe(b)
   })
 })

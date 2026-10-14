@@ -70,6 +70,88 @@ describe('v2 event → GlobalEvent', () => {
     expect(p?.type).toBe(EventTypes.QUESTION_ASKED)
   })
 
+  it('maps tool.input.started to a pending tool part carrying the tool name', () => {
+    const p = payloadOf({
+      type: 'session.tool.input.started',
+      data: { sessionID: 's', assistantMessageID: 'm', id: 'call_1', name: 'read' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.MESSAGE_PART_UPDATED)
+    const part = p?.properties.part as { callID: string; tool: string; state: { status: string } }
+    expect(part?.callID).toBe('call_1')
+    expect(part?.tool).toBe('read')
+    expect(part?.state.status).toBe('pending')
+  })
+
+  it('maps tool.called to a running tool part with input', () => {
+    const p = payloadOf({
+      type: 'session.tool.called',
+      data: { sessionID: 's', assistantMessageID: 'm', id: 'call_1', input: { path: '/x' } },
+      location: { directory: '/w' },
+    })
+    const part = p?.properties.part as { callID: string; state: { status: string; input: unknown } }
+    expect(part?.callID).toBe('call_1')
+    expect(part?.state.status).toBe('running')
+    expect(part?.state.input).toEqual({ path: '/x' })
+  })
+
+  it('maps tool.success content[] text blocks to settled output', () => {
+    const p = payloadOf({
+      type: 'session.tool.success',
+      data: { sessionID: 's', assistantMessageID: 'm', id: 'call_1', content: [{ type: 'text', text: 'line1' }, { type: 'text', text: 'line2' }] },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_NEXT_TOOL_SUCCESS)
+    expect(p?.properties.callID).toBe('call_1')
+    expect(p?.properties.output).toBe('line1\nline2')
+  })
+
+  it('maps execution.interrupted to SESSION_IDLE so the session stops spinning', () => {
+    const p = payloadOf({
+      type: 'session.execution.interrupted',
+      data: { sessionID: 's', reason: 'user' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_IDLE)
+    expect(p?.properties.sessionID).toBe('s')
+  })
+
+  it('maps provider.quota error type to APIError (not generic UnknownError)', () => {
+    const p = payloadOf({
+      type: 'session.execution.failed',
+      data: { sessionID: 's', error: { type: 'provider.quota', message: 'Rate limit', status: 429 } },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_ERROR)
+    expect(p?.properties.name).toBe('APIError')
+    expect((p?.properties.data as { statusCode?: number }).statusCode).toBe(429)
+  })
+
+  it('maps aborted step.failed to nothing (silent, no error bubble)', () => {
+    const p = payloadOf({
+      type: 'session.step.failed',
+      data: { sessionID: 's', assistantMessageID: 'm', error: { type: 'aborted', message: 'Step interrupted' } },
+      location: { directory: '/w' },
+    })
+    expect(p).toBeNull()
+  })
+
+  it('maps step.ended to MESSAGE_UPDATED carrying tokens/cost (no model/agent fields to clobber)', () => {
+    const p = payloadOf({
+      type: 'session.step.ended',
+      data: { sessionID: 's', assistantMessageID: 'm', finish: 'stop', cost: 1.5, tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 1, write: 0 } } },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.MESSAGE_UPDATED)
+    const info = p?.properties.info as { id: string; tokens: { input: number }; cost: number }
+    expect(info?.id).toBe('m')
+    expect(info?.tokens.input).toBe(10)
+    expect(info?.cost).toBe(1.5)
+    // 不得携带空 modelID/agent 等会把已建立字段清空的键
+    expect('modelID' in (info as object)).toBe(false)
+    expect('agent' in (info as object)).toBe(false)
+  })
+
   it('drops unmapped events', () => {
     expect(v2EventToGlobalEvent({ type: 'session.usage.updated', data: {}, location: { directory: '/w' } })).toBeNull()
   })

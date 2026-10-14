@@ -20,6 +20,7 @@ import {
   rawSessionIdOfKey,
   mergePartPreferLiveText,
   mergePartsPreferLiveText,
+  mergeToolPart,
   shouldPreserveLiveParts,
   isServerPartId,
 } from './messagePartMerge'
@@ -1037,7 +1038,12 @@ class MessageStore {
       const oldMessage = state.messages[existingIndex]
       // D19：canonical 消息精确命中乐观占位（服务端复用了同一 id），清掉乐观标记
       if (apiMsg.role === 'user') this.optimisticMessageIds.delete(apiMsg.id)
-      const newMessage = { ...oldMessage, info: toUIMessageInfo(apiMsg) }
+      // 合并而非整体替换：v2 的 step.ended/step.failed 只带部分字段（tokens/cost/error），
+      // 若整体替换会把 step.started 落下的 modelID/providerID/agent 清空。
+      const newMessage: Message = {
+        ...oldMessage,
+        info: { ...oldMessage.info, ...toUIMessageInfo(apiMsg) } as Message['info'],
+      }
       state.messages = [
         ...state.messages.slice(0, existingIndex),
         newMessage,
@@ -1092,10 +1098,15 @@ class MessageStore {
 
     if (existingPartIndex !== undefined) {
       const existing = newContent[existingPartIndex]
-      // 未定稿：兼容前缀时不回退；已 completed：强制服务端定稿
-      newContent[existingPartIndex] = shouldPreserveLiveParts(oldMessage)
-        ? mergePartPreferLiveText(existing, incoming)
-        : incoming
+      // tool part：v2 分片事件（input.started 带名 → called 带 input）需合并保留工具名。
+      // 其它 part：未定稿时兼容前缀不回退；已 completed 强制服务端定稿。
+      if (incoming.type === 'tool') {
+        newContent[existingPartIndex] = mergeToolPart(existing, incoming)
+      } else {
+        newContent[existingPartIndex] = shouldPreserveLiveParts(oldMessage)
+          ? mergePartPreferLiveText(existing, incoming)
+          : incoming
+      }
     } else {
       // 服务端 canonical part 的 id 以 `prt` 开头；乐观消息的 part id 为本地形式
       // （如 `${messageId}:text`）。同一消息内出现服务端 part 时，先清掉同类型的本地

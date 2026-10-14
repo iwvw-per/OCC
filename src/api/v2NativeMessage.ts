@@ -56,7 +56,16 @@ export async function nativePrompt(serverId: string | undefined, input: V2Prompt
 
 /**
  * 原生拉取消息页（v2 message.list，cursor 分页）。
- * 返回适配回 ApiMessageWithParts[] + 双向游标。
+ * 返回适配回 ApiMessageWithParts[] + 双向游标；messages 一律按时间升序。
+ *
+ * ⚠️ v2 `message.list` 的排序语义（与 v1 相反，必须显式处理）：
+ * - 默认 order = `desc`（**最新在前**），并非升序；
+ * - 传 `cursor` 时不能再叠加 `order`（会 400），方向由 cursor 自身携带；
+ * - `cursor.next` 指向**更早**一侧。
+ *
+ * 官方 `@opencode/client` 的用法正是「显式 order=desc + `data.toReversed()`」。
+ * 这里对齐：首页取 desc 后反转成升序，续页只用 cursor（返回仍是 desc）再反转。
+ * 返回的 nextCursor 供调用方继续向前（更早）翻页。
  */
 export async function nativeListMessages(
   serverId: string | undefined,
@@ -68,8 +77,10 @@ export async function nativeListMessages(
       sessionID: input.sessionID,
       limit: input.limit,
       cursor: input.cursor,
-      order: input.order,
+      // 有 cursor 时不能传 order（服务端 400）；首页显式 desc，与官方客户端一致。
+      ...(input.cursor ? {} : { order: input.order ?? 'desc' }),
     }),
   )
-  return page
+  // desc（最新在前）→ 升序（时间正序），与前端渲染顺序一致。
+  return { ...page, messages: [...page.messages].reverse() }
 }

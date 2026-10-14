@@ -80,8 +80,17 @@ function shouldUseEstimatedContext(
 }
 
 export function computeSessionStats(messages: Message[], contextLimit: number = 200000): SessionStats {
-  const tokenTotal = (tokens: AssistantMessageInfo['tokens']): number => {
-    return tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read || 0) + (tokens.cache?.write || 0)
+  // v2 的 assistant 消息在流式/出错时 tokens 可能缺省（undefined）；防御性读取，
+  // 否则 tokenTotal → tokens.input 抛出 "Cannot read properties of undefined"。
+  const tokenTotal = (tokens: AssistantMessageInfo['tokens'] | undefined): number => {
+    if (!tokens) return 0
+    return (
+      (tokens.input ?? 0) +
+      (tokens.output ?? 0) +
+      (tokens.reasoning ?? 0) +
+      (tokens.cache?.read || 0) +
+      (tokens.cache?.write || 0)
+    )
   }
 
   let inputTokens = 0
@@ -99,11 +108,12 @@ export function computeSessionStats(messages: Message[], contextLimit: number = 
       const hasTokens = tokenTotal(info.tokens) > 0
 
       if (hasTokens) {
-        inputTokens += info.tokens.input
-        outputTokens += info.tokens.output
-        reasoningTokens += info.tokens.reasoning
-        cacheRead += info.tokens.cache?.read || 0
-        cacheWrite += info.tokens.cache?.write || 0
+        const tokens = info.tokens
+        inputTokens += tokens.input ?? 0
+        outputTokens += tokens.output ?? 0
+        reasoningTokens += tokens.reasoning ?? 0
+        cacheRead += tokens.cache?.read || 0
+        cacheWrite += tokens.cache?.write || 0
       }
       if (info.cost) {
         totalCost += info.cost

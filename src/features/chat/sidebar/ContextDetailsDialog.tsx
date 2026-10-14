@@ -14,8 +14,15 @@ interface ContextDetailsDialogProps {
   contextLimit: number
 }
 
-function tokenTotal(tokens: TokenUsage): number {
-  return tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
+function tokenTotal(tokens: TokenUsage | undefined): number {
+  if (!tokens) return 0
+  return (
+    (tokens.input ?? 0) +
+    (tokens.output ?? 0) +
+    (tokens.reasoning ?? 0) +
+    (tokens.cache?.read ?? 0) +
+    (tokens.cache?.write ?? 0)
+  )
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -116,12 +123,12 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
 
         {contextTokens && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg border border-border-200/50 bg-bg-200/20">
-            <Stat label={t('contextDetails.inputTokens')} value={formatTokens(contextTokens.input)} />
-            <Stat label={t('contextDetails.outputTokens')} value={formatTokens(contextTokens.output)} />
-            <Stat label={t('contextDetails.reasoning')} value={formatTokens(contextTokens.reasoning)} />
+            <Stat label={t('contextDetails.inputTokens')} value={formatTokens(contextTokens.input ?? 0)} />
+            <Stat label={t('contextDetails.outputTokens')} value={formatTokens(contextTokens.output ?? 0)} />
+            <Stat label={t('contextDetails.reasoning')} value={formatTokens(contextTokens.reasoning ?? 0)} />
             <Stat
               label={t('contextDetails.cacheRW')}
-              value={`${formatTokens(contextTokens.cache.read)} / ${formatTokens(contextTokens.cache.write)}`}
+              value={`${formatTokens(contextTokens.cache?.read ?? 0)} / ${formatTokens(contextTokens.cache?.write ?? 0)}`}
             />
           </div>
         )}
