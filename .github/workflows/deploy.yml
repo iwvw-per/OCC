@@ -29,7 +29,7 @@ jobs:
 
       - run: npm run build
         env:
-          VITE_BASE_PATH: /OpenCodeUI/
+          VITE_BASE_PATH: /OCC/
 
       - uses: actions/upload-pages-artifact@v5
         with:

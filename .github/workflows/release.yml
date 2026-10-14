@@ -104,7 +104,7 @@ jobs:
         with:
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
-          releaseName: 'OpenCodeUI ${{ github.ref_name }}'
+          releaseName: 'OCC ${{ github.ref_name }}'
           releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, 'canary') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
@@ -188,7 +188,7 @@ jobs:
           SIGNED_APK=$(find src-tauri/gen/android/app/build/outputs/apk -path '*/release/*-signed*' -name '*.apk' -type f 2>/dev/null | head -1)
           RELEASE_APK=$(find src-tauri/gen/android/app/build/outputs/apk -path '*/release/*.apk' -name '*.apk' -type f 2>/dev/null | head -1)
           APK_PATH="${SIGNED_APK:-$RELEASE_APK}"
-          DEST="OpenCodeUI-${VERSION}-android-${{ matrix.label }}.apk"
+          DEST="OCC-${VERSION}-android-${{ matrix.label }}.apk"
 
           if $BT/apksigner verify "$APK_PATH" 2>/dev/null; then
             cp "$APK_PATH" "$DEST"

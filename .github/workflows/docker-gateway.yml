@@ -16,7 +16,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/opencodeui-gateway
+  IMAGE_NAME: ${{ github.repository_owner }}/occ-gateway
 
 jobs:
   build-and-push:

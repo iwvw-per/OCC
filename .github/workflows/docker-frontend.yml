@@ -22,7 +22,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/opencodeui-frontend
+  IMAGE_NAME: ${{ github.repository_owner }}/occ-frontend
 
 jobs:
   build-and-push:
