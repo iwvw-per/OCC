@@ -4,11 +4,13 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativePrompt } from './v2NativeMessage'
 import { sanitizeMessageWithParts } from './sanitize'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { sharedInflightRequest } from '../utils/singleFlight'
 import { serverStorage } from '../utils/perServerStorage'
+import { serverStore } from '../store/serverStore'
 import { TURN_FETCH_MAX_PAGES, TURN_FETCH_MESSAGE_LIMIT } from '../constants/pagination'
 import type {
   ApiMessageWithParts,
@@ -624,6 +626,17 @@ function buildPromptParams(params: SendMessageParams, serverId?: string): Prompt
  */
 export async function sendMessage(params: SendMessageParams, serverId?: string): Promise<SendMessageResponse> {
   const target = resolveSessionTarget(params.sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
+    await nativePrompt(target.serverId, {
+      sessionID: target.sessionId,
+      parts: built.parts as never,
+      model: built.model,
+      agent: built.agent,
+      messageID: built.messageID,
+    })
+    return { info: {} as SendMessageResponse['info'], parts: [] }
+  }
   const sdk = getSDKClient(target.serverId)
   return unwrap<SendMessageResponse>(await sdk.session.prompt(buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)))
 }
@@ -633,6 +646,17 @@ export async function sendMessage(params: SendMessageParams, serverId?: string):
  */
 export async function sendMessageAsync(params: SendMessageParams, serverId?: string): Promise<void> {
   const target = resolveSessionTarget(params.sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
+    await nativePrompt(target.serverId, {
+      sessionID: target.sessionId,
+      parts: built.parts as never,
+      model: built.model,
+      agent: built.agent,
+      messageID: built.messageID,
+    })
+    return
+  }
   const sdk = getSDKClient(target.serverId)
   unwrap(await sdk.session.promptAsync(buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)))
 }
