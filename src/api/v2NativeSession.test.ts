@@ -9,7 +9,6 @@ import {
   nativeCreateSession,
   nativeUpdateSession,
   nativeRemoveSession,
-  nativeInterruptSession,
 } from './v2NativeSession'
 
 const URL = import.meta.env.VITE_V2_SANDBOX_URL as string | undefined
