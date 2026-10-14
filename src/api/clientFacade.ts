@@ -318,10 +318,12 @@ export function createV2Facade(serverId?: string): OpencodeClient {
         }
         return ok(true)
       },
-      async providers() {
+      async providers(input?: { directory?: string }) {
         // v1 的 config.providers 期望 { providers: [{ id, name, models: {...} }] },
         // v2 把模型拆到独立 /api/model。合并两路并组装成 v1 形状。
-        const [providersRes, modelsRes] = await Promise.all([client.provider.list(), client.model.list()])
+        // 必须带 location，否则 /api/model 返回空列表 → 模型选择器空白。
+        const loc = input?.directory ? { directory: input.directory } : undefined
+        const [providersRes, modelsRes] = await Promise.all([client.provider.list({ location: loc }), client.model.list({ location: loc })])
         return ok({ providers: adaptProviders(adaptDataList(providersRes), adaptDataList(modelsRes)) })
       },
       global: {
@@ -388,13 +390,13 @@ export function createV2Facade(serverId?: string): OpencodeClient {
       },
     },
     provider: {
-      async list() {
-        return ok(adaptDataList(await client.provider.list()))
+      async list(input?: { directory?: string }) {
+        return ok(adaptDataList(await client.provider.list({ location: input?.directory ? { directory: input.directory } : undefined })))
       },
     },
     model: {
-      async list() {
-        return ok(adaptDataList(await client.model.list()))
+      async list(input?: { directory?: string }) {
+        return ok(adaptDataList(await client.model.list({ location: input?.directory ? { directory: input.directory } : undefined })))
       },
     },
 
