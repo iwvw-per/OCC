@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "OpenCode",
+  "productName": "OCV2",
   "version": "2.0.0",
-  "identifier": "com.opencodeui.app",
+  "identifier": "com.opencodeui.ocv2",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5176",
@@ -15,7 +15,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "OpenCode",
+        "title": "OCV2",
         "width": 800,
         "height": 600,
         "titleBarStyle": "Overlay",
