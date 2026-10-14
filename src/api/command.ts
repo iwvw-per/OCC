@@ -6,6 +6,7 @@ import { getSDKClient, unwrap } from './sdk'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
+import { getSkills } from './skill'
 import i18n from '../i18n'
 
 export interface Command {
@@ -38,6 +39,14 @@ function getCommandCacheKey(directory?: string, serverId?: string): string {
 }
 
 async function fetchCommands(directory?: string, serverId?: string): Promise<Command[]> {
+  const apiCommands = await fetchApiCommands(directory, serverId)
+  const frontendCommands = getFrontendCommands()
+  const commandsFromApi: Command[] = apiCommands.map(command => ({ ...command, source: 'api' }))
+  const apiNames = new Set(commandsFromApi.map(c => c.name))
+  return [...commandsFromApi, ...frontendCommands.filter(c => !apiNames.has(c.name))]
+}
+
+async function fetchApiCommands(directory?: string, serverId?: string): Promise<ApiCommand[]> {
   let apiCommands: ApiCommand[] = []
   try {
     const sdk = getSDKClient(serverId)
@@ -45,10 +54,31 @@ async function fetchCommands(directory?: string, serverId?: string): Promise<Com
   } catch {
     // Backend unreachable — frontend commands still available
   }
-  const frontendCommands = getFrontendCommands()
-  const commandsFromApi: Command[] = apiCommands.map(command => ({ ...command, source: 'api' }))
-  const apiNames = new Set(commandsFromApi.map(c => c.name))
-  return [...commandsFromApi, ...frontendCommands.filter(c => !apiNames.has(c.name))]
+
+  // v1 的 /command 会把 slash skill（source:'skill'）一起返回；v2 把 command 与
+  // skill 拆开（/api/command 只返回纯命令）。这里对 v2 服务器额外合并 skill，
+  // 使 slash 面板能继续通过 / 调出 skill。
+  const isV2 = serverStore.getApiVersion(serverId ?? serverStore.getActiveServerId()) === 'v2'
+  if (!isV2) return apiCommands
+
+  const existingNames = new Set(apiCommands.map(c => c.name))
+  const skillCommands: ApiCommand[] = []
+  try {
+    const skills = await getSkills(directory, serverId)
+    for (const skill of skills) {
+      if (!skill || typeof skill !== 'object') continue
+      const name = (skill as { name?: string }).name
+      if (!name || existingNames.has(name)) continue
+      skillCommands.push({
+        name,
+        description: (skill as { description?: string }).description,
+      })
+      existingNames.add(name)
+    }
+  } catch {
+    // Skill 拉取失败不阻塞命令面板，纯命令仍可用
+  }
+  return [...apiCommands, ...skillCommands]
 }
 
 export async function getCommands(directory?: string, serverId?: string): Promise<Command[]> {
