@@ -323,7 +323,12 @@ export function createV2Facade(serverId?: string): OpencodeClient {
         // v2 把模型拆到独立 /api/model。合并两路并组装成 v1 形状。
         // 必须带 location，否则 /api/model 返回空列表 → 模型选择器空白。
         const loc = input?.directory ? { directory: input.directory } : undefined
-        const [providersRes, modelsRes] = await Promise.all([client.provider.list({ location: loc }), client.model.list({ location: loc })])
+        // model.list 可能失败（如插件未激活返回 503 / 服务器临时不可用）：
+        // 不能让整个 providers 请求崩掉，model 失败时降级为空数组，provider 仍可用。
+        const [providersRes, modelsRes] = await Promise.all([
+          client.provider.list({ location: loc }),
+          client.model.list({ location: loc }).catch(() => ({ data: [] })),
+        ])
         return ok({ providers: adaptProviders(adaptDataList(providersRes), adaptDataList(modelsRes)) })
       },
       global: {
