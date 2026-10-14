@@ -3,7 +3,9 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeGetConfig, nativeGetProviders } from './v2NativeConfig'
 import { formatPathForApi } from '../utils/directoryUtils'
+import { serverStore } from '../store/serverStore'
 import type { Config } from '../types/api/config'
 import type { ProvidersResponse } from '../types/api/model'
 
@@ -11,6 +13,10 @@ import type { ProvidersResponse } from '../types/api/model'
  * 获取当前配置
  */
 export async function getConfig(directory?: string): Promise<Config> {
+  const sid = serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeGetConfig(sid, { directory }) as Config
+  }
   const sdk = getSDKClient()
   return unwrap(await sdk.config.get({ directory: formatPathForApi(directory) }))
 }
@@ -44,6 +50,10 @@ export async function updateGlobalConfig(config: Config): Promise<Config> {
  * 获取 provider 配置列表
  */
 export async function getProviderConfigs(directory?: string): Promise<ProvidersResponse> {
+  const sid = serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeGetProviders(sid, { directory })
+  }
   const sdk = getSDKClient()
   return unwrap(await sdk.config.providers({ directory: formatPathForApi(directory) }))
 }
