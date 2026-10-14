@@ -4,6 +4,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeGetCurrentProject, nativeListProjects, nativeInitGit } from './v2NativeProject'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
 import { ttlCacheGet, ttlCacheSet } from '../utils/ttlCache'
@@ -112,6 +113,9 @@ export async function getActiveModels(directory?: string, serverId?: string): Pr
 export async function getCurrentProject(directory?: string, serverId?: string): Promise<ApiProject> {
   const sid = serverId ?? serverStore.getActiveServerId()
   return singleFlight(`project-current:${sid}:${directoryCacheKey(directory)}`, async () => {
+    if (serverStore.getApiVersion(sid) === 'v2') {
+      return nativeGetCurrentProject(sid, { directory }) as unknown as ApiProject
+    }
     const sdk = getSDKClient(serverId)
     return unwrap(await sdk.project.current({ directory: formatPathForApi(directory, serverId) }))
   })
@@ -125,6 +129,9 @@ export async function getCurrentProject(directory?: string, serverId?: string): 
 export async function getProjects(directory?: string, serverId?: string): Promise<ApiProject[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
   return singleFlight(`project-list:${sid}:${directoryCacheKey(directory)}`, async () => {
+    if (serverStore.getApiVersion(sid) === 'v2') {
+      return nativeListProjects(sid, { directory }) as unknown as ApiProject[]
+    }
     const sdk = getSDKClient(serverId)
     return requireArray<ApiProject>(
       unwrap(await sdk.project.list({ directory: formatPathForApi(directory, serverId) })),
@@ -137,6 +144,10 @@ export async function getProjects(directory?: string, serverId?: string): Promis
  * 初始化 Git 仓库
  */
 export async function initGitProject(directory?: string, serverId?: string): Promise<ApiProject> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeInitGit(sid) as unknown as ApiProject
+  }
   const sdk = getSDKClient(serverId)
   return unwrap(await sdk.project.initGit({ directory: formatPathForApi(directory, serverId) }))
 }
