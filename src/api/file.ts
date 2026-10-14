@@ -4,6 +4,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeListDirectory, nativeReadFile, nativeFindFiles } from './v2NativeFile'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import type { FileNode, FileContent, FileStatusItem, TextSearchMatch } from './types'
 import { serverStore } from '../store/serverStore'
@@ -24,6 +25,10 @@ function getRootDirectoryCacheKey(directory?: string, serverId?: string): string
 }
 
 async function fetchDirectory(path: string, directory?: string, serverId?: string): Promise<FileNode[]> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeListDirectory(sid, { directory, path })
+  }
   const sdk = getSDKClient(serverId)
   const isAbsolute = /^[a-zA-Z]:/.test(path) || path.startsWith('/')
 
@@ -46,6 +51,10 @@ export async function searchFiles(
     serverId?: string
   } = {},
 ): Promise<string[]> {
+  const sid = options.serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeFindFiles(sid, { directory: options.directory, query, type: options.type, limit: options.limit })
+  }
   const sdk = getSDKClient(options.serverId)
   return unwrap(
     await sdk.find.files({
@@ -98,6 +107,10 @@ export async function prefetchRootDirectory(directory?: string, serverId?: strin
  * 读取文件内容
  */
 export async function getFileContent(path: string, directory?: string, serverId?: string): Promise<FileContent> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeReadFile(sid, { directory, path }) as unknown as FileContent
+  }
   const sdk = getSDKClient(serverId)
   return unwrap(await sdk.file.read({ path, directory: formatPathForApi(directory, serverId) }))
 }
