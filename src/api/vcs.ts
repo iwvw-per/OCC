@@ -3,6 +3,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeGetVcsInfo } from './v2NativeAgent'
 import type { FileDiff } from './types'
 import type { VcsDiffMode, VcsInfo } from '../types/api/vcs'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
@@ -22,6 +23,9 @@ export async function getVcsInfo(directory?: string, serverId?: string): Promise
     `vcs:info:${sid}:${directoryCacheKey(directory)}`,
     async () => {
       try {
+        if (serverStore.getApiVersion(sid) === 'v2') {
+          return nativeGetVcsInfo(sid, { directory }) as unknown as VcsInfo
+        }
         const sdk = getSDKClient(serverId)
         return unwrap(await sdk.vcs.get({ directory: formatPathForApi(directory, serverId) }))
       } catch {

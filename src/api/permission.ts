@@ -4,6 +4,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeListPermissions } from './v2NativeAgent'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
@@ -54,6 +55,10 @@ export async function getPendingPermissions(
   const permissions = await microCache(
     pendingScopeKey('permission', directory, serverId),
     async () => {
+      const sid = serverId ?? serverStore.getActiveServerId()
+      if (serverStore.getApiVersion(sid) === 'v2') {
+        return nativeListPermissions(sid)
+      }
       const sdk = getSDKClient(serverId)
       return unwrap(await sdk.permission.list({ directory: formatPathForApi(directory, serverId) }))
     },

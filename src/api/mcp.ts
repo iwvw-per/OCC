@@ -3,6 +3,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeGetMcpStatus } from './v2NativeAgent'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { microCache, invalidateMicroCache } from '../utils/microCache'
 import { serverStore } from '../store/serverStore'
@@ -24,7 +25,11 @@ function mcpScopeKey(kind: 'status' | 'resources', directory?: string, serverId?
  * 获取所有 MCP 服务器状态
  */
 export async function getMcpStatus(directory?: string, serverId?: string): Promise<MCPStatusResponse> {
+  const sid = serverId ?? serverStore.getActiveServerId()
   return microCache(mcpScopeKey('status', directory, serverId), async () => {
+    if (serverStore.getApiVersion(sid) === 'v2') {
+      return (await nativeGetMcpStatus(sid)) as MCPStatusResponse
+    }
     const sdk = getSDKClient(serverId)
     return unwrap(await sdk.mcp.status({ directory: formatPathForApi(directory, serverId) }))
   })

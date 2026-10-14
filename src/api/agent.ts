@@ -4,6 +4,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { nativeListAgents } from './v2NativeAgent'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { microCache } from '../utils/microCache'
 import { serverStore } from '../store/serverStore'
@@ -24,6 +25,9 @@ export async function getAgents(directory?: string, serverId?: string): Promise<
   return microCache(
     `agents:${sid}:${directoryCacheKey(directory)}`,
     async () => {
+      if (serverStore.getApiVersion(sid) === 'v2') {
+        return nativeListAgents(sid, { directory })
+      }
       const sdk = getSDKClient(serverId)
       return unwrap(await sdk.app.agents({ directory: formatPathForApi(directory, serverId) }))
     },
