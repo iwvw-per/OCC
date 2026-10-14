@@ -430,6 +430,10 @@ export async function unrevertSession(sessionId: string, directory?: string, ser
  */
 export async function shareSession(sessionId: string, directory?: string, serverId?: string): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    // v2 无 share 能力，返回当前会话（安全 no-op）
+    return nativeGetSession(target.serverId, target.sessionId)
+  }
   const sdk = getSDKClient(target.serverId)
   return unwrap(
     await sdk.session.share({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
@@ -441,6 +445,10 @@ export async function shareSession(sessionId: string, directory?: string, server
  */
 export async function unshareSession(sessionId: string, directory?: string, serverId?: string): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    // v2 无 share 能力，返回当前会话（安全 no-op）
+    return nativeGetSession(target.serverId, target.sessionId)
+  }
   const sdk = getSDKClient(target.serverId)
   return unwrap(
     await sdk.session.unshare({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
@@ -526,6 +534,10 @@ export type ApiTodo = TodoItem
  */
 export async function getSessionTodos(sessionId: string, directory?: string, serverId?: string): Promise<ApiTodo[]> {
   const target = resolveSessionTarget(sessionId, serverId)
+  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+    // v2 无 session.todo 主动拉取端点，todo 由 SSE 事件（session.todo）驱动，返回空
+    return []
+  }
   const sdk = getSDKClient(target.serverId)
   const todos = unwrap(
     await sdk.session.todo({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
