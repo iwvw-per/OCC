@@ -4,7 +4,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
-import { nativePrompt } from './v2NativeMessage'
+import { nativePrompt, nativeListMessages } from './v2NativeMessage'
 import { sanitizeMessageWithParts } from './sanitize'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
@@ -135,6 +135,17 @@ export async function getSessionMessagePage(
     key,
     () =>
       getWithTruncationRetry(async () => {
+        const isV2 = serverStore.getApiVersion(target.serverId) === 'v2'
+        if (isV2) {
+          const page = await nativeListMessages(target.serverId, {
+            sessionID: target.sessionId,
+            limit: limit ? Math.min(limit, 200) : undefined,
+            cursor: before,
+          })
+          // v2 返回升序（时间），无需重排；v1 需要重排为时间升序。
+          const messages = project ? projectPageMessages(page.messages) : page.messages
+          return { messages, nextCursor: page.nextCursor }
+        }
         const sdk = getSDKClient(target.serverId)
         const result = await sdk.session.messages({
           sessionID: target.sessionId,
@@ -230,6 +241,11 @@ export async function probeLightweightSupport(
 
   const request = (async () => {
     try {
+      // v2 标准服务器无主机 Agent 的轻量投影（X-Lightweight 头），直接判定不支持。
+      if (serverStore.getApiVersion(target.serverId) === 'v2') {
+        lightweightSupportCache.set(cacheKey, false)
+        return false
+      }
       const sdk = getSDKClient(target.serverId)
       const result = await sdk.session.messages(
         {
