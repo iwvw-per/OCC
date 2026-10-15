@@ -11,11 +11,43 @@
 // ============================================
 
 import type { GlobalEvent } from '../types'
+import type { ApiSession } from '../../types'
 import { EventTypes } from '../../types/api/event'
 import { rec, str, num } from './adapt'
+import { adaptSession } from './session'
 
 function globalEvent(directory: string, type: string, properties: Record<string, unknown>): GlobalEvent {
   return { directory, payload: { type, properties } } as unknown as GlobalEvent
+}
+
+/**
+ * 把 v2 的 `session.created / moved / metadata.updated` 事件 payload 适配成
+ * 前端 `ApiSession` 形状。
+ *
+ * v2 事件里会话 id 在 `data.sessionID`（不是 `data.id`）、目录在
+ * `data.location.directory`（不是顶层 `directory`），时间在事件级 `created`
+ * （session.created 的 data 里没有 `time`）。若原样透传：
+ *   - applySessionChanged 按 `session.directory` 路由目录桶时拿到 ''，
+ *     新会话在所有「按目录分桶」的侧栏桶里被 continue 丢弃 —— 新建对话后
+ *     侧栏不出现，必须整页刷新才能看到；
+ *   - scope()/makeSessionKey 拿 undefined id 生成损坏复合 key。
+ *
+ * metadata.updated 只带 {sessionID, metadata}，用事件级 location/created 兜底。
+ */
+function adaptSessionEvent(e: { data?: unknown; location?: unknown; created?: number }): ApiSession {
+  const d = rec(e.data)
+  const dataTime = rec(d.time)
+  const eventLocation = rec(e.location)
+  const sessionID = str(d.sessionID) ?? str(d.id) ?? ''
+  const created = num(dataTime.created) ?? num(e.created) ?? 0
+  const updated = num(dataTime.updated) ?? created
+  return adaptSession({
+    ...d,
+    id: sessionID,
+    // data 里无 location（metadata.updated）时退回事件级 location
+    location: rec(d.location).directory ? d.location : eventLocation,
+    time: { ...dataTime, created, updated },
+  })
 }
 
 /**
@@ -94,7 +126,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     case 'session.updated':
     case 'session.metadata.updated':
     case 'session.moved': {
-      const session = data.session ?? data
+      const session = adaptSessionEvent(e)
       return globalEvent(directory, type === 'session.created' ? EventTypes.SESSION_CREATED : EventTypes.SESSION_UPDATED, {
         info: session,
       })

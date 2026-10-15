@@ -470,13 +470,13 @@ export function SidePanel({
   // all → 拉 /children 全量：选中的 root 或选中子 session 时保持其父展开
   const expandedChildSessionIds = useMemo(() => {
     if (search || !showAllChildSessions || !selectedSessionId) return undefined
-    // 选中 session 可能属于任意服务器，直接用全服务器的 childSessionStore 判断
-    if (childSessionStore.getChildSessionIds(selectedSessionId).length > 0) {
-      return new Set([splitSessionKey(selectedSessionId).sessionId])
-    }
+    // 选中子 session → 展开其父；否则（root）展开自身，交给 SessionChildrenSlot
+    // 走 fetchAll 拉 /children。不能依赖 childSessionStore 的内存注册来判断——
+    // 历史子会话（本客户端连接之前创建）不在注册表里，按注册判断会永远不展开，
+    // 「显示全部子会话」形同无效。
     const pid = findParentId(selectedSessionId)
     if (pid) return new Set([pid])
-    return undefined
+    return new Set([splitSessionKey(selectedSessionId).sessionId])
   }, [search, showAllChildSessions, selectedSessionId, findParentId])
 
   // active → 只挂活跃的 + 选中的子 session；off → 只挂选中的那个

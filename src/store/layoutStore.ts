@@ -666,6 +666,7 @@ export class LayoutStore {
     this.state.sidebarChildSessions = mode
     try {
       localStorage.setItem(STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS, mode)
+      notifyPerServerStorageChanged()
     } catch {
       /* ignore */
     }

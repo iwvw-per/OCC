@@ -16,11 +16,56 @@ describe('v2 event → GlobalEvent', () => {
   it('maps session.created to v1 SESSION_CREATED with info', () => {
     const p = payloadOf({
       type: 'session.created',
-      data: { session: { id: 'ses_1', title: 't' } },
-      location: { directory: '/w' },
+      data: { sessionID: 'ses_1', title: 't' },
+      location: { directory: '/w', subpath: '' },
     })
     expect(p?.type).toBe(EventTypes.SESSION_CREATED)
-    expect((p?.properties.info as { id: string }).id).toBe('ses_1')
+    const info = p?.properties.info as { id: string; title: string; directory: string }
+    expect(info.id).toBe('ses_1')
+  })
+
+  it('adapts session.created v2 shape: sessionID/location.directory → id/directory, event created → time', () => {
+    const p = payloadOf({
+      id: 'evt_1',
+      created: 1792032110104,
+      type: 'session.created',
+      location: { directory: '/tmp/o/w' },
+      data: { sessionID: 'ses_v2', slug: 'happy-panda', projectID: 'p', location: { directory: '/tmp/o/w' }, subpath: '' },
+    })!
+    const info = p.properties.info as {
+      id: string
+      directory: string
+      parentID?: string
+      version?: string
+      time?: { created?: number; updated?: number }
+    }
+    expect(info.id).toBe('ses_v2')
+    expect(info.directory).toBe('/tmp/o/w')
+    expect(info.time?.created).toBe(1792032110104)
+    expect(info.time?.updated).toBe(1792032110104)
+  })
+
+  it('adapts session.moved to SESSION_UPDATED using data.location; falls back to event location for metadata.updated', () => {
+    const moved = payloadOf({
+      id: 'evt_m',
+      created: 1000,
+      type: 'session.moved',
+      location: { directory: '/a' },
+      data: { sessionID: 's', location: { directory: '/b' } },
+    })!
+    expect(moved.type).toBe(EventTypes.SESSION_UPDATED)
+    expect((moved.properties.info as { directory: string }).directory).toBe('/b')
+
+    const meta = payloadOf({
+      id: 'evt_meta',
+      created: 2000,
+      type: 'session.metadata.updated',
+      location: { directory: '/a' },
+      data: { sessionID: 's', metadata: { starred: true } },
+    })!
+    expect(meta.type).toBe(EventTypes.SESSION_UPDATED)
+    expect((meta.properties.info as { id: string; directory: string }).id).toBe('s')
+    expect((meta.properties.info as { directory: string }).directory).toBe('/a')
   })
 
   it('maps text.delta to MESSAGE_PART_DELTA (assistantMessageID + ordinal)', () => {
