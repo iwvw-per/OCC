@@ -85,6 +85,11 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
   if (!result.filePath && inputObj?.filePath) {
     result.filePath = String(inputObj.filePath)
   }
+  // v2 write/save 工具把目标路径放在 input.path（而非 filePath）。不读取会导致
+  // collectChangedFiles 用工具名（如 "write"）兜底当文件路径，变更列表显示错乱。
+  if (!result.filePath && inputObj && typeof inputObj.path === 'string') {
+    result.filePath = inputObj.path
+  }
 
   // Exit code
   if (metadata && typeof metadata.exit === 'number') {
