@@ -3,7 +3,7 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
-import { nativeGetVcsInfo } from './v2NativeAgent'
+import { nativeGetVcsInfo, nativeGetVcsDiff } from './v2NativeAgent'
 import type { FileDiff } from './types'
 import type { VcsDiffMode, VcsInfo } from '../types/api/vcs'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
@@ -45,6 +45,24 @@ export async function getVcsDiff(mode: VcsDiffMode, directory?: string, serverId
   return microCache(
     `vcs:diff:${mode}:${sid}:${directoryCacheKey(directory)}`,
     async () => {
+      if (serverStore.getApiVersion(sid) === 'v2') {
+        const raw = (await nativeGetVcsDiff(sid, { mode: String(mode), directory })) as Array<{
+          file?: string
+          patch?: string
+          additions?: number
+          deletions?: number
+          status?: 'added' | 'deleted' | 'modified'
+        }>
+        return normalizeFileDiffs(
+          raw.map(diff => ({
+            file: diff.file,
+            patch: diff.patch,
+            additions: diff.additions ?? 0,
+            deletions: diff.deletions ?? 0,
+            status: diff.status,
+          })),
+        )
+      }
       const sdk = getSDKClient(serverId)
       return normalizeFileDiffs(unwrap(await sdk.vcs.diff({ mode, directory: formatPathForApi(directory, serverId) })))
     },
