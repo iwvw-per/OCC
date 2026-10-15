@@ -848,6 +848,17 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           }
         },
 
+        // v2 重试：后端放弃旧 assistant 消息（assistantMessageID）、用新 id 重新生成。
+        // 旧消息可能已产生部分文本（限流/超时打断时），不移除会与新消息完整文本
+        // 同时渲染 → 同一轮回复里句子重复。这里按 id 移除旧消息；新消息由后续
+        // step.started / text.* 事件正常建立。
+        onSessionRetryScheduled: ({ sessionID, assistantMessageID }) => {
+          const scopedId = scope(sessionID)
+          if (!messageStore.getSessionState(scopedId)) return
+          messageStore.removeMessage(scopedId, assistantMessageID)
+          scheduleScroll?.(scopedId)
+        },
+
         onSessionDeleted: sessionId => {
           const scopedId = scope(sessionId)
           // 内部临时会话：不进用户列表，但需清运行时状态；若曾在事件竞态中

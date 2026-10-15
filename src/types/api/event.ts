@@ -106,6 +106,13 @@ export const EventTypes = {
   SESSION_STATUS: 'session.status',
   SESSION_DIFF: 'session.diff',
   SESSION_COMPACTED: 'session.compacted',
+  /**
+   * v2 重试信号：`session.retry.scheduled`。后端因限流/超时对某条 assistant
+   * 消息发起重试时，会先广播此事件（带被放弃的 assistantMessageID），随后用
+   * **新的** assistantMessageID 重新生成。若不处理，前端会把旧消息已产生的
+   * 部分文本与新消息的完整文本都渲染出来 —— 表现为「回复中有的句子出现两次」。
+   */
+  SESSION_RETRY_SCHEDULED: 'session.retry.scheduled',
 
   // Message events
   MESSAGE_UPDATED: 'message.updated',
@@ -171,7 +178,7 @@ export const EventTypes = {
   PTY_UPDATED: 'pty.updated',
   PTY_EXITED: 'pty.exited',
   PTY_DELETED: 'pty.deleted',
-} as const satisfies Record<string, SDKGlobalEvent['payload']['type'] | 'session.renamed'>
+} as const satisfies Record<string, SDKGlobalEvent['payload']['type'] | 'session.renamed' | 'session.retry.scheduled'>
 
 export type EventType = SDKGlobalEvent['payload']['type']
 
@@ -189,6 +196,8 @@ export interface EventCallbacks {
   onSessionUpdated?: (session: Session) => void
   /** 会话重命名（v2）：仅有 {sessionID, title}，消费方按 id 更新标题，不做整条替换 */
   onSessionRenamed?: (data: { sessionID: string; title: string }) => void
+  /** v2 重试：后端放弃该 assistant 消息并用新 id 重新生成，消费方移除旧消息避免文本重复 */
+  onSessionRetryScheduled?: (data: { sessionID: string; assistantMessageID: string }) => void
   onSessionDeleted?: (sessionId: string) => void
   onSessionIdle?: (data: SessionIdlePayload) => void
   onSessionError?: (data: SessionErrorPayload) => void

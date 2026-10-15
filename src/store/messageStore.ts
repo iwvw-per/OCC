@@ -1149,6 +1149,13 @@ class MessageStore {
       return // Mutable 修改：直接拼接 text，不做不可变拷贝。
       // 一帧内可能收到多个 delta，只有最后的状态会被 React 看到。
       // flushDirtyMessages() 会在 notify 的 rAF 回调中统一生成新引用。
+
+    // D-dup：part 已被 text.ended 定稿（带 end 时间）后，迟到的 delta 不再追加。
+    // text.ended 携带完整文本并覆盖 part.text；若随后再有乱序/重发的 delta 被
+    // 拼到完整文本后面，就会「完整文本 + 迟到增量」导致句子重复。已定稿的 part
+    // 以服务端完整文本为准，丢弃后续增量。
+    const partTime = (part as { time?: { end?: number } }).time
+    if (partTime && typeof partTime.end === 'number') return
     ;(part as { text: string }).text += data.delta
 
     let dirtyPartsByMessage = this.dirtyPartsBySession.get(sessionKey)

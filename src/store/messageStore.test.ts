@@ -144,6 +144,25 @@ describe('messageStore', () => {
     expect(msg2?.content[0]).toMatchObject({ id: 'part-2', text: 'queued' })
   })
 
+  it('ignores a delta that arrives after its text part was finalized by text.ended (D-dup)', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    // text.ended 携带完整文本 + end 时间，定稿 part
+    messageStore.handlePartUpdated({
+      ...createTextPart('part-1', 'message-1', '完整句子'),
+      time: { start: 1000, end: 2000 },
+    } as unknown as ApiPart & { sessionID: string; messageID: string })
+    // 乱序/重发的迟到 delta：不得拼到完整文本后面
+    messageStore.handlePartDelta({
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      partID: 'part-1',
+      field: 'text',
+      delta: '（重复尾巴）',
+    })
+    const state = messageStore.getSessionState('session-1')
+    expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-1', text: '完整句子' })
+  })
+
   it('marks cached sessions stale after reconnect and clears the flag after a fresh load', () => {
     messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
 

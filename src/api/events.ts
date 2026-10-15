@@ -769,6 +769,15 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     if (sessionID) callbacks.onSessionRenamed?.({ sessionID, title })
     return
   }
+  if ((payload.type as string) === EventTypes.SESSION_RETRY_SCHEDULED) {
+    const props = (payload as {
+      properties?: { sessionID?: unknown; assistantMessageID?: unknown }
+    }).properties
+    const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
+    const assistantMessageID = typeof props?.assistantMessageID === 'string' ? props.assistantMessageID : ''
+    if (sessionID && assistantMessageID) callbacks.onSessionRetryScheduled?.({ sessionID, assistantMessageID })
+    return
+  }
   switch (payload.type) {
     case EventTypes.MESSAGE_UPDATED: {
       const message = getMessageInfo(payload.properties)

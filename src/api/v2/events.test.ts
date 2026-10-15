@@ -101,6 +101,16 @@ describe('v2 event → GlobalEvent', () => {
     expect(p?.properties).toEqual({ sessionID: 'ses_1', title: '递归定义与示例' })
   })
 
+  it('maps session.retry.scheduled to SESSION_RETRY_SCHEDULED with assistantMessageID', () => {
+    const p = payloadOf({
+      type: 'session.retry.scheduled',
+      data: { sessionID: 'ses_1', assistantMessageID: 'msg_old', attempt: 2, at: 1, error: { type: 'rate_limit', message: 'x' } },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_RETRY_SCHEDULED)
+    expect(p?.properties).toEqual({ sessionID: 'ses_1', assistantMessageID: 'msg_old' })
+  })
+
   it('maps execution.succeeded to SESSION_IDLE (v2 has no session.idle)', () => {
     const p = payloadOf({
       type: 'session.execution.succeeded',

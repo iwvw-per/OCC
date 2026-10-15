@@ -138,6 +138,16 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         sessionID,
         title: str(data.title) ?? '',
       })
+    // v2 重试：后端放弃该 assistant 消息、用新 id 重新生成。前端须移除旧消息，
+    // 否则旧消息已产生的部分文本与新消息完整文本同时渲染 → 句子重复。
+    case 'session.retry.scheduled': {
+      const assistantMessageID = str(data.assistantMessageID) ?? ''
+      if (!sessionID || !assistantMessageID) return null
+      return globalEvent(directory, EventTypes.SESSION_RETRY_SCHEDULED, {
+        sessionID,
+        assistantMessageID,
+      })
+    }
     case 'session.deleted':
       return globalEvent(directory, EventTypes.SESSION_DELETED, { sessionID })
     case 'session.idle':
