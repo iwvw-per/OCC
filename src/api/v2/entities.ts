@@ -53,16 +53,22 @@ export function adaptPty(raw: unknown): Pty {
  * {path, type}（path 为相对路径）。UI（ProjectDialog / useFileExplorer 等）
  * 依赖 name 做排序（localeCompare），缺 name 直接崩溃，必须在适配层补上
  * name/absolute/ignored。
+ *
+ * ⚠️ 跨平台：Windows 后端返回的 path 用反斜杠且目录带尾分隔符（如 `.agents\`），
+ * Linux 用正斜杠（`.agents/`）。此前只按 '/' 切分，Windows 下 name 会变成整段
+ * 带反斜杠的路径，于是子目录显示成「父目录名\子目录名」、目录名还挂着尾反斜杠。
+ * 这里统一把 path 规范成前端内部约定的正斜杠相对路径（去尾分隔符），name 取最后
+ * 一段，absolute 也用正斜杠拼接；两种系统下表现一致。
  */
 export function adaptFileNode(
   raw: unknown,
   options: { directory?: string },
 ): { name: string; path: string; absolute: string; type: 'file' | 'directory'; ignored: boolean } {
   const e = rec(raw)
-  const relPath = str(e.path) ?? ''
   const isDir = e.type === 'directory'
+  const relPath = (str(e.path) ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
   const name = relPath.split('/').filter(Boolean).pop() ?? relPath
-  const directory = options.directory?.replace(/\/+$/, '') ?? ''
+  const directory = (options.directory ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
   const absolute = relPath === '' ? directory : directory ? `${directory}/${relPath}` : relPath
   return {
     name,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { adaptSession } from './session'
 import { adaptMessage, adaptMessagePage } from './message'
-import { adaptPermission, adaptAgent, adaptPty } from './entities'
+import { adaptPermission, adaptAgent, adaptPty, adaptFileNode } from './entities'
 
 describe('v2 session adapter', () => {
   it('maps location.directory to directory and fills version placeholder', () => {
@@ -80,5 +80,36 @@ describe('v2 entity adapters', () => {
   it('fills pty size default', () => {
     const p = adaptPty({ id: 'pty_1', title: 't', status: 'running', pid: 5 }) as unknown as { size: { rows: number; cols: number } }
     expect(p.size).toEqual({ rows: 24, cols: 80 })
+  })
+})
+
+describe('v2 file node adapter (cross-platform paths)', () => {
+  it('Linux 正斜杠相对路径', () => {
+    const n = adaptFileNode({ path: 'apps/(app)/index.ts', type: 'file' }, { directory: '/home/u/proj' })
+    expect(n.name).toBe('index.ts')
+    expect(n.path).toBe('apps/(app)/index.ts')
+    expect(n.absolute).toBe('/home/u/proj/apps/(app)/index.ts')
+  })
+
+  it('Windows 反斜杠相对路径：name 只取最后一段，不带父目录', () => {
+    const n = adaptFileNode({ path: 'apps\\web\\src\\index.ts', type: 'file' }, { directory: 'C:\\dev\\proj' })
+    expect(n.name).toBe('index.ts')
+    expect(n.path).toBe('apps/web/src/index.ts')
+    expect(n.absolute).toBe('C:/dev/proj/apps/web/src/index.ts')
+  })
+
+  it('Windows 目录带尾反斜杠：name 不带尾分隔符，更不嵌套父目录名', () => {
+    const n = adaptFileNode({ path: '.agents\\', type: 'directory' }, { directory: 'C:\\dev\\proj' })
+    expect(n.name).toBe('.agents')
+    expect(n.path).toBe('.agents')
+    expect(n.absolute).toBe('C:/dev/proj/.agents')
+    expect(n.type).toBe('directory')
+  })
+
+  it('目录带尾正斜杠（Linux）同样去掉', () => {
+    const n = adaptFileNode({ path: 'node_modules/', type: 'directory' }, { directory: '/p' })
+    expect(n.name).toBe('node_modules')
+    expect(n.path).toBe('node_modules')
+    expect(n.absolute).toBe('/p/node_modules')
   })
 })
