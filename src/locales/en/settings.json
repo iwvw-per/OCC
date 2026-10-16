@@ -2,7 +2,7 @@
   "title": "Settings",
   "subtitle": "Customize UI, behavior, and server setup",
   "closeSettings": "Close settings",
-  "version": "OpenCodeUI v{{version}}",
+  "version": "OCC v{{version}}",
   "search": {
     "placeholder": "Search settings",
     "clear": "Clear settings search",
@@ -316,7 +316,7 @@
     "testNotification": "Test Notification",
     "sendSampleDesc": "Send a sample notification",
     "enableToTest": "Enable notifications to test",
-    "testTitle": "OpenCode",
+    "testTitle": "OCC",
     "testBody": "This is a test notification",
     "notAvailable": "System notifications are not available in this environment",
     "notificationTypes": "Notification Types",
@@ -467,7 +467,7 @@
   "about": {
     "title": "About & Updates",
     "versionCardTitle": "Version",
-    "versionCardDesc": "Check whether a newer OpenCodeUI release is available and jump to the download page.",
+    "versionCardDesc": "Check whether a newer OCC release is available and jump to the download page.",
     "backupCardTitle": "Backup & Restore",
     "backupCardDesc": "Export your local settings to a JSON backup, or restore them later on another device.",
     "backupWarning": "For security, backups exclude server passwords and tokens — you will need to re-enter them after importing on another device. Backups still include sensitive settings such as service environment variables, so keep the file private.",

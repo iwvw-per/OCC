@@ -2,7 +2,7 @@
   "title": "设置",
   "subtitle": "自定义界面、行为和服务器配置",
   "closeSettings": "关闭设置",
-  "version": "OpenCodeUI v{{version}}",
+  "version": "OCC v{{version}}",
   "search": {
     "placeholder": "搜索设置",
     "clear": "清空设置搜索",
@@ -316,7 +316,7 @@
     "testNotification": "测试通知",
     "sendSampleDesc": "发送一条示例通知",
     "enableToTest": "启用通知以进行测试",
-    "testTitle": "OpenCode",
+    "testTitle": "OCC",
     "testBody": "这是一条测试通知",
     "notAvailable": "此环境不支持系统通知",
     "notificationTypes": "通知类型",
@@ -467,7 +467,7 @@
   "about": {
     "title": "关于和更新",
     "versionCardTitle": "版本",
-    "versionCardDesc": "检查是否有新的 OpenCodeUI 发布版本，并直接跳到下载页面。",
+    "versionCardDesc": "检查是否有新的 OCC 发布版本，并直接跳到下载页面。",
     "backupCardTitle": "备份和恢复",
     "backupCardDesc": "把本地设置导出为 JSON 备份，或在另一台设备上重新导入恢复。",
     "backupWarning": "出于安全考虑，备份文件不包含服务器密码与令牌，在另一台设备导入后需要重新填写。备份仍包含服务环境变量等敏感设置，请妥善保管。",
