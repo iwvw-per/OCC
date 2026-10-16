@@ -69,17 +69,20 @@ export async function nativePrompt(serverId: string | undefined, input: V2Prompt
  */
 export async function nativeListMessages(
   serverId: string | undefined,
-  input: { sessionID: string; limit?: number; cursor?: string; order?: 'desc' },
+  input: { sessionID: string; limit?: number; cursor?: string; order?: 'desc'; headers?: Record<string, string> },
 ): Promise<{ messages: ApiMessageWithParts[]; nextCursor?: string; prevCursor?: string }> {
   const client = getV2Client(serverId)
   const page = adaptMessagePage(
-    await client.message.list({
-      sessionID: input.sessionID,
-      limit: input.limit,
-      cursor: input.cursor,
-      // 有 cursor 时不能传 order（服务端 400）；首页显式 desc，与官方客户端一致。
-      ...(input.cursor ? {} : { order: input.order ?? 'desc' }),
-    }),
+    await client.message.list(
+      {
+        sessionID: input.sessionID,
+        limit: input.limit,
+        cursor: input.cursor,
+        // 有 cursor 时不能传 order（服务端 400）；首页显式 desc，与官方客户端一致。
+        ...(input.cursor ? {} : { order: input.order ?? 'desc' }),
+      },
+      input.headers ? { headers: input.headers } : undefined,
+    ),
   )
   // desc（最新在前）→ 升序（时间正序），与前端渲染顺序一致。
   return { ...page, messages: [...page.messages].reverse() }

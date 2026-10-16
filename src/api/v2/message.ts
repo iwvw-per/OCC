@@ -149,6 +149,9 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
   const sessionID = str(m.sessionID) ?? ''
   const time = rec(m.time)
   const type = str(m.type)
+  // 主机 Agent 的轻量投影会在消息上回填 lightweight 统计（见 aiagent_projection）。
+  // 透传到内部形状，前端据此把消息标记为压缩态并可展开回拉完整内容。
+  const lightweight = adaptLightweight(m.lightweight)
   if (type === 'assistant') {
     const model = rec(m.model)
     // v2 assistant 在流式/出错时可能不带 tokens；归一为完整 TokenUsage 形状，
@@ -177,6 +180,7 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
         finish: str(m.finish),
       } as never,
       parts: adaptAssistantParts(m),
+      ...(lightweight ? { lightweight } : {}),
     }
   }
   // 只把真正的 user 消息映射为用户消息；idle / model-switched / agent-switched /
@@ -193,7 +197,18 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
       model: { providerID: '', modelID: '' },
     } as never,
     parts: adaptUserParts(m),
+    ...(lightweight ? { lightweight } : {}),
   }
+}
+
+/** 归一 lightweight 统计字段；缺失或非法返回 undefined。 */
+function adaptLightweight(raw: unknown): { reasoningCount?: number; stepCount?: number } | undefined {
+  if (raw == null || typeof raw !== 'object') return undefined
+  const lw = rec(raw)
+  const reasoningCount = num(lw.reasoningCount)
+  const stepCount = num(lw.stepCount)
+  if (reasoningCount == null && stepCount == null) return undefined
+  return { reasoningCount, stepCount }
 }
 
 /** v2 message.list 响应 → 内部 messages + 双向游标 */

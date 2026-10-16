@@ -3,8 +3,9 @@
 // 基于 @opencode-ai/sdk: /session/{sessionID}/message 相关接口
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
+import { getSDKClient, unwrap, buildHeaders } from './sdk'
 import { nativePrompt, nativeListMessages } from './v2NativeMessage'
+import { adaptMessagePage } from './v2/message'
 import { sanitizeMessageWithParts } from './sanitize'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
@@ -185,6 +186,68 @@ function writePersistedSupport(serverId: string): void {
 }
 
 /**
+ * 构造 v2 消息端点 URL。
+ *
+ * v2 的路径前缀是 `/api`（v1 无前缀），主机 Agent 的轻量投影对两者都生效：
+ * Agent 会识别 `/session/{id}/message` 与 `/api/session/{id}/message`。
+ */
+function v2MessageUrl(serverId: string, sessionId: string, params: Record<string, string>): string {
+  const base = serverStore.getServerBaseUrl(serverId).replace(/\/$/, '')
+  const url = new URL(`${base}/api/session/${encodeURIComponent(sessionId)}/message`)
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
+  return url.toString()
+}
+
+/** 走裸 fetch 直连 v2 消息端点（v2 SDK 不透出响应头，探测/读头必须自己发）。 */
+async function fetchV2MessageRaw(
+  serverId: string,
+  url: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const { getUnifiedFetch } = await import('../store/serverStore')
+  const fetchImpl = await getUnifiedFetch()
+  return fetchImpl(url, {
+    headers: { ...buildHeaders(serverId), Accept: 'application/json', [LIGHTWEIGHT_HEADER]: '1' },
+    signal,
+  })
+}
+
+/** v2 轻量能力探测：连本机 Agent 是否对 /api/session/{id}/message 做投影。 */
+async function probeV2LightweightSupport(serverId: string, sessionId: string): Promise<boolean> {
+  const res = await fetchV2MessageRaw(serverId, v2MessageUrl(serverId, sessionId, { limit: '1' }))
+  if (!res.ok) return false
+  return (res.headers.get(LIGHTWEIGHT_HEADER) ?? '') === '1'
+}
+
+/**
+ * v2 一次性轻量拉取整个会话（单请求）。
+ *
+ * v2 服务端把单次 limit 钳到 200，但主机 Agent 会对 `/api/session/{id}/message`
+ * 的轻量请求做投影，并在 Agent 侧自行按 cursor 翻页取全（见 aiagent 的 v2 投影），
+ * 因此这里只发「一次」大 limit 请求即可拿到整段压缩对话，与 v1 主机的轻量路径
+ * 对齐：首屏即完整、无需上滑补历史；展开折叠块时再按轮次回拉完整 parts。
+ *
+ * 若 Agent 未升级（不识别 v2 轻量请求）则不会回填 X-Lightweight 头，
+ * probeLightweightSupport 会判定不支持，调用方不会走到这里。
+ */
+async function fetchV2LightweightMessages(
+  serverId: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<LightweightMessages> {
+  const res = await fetchV2MessageRaw(
+    serverId,
+    v2MessageUrl(serverId, sessionId, { limit: String(LIGHTWEIGHT_MESSAGE_LIMIT) }),
+    signal,
+  )
+  if (!res.ok) throw new Error(`v2 lightweight fetch failed: HTTP ${res.status}`)
+  const body: unknown = await res.json()
+  const page = adaptMessagePage(body)
+  // Agent 按 desc（最新在前）累积返回，这里反转为时间升序，与前端渲染顺序一致。
+  return { messages: [...page.messages].reverse(), hasMore: false }
+}
+
+/**
  * 探测某服务器的主机 Agent 是否支持轻量投影。
  *
  * 用 limit=1 + X-Lightweight 头发一个极小请求：新版 Agent 会回填 X-Lightweight
@@ -217,10 +280,13 @@ export async function probeLightweightSupport(
 
   const request = (async () => {
     try {
-      // v2 标准服务器无主机 Agent 的轻量投影（X-Lightweight 头），直接判定不支持。
+      // v2：主机 Agent 同样支持轻量投影，但走的是 /api/session/{id}/message
+      // （v2 前缀）。v2 SDK 不透出响应头，故用裸 fetch 探测。
       if (serverStore.getApiVersion(target.serverId) === 'v2') {
-        lightweightSupportCache.set(cacheKey, false)
-        return false
+        const supported = await probeV2LightweightSupport(target.serverId, target.sessionId)
+        lightweightSupportCache.set(cacheKey, supported)
+        if (supported) writePersistedSupport(cacheKey)
+        return supported
       }
       const sdk = getSDKClient(target.serverId)
       const result = await sdk.session.messages(
@@ -297,6 +363,11 @@ export async function getSessionLightweightMessages(
   return sharedInflightRequest(
     key,
     async () => {
+      // v2：走原生的 /api/session/{id}/message + X-Lightweight，由主机 Agent 内部
+      // 分页取全并投影；v2 SDK 不便于读响应头，这里用裸 fetch。
+      if (serverStore.getApiVersion(target.serverId) === 'v2') {
+        return fetchV2LightweightMessages(target.serverId, target.sessionId, options?.signal)
+      }
       const sdk = getSDKClient(target.serverId)
       const result = await sdk.session.messages({
         sessionID: target.sessionId,
@@ -367,11 +438,51 @@ function isUserApiMessage(message: ApiMessageWithParts): boolean {
  */
 export function encodeMessageCursor(message: ApiMessageWithParts, inclusive = false): string {
   const created = message.info.time?.created ?? 0
-  const payload = JSON.stringify({ id: message.info.id, time: inclusive ? created + 1 : created })
+  return encodeBase64Url(JSON.stringify({ id: message.info.id, time: inclusive ? created + 1 : created }))
+}
+
+/** base64url 编码（无填充），游标载荷统一走这里，保证与各端期待一致。 */
+function encodeBase64Url(payload: string): string {
   const bytes = new TextEncoder().encode(payload)
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+/**
+ * 构造 v2 服务端可识别的分页游标。
+ *
+ * ⚠️ v2 `message.list` 的游标与 v1 **不同**（不能复用 encodeMessageCursor）：
+ *
+ *     base64url(JSON.stringify({ id: string, order: 'asc'|'desc', direction: 'next'|'previous' }))
+ *
+ * 语义（实测）：
+ * - `direction: 'next'` 返回该消息**更早**一侧（不含自身）；
+ * - `direction: 'previous'` 返回该消息**更新**一侧（不含自身）；
+ * - `order` 决定返回后的排序，服务端不强制须与首页一致。
+ *
+ * v1 游标（{id,time}）传给 v2 会被拒（InvalidCursorError），因此 hydrateTurn
+ * 展开压缩轮次时必须按 apiVersion 选对游标编码，见 encodeBeforeCursor。
+ */
+export function encodeV2MessageCursor(
+  message: ApiMessageWithParts,
+  direction: 'next' | 'previous' = 'next',
+): string {
+  return encodeBase64Url(JSON.stringify({ id: message.info.id, order: 'desc', direction }))
+}
+
+/**
+ * 按服务器协议选择「取该消息更早一侧」的游标编码。
+ *
+ * v1 用 {id,time}（time=created 表示不含自身），v2 用 {id,order,direction:next}。
+ * 供 hydrateTurn（展开被压缩轮次）等需要本地自造游标的场景调用。
+ */
+export function encodeBeforeCursor(message: ApiMessageWithParts, serverId?: string): string {
+  const resolvedServerId = serverId ?? serverStore.getActiveServerId()
+  if (resolvedServerId && serverStore.getApiVersion(resolvedServerId) === 'v2') {
+    return encodeV2MessageCursor(message, 'next')
+  }
+  return encodeMessageCursor(message, false)
 }
 
 /**

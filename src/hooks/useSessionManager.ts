@@ -17,7 +17,7 @@ import {
   getSessionMessagePage,
   getSessionLightweightMessages,
   probeLightweightSupport,
-  encodeMessageCursor,
+  encodeBeforeCursor,
   getSession,
   revertMessage,
   unrevertSession,
@@ -547,7 +547,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       const serverId = sessionKeyToServerId(sessionId)
       const nextTurnUser = endIndex < messages.length ? messages[endIndex] : undefined
       const before = nextTurnUser
-        ? encodeMessageCursor({ info: nextTurnUser.info, parts: [] } as ApiMessageWithParts, false)
+        ? encodeBeforeCursor({ info: nextTurnUser.info, parts: [] } as ApiMessageWithParts, serverId)
         : undefined
 
       const seq = loadSequenceRef.current.get(sessionId)

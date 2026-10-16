@@ -76,6 +76,12 @@ export type Part =
 export interface MessageWithParts {
   info: Message
   parts: Part[]
+  /**
+   * 轻量投影统计：主机 Agent 命中 X-Lightweight 投影时会剥掉 reasoning 与工具
+   * 大输出，并在消息上回填过程规模，供折叠块 header 在压缩态仍显示「N 步 / N 段思考」。
+   * 存在即表示该消息为压缩投影（前端标记 isCompressed）。
+   */
+  lightweight?: { reasoningCount?: number; stepCount?: number }
 }
 
 export type TextPartInput = SDKTextPartInput

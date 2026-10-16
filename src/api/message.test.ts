@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { messagesMock, messageMock, getSDKClientMock } = vi.hoisted(() => ({
+const { messagesMock, messageMock, getSDKClientMock, getApiVersionMock, getActiveServerIdMock } = vi.hoisted(() => ({
   messagesMock: vi.fn(),
   messageMock: vi.fn(),
   getSDKClientMock: vi.fn(),
+  getApiVersionMock: vi.fn(),
+  getActiveServerIdMock: vi.fn(),
 }))
 
 vi.mock('./sdk', () => ({
@@ -11,6 +13,13 @@ vi.mock('./sdk', () => ({
   unwrap: (result: { data?: unknown; error?: unknown }) => {
     if (result.error != null) throw result.error
     return result.data
+  },
+}))
+
+vi.mock('../store/serverStore', () => ({
+  serverStore: {
+    getApiVersion: (...args: unknown[]) => getApiVersionMock(...args),
+    getActiveServerId: (...args: unknown[]) => getActiveServerIdMock(...args),
   },
 }))
 
@@ -38,12 +47,23 @@ const { storageMock } = vi.hoisted(() => {
 
 vi.mock('../utils/perServerStorage', () => ({ serverStorage: storageMock }))
 
+beforeEach(() => {
+  // 版本探测按会话协议分支：默认未知（走 v1），用例内用 mockReturnValueOnce 覆盖，
+  // 避免某个用例设的 'v2' 泄漏到后续用例。
+  getApiVersionMock.mockReset()
+  getApiVersionMock.mockReturnValue(undefined)
+  getActiveServerIdMock.mockReset()
+  getActiveServerIdMock.mockReturnValue('srv')
+})
+
 import {
   getSessionMessagePage,
   getSessionMessages,
   getSessionTurnPage,
   encodeMessageCursor,
   decodeMessageCursor,
+  encodeV2MessageCursor,
+  encodeBeforeCursor,
   probeLightweightSupport,
   resetLightweightSupportCache,
   getSessionLightweightMessages,
@@ -245,6 +265,67 @@ describe('encodeMessageCursor', () => {
     expect(decodeMessageCursor('not-a-cursor')).toBeUndefined()
     expect(decodeMessageCursor('')).toBeUndefined()
     expect(decodeMessageCursor(btoa('{"id":1}'))).toBeUndefined()
+  })
+})
+
+function decodeCursorJson(cursor: string): unknown {
+  const base64 = cursor.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+  return JSON.parse(atob(padded))
+}
+
+describe('encodeV2MessageCursor', () => {
+  it('encodes {id,order,direction:next} as base64url (v2 server format)', () => {
+    const message = envelope({
+      info: { id: 'msg-9', sessionID: 'ses-1', role: 'user', time: { created: 1234 } },
+    })
+    const cursor = encodeV2MessageCursor(message as never)
+    expect(cursor).not.toContain('=')
+    expect(decodeCursorJson(cursor)).toEqual({ id: 'msg-9', order: 'desc', direction: 'next' })
+  })
+
+  it('supports the newer-side direction', () => {
+    const message = envelope({
+      info: { id: 'msg-9', sessionID: 'ses-1', role: 'user', time: { created: 1234 } },
+    })
+    expect(decodeCursorJson(encodeV2MessageCursor(message as never, 'previous'))).toEqual({
+      id: 'msg-9',
+      order: 'desc',
+      direction: 'previous',
+    })
+  })
+
+  it('is NOT the v1 format (a v2 server rejects {id,time})', () => {
+    const message = envelope({
+      info: { id: 'msg-9', sessionID: 'ses-1', role: 'user', time: { created: 1234 } },
+    })
+    expect(decodeCursorJson(encodeV2MessageCursor(message as never))).not.toHaveProperty('time')
+    expect(decodeCursorJson(encodeMessageCursor(message as never))).toEqual({ id: 'msg-9', time: 1234 })
+  })
+})
+
+describe('encodeBeforeCursor (protocol-aware)', () => {
+  it('uses the v1 {id,time} cursor for v1 servers', () => {
+    getApiVersionMock.mockReturnValue('v1')
+    const message = envelope({
+      info: { id: 'msg-9', sessionID: 'ses-1', role: 'user', time: { created: 1234 } },
+    })
+    expect(decodeCursorJson(encodeBeforeCursor(message as never, 'srv-1'))).toEqual({
+      id: 'msg-9',
+      time: 1234,
+    })
+  })
+
+  it('uses the v2 {id,order,direction} cursor for v2 servers', () => {
+    getApiVersionMock.mockReturnValue('v2')
+    const message = envelope({
+      info: { id: 'msg-9', sessionID: 'ses-1', role: 'user', time: { created: 1234 } },
+    })
+    expect(decodeCursorJson(encodeBeforeCursor(message as never, 'srv-1'))).toEqual({
+      id: 'msg-9',
+      order: 'desc',
+      direction: 'next',
+    })
   })
 })
 
