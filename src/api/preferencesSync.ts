@@ -113,7 +113,7 @@
 // 时间戳用 ISO 8601，与服务端字符串比较口径一致。
 // ============================================
 
-import { accountRequest, readAccount, type AiAgentAccount } from './aiagent'
+import { accountRequest, accountRequestWithMeta, readAccount, type AiAgentAccount } from './aiagent'
 import { notifyPerServerStorageChanged } from '../utils/perServerStorage'
 import { layoutStore } from '../store/layoutStore'
 import { serverStore } from '../store/serverStore'
@@ -142,6 +142,43 @@ const SYNC_STAMPS_KEY = 'opencode-preferences-sync-stamps'
 const TOMBSTONES_KEY = 'opencode-preferences-sync-tombstones'
 
 const SNAPSHOT_KEY = '__snapshot__'
+
+/**
+ * 上一次 pull 拿到的 ETag（按账号域 + 用户区分）。
+ *
+ * 面板对 GET /api/aiagent/preferences 返回全量偏好（数十 KB），而同步引擎每
+ * 15 秒就会拉一次。服务端已支持 ETag/If-None-Match → 304（零响应体），这里
+ * 带上缓存值即可把「内容没变」的轮询成本降到接近 0。
+ */
+const PULL_ETAG_KEY = 'opencode-preferences-sync-etag'
+
+function readPullEtag(account: AiAgentAccount): string {
+  try {
+    const raw = localStorage.getItem(PULL_ETAG_KEY)
+    if (!raw) return ''
+    const parsed = asRecord(JSON.parse(raw))
+    if (!parsed) return ''
+    const scope = `${account.domain}|${account.username}`
+    const value = parsed[scope]
+    return typeof value === 'string' ? value : ''
+  } catch {
+    return ''
+  }
+}
+
+function writePullEtag(account: AiAgentAccount, etag: string): void {
+  try {
+    const raw = localStorage.getItem(PULL_ETAG_KEY)
+    const parsed = raw ? asRecord(JSON.parse(raw)) : null
+    const next: Record<string, string> = parsed ? { ...(parsed as Record<string, string>) } : {}
+    const scope = `${account.domain}|${account.username}`
+    if (etag) next[scope] = etag
+    else delete next[scope]
+    localStorage.setItem(PULL_ETAG_KEY, JSON.stringify(next))
+  } catch {
+    // 忽略：ETag 只是优化，存不下就退化为普通请求。
+  }
+}
 
 const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -806,7 +843,25 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
   const current = account ?? readAccount()
   if (!current) throw new Error('尚未登录')
 
-  const items = await accountRequest<ServerPreferenceItem[]>(current, '/api/aiagent/preferences')
+  // 带 ETag 的条件请求：服务端内容未变时回 304（零响应体），直接跳过合并。
+  const cachedEtag = readPullEtag(current)
+  const meta = await accountRequestWithMeta<ServerPreferenceItem[]>(
+    current,
+    '/api/aiagent/preferences',
+    cachedEtag ? { headers: { 'If-None-Match': cachedEtag } } : undefined,
+  )
+  if (meta.etag) writePullEtag(current, meta.etag)
+  if (meta.notModified) {
+    // 304：服务端内容与上次拉取完全一致，无需合并，但快照仍要跟上本地当前值。
+    // 否则快照会停留在更早的基线，下一轮把「本地已删除、服务端仍在」的条目
+    // 误判成新增，墓碑判定也会滞后一轮。
+    writeStampState({
+      stamps: readStampState().stamps,
+      known: { ...readStampState().known, [SNAPSHOT_KEY]: JSON.stringify(collectLocalPreferences()) },
+    })
+    return 0
+  }
+  const items = meta.data
   if (!Array.isArray(items)) return 0
 
   const stampState = readStampState()

@@ -81,6 +81,59 @@ describe('preferences sync', () => {
     return fetchMock
   }
 
+  it('sends If-None-Match and skips merge on 304', async () => {
+    const account = await seedAccount()
+    localStorage.setItem('font-scale', '0.5')
+    // 首次拉取：服务端返回内容并下发 ETag。
+    const ETAG = '"abc123"'
+    let getCalls = 0
+    let sawIfNoneMatch: string | null = null
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'PUT') {
+        return new Response(JSON.stringify({ success: true, data: { written: [] } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/aiagent/preferences')) {
+        getCalls += 1
+        const headers = new Headers(init?.headers)
+        sawIfNoneMatch = headers.get('If-None-Match')
+        if (sawIfNoneMatch === ETAG) {
+          // 304：无响应体。
+          return new Response(null, { status: 304, headers: { ETag: ETAG } })
+        }
+        return new Response(
+          JSON.stringify({
+            success: true,
+            data: [{ key: 'font-scale', value: '0.1', updatedAt: '2030-01-01T00:00:00.000Z' }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json', ETag: ETAG } },
+        )
+      }
+      return new Response(JSON.stringify({ success: true, data: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { pullPreferences } = await import('./preferencesSync')
+
+    // 第一次：无 If-None-Match，拿到数据并记住 ETag。
+    const first = await pullPreferences(account)
+    expect(sawIfNoneMatch).toBeNull()
+    expect(first).toBe(1)
+    expect(localStorage.getItem('font-scale')).toBe('0.1')
+
+    // 第二次：带上 ETag，服务端回 304，不产生任何写入。
+    const second = await pullPreferences(account)
+    expect(sawIfNoneMatch).toBe(ETAG)
+    expect(second).toBe(0)
+    expect(getCalls).toBe(2)
+  })
+
   it('admits every globally whitelisted key', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
     for (const key of GLOBAL_WHITELIST) {

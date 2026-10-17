@@ -108,6 +108,39 @@ export async function accountRequest<T>(account: AiAgentAccount, path: string, i
   return (isRecord(payload) ? payload.data : payload) as T
 }
 
+/** accountRequest 的带响应头版本：供需要 ETag 条件请求的调用方使用。 */
+export async function accountRequestWithMeta<T>(
+  account: AiAgentAccount,
+  path: string,
+  init?: RequestInit,
+): Promise<{ data: T; notModified: boolean; etag: string | null }> {
+  const requestFetch = await getUnifiedFetch()
+  const response = await requestFetch(`${account.domain}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${account.token}`,
+      ...(init?.headers || {}),
+    },
+  })
+  // 304 没有响应体，且不是错误：调用方据此复用本地缓存。
+  if (response.status === 304) {
+    return { data: undefined as T, notModified: true, etag: response.headers.get('ETag') }
+  }
+  const payload: unknown = await response.json().catch(() => ({}))
+  if (!response.ok || (isRecord(payload) && payload.success === false)) {
+    const message = isRecord(payload) && typeof payload.error === 'string' ? payload.error : `请求失败 (${response.status})`
+    const error = new Error(message)
+    ;(error as Error & { status?: number }).status = response.status
+    throw error
+  }
+  return {
+    data: (isRecord(payload) ? payload.data : payload) as T,
+    notModified: false,
+    etag: response.headers.get('ETag'),
+  }
+}
+
 /** 登录换取长期令牌（不落盘，由调用方决定是否保存） */
 export async function login(domainInput: string, username: string, password: string, deviceLabel?: string) {
   const domain = normalizeDomain(domainInput)

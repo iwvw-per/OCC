@@ -40,6 +40,15 @@ export interface SyncState {
 }
 
 const POLL_INTERVAL_MS = 15_000
+/**
+ * 本地无改动时的兜底拉取间隔。
+ *
+ * 原实现每 15 秒无条件拉一次全量偏好（数十 KB），实测单端约 0.3 GB/天。
+ * 真正的实时性由 SSE 推送保证（服务端写成功后立即推送变更键），轮询只是
+ * 「SSE 断开/丢事件」时的兜底，因此无本地改动时没必要保持 15 秒。
+ * 拉取仍带 If-None-Match，内容未变时服务端回 304（零响应体）。
+ */
+const IDLE_POLL_INTERVAL_MS = 5 * 60_000
 // 本地改动合并窗口：一次编辑常触发多次写入（如删一项后重排），需要合并成一次
 // 上传；但不能太长，否则「改完立刻看另一台」的体感变差。500ms 足以吸收连写，
 // 又让上传几乎立刻发生。
@@ -137,7 +146,9 @@ function poll(): void {
     scheduleSync()
     return
   }
-  if (Date.now() - lastSyncAt < POLL_INTERVAL_MS) return
+  // 本地无改动：走较长的兜底间隔（实时性由 SSE 保证），且请求带 ETag，
+  // 内容未变时服务端回 304，几乎不产生流量。
+  if (Date.now() - lastSyncAt < IDLE_POLL_INTERVAL_MS) return
   void runSync(false)
 }
 
