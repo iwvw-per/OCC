@@ -70,8 +70,8 @@ export async function getSessionStatus(directory?: string, serverId?: string): P
       if (serverStore.getApiVersion(sid) === 'v2') {
         return nativeActiveSessions(sid) as unknown as SessionStatusMap
       }
-      const sdk = getSDKClient(serverId)
-      return unwrap(await sdk.session.status({ directory: formatPathForApi(directory, serverId) }))
+      const sdk = getSDKClient(sid)
+      return unwrap(await sdk.session.status({ directory: formatPathForApi(directory, sid) }))
     },
     { ttlMs: 1500 },
   )
@@ -164,8 +164,12 @@ export async function getSessions(
   params: SessionListParams & { includeArchived?: boolean; archivedOnly?: boolean; skipCache?: boolean } = {},
   serverId?: string,
 ): Promise<ApiSession[]> {
-  const sdk = getSDKClient(serverId)
   const { directory, roots, start, search, limit, includeArchived, archivedOnly, skipCache } = params
+  // 先解析目标服务器：下面的目录格式化必须按「目标服务器」的风格来。
+  // 此前直接传 serverId，调用方省略 serverId 时会落到活动服务器（可能是另一台
+  // Windows 主机），把 Linux 路径 /opt/code/OCC 转成 \opt\code\OCC 后请求失败。
+  const cacheServerId = serverId ?? serverStore.getActiveServerId()
+  const sdk = getSDKClient(cacheServerId)
   // 归一 roots：undefined 保持 undefined（让服务端用默认），否则规约成 boolean。
   // 列表默认只返回 root 会话；只有显式 roots===false（如归档全量）才保留子会话。
   const rootsFlag = roots === undefined ? undefined : roots !== false && roots !== 'false'
@@ -175,7 +179,7 @@ export async function getSessions(
   // 再在客户端按 time.archived 真值分桶（见 openchamber splitGlobalSessionsByArchived）。
   const sdkArchived = true
   const sdkQuery = {
-    directory: formatPathForApi(directory, serverId),
+    directory: formatPathForApi(directory, cacheServerId),
     roots,
     start,
     search,
@@ -184,7 +188,6 @@ export async function getSessions(
   }
   const cacheQuery = { ...sdkQuery, includeArchived, archivedOnly, skipCache }
 
-  const cacheServerId = serverId ?? serverStore.getActiveServerId()
   const cached = readSessionListCache(cacheServerId, cacheQuery)
   // 返回浅拷贝：调用方（如 getArchivedSessions 的 sort）可能就地修改数组，
   // 直接返回缓存引用会把缓存内容改坏。
@@ -300,7 +303,7 @@ export async function createSession(
     ? await nativeCreateSession(sid, { directory, title, parentID })
     : unwrap(
         await sdk.session.create({
-          directory: formatPathForApi(directory, serverId),
+          directory: formatPathForApi(directory, sid),
           title,
           parentID,
         }),

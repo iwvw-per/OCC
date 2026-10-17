@@ -17,6 +17,7 @@ import {
   type Content,
   type ToolContent,
 } from '../../types/message'
+import { messageCompletedAt } from '../../store/messagePartMerge'
 
 /**
  * 过程内容范围：
@@ -120,7 +121,7 @@ export function splitProcessRenderItems(items: RenderItem[]): ProcessSplit {
 /** 流式未完成时不拆 final：中间 text 后面还可能跟 tool */
 export function messageStillStreamingProcess(message: Message): boolean {
   if (message.info.role !== 'assistant') return false
-  return !!message.isStreaming || message.info.time.completed == null
+  return !!message.isStreaming || messageCompletedAt(message) == null
 }
 
 /** 是否有可收进过程块的内容（tool / reasoning 等，不含尾部最终 text） */

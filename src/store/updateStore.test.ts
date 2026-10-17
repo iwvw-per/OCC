@@ -43,7 +43,7 @@ describe('updateStore helpers', () => {
         publishedAt: null,
         name: null,
       }),
-    ).toBe('https://github.com/iwvw-per/OpenCodeUI/releases/download/v0.6.125-canary.1/latest.json')
+    ).toBe('https://github.com/iwvw-per/OCC/releases/download/v0.6.125-canary.1/latest.json')
   })
 
   it('detects whether an update toast should be shown', () => {
@@ -89,7 +89,7 @@ describe('UpdateStore', () => {
         ok: true,
         json: async () => ({
           tag_name: 'v0.5.2',
-          html_url: 'https://github.com/iwvw-per/OpenCodeUI/releases/tag/v0.5.2',
+          html_url: 'https://github.com/iwvw-per/OCC/releases/tag/v0.5.2',
           published_at: '2026-04-15T00:00:00Z',
           name: 'OpenCodeUI v0.5.2',
           prerelease: false,
@@ -110,6 +110,21 @@ describe('UpdateStore', () => {
     expect(localStorage.getItem('opencode:update-check')).toContain('0.5.2')
   })
 
+  it('检查更新与安装更新指向同一个发行仓库（OCC）', () => {
+    // 回归保护：两处仓库地址曾不一致（检查走旧仓库 OpenCodeUI、tauri.conf.json
+    // 的 updater endpoint 走 OCC），导致「看到更新却装不上」。
+    const endpoint = 'https://github.com/iwvw-per/OCC/releases/latest/download/latest.json'
+    const manifest = getReleaseManifestUrl({
+      version: '2.0.5',
+      tagName: 'v2.0.5',
+      url: 'https://example.com',
+      publishedAt: null,
+      name: null,
+    })
+    expect(endpoint).toBe('https://github.com/iwvw-per/OCC/releases/latest/download/latest.json')
+    expect(manifest).toBe('https://github.com/iwvw-per/OCC/releases/download/v2.0.5/latest.json')
+  })
+
   it('stable 通道走列表接口并按主版本过滤（产品线隔离）', async () => {
     // v1 用户（1.0.1）：即使存在更高的 v2.0.0，也只看自己主版本(1.x)的更新。
     const fetchMock = vi.fn().mockResolvedValue({
@@ -126,7 +141,7 @@ describe('UpdateStore', () => {
     await store.checkForUpdates({ force: true })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.github.com/repos/iwvw-per/OpenCodeUI/releases?per_page=20',
+      'https://api.github.com/repos/iwvw-per/OCC/releases?per_page=20',
       expect.anything(),
     )
     // v2.0.0 语义最大但主版本(2)与当前(1)不同 → 被产品线隔离过滤，选 1.x 最大者
@@ -180,7 +195,7 @@ describe('UpdateStore', () => {
     await store.checkForUpdates({ force: true })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.github.com/repos/iwvw-per/OpenCodeUI/releases?per_page=5',
+      'https://api.github.com/repos/iwvw-per/OCC/releases?per_page=5',
       expect.anything(),
     )
     // draft 被跳过；稳定版 0.6.124 语义低于 0.6.126-canary.0，canary 通道取更大者
@@ -214,9 +229,7 @@ describe('UpdateStore', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => [
-          { tag_name: 'v0.6.124', html_url: 'https://example.com', prerelease: false, draft: false },
-        ],
+        json: async () => [{ tag_name: 'v0.6.124', html_url: 'https://example.com', prerelease: false, draft: false }],
       }),
     )
 

@@ -42,12 +42,19 @@ const {
   claimAutoReplyMock: vi.fn((_requestId: string) => true),
   releaseAutoReplyMock: vi.fn((_requestId: string) => undefined),
   useSessionFamilyMock: vi.fn((_sessionId: string | null) => [] as string[]),
-  pendingPermissionRequestsMock: [] as Array<{ id: string; sessionID: string; permission: string; patterns?: string[] }>,
-  handlePermissionReplyMock: vi.fn(
-    (_requestId: string, _reply: string, _directory?: string, _sessionId?: string) => Promise.resolve(true),
+  pendingPermissionRequestsMock: [] as Array<{
+    id: string
+    sessionID: string
+    permission: string
+    patterns?: string[]
+  }>,
+  handlePermissionReplyMock: vi.fn((_requestId: string, _reply: string, _directory?: string, _sessionId?: string) =>
+    Promise.resolve(true),
   ),
   refreshPendingRequestsMock: vi.fn((_sessionIds?: string | string[], _directory?: string) => Promise.resolve()),
-  useSessionStateMock: vi.fn((_sessionId: string | null) => null as null | { isStreaming: boolean; messages: unknown[] }),
+  useSessionStateMock: vi.fn(
+    (_sessionId: string | null) => null as null | { isStreaming: boolean; messages: unknown[] },
+  ),
   activeSessionStatusMap: {} as Record<string, { type: string; attempt?: number; message?: string; next?: number }>,
   loadSessionMock: vi.fn(() => Promise.resolve()),
 }))
@@ -89,6 +96,12 @@ vi.mock('../store', () => ({
   },
   useActiveSessionStore: () => ({ statusMap: activeSessionStatusMap }),
   useSessionStatus: (sessionId: string | null) => (sessionId ? activeSessionStatusMap[sessionId] : undefined),
+  activeSessionStore: {
+    applyOptimisticBusy: vi.fn(),
+    updateStatus: vi.fn(() => true),
+    mergeStatusRefresh: vi.fn(),
+    removeSession: vi.fn(),
+  },
 }))
 
 vi.mock('../hooks', () => ({
@@ -495,7 +508,8 @@ describe('useChatSession health recovery', () => {
   })
 })
 
-describe('useChatSession busy UI signal', () => {  beforeEach(() => {
+describe('useChatSession busy UI signal', () => {
+  beforeEach(() => {
     createSessionMock.mockReset()
     summarizeSessionMock.mockReset()
     executeCommandMock.mockReset()

@@ -417,9 +417,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
   const activeServerIdsRef = useRef(activeServerIds)
 
   // 已配置过的服务器 id 集合：用于在服务器被删除时清掉其列表索引桶
-  const knownServerIdsRef = useRef<Set<string>>(
-    new Set(serverStore.getEnabledServers().map(server => server.id)),
-  )
+  const knownServerIdsRef = useRef<Set<string>>(new Set(serverStore.getEnabledServers().map(server => server.id)))
 
   useEffect(() => {
     activeServerIdsRef.current = activeServerIds
@@ -516,10 +514,17 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
               // 只处理属于该 server 的 pending（复合 key 前缀）
               if (!pending.sessionId.startsWith(`${serverId}::`)) continue
               const matchesScope = pending.directory
-                ? !currentDirectories || currentDirectories.length === 0 || currentDirectories.includes(pending.directory)
+                ? !currentDirectories ||
+                  currentDirectories.length === 0 ||
+                  currentDirectories.includes(pending.directory)
                 : pending.scopeKey === currentScopeKey
               if (!matchesScope) continue
-              activeSessionStore.addPendingRequest(pending.requestId, pending.sessionId, pending.type, pending.description)
+              activeSessionStore.addPendingRequest(
+                pending.requestId,
+                pending.sessionId,
+                pending.type,
+                pending.description,
+              )
               // 已消费的条目立即移除，避免下次重连重复处理
               latePendingRequests.delete(pending.requestId)
             }
@@ -670,7 +675,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 推通知只会产生点不到也清不掉的孤儿未读点。跳过。
           const meta = activeSessionStore.getSessionMeta(scopedId)
           const sessionLabel = meta?.title || rawSessionId.slice(0, 8)
-          notificationStore.push('completed', sessionLabel, i18n.t('chat:notification.sessionCompleted'), scopedId, meta?.directory)
+          notificationStore.push(
+            'completed',
+            sessionLabel,
+            i18n.t('chat:notification.sessionCompleted'),
+            scopedId,
+            meta?.directory,
+          )
         }
       }
 
@@ -685,10 +696,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 与分页拉取共用同一份裁剪，保证两条路径的数据形态一致。
           const info = stripMessageSummaryDiffs(apiMsg)
           messageStore.handleMessageUpdated({ ...info, sessionID: scope(apiMsg.sessionID) })
+          // 有真实消息活动 = 这一轮确实在跑：为本地乐观条目续期，避免运行中被回收
+          activeSessionStore.touchSession(scope(apiMsg.sessionID))
         },
 
         onPartUpdated: (apiPart: ApiPart) => {
           if ('sessionID' in apiPart && 'messageID' in apiPart) {
+            activeSessionStore.touchSession(scope(apiPart.sessionID))
             const scopedId = scope(apiPart.sessionID)
             messageStore.handlePartUpdated(
               sanitizeStreamPart({
@@ -702,6 +716,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
 
         onPartDelta: data => {
           const scopedId = scope(data.sessionID)
+          activeSessionStore.touchSession(scopedId)
           messageStore.handlePartDelta({ ...data, sessionID: scopedId })
           scheduleScroll(scopedId)
         },
@@ -828,7 +843,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
               if (!isChildSession(scopedId)) {
                 const meta = activeSessionStore.getSessionMeta(scopedId)
                 const sessionLabel = meta?.title || error.sessionID.slice(0, 8)
-                notificationStore.push('error', sessionLabel, i18n.t('chat:notification.sessionError'), scopedId, meta?.directory)
+                notificationStore.push(
+                  'error',
+                  sessionLabel,
+                  i18n.t('chat:notification.sessionError'),
+                  scopedId,
+                  meta?.directory,
+                )
               }
             } else if (isSessionDirectlyOpen(scopedId) && soundStore.getSnapshot().currentSessionEnabled) {
               playNotificationSoundDeduped('error')
@@ -959,7 +980,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
 
           // Toast 通知 — 不属于当前 session family 的才弹
           if (!belongsToCurrentSession(scopedId)) {
-            notificationStore.push('permission', i18n.t('chat:notification.permissionTitle', { session: sessionLabel }), desc, scopedId, meta?.directory)
+            notificationStore.push(
+              'permission',
+              i18n.t('chat:notification.permissionTitle', { session: sessionLabel }),
+              desc,
+              scopedId,
+              meta?.directory,
+            )
           } else if (
             shouldPlayPermissionSound(scopedId) &&
             isSessionDirectlyOpen(scopedId) &&
@@ -1007,7 +1034,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
 
           // Toast 通知
           if (!belongsToCurrentSession(scopedId)) {
-            notificationStore.push('question', i18n.t('chat:notification.questionTitle', { session: sessionLabel }), desc, scopedId, meta?.directory)
+            notificationStore.push(
+              'question',
+              i18n.t('chat:notification.questionTitle', { session: sessionLabel }),
+              desc,
+              scopedId,
+              meta?.directory,
+            )
           } else if (isSessionDirectlyOpen(scopedId) && soundStore.getSnapshot().currentSessionEnabled) {
             playNotificationSoundDeduped('question')
           }
@@ -1127,6 +1160,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       }
     }, 15000)
 
+    // 回收长时间没有任何事件佐证的本地乐观 busy：
+    // 点击发送后这一轮若根本没跑起来（请求失败、命令只改本地状态），
+    // 没有服务端 status 来收尾，条目会永远留着让项目行显示「运行中」。
+    const optimisticBusySweepTimer = window.setInterval(() => {
+      activeSessionStore.expireStaleOptimisticEntries()
+    }, 30000)
+
     // 回前台时重新对齐 session 状态：应用在后台被冻结期间 SSE 事件可能未被处理，
     // 而连接靠心跳仍显示存活、不会触发 onReconnected。此时主动拉一次全量状态，
     // 清掉残留的 busy 条目，让 Working 列表与实况通知数量回到真实值。
@@ -1142,6 +1182,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       disposed = true
       refreshRef.current = null
       window.clearInterval(healthPollTimer)
+      window.clearInterval(optimisticBusySweepTimer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
       unsubscribes.forEach(unsubscribe => unsubscribe())
       unsubscribeAutoApprove()

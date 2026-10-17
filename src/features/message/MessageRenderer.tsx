@@ -24,6 +24,7 @@ import { useNow } from '../../hooks/useNow'
 import { useTheme } from '../../hooks/useTheme'
 import { exportNodeAsImage } from '../../utils/imageExport'
 import { notificationStore } from '../../store/notificationStore'
+import { messageCompletedAt } from '../../store/messagePartMerge'
 import { uiErrorHandler } from '../../utils/errorHandling'
 import {
   useInlineToolRequests,
@@ -881,8 +882,8 @@ const AssistantMessageView = memo(function AssistantMessageView({
   // 检查消息级别错误
   const messageError = (info as AssistantMessageInfo).error
 
-  // 消息总耗时
-  const completed = info.time.completed
+  // 消息总耗时（v2 轻量消息可能没有 time，统一走安全读取）
+  const completed = messageCompletedAt(message)
 
   const showTurnDurationFooter =
     allowStepFinishOnMessage &&

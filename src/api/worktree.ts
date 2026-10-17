@@ -32,16 +32,17 @@ export async function createWorktree(params: WorktreeCreateInput, directory?: st
     })
     return created as unknown as Worktree
   }
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.worktree.create({ directory: formatPathForApi(directory), worktreeCreateInput: params }))
+  const sdk = getSDKClient(sid)
+  return unwrap(await sdk.worktree.create({ directory: formatPathForApi(directory, sid), worktreeCreateInput: params }))
 }
 
 /**
  * 删除 worktree
  */
 export async function removeWorktree(params: WorktreeRemoveInput, directory?: string): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.worktree.remove({ directory: formatPathForApi(directory), worktreeRemoveInput: params }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  unwrap(await sdk.worktree.remove({ directory: formatPathForApi(directory, sid), worktreeRemoveInput: params }))
   return true
 }
 
@@ -49,7 +50,8 @@ export async function removeWorktree(params: WorktreeRemoveInput, directory?: st
  * 重置 worktree
  */
 export async function resetWorktree(params: WorktreeResetInput, directory?: string): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.worktree.reset({ directory: formatPathForApi(directory), worktreeResetInput: params }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  unwrap(await sdk.worktree.reset({ directory: formatPathForApi(directory, sid), worktreeResetInput: params }))
   return true
 }

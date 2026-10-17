@@ -61,7 +61,10 @@ export function mergeToolPart(local: Part | undefined, incoming: Part): Part {
   if (!local || local.id !== incoming.id) return incoming
   if (local.type !== 'tool' || incoming.type !== 'tool') return incoming
   const localTool = local as Part & { tool?: string; state?: { status?: string; input?: Record<string, unknown> } }
-  const incomingTool = incoming as Part & { tool?: string; state?: { status?: string; input?: Record<string, unknown> } }
+  const incomingTool = incoming as Part & {
+    tool?: string
+    state?: { status?: string; input?: Record<string, unknown> }
+  }
   const localStatus = localTool.state?.status
   const incomingStatus = incomingTool.state?.status
   const settled = localStatus === 'completed' || localStatus === 'error' || localStatus === 'interrupted'
@@ -73,8 +76,7 @@ export function mergeToolPart(local: Part | undefined, incoming: Part): Part {
   const tool = incomingTool.tool || localTool.tool || ''
   const localInput = localTool.state?.input
   const incomingInput = incomingTool.state?.input
-  const input =
-    incomingInput && Object.keys(incomingInput).length > 0 ? incomingInput : (localInput ?? incomingInput)
+  const input = incomingInput && Object.keys(incomingInput).length > 0 ? incomingInput : (localInput ?? incomingInput)
   if (tool === incomingTool.tool && input === incomingInput) return incoming
   return {
     ...incoming,
@@ -98,19 +100,27 @@ export interface IncompleteMessageLike {
   info: { time?: { completed?: number } }
 }
 
+/**
+ * 读取助手消息的完成时间；消息或 time 缺失时返回 undefined。
+ *
+ * v2 的轻量投影/流式消息可能整条没有 time 字段，直接 `info.time.completed`
+ * 会在渲染期抛 TypeError（Cannot read properties of undefined）。
+ */
+export function messageCompletedAt(
+  message: { info?: { time?: { completed?: number } | null } | null } | null | undefined,
+): number | undefined {
+  return message?.info?.time?.completed
+}
+
 export function messageIsIncomplete(message: IncompleteMessageLike): boolean {
   if (message.isStreaming) return true
-  const completed = message.info.time && 'completed' in message.info.time ? message.info.time.completed : undefined
-  return completed == null
+  return messageCompletedAt(message) == null
 }
 
 /**
  * 仅未定稿时保护更长 live；incoming/本地已 completed 则强制服务端，不再 preserve。
  */
-export function shouldPreserveLiveParts(
-  previous: IncompleteMessageLike,
-  incoming?: IncompleteMessageLike,
-): boolean {
+export function shouldPreserveLiveParts(previous: IncompleteMessageLike, incoming?: IncompleteMessageLike): boolean {
   if (incoming && !messageIsIncomplete(incoming)) return false
   return messageIsIncomplete(previous)
 }

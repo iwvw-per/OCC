@@ -219,12 +219,21 @@ export function useChatSession({
   const sessionFamily = useSessionFamily(routeSessionId)
 
   // Session Manager
-  const { loadSession, loadMoreHistory, loadUntilMessage, hydrateTurn, requestUndo, commitUndo, handleRedo, handleRedoAll, clearRevert } =
-    useSessionManager({
-      sessionId: routeSessionId,
-      directory: currentDirectory,
-      onSessionMissing: handleMissingRouteSession,
-    })
+  const {
+    loadSession,
+    loadMoreHistory,
+    loadUntilMessage,
+    hydrateTurn,
+    requestUndo,
+    commitUndo,
+    handleRedo,
+    handleRedoAll,
+    clearRevert,
+  } = useSessionManager({
+    sessionId: routeSessionId,
+    directory: currentDirectory,
+    onSessionMissing: handleMissingRouteSession,
+  })
 
   /**
    * 健康状态恢复 → 重新加载当前会话。
@@ -711,13 +720,7 @@ export function useChatSession({
     return () => {
       cancelled = true
     }
-  }, [
-    routeSessionId,
-    effectiveDirectory,
-    paneServerId,
-    setPendingPermissionRequests,
-    setPendingQuestionRequests,
-  ])
+  }, [routeSessionId, effectiveDirectory, paneServerId, setPendingPermissionRequests, setPendingQuestionRequests])
 
   const sendMessageNow = useCallback(
     async (input: {
@@ -781,6 +784,9 @@ export function useChatSession({
         // D7：记录发送前的结束世代，await 返回后比对——若本轮在请求返回前已 idle，
         // 不再置 streaming，避免永久 Working。
         const idleGenerationBeforeSend = messageStore.getIdleGeneration(sessionId)
+        // 本地乐观置忙：请求往返期间侧栏/项目行立即显示「运行中」，停止按钮也可用。
+        // 服务端 status 到达后会转成「有佐证」；若这一轮根本没跑起来，超时自动回收。
+        activeSessionStore.applyOptimisticBusy(sessionId)
         await sendMessageAsync(
           {
             sessionId,
@@ -838,6 +844,8 @@ export function useChatSession({
           } else {
             messageStore.setStreaming(sessionId, false)
           }
+          // 发送失败：回收本地乐观的「运行中」，否则会话会一直显示在跑
+          activeSessionStore.updateStatus(sessionId, { type: 'idle' })
         }
 
         return false
@@ -1022,7 +1030,12 @@ export function useChatSession({
               }
             }
           }
-          const forkedSession = await forkSession(assistantInfo.sessionID, forkAtMessageId, effectiveDirectory, paneServerId)
+          const forkedSession = await forkSession(
+            assistantInfo.sessionID,
+            forkAtMessageId,
+            effectiveDirectory,
+            paneServerId,
+          )
           setRestoredContent(null)
           navigateToSession(forkedSession.id, forkedSession.directory)
           return
@@ -1120,6 +1133,10 @@ export function useChatSession({
             return false
           }
 
+          // 命令也可能启动一轮生成（如 /compact 之后继续、自定义命令模板）：
+          // 同样先本地乐观置忙；纯本地命令（不发消息）不会被任何事件佐证，超时后自动回收。
+          activeSessionStore.applyOptimisticBusy(sessionId)
+
           // Commands should count as sent once they are accepted for execution.
           // Do not keep the draft alive until the long-running compaction finishes.
           void summarizeSession(
@@ -1129,6 +1146,8 @@ export function useChatSession({
             paneServerId,
           ).catch(err => {
             handleError('execute command', err)
+            // 失败回收乐观 busy：压缩没跑起来，不应让项目行一直显示运行中
+            if (sessionId) activeSessionStore.updateStatus(sessionId, { type: 'idle' })
           })
 
           return true
@@ -1138,15 +1157,26 @@ export function useChatSession({
         // once the command is dispatched, clear the draft immediately.
         void executeCommand(sessionId, command, args, effectiveDirectory, paneServerId).catch(err => {
           handleError('execute command', err)
+          if (sessionId) activeSessionStore.updateStatus(sessionId, { type: 'idle' })
         })
 
         return true
       } catch (err) {
         handleError('execute command', err)
+        if (sessionId) activeSessionStore.updateStatus(sessionId, { type: 'idle' })
         return false
       }
     },
-    [routeSessionId, effectiveDirectory, createSession, navigateToSession, currentModel, navigateHome, handleNewChat, paneServerId],
+    [
+      routeSessionId,
+      effectiveDirectory,
+      createSession,
+      navigateToSession,
+      currentModel,
+      navigateHome,
+      handleNewChat,
+      paneServerId,
+    ],
   )
 
   // Undo with animation

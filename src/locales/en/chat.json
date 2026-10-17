@@ -218,7 +218,9 @@
     "cloning": "Cloning...",
     "cloneInvalidUrl": "Enter a valid Git repository URL",
     "cloneInvalidName": "Directory name is required and cannot contain / or \\",
-    "cloneFailed": "Clone failed (exit code {{code}}). See the output below."
+    "cloneFailed": "Clone failed (exit code {{code}}). See the output below.",
+    "invalidPathTitle": "Cannot add project",
+    "invalidPath": "Enter an absolute path (for example /home/user/project or C:/Users/name/project). Relative paths cannot be used as project directories."
   },
   "inputToolbar": {
     "default": "Default",

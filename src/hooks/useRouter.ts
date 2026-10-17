@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
-import { normalizeToForwardSlash, serverStorage } from '../utils'
+import { isAbsoluteDirectory, normalizeToForwardSlash, serverStorage } from '../utils'
 import { STORAGE_KEY_LAST_DIRECTORY } from '../constants/storage'
 import { useIsMobile } from './useIsMobile'
 
@@ -43,7 +43,10 @@ function parseHash(): RouteState {
   if (queryString) {
     const dirMatch = queryString.match(/(?:^|&)dir=([^&]*)/)
     if (dirMatch && dirMatch[1]) {
-      directory = normalizeToForwardSlash(decodeDirectoryParam(dirMatch[1])) || undefined
+      const decoded = normalizeToForwardSlash(decodeDirectoryParam(dirMatch[1]))
+      // 只接受绝对路径：外部链接/旧书签可能带 `../code/OCC` 这类相对路径，
+      // 后端（v2）会以 Path is not absolute 拒绝，放行只会污染路由和项目列表。
+      directory = isAbsoluteDirectory(decoded) ? decoded : undefined
     }
     const serverMatch = queryString.match(/(?:^|&)server=([^&]*)/)
     if (serverMatch && serverMatch[1]) {
@@ -74,7 +77,11 @@ function parseHash(): RouteState {
   return { sessionId: null, serverId, directory }
 }
 
-function buildHash(sessionId: string | null, serverId: string | null | undefined, directory: string | undefined): string {
+function buildHash(
+  sessionId: string | null,
+  serverId: string | null | undefined,
+  directory: string | undefined,
+): string {
   const path = sessionId ? `#/session/${encodeURIComponent(sessionId)}` : '#/'
   const params: string[] = []
   // 仅 home（无 session）写 server 参数；session URL 的复合 key 已携带服务器
@@ -216,24 +223,21 @@ export function useRouter() {
    * navigateHome/setDirectory 的区别是它原子地写入 serverId 与 directory，
    * 避免中间态把旧主机的目录带到新主机上。
    */
-  const restoreWorkspace = useCallback(
-    (serverId: string, sessionKey: string | null, directory: string | undefined) => {
-      const normalized = directory ? normalizeToForwardSlash(directory) : undefined
-      const newHash = buildHash(sessionKey, serverId, normalized)
-      if (normalized) {
-        serverStorage.set(STORAGE_KEY_LAST_DIRECTORY, normalized)
-      } else {
-        serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY)
-      }
-      if (isMobileRef.current) {
-        window.history.replaceState(null, '', newHash)
-      } else {
-        window.location.hash = newHash
-      }
-      emitRoute({ sessionId: sessionKey, serverId, directory: normalized })
-    },
-    [],
-  )
+  const restoreWorkspace = useCallback((serverId: string, sessionKey: string | null, directory: string | undefined) => {
+    const normalized = directory ? normalizeToForwardSlash(directory) : undefined
+    const newHash = buildHash(sessionKey, serverId, normalized)
+    if (normalized) {
+      serverStorage.set(STORAGE_KEY_LAST_DIRECTORY, normalized)
+    } else {
+      serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY)
+    }
+    if (isMobileRef.current) {
+      window.history.replaceState(null, '', newHash)
+    } else {
+      window.location.hash = newHash
+    }
+    emitRoute({ sessionId: sessionKey, serverId, directory: normalized })
+  }, [])
 
   return {
     sessionId: route.sessionId,

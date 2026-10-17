@@ -21,6 +21,7 @@
 // ============================================
 
 import type { Message, Part } from '../types/message'
+import { messageCompletedAt } from '../store/messagePartMerge'
 
 export interface SessionTurnStats {
   /** 轮数：用户消息数（与 DeepSeek 的 turn 计数口径一致） */
@@ -118,7 +119,8 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
     }
 
     const created = info.time.created
-    const completed = info.time.completed
+    // v2 轻量消息可能没有 time 字段：安全读取，避免整段统计崩溃
+    const completed = messageCompletedAt(message)
 
     // 工具时长逐次累加：不依赖消息是否结算，流式中的工具调用也能计入
     let messageToolMs = 0

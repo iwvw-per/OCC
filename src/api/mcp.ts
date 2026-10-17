@@ -56,8 +56,9 @@ function invalidateMcpStatus(directory?: string, serverId?: string): void {
  * 添加 MCP 服务器
  */
 export async function addMcpServer(name: string, config: McpServerConfig, directory?: string): Promise<void> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.mcp.add({ name, config, directory: formatPathForApi(directory) }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  unwrap(await sdk.mcp.add({ name, config, directory: formatPathForApi(directory, sid) }))
   invalidateMcpStatus(directory)
 }
 
@@ -65,8 +66,9 @@ export async function addMcpServer(name: string, config: McpServerConfig, direct
  * 连接到 MCP 服务器
  */
 export async function connectMcpServer(name: string, directory?: string): Promise<void> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.mcp.connect({ name, directory: formatPathForApi(directory) }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  unwrap(await sdk.mcp.connect({ name, directory: formatPathForApi(directory, sid) }))
   invalidateMcpStatus(directory)
 }
 
@@ -74,8 +76,9 @@ export async function connectMcpServer(name: string, directory?: string): Promis
  * 断开 MCP 服务器连接
  */
 export async function disconnectMcpServer(name: string, directory?: string): Promise<void> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.mcp.disconnect({ name, directory: formatPathForApi(directory) }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  unwrap(await sdk.mcp.disconnect({ name, directory: formatPathForApi(directory, sid) }))
   invalidateMcpStatus(directory)
 }
 
@@ -83,8 +86,9 @@ export async function disconnectMcpServer(name: string, directory?: string): Pro
  * 开始 MCP 认证流程
  */
 export async function startMcpAuth(name: string, directory?: string): Promise<{ url: string }> {
-  const sdk = getSDKClient()
-  const result = unwrap(await sdk.mcp.auth.start({ name, directory: formatPathForApi(directory) }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  const result = unwrap(await sdk.mcp.auth.start({ name, directory: formatPathForApi(directory, sid) }))
   // SDK 返回 { authorizationUrl: string }，转换为我们期望的 { url: string }
   return { url: result.authorizationUrl }
 }
@@ -93,6 +97,7 @@ export async function startMcpAuth(name: string, directory?: string): Promise<{ 
  * 启动完整的 OAuth 认证流程
  */
 export async function authenticateMcp(name: string, directory?: string): Promise<void> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.mcp.auth.authenticate({ name, directory: formatPathForApi(directory) }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  unwrap(await sdk.mcp.auth.authenticate({ name, directory: formatPathForApi(directory, sid) }))
 }

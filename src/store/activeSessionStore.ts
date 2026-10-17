@@ -8,10 +8,11 @@
 // 1. GET /session/status → 全量 session 状态
 // 2. GET /permission + GET /question → 补充等待中的 session
 // 3. SSE session.status / permission.asked / question.asked 事件
+// 4. applyOptimisticBusy → 点击发送/执行命令时的本地乐观置忙（可超时回收）
 //
 // 与 notificationStore 完全独立，不互相依赖
 
-import { useCallback, useSyncExternalStore } from 'react'
+import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import i18n from '../i18n'
 import type { SessionStatus, SessionStatusMap } from '../types/api/session'
 
@@ -36,7 +37,25 @@ export interface ActiveSessionEntry {
     type: 'permission' | 'question'
     description?: string
   }
+  /**
+   * 该条 busy 的判定来源：'pending' = 仍有未回复的权限/问答请求（服务端已 idle，
+   * 但请求还悬着）；'server' = 服务端报告 busy/retry；'local' = 仅有本地乐观标记。
+   *
+   * 项目行据此区分「还在跑」与「等着你回」：pending 不是运行，显示为彩色等待点，
+   * 避免一个从没被点开过的权限请求让折叠的目录一直转圈。
+   */
+  source: 'server' | 'pending' | 'local'
 }
+
+/**
+ * 本地乐观置忙的条目在「没有任何事件佐证」时的存活上限。
+ *
+ * 点击发送瞬间、服务端 status 到达之前会先本地置 busy（按钮立即变成停止）。
+ * 若这一轮其实没有真正开跑（请求失败、命令只改本地状态），又恰好没有任何
+ * status/idle 事件来收尾，这条条目就会永远留下，折叠的项目行一直显示运行中。
+ * 超时后清掉；真正的 busy 会不断收到事件（message/part/tool），从而持续续期。
+ */
+export const OPTIMISTIC_BUSY_TTL_MS = 2 * 60 * 1000
 
 interface SessionMetaEntry {
   sessionId: string
@@ -61,6 +80,7 @@ function isSameBusySessions(a: ActiveSessionEntry[], b: ActiveSessionEntry[]): b
     if (left.title !== right.title || left.directory !== right.directory) return false
     if (left.pendingAction?.type !== right.pendingAction?.type) return false
     if (left.pendingAction?.description !== right.pendingAction?.description) return false
+    if (left.source !== right.source) return false
     if (left.status.type !== right.status.type) return false
     if (left.status.type === 'retry' && right.status.type === 'retry') {
       if (
@@ -95,6 +115,18 @@ class ActiveSessionStore {
   // 服务端已报告 idle，但因有未回复请求而暂缓移出的 session
   private deferredIdleSessions = new Set<string>()
 
+  /**
+   * 纯本地乐观置忙（尚无服务端 status 佐证）的 session → 最后一次被佐证的时间。
+   *
+   * 有该标记的条目在 recomputeDerived 中会被加上空闲超时：超过
+   * OPTIMISTIC_BUSY_TTL_MS 没有任何事件就清掉，避免「点了发送但这一轮没真正
+   * 开跑」的会话永远让折叠的项目行转圈。收到服务端 status / 任何事件时刷新。
+   */
+  private optimisticBusyAt = new Map<string, number>()
+
+  /** 有服务端 status（busy/retry，或服务端快照里列出）佐证的 session */
+  private serverBusySessions = new Set<string>()
+
   // 派生数据缓存
   private cachedBusySessions: ActiveSessionEntry[] = []
   private cachedBusyCount: number = 0
@@ -120,18 +152,43 @@ class ActiveSessionStore {
       if (!pendingBySession.has(req.sessionId)) pendingBySession.set(req.sessionId, req)
     }
 
+    // 纯本地乐观的 busy 条目超过空闲上限就回收：没有服务端 status 佐证，
+    // 也没有任何事件为它续期，说明这一轮并没有真正在跑。
+    if (this.optimisticBusyAt.size > 0) {
+      const now = Date.now()
+      let changed = false
+      const nextMap = { ...this.state.statusMap }
+      for (const [sessionId, at] of this.optimisticBusyAt) {
+        if (now - at <= OPTIMISTIC_BUSY_TTL_MS) continue
+        this.optimisticBusyAt.delete(sessionId)
+        if (nextMap[sessionId] && !this.hasServerEvidence(sessionId)) {
+          delete nextMap[sessionId]
+          changed = true
+        }
+      }
+      if (changed) this.state = { ...this.state, statusMap: nextMap }
+    }
+
     const entries = Object.entries(this.state.statusMap)
       .filter(([, status]) => status.type === 'busy' || status.type === 'retry')
       .map(([sessionId, status]) => {
         const meta = this.sessionMeta.get(sessionId)
         // 从索引查 pending action
         const pending = pendingBySession.get(sessionId)
+        // 优先级：服务端 status > 仍有 pending 请求 > 纯本地乐观标记。
+        // pending 优先于 local：等待用户回复的会话不应被当成「正在跑」。
+        const source: ActiveSessionEntry['source'] = this.serverBusySessions.has(sessionId)
+          ? 'server'
+          : pending
+            ? 'pending'
+            : 'local'
         return {
           sessionId,
           status,
           title: meta?.title,
           directory: meta?.directory,
           pendingAction: pending ? { type: pending.type, description: pending.description } : undefined,
+          source,
         } as ActiveSessionEntry
       })
     // 内容不变时复用旧数组引用，避免 useBusySessions 订阅方因引用抖动重渲染
@@ -139,6 +196,17 @@ class ActiveSessionStore {
       this.cachedBusySessions = entries
     }
     this.cachedBusyCount = entries.length
+  }
+
+  /** 该 session 是否已有服务端/事件佐证的 busy（而非纯本地乐观标记） */
+  private hasServerEvidence(sessionId: string): boolean {
+    return this.serverBusySessions.has(sessionId) || this.hasPendingForSession(sessionId)
+  }
+
+  /** 记录/刷新「该 session 有服务端或事件佐证」的标记，并停止乐观超时计时 */
+  private markEvidence(sessionId: string) {
+    this.serverBusySessions.add(sessionId)
+    this.optimisticBusyAt.delete(sessionId)
   }
 
   private hasPendingForSession(sessionId: string): boolean {
@@ -199,11 +267,23 @@ class ActiveSessionStore {
    */
   initialize(statusMap: SessionStatusMap, serverId?: string) {
     const base = serverId ? this.statusMapExceptServer(serverId) : {}
+    this.recordServerEvidence(statusMap)
     this.state = {
       statusMap: this.applyStatusSnapshot(statusMap, base),
       initialized: true,
     }
     this.notify()
+  }
+
+  /** 把快照里的非 idle 条目记为「服务端佐证」，并停止它们的乐观超时 */
+  private recordServerEvidence(statusMap: SessionStatusMap) {
+    for (const [sessionId, status] of Object.entries(statusMap)) {
+      if (status.type === 'idle') {
+        this.serverBusySessions.delete(sessionId)
+        continue
+      }
+      this.markEvidence(sessionId)
+    }
   }
 
   /** 取出不属于指定服务器的 status 条目（保留其它服务器状态） */
@@ -221,6 +301,7 @@ class ActiveSessionStore {
   // ============================================
 
   mergeStatusRefresh(statusMap: SessionStatusMap) {
+    this.recordServerEvidence(statusMap)
     this.state = {
       statusMap: this.applyStatusSnapshot(statusMap, this.state.statusMap),
       initialized: true,
@@ -238,6 +319,14 @@ class ActiveSessionStore {
    */
   replaceServerStatus(serverId: string, statusMap: SessionStatusMap) {
     const prefix = `${serverId}::`
+    // 该服务器的旧佐证整体作废，再按本次快照重建
+    for (const sessionId of [...this.serverBusySessions]) {
+      if (sessionId.startsWith(prefix)) this.serverBusySessions.delete(sessionId)
+    }
+    for (const sessionId of [...this.optimisticBusyAt.keys()]) {
+      if (sessionId.startsWith(prefix)) this.optimisticBusyAt.delete(sessionId)
+    }
+    this.recordServerEvidence(statusMap)
     const nextMap: SessionStatusMap = {}
     for (const [key, status] of Object.entries(this.state.statusMap)) {
       if (!key.startsWith(prefix)) nextMap[key] = status
@@ -246,7 +335,10 @@ class ActiveSessionStore {
     // 仍有未回复 pending 的会话要保留，否则等待用户操作的条目会被误清
     for (const sessionId of this.pendingRequestSessionIds()) {
       if (!sessionId.startsWith(prefix)) continue
-      if (!replaced[sessionId]) replaced[sessionId] = { type: 'busy' }
+      if (!replaced[sessionId]) {
+        replaced[sessionId] = { type: 'busy' }
+        this.serverBusySessions.delete(sessionId)
+      }
     }
     this.state = { statusMap: replaced, initialized: true }
     this.notify()
@@ -323,6 +415,8 @@ class ActiveSessionStore {
       if (!newMap[p.sessionID] || newMap[p.sessionID].type === 'idle') {
         newMap[p.sessionID] = { type: 'busy' }
         deferredIdleSessions.add(p.sessionID)
+        // 由 pending 撑起的 busy 不是服务端在跑（见 addPendingRequest）
+        this.serverBusySessions.delete(p.sessionID)
         changed = true
       }
     }
@@ -338,6 +432,8 @@ class ActiveSessionStore {
       if (!newMap[q.sessionID] || newMap[q.sessionID].type === 'idle') {
         newMap[q.sessionID] = { type: 'busy' }
         deferredIdleSessions.add(q.sessionID)
+        // 由 pending 撑起的 busy 不是服务端在跑（见 addPendingRequest）
+        this.serverBusySessions.delete(q.sessionID)
         changed = true
       }
     }
@@ -361,6 +457,10 @@ class ActiveSessionStore {
     if (!this.state.statusMap[sessionId] || this.state.statusMap[sessionId].type === 'idle') {
       const newMap = { ...this.state.statusMap, [sessionId]: { type: 'busy' as const } }
       this.deferredIdleSessions.add(sessionId)
+      // 这条 busy 只由「未回复请求」撑着，不是服务端在跑：不能算服务端佐证，
+      // 否则后续再也没有任何事件会把它清掉。
+      this.serverBusySessions.delete(sessionId)
+      this.optimisticBusyAt.delete(sessionId)
       this.state = { ...this.state, statusMap: newMap }
     }
     this.notify()
@@ -380,6 +480,10 @@ class ActiveSessionStore {
       this.deferredIdleSessions.delete(req.sessionId)
       const newMap = { ...this.state.statusMap }
       delete newMap[req.sessionId]
+      // 该条目只是「服务端已 idle、等这个请求」的临时占位：请求处理完就彻底移除，
+      // 否则它会以「无服务端佐证」的 busy 一直留在项目行上转圈。
+      this.serverBusySessions.delete(req.sessionId)
+      this.optimisticBusyAt.delete(req.sessionId)
       this.state = { ...this.state, statusMap: newMap }
     }
     this.notify()
@@ -411,6 +515,8 @@ class ActiveSessionStore {
         this.deferredIdleSessions.delete(sessionId)
         const newMap = { ...this.state.statusMap }
         delete newMap[sessionId]
+        this.serverBusySessions.delete(sessionId)
+        this.optimisticBusyAt.delete(sessionId)
         this.state = { ...this.state, statusMap: newMap }
       }
     }
@@ -426,6 +532,9 @@ class ActiveSessionStore {
     let cleared = false
 
     if (status.type === 'idle') {
+      // 服务端明确 idle：旧的服务端佐证作废，未回复的 pending 仍保留条目
+      this.serverBusySessions.delete(sessionId)
+      this.optimisticBusyAt.delete(sessionId)
       if (this.hasPendingForSession(sessionId)) {
         this.deferredIdleSessions.add(sessionId)
       } else {
@@ -435,15 +544,50 @@ class ActiveSessionStore {
       }
     } else if (status.type === 'retry') {
       this.deferredIdleSessions.delete(sessionId)
+      this.markEvidence(sessionId)
       newMap[sessionId] = { ...status }
     } else {
       this.deferredIdleSessions.delete(sessionId)
+      this.markEvidence(sessionId)
       newMap[sessionId] = { type: 'busy' }
     }
 
     this.state = { ...this.state, statusMap: newMap }
     this.notify()
     return cleared
+  }
+
+  /**
+   * 本地乐观置忙：点击发送 / 执行命令时立刻把会话标成 busy，让停止按钮即时可用。
+   *
+   * 这类条目不来自服务端，因此单独计时（OPTIMISTIC_BUSY_TTL_MS）：期间收到任何
+   * 服务端 status 或会话事件（见 touchSession）都会被提升为「有佐证」，不会再超时；
+   * 一直没有任何佐证的条目会被回收，避免项目行永远显示「正在运行」。
+   */
+  applyOptimisticBusy(sessionId: string) {
+    if (this.serverBusySessions.has(sessionId)) return
+    this.optimisticBusyAt.set(sessionId, Date.now())
+    if (this.state.statusMap[sessionId]?.type === 'busy') {
+      this.notify()
+      return
+    }
+    this.state = {
+      ...this.state,
+      statusMap: { ...this.state.statusMap, [sessionId]: { type: 'busy' } },
+    }
+    this.notify()
+  }
+
+  /**
+   * 会话产生了真实活动（消息/part/工具事件）：证明它确实在跑。
+   * 有佐证后停止乐观超时；对纯本地条目续期，避免长轮次中途被回收。
+   */
+  touchSession(sessionId: string) {
+    if (this.serverBusySessions.has(sessionId)) return
+    if (!this.state.statusMap[sessionId]) return
+    if (this.optimisticBusyAt.has(sessionId)) {
+      this.optimisticBusyAt.set(sessionId, Date.now())
+    }
   }
 
   removeSession(sessionId: string) {
@@ -464,10 +608,36 @@ class ActiveSessionStore {
 
     if (this.deferredIdleSessions.delete(sessionId)) changed = true
     if (this.sessionMeta.delete(sessionId)) changed = true
+    if (this.serverBusySessions.delete(sessionId)) changed = true
+    if (this.optimisticBusyAt.delete(sessionId)) changed = true
 
     if (!changed) return
     this.state = { ...this.state, statusMap: nextMap }
     this.notify()
+  }
+
+  /**
+   * 没有任何 SSE 事件佐证的乐观条目会被回收。由 global events 的低频心跳调用。
+   * 返回是否真的回收了条目（用于避免无意义重渲染）。
+   */
+  expireStaleOptimisticEntries(now = Date.now()): boolean {
+    if (this.optimisticBusyAt.size === 0) return false
+    let expired = false
+    const nextMap = { ...this.state.statusMap }
+    for (const [sessionId, at] of [...this.optimisticBusyAt]) {
+      if (now - at <= OPTIMISTIC_BUSY_TTL_MS) continue
+      if (this.hasServerEvidence(sessionId)) continue
+      this.optimisticBusyAt.delete(sessionId)
+      if (nextMap[sessionId]) {
+        delete nextMap[sessionId]
+        expired = true
+      }
+    }
+    if (expired) {
+      this.state = { ...this.state, statusMap: nextMap }
+      this.notify()
+    }
+    return expired
   }
 
   // ============================================
@@ -530,6 +700,17 @@ export function useBusySessions(): ActiveSessionEntry[] {
   return useSyncExternalStore(activeSessionStore.subscribe, activeSessionStore.getBusySessionsSnapshot)
 }
 
+/**
+ * 只返回「确实在跑」的会话：排除仅因未回复权限/问答而停在 busy 的条目。
+ *
+ * 项目行的运行中图标用它，避免一个从没被点开过的权限请求让折叠的目录
+ * 一直转圈（它并没有在运行，只是在等你回复）。
+ */
+export function useRunningSessions(): ActiveSessionEntry[] {
+  const busy = useBusySessions()
+  return useMemo(() => busy.filter(entry => entry.source !== 'pending'), [busy])
+}
+
 export function useBusyCount(): number {
   return useSyncExternalStore(activeSessionStore.subscribe, activeSessionStore.getBusyCountSnapshot)
 }
@@ -544,10 +725,7 @@ export function useBusyCount(): number {
  * （参考 messageStore.subscribeSession）。
  */
 export function useSessionActiveEntry(sessionId: string): ActiveSessionEntry | undefined {
-  const getSnapshot = useCallback(
-    () => activeSessionStore.getBusySessionEntry(sessionId),
-    [sessionId],
-  )
+  const getSnapshot = useCallback(() => activeSessionStore.getBusySessionEntry(sessionId), [sessionId])
   return useSyncExternalStore(activeSessionStore.subscribe, getSnapshot)
 }
 

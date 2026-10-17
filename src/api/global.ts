@@ -26,7 +26,8 @@ export async function getHealth(): Promise<HealthInfo> {
  * 释放当前实例
  */
 export async function disposeInstance(directory?: string): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.instance.dispose({ directory: formatPathForApi(directory) }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  unwrap(await sdk.instance.dispose({ directory: formatPathForApi(directory, sid) }))
   return true
 }

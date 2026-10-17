@@ -218,7 +218,9 @@
     "cloning": "克隆中...",
     "cloneInvalidUrl": "请填写有效的 Git 仓库地址",
     "cloneInvalidName": "目录名不能为空，且不能包含 / 或 \\",
-    "cloneFailed": "克隆失败（退出码 {{code}}），请查看下方输出"
+    "cloneFailed": "克隆失败（退出码 {{code}}），请查看下方输出",
+    "invalidPathTitle": "无法添加项目",
+    "invalidPath": "请填写绝对路径（如 /home/user/project 或 C:/Users/name/project），相对路径无法作为项目目录。"
   },
   "inputToolbar": {
     "default": "默认",

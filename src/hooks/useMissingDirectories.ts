@@ -11,19 +11,19 @@
 // 探测失败（网络抖动、服务器不支持）一律视为存在，避免误隐藏。
 
 import { useEffect, useMemo, useState } from 'react'
-import { directoryExists } from '../api'
+import { probeDirectory } from '../api'
 import { normalizeToForwardSlash } from '../utils'
 
 const CACHE_TTL_MS = 60_000
 
-/** 目录 → { exists, checkedAt } */
-const existenceCache = new Map<string, { exists: boolean; checkedAt: number }>()
+/** 目录 → { exists: true=存在 / false=确认不存在 / null=探测失败 } */
+const existenceCache = new Map<string, { exists: boolean | null; checkedAt: number }>()
 
 function cacheKey(serverId: string, directory: string): string {
   return `${serverId}::${normalizeToForwardSlash(directory).toLowerCase()}`
 }
 
-function readCached(serverId: string, directory: string): boolean | undefined {
+function readCached(serverId: string, directory: string): boolean | null | undefined {
   const entry = existenceCache.get(cacheKey(serverId, directory))
   if (!entry) return undefined
   if (Date.now() - entry.checkedAt > CACHE_TTL_MS) return undefined
@@ -75,13 +75,35 @@ export function useMissingDirectories(directories: string[], serverId?: string):
 
     void Promise.all(
       targets.map(async directory => {
-        const exists = await directoryExists(directory, serverId)
-        existenceCache.set(cacheKey(serverId, directory), { exists, checkedAt: Date.now() })
+        const result = await probeDirectory(directory, serverId)
+        // 探测失败（unknown）不写缓存：下次进入页面应重试，而不是沿用「未知」
+        if (result === 'unknown') return
+        existenceCache.set(cacheKey(serverId, directory), {
+          exists: result === 'exists',
+          checkedAt: Date.now(),
+        })
       }),
     ).then(() => {
       if (cancelled) return
-      const next = applyFromCache()
-      setMissing(prev => (sameSet(prev, next) ? prev : next))
+      // 只更新本轮探测过的目录：没探测的（含 unknown）保持上一轮结论，
+      // 不能因为「缓存里没有」就把它从 missing 集合里抹掉。
+      setMissing(prev => {
+        const next = new Set(prev)
+        let changed = false
+        for (const directory of targets) {
+          const cached = readCached(serverId, directory)
+          if (cached === undefined) continue
+          if (cached === false) {
+            if (!next.has(directory)) {
+              next.add(directory)
+              changed = true
+            }
+          } else if (next.delete(directory)) {
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
     })
 
     return () => {

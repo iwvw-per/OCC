@@ -12,8 +12,12 @@ import type { ActiveSessionEntry } from '../../../store/activeSessionStore'
 
 const t = (key: string) => key
 
-function busy(sessionId: string, directory: string, extra: Partial<ActiveSessionEntry> = {}): ActiveSessionEntry {
-  return { sessionId, directory, status: { type: 'busy' }, ...extra }
+function busy(
+  sessionId: string,
+  directory: string,
+  extra: Partial<Omit<ActiveSessionEntry, 'sessionId' | 'status'>> & { status?: ActiveSessionEntry['status'] } = {},
+): ActiveSessionEntry {
+  return { sessionId, directory, status: extra.status ?? { type: 'busy' }, source: 'server', ...extra }
 }
 
 function notif(sessionId: string, directory: string, overrides: Partial<NotificationEntry> = {}): NotificationEntry {
@@ -62,6 +66,32 @@ describe('buildFolderStatus', () => {
     })
     expect(status?.kind).toBe('permission')
     expect(status?.count).toBe(2)
+  })
+
+  it('只有未回复请求、服务端已 idle 的会话不算运行中', () => {
+    // 一个从没被点开的权限请求会让折叠目录一直转圈：它并不在跑。
+    const status = buildFolderStatus({
+      serverId: 'local',
+      directories: ['/repo'],
+      busySessions: [busy('local::ses_1', '/repo', { source: 'pending' })],
+      notifications: [],
+      t,
+    })
+    expect(status).toBeNull()
+  })
+
+  it('pending 与真正运行中的会话并存时按运行中展示', () => {
+    const status = buildFolderStatus({
+      serverId: 'local',
+      directories: ['/repo'],
+      busySessions: [
+        busy('local::ses_1', '/repo', { source: 'server' }),
+        busy('local::ses_2', '/repo', { source: 'pending' }),
+      ],
+      notifications: [],
+      t,
+    })
+    expect(status?.kind).toBe('working')
   })
 
   it('question 优先于 retry 和 working，但低于 permission', () => {
@@ -123,7 +153,6 @@ describe('buildFolderStatus', () => {
       t,
     })
     expect(status?.kind).toBe('unread')
-    
   })
 
   it('已读通知不触发 unread', () => {

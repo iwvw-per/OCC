@@ -40,21 +40,48 @@ async function fetchDirectory(path: string, directory?: string, serverId?: strin
 }
 
 /**
- * 探测某绝对目录在服务器上是否存在（只列一层，失败即视为不存在）。
+ * 目录存在性探测结果。
  *
- * 用于识别「项目根目录已迁移/删除」：opencode 按 git 仓库身份记项目，
- * 仓库整体搬家后 project.current 仍返回旧 worktree，靠它判断会一直把
- * 新目录挂到旧项目下。该请求失败（目录不存在时服务端返回 500）即判定不存在。
+ * - exists：确认目录存在
+ * - missing：确认目录不存在（服务端明确报 404 / 空目录语义）
+ * - unknown：请求本身失败（网络、鉴权、路径非法等），无法据此判断
+ *
+ * 只有「确认不存在」才允许调用方隐藏项目：把 `unknown` 当成不存在会让
+ * 一次网络抖动或一个非法路径把整个项目从侧栏抹掉。
  */
-export async function directoryExists(path: string, serverId?: string): Promise<boolean> {
-  if (!path) return false
-  try {
-    // 把待测目录当作 location、列其根（path='.'）：目录不存在时服务端返回 500。
-    await listDirectory('.', path, serverId)
-    return true
-  } catch {
-    return false
+export type DirectoryExistence = 'exists' | 'missing' | 'unknown'
+
+/** 从 SDK / fetch 错误里尽量读出 HTTP 状态码 */
+function readErrorStatus(error: unknown): number | null {
+  const candidates: unknown[] = [
+    (error as { status?: unknown })?.status,
+    (error as { statusCode?: unknown })?.statusCode,
+    (error as { response?: { status?: unknown } })?.response?.status,
+    (error as { cause?: { status?: unknown } })?.cause?.status,
+  ]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number') return candidate
   }
+  return null
+}
+
+export async function probeDirectory(path: string, serverId?: string): Promise<DirectoryExistence> {
+  if (!path) return 'missing'
+  try {
+    // 把待测目录当作 location、列其根（path='.'）。
+    await listDirectory('.', path, serverId)
+    return 'exists'
+  } catch (error) {
+    const status = readErrorStatus(error)
+    // 404/410 明确表示目录不存在；其余（500、网络、非法路径）都无法断定。
+    if (status === 404 || status === 410) return 'missing'
+    return 'unknown'
+  }
+}
+
+/** 目录存在性（兼容旧调用）：只有确认不存在时返回 false，探测失败按存在处理。 */
+export async function directoryExists(path: string, serverId?: string): Promise<boolean> {
+  return (await probeDirectory(path, serverId)) !== 'missing'
 }
 
 /**

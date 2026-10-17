@@ -1,27 +1,26 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearDirectoryExistenceCache, useMissingDirectories } from './useMissingDirectories'
+import type { DirectoryExistence } from '../api'
 
-const directoryExistsMock = vi.fn<(path: string, serverId?: string) => Promise<boolean>>()
+const probeDirectoryMock = vi.fn<(path: string, serverId?: string) => Promise<DirectoryExistence>>()
 
 vi.mock('../api', () => ({
-  directoryExists: (...args: [string, string?]) => directoryExistsMock(...args),
+  probeDirectory: (...args: [string, string?]) => probeDirectoryMock(...args),
 }))
 
 describe('useMissingDirectories', () => {
   beforeEach(() => {
-    directoryExistsMock.mockReset()
+    probeDirectoryMock.mockReset()
     clearDirectoryExistenceCache()
   })
 
   it('reports only directories that no longer exist', async () => {
-    directoryExistsMock.mockImplementation((path: string) =>
-      Promise.resolve(path !== '/opt/komidash'),
+    probeDirectoryMock.mockImplementation((path: string) =>
+      Promise.resolve(path !== '/opt/komidash' ? 'exists' : 'missing'),
     )
 
-    const { result } = renderHook(() =>
-      useMissingDirectories(['/opt/komidash', '/opt/code/komidash'], 'server-1'),
-    )
+    const { result } = renderHook(() => useMissingDirectories(['/opt/komidash', '/opt/code/komidash'], 'server-1'))
 
     await waitFor(() => {
       expect(result.current.has('/opt/komidash')).toBe(true)
@@ -29,18 +28,29 @@ describe('useMissingDirectories', () => {
     expect(result.current.has('/opt/code/komidash')).toBe(false)
   })
 
-  it('does not hide anything when the probe fails', async () => {
-    // 探测失败按「存在」处理：网络抖动不应让项目从侧栏消失
-    directoryExistsMock.mockResolvedValue(true)
+  it('does not hide anything when the probe is unknown', async () => {
+    // 请求本身失败（网络抖动、路径非法等）无法断定目录不存在，不能隐藏项目
+    probeDirectoryMock.mockResolvedValue('unknown')
 
     const { result } = renderHook(() => useMissingDirectories(['/opt/komidash'], 'server-1'))
 
-    await waitFor(() => expect(directoryExistsMock).toHaveBeenCalled())
+    await waitFor(() => expect(probeDirectoryMock).toHaveBeenCalled())
+    expect(result.current.size).toBe(0)
+  })
+
+  it('does not hide a relative path when the backend rejects it', async () => {
+    probeDirectoryMock.mockResolvedValue('unknown')
+
+    const { result } = renderHook(() => useMissingDirectories(['../code/OCC'], 'server-1'))
+
+    await waitFor(() => expect(probeDirectoryMock).toHaveBeenCalled())
     expect(result.current.size).toBe(0)
   })
 
   it('normalizes backslashes before comparing', async () => {
-    directoryExistsMock.mockImplementation((path: string) => Promise.resolve(path !== 'C:/repo/old'))
+    probeDirectoryMock.mockImplementation((path: string) =>
+      Promise.resolve(path !== 'C:/repo/old' ? 'exists' : 'missing'),
+    )
 
     const { result } = renderHook(() => useMissingDirectories(['C:\\repo\\old'], 'server-1'))
 

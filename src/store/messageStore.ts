@@ -23,8 +23,14 @@ import {
   mergeToolPart,
   shouldPreserveLiveParts,
   isServerPartId,
+  messageCompletedAt,
 } from './messagePartMerge'
-import { reconcileInFlightTools, settleToolByCallID, finalizeStreamingMessages, computeTrimCount } from './messageToolSettle'
+import {
+  reconcileInFlightTools,
+  settleToolByCallID,
+  finalizeStreamingMessages,
+  computeTrimCount,
+} from './messageToolSettle'
 import type { RevertState, RevertHistoryItem, SessionState, SendRollbackSnapshot } from './messageStoreTypes'
 
 // Re-export types for consumers
@@ -912,7 +918,7 @@ class MessageStore {
     for (let i = 0; i < compressBefore; i++) {
       const message = nextMessages[i]
       if (message.info.role !== 'assistant') continue
-      if (message.isStreaming || message.info.time.completed == null) continue
+      if (message.isStreaming || messageCompletedAt(message) == null) continue
       if (message.isCompressed) continue
 
       const { content, reasoningCount, stepCount } = compressMessageParts(message.content)
@@ -1033,7 +1039,9 @@ class MessageStore {
     // Replace an optimistic user row when the server's canonical message arrives.
     // Matching on text keeps this safe when the async prompt response has no message id.
     if (apiMsg.role === 'user') {
-      const incomingText = Array.isArray((apiMsg as unknown as { parts?: Array<{ type?: string; text?: string }> }).parts)
+      const incomingText = Array.isArray(
+        (apiMsg as unknown as { parts?: Array<{ type?: string; text?: string }> }).parts,
+      )
         ? (apiMsg as unknown as { parts: Array<{ type?: string; text?: string }> }).parts
             .filter(part => part.type === 'text')
             .map(part => part.text ?? '')
@@ -1094,14 +1102,24 @@ class MessageStore {
     let msgIndex = this.getMessageIndex(sessionKey, state).get(apiPart.messageID)
     if (msgIndex === undefined && apiPart.type === 'text') {
       const text = (apiPart as ApiPart & { text?: string }).text
-      const optimisticIndex = typeof text === 'string'
-        ? state.messages.findIndex(message => this.optimisticMessageIds.has(message.info.id) && message.info.role === 'user' && message.content.some(part => part.type === 'text' && part.text === text))
-        : -1
+      const optimisticIndex =
+        typeof text === 'string'
+          ? state.messages.findIndex(
+              message =>
+                this.optimisticMessageIds.has(message.info.id) &&
+                message.info.role === 'user' &&
+                message.content.some(part => part.type === 'text' && part.text === text),
+            )
+          : -1
       if (optimisticIndex >= 0) {
         const optimistic = state.messages[optimisticIndex]
         // D19：乐观占位被 canonical part 认领（id 改写为服务端 id），清掉乐观标记
         this.optimisticMessageIds.delete(optimistic.info.id)
-        state.messages = [...state.messages.slice(0, optimisticIndex), { ...optimistic, info: { ...optimistic.info, id: apiPart.messageID } }, ...state.messages.slice(optimisticIndex + 1)]
+        state.messages = [
+          ...state.messages.slice(0, optimisticIndex),
+          { ...optimistic, info: { ...optimistic.info, id: apiPart.messageID } },
+          ...state.messages.slice(optimisticIndex + 1),
+        ]
         this.messageIndexCache.delete(sessionKey)
         msgIndex = optimisticIndex
       }
@@ -1164,10 +1182,9 @@ class MessageStore {
     }
     const part = msg.content[partIndex]
 
-    if (!(data.field === 'text' && 'text' in part))
-      return // Mutable 修改：直接拼接 text，不做不可变拷贝。
-      // 一帧内可能收到多个 delta，只有最后的状态会被 React 看到。
-      // flushDirtyMessages() 会在 notify 的 rAF 回调中统一生成新引用。
+    if (!(data.field === 'text' && 'text' in part)) return // Mutable 修改：直接拼接 text，不做不可变拷贝。
+    // 一帧内可能收到多个 delta，只有最后的状态会被 React 看到。
+    // flushDirtyMessages() 会在 notify 的 rAF 回调中统一生成新引用。
 
     // D-dup：part 已被 text.ended 定稿（带 end 时间）后，迟到的 delta 不再追加。
     // text.ended 携带完整文本并覆盖 part.text；若随后再有乱序/重发的 delta 被

@@ -6,6 +6,7 @@ function makeEntry(sessionId: string): ActiveSessionEntry {
   return {
     sessionId,
     status: { type: 'busy' },
+    source: 'server',
   }
 }
 

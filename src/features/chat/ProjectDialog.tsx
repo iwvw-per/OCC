@@ -4,7 +4,7 @@ import { FolderIcon, FolderOpenIcon, ArrowUpIcon, SpinnerIcon, PlusIcon, GitBran
 import { listDirectory, getPath, directoryExists } from '../../api'
 import { runPtyCommand } from '../../api/ptyRun'
 import { inferRepoName, isLikelyGitUrl } from './gitCloneUrl'
-import { fileErrorHandler } from '../../utils'
+import { collapseDotSegments, fileErrorHandler, isAbsoluteDirectory } from '../../utils'
 import { canUseSystemDirectoryPicker } from '../../utils/nativeFileIntegration'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
 import { Dialog } from '../../components/ui/Dialog'
@@ -47,6 +47,21 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, '/')
 }
 
+/**
+ * 把用户输入整理成可展示的绝对路径起点。
+ *
+ * 浏览器地址栏里的相对路径（`../code/OCC`）无法在远程后端上解析，这里把它
+ * 折叠掉 `..`/`.`（`/opt/code/../code` → `/opt/code`）；仍不是绝对路径时返回
+ * 空串，由调用方回落到服务端 home，避免把相对路径当成项目目录。
+ */
+function toAbsoluteStartingPath(p: string | undefined): string {
+  if (!p) return ''
+  const normalized = normalizePath(p)
+  const collapsed = collapseDotSegments(normalized)
+  if (!isAbsoluteDirectory(collapsed)) return ''
+  return collapsed.endsWith(PATH_SEP) ? collapsed : collapsed + PATH_SEP
+}
+
 function getDirectoryPath(path: string): string {
   const normalized = normalizePath(path)
   if (normalized.endsWith(PATH_SEP)) return normalized
@@ -74,6 +89,8 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 输入框当前值不是绝对路径时展示的提示（不阻塞浏览，只阻止添加） */
+  const [pathError, setPathError] = useState<string | null>(null)
 
   // ---- Git clone ----
   const [cloneOpen, setCloneOpen] = useState(false)
@@ -115,7 +132,9 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
       setItems([])
 
       const initPath = async () => {
-        let path = initialPath
+        // initialPath 可能来自 URL 等外部来源：相对路径在远程后端上无法解析，
+        // 先折叠 `..`，仍不是绝对路径就回落到服务端 home。
+        let path = toAbsoluteStartingPath(initialPath)
         if (!path) {
           try {
             const p = await getPath(serverId)
@@ -127,7 +146,13 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
 
         if (cancelled) return
 
-        path = normalizePath(path)
+        path = toAbsoluteStartingPath(normalizePath(path))
+        if (!path) {
+          path = PATH_SEP
+          setPathError(t('projectDialog.invalidPath'))
+        } else {
+          setPathError(null)
+        }
         if (!path.endsWith(PATH_SEP)) path += PATH_SEP
         setInputValue(path)
         setSelectedIndex(0)
@@ -142,7 +167,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
       cancelled = true
       clearTimeout(timer)
     }
-  }, [isOpen, initialPath, serverId])
+  }, [isOpen, initialPath, serverId, t])
 
   // ==========================================
   // Load Directory
@@ -230,15 +255,18 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
     }
 
     const parent = getDirectoryPath(current)
-    if (parent && parent !== current + PATH_SEP) {
-      const folderName = current.split(PATH_SEP).pop()
+    // `..` 这类相对段在服务端无法解析：按字符串折叠掉，而不是继续截短成更早的路径。
+    const collapsedParent = normalizePath(collapseDotSegments(parent))
+    if (collapsedParent && collapsedParent !== normalizePath(current)) {
+      const folderName = current.split(PATH_SEP).filter(Boolean).pop()
       if (folderName) pendingSelectionRef.current = folderName
-      setInputValue(parent)
+      setInputValue(collapsedParent)
     }
   }, [inputValue])
 
   const handleItemClick = useCallback((item: FileItem) => {
     setInputValue(item.path + PATH_SEP)
+    setPathError(null)
     inputRef.current?.focus()
   }, [])
 
@@ -258,9 +286,16 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
     }
     // 只阻止空路径和 "."
     if (!path || path === '.') return
+    // 后端只接受绝对路径：相对路径（`../code/OCC`、`foo/bar`）会让后续
+    // 列目录/查询会话全部失败，且被侧栏误判为「目录不存在」。这里直接拦下。
+    if (!isAbsoluteDirectory(path)) {
+      setPathError(t('projectDialog.invalidPath'))
+      return
+    }
+    setPathError(null)
     onSelect(path)
     onClose()
-  }, [inputValue, onSelect, onClose])
+  }, [inputValue, onSelect, onClose, t])
 
   /**
    * 用系统文件夹选择器挑目录。
@@ -303,11 +338,14 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
     window.setTimeout(() => cloneInputRef.current?.focus(), 50)
   }, [resetCloneState])
 
-  const handleCloneUrlChange = useCallback((value: string) => {
-    setCloneUrl(value)
-    // 目录名只在用户没手动改过时跟随 URL
-    setCloneDirName(prev => (prev === '' || prev === inferRepoName(cloneUrl) ? inferRepoName(value) : prev))
-  }, [cloneUrl])
+  const handleCloneUrlChange = useCallback(
+    (value: string) => {
+      setCloneUrl(value)
+      // 目录名只在用户没手动改过时跟随 URL
+      setCloneDirName(prev => (prev === '' || prev === inferRepoName(cloneUrl) ? inferRepoName(value) : prev))
+    },
+    [cloneUrl],
+  )
 
   /**
    * 执行 git clone。
@@ -455,6 +493,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             onChange={e => {
               setInputValue(e.target.value)
               setSelectedIndex(0)
+              if (pathError) setPathError(null)
             }}
             onKeyDown={handleKeyDown}
             placeholder={t('projectDialog.typePath')}
@@ -464,6 +503,14 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
           />
           {isLoading && <SpinnerIcon className="animate-spin text-text-400 w-4 h-4" size={16} />}
         </div>
+        {pathError && (
+          <div
+            role="alert"
+            className="mt-2 rounded-md border border-danger-100/40 bg-danger-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100"
+          >
+            {pathError}
+          </div>
+        )}
       </div>
 
       {/* List */}
@@ -562,7 +609,10 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             <span className="shrink-0 font-mono text-[length:var(--fs-xxs)] text-text-400">
               {t('projectDialog.cloneInto')}
             </span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-xxs)] text-text-300" title={inputValue}>
+            <span
+              className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-xxs)] text-text-300"
+              title={inputValue}
+            >
               {inputValue}
             </span>
           </div>
@@ -701,11 +751,7 @@ function ListItem({ id, icon, label, isSelected, onClick, onMouseEnter, action }
       onMouseEnter={onMouseEnter}
       className={`
         flex items-center justify-between px-3 py-2 rounded-md cursor-pointer transition-all duration-150
-        ${
-          isSelected
-            ? 'bg-bg-200/60 text-text-100'
-            : 'text-text-300 hover:bg-bg-200'
-        }
+        ${isSelected ? 'bg-bg-200/60 text-text-100' : 'text-text-300 hover:bg-bg-200'}
       `}
     >
       <div className="flex items-center gap-2.5 min-w-0">

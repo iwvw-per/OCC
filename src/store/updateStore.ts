@@ -41,7 +41,12 @@ type Subscriber = () => void
 
 const STORAGE_KEY = 'opencode:update-check'
 const CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000
-const RELEASES_ROOT_URL = 'https://api.github.com/repos/iwvw-per/OpenCodeUI/releases'
+/**
+ * 发行仓库。必须与 src-tauri/tauri.conf.json 的 updater endpoint 指向同一个仓库，
+ * 否则「检查更新」看到的版本与「安装更新」下载的清单会来自两个不同的 release。
+ */
+export const RELEASE_REPO = 'iwvw-per/OCC'
+const RELEASES_ROOT_URL = `https://api.github.com/repos/${RELEASE_REPO}/releases`
 // canary 通道用列表接口拉取最近若干个 release，取语义最大的 prerelease。
 // 单次响应约 27KB/release，per_page 取最小可用值控制流量。
 const CANARY_RELEASE_SCAN_LIMIT = 5
@@ -49,7 +54,7 @@ const CANARY_RELEASE_SCAN_LIMIT = 5
 // 过滤）。per_page 需要能覆盖该主版本的全部 release，取 20 以兼顾 v1/v2 各迭代。
 const STABLE_RELEASE_SCAN_LIMIT = 20
 export const RELEASES_API_URL = `${RELEASES_ROOT_URL}/latest`
-export const RELEASES_PAGE_URL = 'https://github.com/iwvw-per/OpenCodeUI/releases/latest'
+export const RELEASES_PAGE_URL = `https://github.com/${RELEASE_REPO}/releases/latest`
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -89,9 +94,7 @@ export function compareVersions(a: string, b: string): number {
     const prerelease = dashIndex === -1 ? null : normalized.slice(dashIndex + 1)
     const numbers = core.split('.').map(part => Number.parseInt(part, 10) || 0)
     const preParts = prerelease
-      ? prerelease
-          .split('.')
-          .map(part => (/^\d+$/.test(part) ? Number.parseInt(part, 10) : part.toLowerCase()))
+      ? prerelease.split('.').map(part => (/^\d+$/.test(part) ? Number.parseInt(part, 10) : part.toLowerCase()))
       : null
     return { numbers, preParts }
   }
@@ -148,7 +151,7 @@ export function shouldShowUpdateToast(state: UpdateState): boolean {
  * releases/latest/download 永远解析不到 prerelease。
  */
 export function getReleaseManifestUrl(release: UpdateRelease): string {
-  return `https://github.com/iwvw-per/OpenCodeUI/releases/download/${release.tagName}/latest.json`
+  return `https://github.com/${RELEASE_REPO}/releases/download/${release.tagName}/latest.json`
 }
 
 function loadPersistedState(): PersistedUpdateState {
@@ -319,8 +322,7 @@ export class UpdateStore {
         // 稳定通道也必须走列表接口：产品线隔离需要按主版本过滤，
         // /releases/latest 只返回最新一个、无法区分 v1(1.x)/v2(2.x)。
         // canary 通道取预发布与正式版的最大者（/latest 解析不到 prerelease）。
-        const scanLimit =
-          this.state.currentChannel === 'canary' ? CANARY_RELEASE_SCAN_LIMIT : STABLE_RELEASE_SCAN_LIMIT
+        const scanLimit = this.state.currentChannel === 'canary' ? CANARY_RELEASE_SCAN_LIMIT : STABLE_RELEASE_SCAN_LIMIT
         const requestUrl = `${RELEASES_ROOT_URL}?per_page=${scanLimit}`
 
         const response = await fetch(requestUrl, {
@@ -334,8 +336,7 @@ export class UpdateStore {
         const release = Array.isArray(payload)
           ? pickRelease(payload, this.state.currentChannel, this.state.currentVersion)
           : // 兜底：单个 release 对象时视为与当前主版本一致（仅当主版本匹配才接受）
-            majorVersion((payload as { tag_name?: string })?.tag_name ?? '') ===
-              majorVersion(this.state.currentVersion)
+            majorVersion((payload as { tag_name?: string })?.tag_name ?? '') === majorVersion(this.state.currentVersion)
             ? parseRelease(payload)
             : null
         this.applyRelease(release, now)

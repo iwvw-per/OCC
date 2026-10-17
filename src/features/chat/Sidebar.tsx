@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { SidePanel } from './sidebar/SidePanel'
 import { ProjectDialog } from './ProjectDialog'
 import { useMultiServerStore } from '../../store/multiServerStore'
+import { notificationStore } from '../../store/notificationStore'
 import { useDirectory } from '../../hooks'
+import { isAbsoluteDirectory, normalizeToForwardSlash } from '../../utils'
 import { canUseNativeDirectoryPicker } from '../../utils/nativeFileIntegration'
 import { getDesktopPlatform } from '../../utils/tauri'
 import { DESKTOP_TITLEBAR_HEIGHT } from '../../constants/desktopWindow'
@@ -52,9 +54,22 @@ export const Sidebar = memo(function Sidebar({
   const { t } = useTranslation(['chat', 'common'])
   const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false)
   const [projectDialogKey, setProjectDialogKey] = useState(0)
-  const { addDirectory, pathInfo, currentDirectory } = useDirectory()
-  // 已在项目里时，从当前项目路径起步，方便加相邻目录；否则回落 home
+  const { addDirectory, pruneInvalidDirectories, pathInfo, currentDirectory, savedDirectories } = useDirectory()
+  // 已在项目里时，从当前项目路径起步，方便加相邻目录；否则回落 home。
+  // 只接受绝对路径：URL 里可能是外部链接带来的 `../code/OCC`，不能带进弹窗。
   const projectDialogInitialPath = currentDirectory || pathInfo?.home
+
+  // 历史版本可能把相对路径存进项目列表，后端会拒绝并导致项目「消失」。
+  // 路径信息（home）就绪后清理一次；没有合法起点时宁可不动，避免误删。
+  const hasInvalidSavedDirectories = savedDirectories.some(
+    directory => !isAbsoluteDirectory(normalizeToForwardSlash(directory.path)),
+  )
+  useEffect(() => {
+    if (!hasInvalidSavedDirectories) return
+    if (!pathInfo?.home) return
+    pruneInvalidDirectories()
+  }, [hasInvalidSavedDirectories, pathInfo?.home, pruneInvalidDirectories])
+
   const { interaction, layout, actions } = useChatViewport()
   const isOverlay = interaction.sidebarBehavior === 'overlay'
   const touchCapable = interaction.touchCapable
@@ -73,12 +88,16 @@ export const Sidebar = memo(function Sidebar({
     (path: string) => {
       // 项目目录列表跨服务器共享（saved-directories 不再按服务器隔离），
       // 切到远程主机后同一份列表原样展示，实现无缝衔接
-      addDirectory(path)
+      const added = addDirectory(path)
+      if (!added) {
+        notificationStore.toast('error', t('projectDialog.invalidPathTitle'), t('projectDialog.invalidPath'))
+        return
+      }
       if (!isOverlay) {
         onOpen()
       }
     },
-    [addDirectory, isOverlay, onOpen],
+    [addDirectory, isOverlay, onOpen, t],
   )
 
   const openProjectDialog = useCallback(async () => {
@@ -347,7 +366,10 @@ export const Sidebar = memo(function Sidebar({
             transition-opacity duration-300
             ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
           `}
-          style={{ top: 'calc(var(--overlay-safe-top, 0px) + var(--desktop-titlebar-height, 0px))', height: 'calc(100% - var(--overlay-safe-top, 0px) - var(--desktop-titlebar-height, 0px))' }}
+          style={{
+            top: 'calc(var(--overlay-safe-top, 0px) + var(--desktop-titlebar-height, 0px))',
+            height: 'calc(100% - var(--overlay-safe-top, 0px) - var(--desktop-titlebar-height, 0px))',
+          }}
           onClick={handleBackdropClick}
         />
 
@@ -415,11 +437,7 @@ export const Sidebar = memo(function Sidebar({
             className="flex items-center shrink-0 border-b border-border-200/50 pl-2 pr-2 gap-1"
             style={{ height: DESKTOP_TITLEBAR_HEIGHT }}
           >
-            <DesktopNavControls
-              sidebarOpen={isOpen}
-              onToggleSidebar={handleToggle}
-              showExtra={isOpen}
-            />
+            <DesktopNavControls sidebarOpen={isOpen} onToggleSidebar={handleToggle} showExtra={isOpen} />
           </div>
         )}
 

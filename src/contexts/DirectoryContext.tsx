@@ -7,6 +7,7 @@ import { getPath, type ApiPath } from '../api'
 import { useRouter } from '../hooks/useRouter'
 import {
   handleError,
+  isAbsoluteDirectory,
   normalizeToForwardSlash,
   getDirectoryName,
   isSameDirectory,
@@ -37,6 +38,9 @@ function readSavedDirectories(): SavedDirectory[] {
   return saved.flatMap(item => {
     if (!isRecord(item) || typeof item.path !== 'string') return []
     const path = item.path
+    // 历史数据里可能存过 `../code/OCC` 这类相对路径：后端会拒绝它，
+    // 侧栏也只能显示错误。读取时直接丢弃，避免坏数据反复传播。
+    if (!isAbsoluteDirectory(normalizeToForwardSlash(path))) return []
     return [
       {
         path,
@@ -172,12 +176,18 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       }
 
       // 验证路径非空（只阻止空字符串和 "."）
-      if (!normalized || normalized === '.') return
+      if (!normalized || normalized === '.') return false
+
+      // 后端只接受绝对路径：相对路径（如 `../code/OCC`）会在列会话/文件时
+      // 被拒绝（v2: Path is not absolute），且会被误判为「目录不存在」而隐藏。
+      if (!isAbsoluteDirectory(normalized)) {
+        return false
+      }
 
       // 使用 isSameDirectory 检查是否已存在（处理大小写和斜杠差异）
       if (savedDirectories.some(d => isSameDirectory(d.path, normalized))) {
         setCurrentDirectory(normalized)
-        return
+        return true
       }
 
       const newDir: SavedDirectory = {
@@ -192,6 +202,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
         return next
       })
       setCurrentDirectory(normalized)
+      return true
     },
     [savedDirectories, setCurrentDirectory],
   )
@@ -208,9 +219,29 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       if (isSameDirectory(urlDirectory, normalized)) {
         setCurrentDirectory(undefined)
       }
+      return true
     },
     [urlDirectory, setCurrentDirectory],
   )
+
+  /**
+   * 清理已落库的非法目录（非绝对路径）。
+   *
+   * 老版本会把 `../code/OCC` 这类相对路径存进项目列表，新建项目入口现在会
+   * 拦截，但历史数据仍需一次清理：否则侧栏每次都会去请求并失败。
+   * 只在确实有非法项时写回，避免无谓的存储写入与同步。
+   */
+  const pruneInvalidDirectories = useCallback(() => {
+    setSavedState(prev => {
+      const valid = prev.directories.filter(directory => {
+        const normalized = normalizeToForwardSlash(directory.path)
+        return !!normalized && normalized !== '.' && isAbsoluteDirectory(normalized)
+      })
+      if (valid.length === prev.directories.length) return prev
+      serverStorage.setJSONFor(STORAGE_KEY_SAVED, valid, prev.serverId)
+      return { ...prev, directories: valid }
+    })
+  }, [])
 
   const reorderDirectories = useCallback((draggedPath: string, targetPath: string) => {
     const normalizedDragged = normalizeToForwardSlash(draggedPath)
@@ -284,6 +315,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       addDirectory,
       removeDirectory,
       reorderDirectories,
+      pruneInvalidDirectories,
       pathInfo,
       sidebarExpanded,
       setSidebarExpanded,
@@ -296,6 +328,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       addDirectory,
       removeDirectory,
       reorderDirectories,
+      pruneInvalidDirectories,
       pathInfo,
       sidebarExpanded,
       setSidebarExpanded,

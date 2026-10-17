@@ -25,10 +25,21 @@ export interface FolderStatus {
   count?: number
 }
 
+/**
+ * 项目行可用的活跃条目。`source` 缺省视为服务端状态（mock/旧数据），
+ * 只有显式标成 'pending' 的才被当作「服务端已 idle、仅剩未回复请求」，
+ * 不计入运行中（否则折叠的目录会一直转圈）。
+ */
+export type FolderStatusSession = Pick<ActiveSessionEntry, 'sessionId' | 'directory'> & {
+  status: ActiveSessionEntry['status']
+  pendingAction?: ActiveSessionEntry['pendingAction']
+  source?: ActiveSessionEntry['source']
+}
+
 export interface FolderStatusInput {
   serverId: string
   directories: string[]
-  busySessions: ActiveSessionEntry[]
+  busySessions: FolderStatusSession[]
   notifications: NotificationEntry[]
   t: (key: string) => string
 }
@@ -55,11 +66,16 @@ export function buildFolderStatus({
     let hasPermission = false
     let hasQuestion = false
     let hasRetry = false
+    let hasRunning = false
 
     for (const session of dirSessions) {
+      // 「等用户回复」优先于「在跑」：一条从未点开的权限请求不应该表现成运行中。
       if (session.pendingAction?.type === 'permission') hasPermission = true
       else if (session.pendingAction?.type === 'question') hasQuestion = true
       else if (session.status.type === 'retry') hasRetry = true
+      // source === 'pending' 表示服务端已 idle、只是请求还悬着：不进 running，
+      // 否则折叠的目录会因为一个没人看的权限请求一直转圈。
+      else if (session.source !== 'pending') hasRunning = true
     }
 
     const count = dirSessions.length
@@ -87,6 +103,8 @@ export function buildFolderStatus({
         count,
       }
     }
+
+    if (!hasRunning) return null
 
     return {
       kind: 'working',

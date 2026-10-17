@@ -17,8 +17,8 @@ export async function getConfig(directory?: string): Promise<Config> {
   if (serverStore.getApiVersion(sid) === 'v2') {
     return nativeGetConfig(sid, { directory }) as Config
   }
-  const sdk = getSDKClient()
-  return unwrap(await sdk.config.get({ directory: formatPathForApi(directory) }))
+  const sdk = getSDKClient(sid)
+  return unwrap(await sdk.config.get({ directory: formatPathForApi(directory, sid) }))
 }
 
 /**
@@ -33,8 +33,9 @@ export async function getGlobalConfig(): Promise<Config> {
  * 更新配置
  */
 export async function updateConfig(config: Config, directory?: string): Promise<Config> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.config.update({ directory: formatPathForApi(directory), config }))
+  const sid = serverStore.getActiveServerId()
+  const sdk = getSDKClient(sid)
+  return unwrap(await sdk.config.update({ directory: formatPathForApi(directory, sid), config }))
 }
 
 /**
@@ -54,6 +55,6 @@ export async function getProviderConfigs(directory?: string): Promise<ProvidersR
   if (serverStore.getApiVersion(sid) === 'v2') {
     return nativeGetProviders(sid, { directory })
   }
-  const sdk = getSDKClient()
-  return unwrap(await sdk.config.providers({ directory: formatPathForApi(directory) }))
+  const sdk = getSDKClient(sid)
+  return unwrap(await sdk.config.providers({ directory: formatPathForApi(directory, sid) }))
 }

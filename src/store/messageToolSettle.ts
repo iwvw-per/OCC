@@ -7,6 +7,7 @@
 // 「工具是否卡住」「消息是否定稿」，此前只能经由整个 store 间接测试。
 
 import type { Message, Part, ToolPart } from '../types/message'
+import { messageCompletedAt } from './messagePartMerge'
 
 /** 单条消息计费上限：超长消息按此截断计费，避免一条巨消息把整段预算吃光。 */
 export const MAX_SINGLE_MESSAGE_BYTES = 2 * 1024 * 1024
@@ -33,11 +34,7 @@ export function estimateMessageBytes(message: Message): number {
  * 只返回裁剪条数，不改动状态。体积从最新向最旧累积，超过预算时把更旧的一并裁掉；
  * 条数超限时至少裁到 maxCount。返回 0 表示无需裁剪。
  */
-export function computeTrimCount(
-  messages: readonly Message[],
-  maxBytes: number,
-  maxCount: number,
-): number {
+export function computeTrimCount(messages: readonly Message[], maxBytes: number, maxCount: number): number {
   const total = messages.length
   if (total === 0) return 0
 
@@ -62,7 +59,6 @@ export function computeTrimCount(
   return cut
 }
 
-
 /** part 是否处于未落定状态（running/pending） */
 export function isUnsettledToolPart(part: Part): part is ToolPart {
   return part.type === 'tool' && (part.state.status === 'running' || part.state.status === 'pending')
@@ -72,10 +68,7 @@ export function isUnsettledToolPart(part: Part): part is ToolPart {
  * 把仍处于 running/pending 的工具 part 落定为 interrupted。
  * 用于会话已结束（idle/error）但仍悬空的工具。返回新的 messages 与是否有变更。
  */
-export function reconcileInFlightTools(
-  messages: Message[],
-  now: number,
-): { messages: Message[]; changed: boolean } {
+export function reconcileInFlightTools(messages: Message[], now: number): { messages: Message[]; changed: boolean } {
   let changed = false
   const next = messages.map(message => {
     let partsChanged = false
@@ -128,9 +121,7 @@ export function settleToolByCallID(
       partsChanged = true
       changed = true
       const start = part.state.time?.start ?? now
-      const metadata = outcome.metadata
-        ? { ...(part.state.metadata ?? {}), ...outcome.metadata }
-        : part.state.metadata
+      const metadata = outcome.metadata ? { ...(part.state.metadata ?? {}), ...outcome.metadata } : part.state.metadata
       if (outcome.status === 'error') {
         return {
           ...part,
@@ -178,7 +169,7 @@ export function finalizeStreamingMessages(
         ...m.info,
         time: {
           ...m.info.time,
-          completed: m.info.time.completed ?? completedAt,
+          completed: messageCompletedAt(m) ?? completedAt,
         },
       },
     }

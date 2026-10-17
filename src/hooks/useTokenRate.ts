@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react'
 import { messageStore } from '../store'
+import { messageCompletedAt } from '../store/messagePartMerge'
 
 export interface TokenRateState {
   tokensPerSec: number
@@ -37,7 +38,7 @@ export function useTokenRate(sessionId: string | null): TokenRateState {
         if (message.info.role !== 'assistant') continue
         const info = message.info
         const created = info.time.created
-        const completed = info.time.completed
+        const completed = messageCompletedAt(message)
         if (!created || !completed || completed <= created) continue
 
         // 速率 = 输出 token / 文本生成时间：只算 text part 的时间窗口，

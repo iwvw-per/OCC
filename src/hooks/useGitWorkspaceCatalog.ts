@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getCurrentProject, listWorktrees, directoryExists, type ApiProject } from '../api'
+import { getCurrentProject, listWorktrees, probeDirectory, type ApiProject } from '../api'
 import { subscribeToEvents } from '../api/events'
 import { serverStore } from '../store/serverStore'
 import { normalizeToForwardSlash } from '../utils'
@@ -135,18 +135,19 @@ export function useGitWorkspaceCatalog(directories: string[], serverId?: string)
 
       // 根目录存在性：git 仓库整体搬家后，服务端仍返回旧 worktree，
       // 旧路径在磁盘上已不存在。这里并发探一次，供侧栏判断能否继续聚合到旧根。
+      // 只有「确认不存在」才标记 rootExists=false：探测失败（unknown）不能用来拆组。
       const rootDirectoryList = Array.from(rootDirectories)
       const rootExistsResults = await Promise.allSettled(
         rootDirectoryList.map(async rootDirectory => ({
           rootDirectory,
-          exists: await directoryExists(rootDirectory, serverId),
+          probe: await probeDirectory(rootDirectory, serverId),
         })),
       )
       const rootExistsMap = new Map<string, boolean>()
       for (let index = 0; index < rootExistsResults.length; index++) {
         const result = rootExistsResults[index]
         if (result.status === 'fulfilled') {
-          rootExistsMap.set(result.value.rootDirectory, result.value.exists)
+          rootExistsMap.set(result.value.rootDirectory, result.value.probe !== 'missing')
         } else {
           // 探测失败：保守视为存在，避免网络抖动时把项目拆散
           rootExistsMap.set(rootDirectoryList[index], true)

@@ -178,6 +178,11 @@ export function formatPathForApi(dir: string | undefined | null, serverId?: stri
     trimmed = trimmed + '/'
   }
 
+  // Unix 绝对路径永远不能被转成反斜杠：\opt\code\OCC 不是合法路径，
+  // 后端会报 LocationNotFoundError。这通常发生在多服务器场景下「风格判定
+  // 走到了另一台 Windows 主机」时，这里兜底保住原样。
+  if (trimmed.startsWith('/')) return trimmed
+
   const style = getEffectivePathStyle(serverId)
   if (style === 'windows') {
     // 已是 Windows 反斜杠形式时原样返回，避免「规范化→再反斜杠」的无谓往返，
@@ -255,6 +260,51 @@ export function normalizeToForwardSlash(dir: string | undefined | null): string 
   return dir
     .replace(/\\/g, '/') // 反斜杠 → 正斜杠
     .replace(/\/+$/, '') // 移除末尾斜杠
+}
+
+/**
+ * 判断路径是否为绝对路径。
+ *
+ * 后端（尤其 opencode v2）只接受绝对路径作为 location/项目目录，相对路径
+ * （如 `../code/OCC`）会在请求时被拒绝。这里统一按两种平台判断：
+ * - Unix：以 `/` 开头
+ * - Windows：`C:/` 或 `C:\` 开头（也接受 `\\server` UNC 的等价正斜杠形式）
+ */
+export function isAbsoluteDirectory(dir: string | undefined | null): boolean {
+  if (!dir) return false
+  if (dir.startsWith('/')) return true
+  return /^[a-zA-Z]:[\\/]/.test(dir)
+}
+
+/**
+ * 把 `..`、`.` 段折叠掉的纯字符串路径归一化（不访问文件系统）。
+ * 用于用户手输路径时展示/落库前消除 `..`，避免把相对路径原样存成项目。
+ *
+ * - Unix：`/a/../b` → `/b`；已到根时忽略多余 `..`
+ * - Windows：`C:/a/../b` → `C:/b`
+ */
+export function collapseDotSegments(dir: string | undefined | null): string {
+  if (!dir) return ''
+  const normalized = dir.replace(/\\/g, '/')
+  const hasRoot = normalized.startsWith('/')
+  const driveMatch = normalized.match(/^([a-zA-Z]:)/)
+  const drive = driveMatch ? driveMatch[1] : ''
+  const rest = drive ? normalized.slice(drive.length) : normalized
+  const parts = rest.split('/')
+  const stack: string[] = []
+  for (const part of parts) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (stack.length > 0 && stack[stack.length - 1] !== '..') stack.pop()
+      else if (!hasRoot && !drive) stack.push('..')
+      continue
+    }
+    stack.push(part)
+  }
+  const joined = stack.join('/')
+  if (drive) return joined ? `${drive}/${joined}` : `${drive}/`
+  if (hasRoot) return joined ? `/${joined}` : '/'
+  return joined
 }
 
 /**

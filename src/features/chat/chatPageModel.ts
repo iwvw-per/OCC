@@ -1,4 +1,5 @@
 import type { Message, ToolPart } from '../../types/message'
+import { messageCompletedAt } from '../../store/messagePartMerge'
 import { collectChangedFiles } from '../message/parts/changedFiles'
 import type { ChangedFile } from '../message/parts/changedFiles'
 
@@ -671,8 +672,9 @@ export function buildTurnDurationMap(messages: Message[], visibleMessages: Messa
     if (visibleAssistantIds.has(message.info.id)) {
       currentVisibleAssistantId = message.info.id
     }
-    if (message.info.time.completed != null) {
-      currentLastCompleted = message.info.time.completed
+    const completedAt = messageCompletedAt(message)
+    if (completedAt != null) {
+      currentLastCompleted = completedAt
     }
   }
 
@@ -798,7 +800,7 @@ export function reuseProcessTimelineItems(
 
 function assistantHasLiveWork(message: Message): boolean {
   if (message.info.role !== 'assistant') return false
-  if (message.info.time.completed == null || message.isStreaming) return true
+  if (messageCompletedAt(message) == null || message.isStreaming) return true
   return message.content.some(
     p => p.type === 'tool' && (p.state.status === 'running' || p.state.status === 'pending'),
   )
@@ -816,7 +818,7 @@ function resolveTurnDurationMs(
   }
   let latestEnd: number | undefined
   for (const m of assistants) {
-    const completed = m.info.time.completed
+    const completed = messageCompletedAt(m)
     if (completed != null && (latestEnd == null || completed > latestEnd)) latestEnd = completed
     for (const p of m.content) {
       if (p.type !== 'tool') continue
@@ -917,7 +919,7 @@ export function buildProcessTimeline(
     // 全 completed 且无 live → 锁定 Worked。
     // 不要再用 sessionIsStreaming 重开：发送时 busy 常早于新 user 入列，会闪一下。
     // 工具循环间隙若下一助手还没到，会短暂 Worked；下一助手 live 后自然回到 Working。
-    return assistants.every(m => m.info.time.completed != null && !m.isStreaming)
+    return assistants.every(m => messageCompletedAt(m) != null && !m.isStreaming)
   }
 
   const isTurnPending = (turn: TurnBag & { user: Message }, index: number): boolean => {

@@ -16,11 +16,13 @@ const subscribeToEventsMock = vi.fn()
 const onServerChangeMock = vi.fn()
 let latestServerChange: (() => void) | undefined
 
-const directoryExistsMock = vi.fn<(directory: string, serverId?: string) => Promise<boolean>>(() => Promise.resolve(true))
+const probeDirectoryMock = vi.fn<(directory: string, serverId?: string) => Promise<'exists' | 'missing' | 'unknown'>>(
+  () => Promise.resolve('exists'),
+)
 vi.mock('../api', () => ({
   getCurrentProject: (...args: unknown[]) => getCurrentProjectMock(...args),
   listWorktrees: (...args: unknown[]) => listWorktreesMock(...args),
-  directoryExists: (directory: string, serverId?: string) => directoryExistsMock(directory, serverId),
+  probeDirectory: (directory: string, serverId?: string) => probeDirectoryMock(directory, serverId),
 }))
 
 vi.mock('../api/events', () => ({
@@ -37,8 +39,8 @@ describe('useGitWorkspaceCatalog', () => {
   beforeEach(() => {
     getCurrentProjectMock.mockReset()
     listWorktreesMock.mockReset()
-    directoryExistsMock.mockReset()
-    directoryExistsMock.mockResolvedValue(true)
+    probeDirectoryMock.mockReset()
+    probeDirectoryMock.mockResolvedValue('exists')
     subscribeToEventsMock.mockReset()
     onServerChangeMock.mockReset()
     latestServerChange = undefined
@@ -55,7 +57,9 @@ describe('useGitWorkspaceCatalog', () => {
     const staleRequest = createDeferred<{ vcs: string; worktree: string }>()
     const freshRequest = createDeferred<{ vcs: string; worktree: string }>()
 
-    getCurrentProjectMock.mockImplementationOnce(() => staleRequest.promise).mockImplementationOnce(() => freshRequest.promise)
+    getCurrentProjectMock
+      .mockImplementationOnce(() => staleRequest.promise)
+      .mockImplementationOnce(() => freshRequest.promise)
 
     const directories = ['C:\\repo']
     const { result } = renderHook(() => useGitWorkspaceCatalog(directories))
@@ -96,8 +100,8 @@ describe('useGitWorkspaceCatalog', () => {
       sandboxes: ['/opt/code/komidash'],
     })
     listWorktreesMock.mockResolvedValue(['/opt/komidash', '/opt/code/komidash'])
-    directoryExistsMock.mockImplementation((directory: string) =>
-      Promise.resolve(directory !== '/opt/komidash'),
+    probeDirectoryMock.mockImplementation((directory: string) =>
+      Promise.resolve(directory === '/opt/komidash' ? 'missing' : 'exists'),
     )
     subscribeToEventsMock.mockReturnValue(() => {})
 
@@ -105,6 +109,25 @@ describe('useGitWorkspaceCatalog', () => {
 
     await waitFor(() => {
       expect(result.current.catalog.get('/opt/code/komidash')?.rootExists).toBe(false)
+    })
+  })
+
+  it('keeps a git root when the probe is unknown (request error)', async () => {
+    // 请求失败（路由非法、网络抖动）不能把项目拆成独立分组
+    getCurrentProjectMock.mockResolvedValue({
+      vcs: 'git',
+      worktree: '/opt/komidash',
+      sandboxes: ['/opt/code/komidash'],
+    })
+    listWorktreesMock.mockResolvedValue(['/opt/komidash', '/opt/code/komidash'])
+    probeDirectoryMock.mockResolvedValue('unknown')
+    subscribeToEventsMock.mockReturnValue(() => {})
+
+    const { result } = renderHook(() => useGitWorkspaceCatalog(['/opt/code/komidash'], 'server-1'))
+
+    await waitFor(() => {
+      expect(result.current.catalog.get('/opt/code/komidash')?.rootDirectory).toBe('/opt/komidash')
+      expect(result.current.catalog.get('/opt/code/komidash')?.rootExists).toBe(true)
     })
   })
 })

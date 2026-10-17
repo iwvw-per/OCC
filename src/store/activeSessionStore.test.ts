@@ -62,6 +62,7 @@ describe('activeSessionStore scoped refresh handling', () => {
       {
         sessionId: 'root',
         status: { type: 'busy' },
+        source: 'server',
         title: 'Root',
         directory: '/repo',
         pendingAction: undefined,
@@ -166,10 +167,12 @@ describe('activeSessionStore scoped refresh handling', () => {
       activeSessionStore.initialize({ 'srv-a::a': { type: 'busy' } }, 'srv-a')
       activeSessionStore.initialize({ 'srv-b::b': { type: 'busy' } }, 'srv-b')
 
-      expect(activeSessionStore.getBusySessions().map(entry => entry.sessionId).sort()).toEqual([
-        'srv-a::a',
-        'srv-b::b',
-      ])
+      expect(
+        activeSessionStore
+          .getBusySessions()
+          .map(entry => entry.sessionId)
+          .sort(),
+      ).toEqual(['srv-a::a', 'srv-b::b'])
     })
 
     it('replaces only the named server on re-initialize', () => {
@@ -177,10 +180,12 @@ describe('activeSessionStore scoped refresh handling', () => {
       activeSessionStore.initialize({ 'srv-b::keep': { type: 'busy' } }, 'srv-b')
       activeSessionStore.initialize({ 'srv-a::new': { type: 'busy' } }, 'srv-a')
 
-      expect(activeSessionStore.getBusySessions().map(entry => entry.sessionId).sort()).toEqual([
-        'srv-a::new',
-        'srv-b::keep',
-      ])
+      expect(
+        activeSessionStore
+          .getBusySessions()
+          .map(entry => entry.sessionId)
+          .sort(),
+      ).toEqual(['srv-a::new', 'srv-b::keep'])
     })
 
     it('keeps other servers pending requests when initializing with a serverId', () => {
