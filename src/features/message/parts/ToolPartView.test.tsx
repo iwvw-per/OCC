@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToolPartView } from './ToolPartView'
 import type { ToolPart } from '../../../types/message'
 
-const { getActiveCalibratedNowMock, useSessionStatusMock } = vi.hoisted(() => ({
+const { getActiveCalibratedNowMock, useSessionStatusMock, useChildSessionStatusMock } = vi.hoisted(() => ({
   getActiveCalibratedNowMock: vi.fn<() => number | undefined>(() => undefined),
   useSessionStatusMock: vi.fn<() => { type: string } | undefined>(() => ({ type: 'busy' })),
+  useChildSessionStatusMock: vi.fn<() => string | undefined>(() => undefined),
 }))
 
 vi.mock('react-i18next', () => ({
@@ -46,6 +47,13 @@ vi.mock('../../../hooks/useTheme', () => ({
 
 vi.mock('../../../store/activeSessionStore', () => ({
   useSessionStatus: useSessionStatusMock,
+}))
+
+vi.mock('../../../store/childSessionStore', () => ({
+  childSessionStore: {
+    getSessionInfo: () => undefined,
+  },
+  useChildSessionStatus: useChildSessionStatusMock,
 }))
 
 vi.mock('../../../store/serverStore', () => ({
@@ -260,5 +268,50 @@ describe('ToolPartView task completion icon', () => {
   it('keeps the tool icon (spinner) while the task is running', () => {
     render(<ToolPartView part={createTaskPart('running')} />)
     expect(screen.getByTestId('tool-icon')).toBeInTheDocument()
+  })
+})
+
+describe('ToolPartView background subagent', () => {
+  beforeEach(() => {
+    useChildSessionStatusMock.mockReturnValue(undefined)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function createBackgroundPart(): ToolPart {
+    return {
+      id: 'tool-bg',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-bg',
+      tool: 'subagent',
+      state: {
+        status: 'completed',
+        title: '深入分析 core 包',
+        output: 'The subagent is working in the background (sessionID: ses_bg123). You will be notified.',
+        time: { start: 1, end: 2 },
+      },
+    }
+  }
+
+  it('shows the running-in-background label and keeps the running visual while the child runs', () => {
+    useChildSessionStatusMock.mockReturnValue('running')
+
+    render(<ToolPartView part={createBackgroundPart()} />)
+
+    expect(screen.getByText('task.backgroundRunning')).toBeInTheDocument()
+    // 父工具虽已返回，子会话仍在跑 → 不显示「已完成」对勾，仍渲染工具图表
+    expect(screen.getByTestId('tool-icon')).toBeInTheDocument()
+  })
+
+  it('drops the background label once the child session is no longer running', () => {
+    useChildSessionStatusMock.mockReturnValue('idle')
+
+    render(<ToolPartView part={createBackgroundPart()} />)
+
+    expect(screen.queryByText('task.backgroundRunning')).not.toBeInTheDocument()
   })
 })

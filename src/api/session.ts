@@ -166,6 +166,9 @@ export async function getSessions(
 ): Promise<ApiSession[]> {
   const sdk = getSDKClient(serverId)
   const { directory, roots, start, search, limit, includeArchived, archivedOnly, skipCache } = params
+  // 归一 roots：undefined 保持 undefined（让服务端用默认），否则规约成 boolean。
+  // 列表默认只返回 root 会话；只有显式 roots===false（如归档全量）才保留子会话。
+  const rootsFlag = roots === undefined ? undefined : roots !== false && roots !== 'false'
   // 服务端的 active 过滤是 time_archived IS NULL，会把恢复后的会话
   // （time.archived === 0，falsy-but-present）排除掉，导致恢复的会话不回显。
   // 因此无论目标列表是活跃还是归档，都向服务端请求归档（archived: true 包含式），
@@ -203,9 +206,13 @@ export async function getSessions(
       : includeArchived
         ? sessions
         : sessions.filter(session => !session.time?.archived)
+    // 子代理会话（有 parentID）不属于列表：列表按 roots 展示，子会话归 childSessionStore。
+    // v2 session.list 不保证按 roots 过滤（且历史响应可能带子会话），这里客户端兜底剔除，
+    // 否则子对话会泄漏进侧栏/搜索列表。显式 roots===false 时（归档全量）保留。
+    const rootsFiltered = rootsFlag === false ? filtered : filtered.filter(session => !session.parentID)
     // 内部临时会话（如 AI 重命名用的临时会话）不进入任何用户可见列表。
     // 列表读侧与 SSE 增量读侧共用同一登记，见 utils/ephemeralSessions。
-    const visible = filtered.filter(session => !isEphemeralSession(session.id))
+    const visible = rootsFiltered.filter(session => !isEphemeralSession(session.id))
     // 列表渲染不需要 summary.diffs / revert 快照 / permission 详情，
     // 这些字段单条可达数百 KB，且会被缓存 30s，去掉后缓存占用同步下降。
     const result = visible.map(stripSessionListDetails)

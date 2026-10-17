@@ -18,8 +18,12 @@ function question(id: string, callID?: string, sessionID = 'session-1'): ApiQues
   } as ApiQuestionRequest
 }
 
-function toolPart(callID: string, tool = 'question'): { type: string; callID: string; tool: string; state: object } {
-  return { type: 'tool', callID, tool, state: {} }
+function toolPart(
+  callID: string,
+  tool = 'question',
+  sessionID = 'session-1',
+): { type: string; sessionID: string; callID: string; tool: string; state: object } {
+  return { type: 'tool', sessionID, callID, tool, state: {} }
 }
 
 describe('findUnmatchedQuestions', () => {
@@ -48,5 +52,17 @@ describe('findUnmatchedQuestions', () => {
 
   it('returns an empty list for no pending questions', () => {
     expect(findUnmatchedQuestions([], [{ content: [toolPart('call-1')] }])).toEqual([])
+  })
+
+  it('keeps a v2 form (no tool callID) unmatched so it renders in the message-flow inline slot', () => {
+    const pending = [question('q-form')]
+    const messages = [{ content: [toolPart('call-old', 'bash'), toolPart('call-new', 'bash')] }]
+    expect(findUnmatchedQuestions(pending, messages).map(q => q.id)).toEqual(['q-form'])
+  })
+
+  it('never matches a callID-linked question via any fallback (no duplicates)', () => {
+    const pending = [question('q-1', 'call-1')]
+    const messages = [{ content: [toolPart('call-1'), toolPart('call-last', 'bash')] }]
+    expect(findUnmatchedQuestions(pending, messages)).toEqual([])
   })
 })

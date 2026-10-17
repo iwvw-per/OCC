@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { QuestionIcon, CheckIcon, ReturnIcon, ChevronDownIcon, TimerIcon } from '../../components/Icons'
 import type { ApiQuestionRequest, ApiQuestionInfo, QuestionAnswer } from '../../api'
@@ -31,24 +31,26 @@ export function QuestionDialog({
   const { t } = useTranslation(['chat', 'common'])
   const { presentation } = useChatViewport()
   const isCompact = presentation.isCompact
+  // 兜底：任何来源的请求都必须带 questions 数组（v2 表单已由事件层转成 questions）。
+  const questions = useMemo(() => (Array.isArray(request.questions) ? request.questions : []), [request.questions])
   // 每个问题选中的选项 labels
   const [answers, setAnswers] = useState<Map<number, Set<string>>>(() => {
     const map = new Map<number, Set<string>>()
-    request.questions.forEach((_, idx) => map.set(idx, new Set()))
+    questions.forEach((_, idx) => map.set(idx, new Set()))
     return map
   })
 
   // 每个问题是否启用了自定义输入
   const [customEnabled, setCustomEnabled] = useState<Map<number, boolean>>(() => {
     const map = new Map<number, boolean>()
-    request.questions.forEach((_, idx) => map.set(idx, false))
+    questions.forEach((_, idx) => map.set(idx, false))
     return map
   })
 
   // 每个问题的自定义输入值
   const [customValues, setCustomValues] = useState<Map<number, string>>(() => {
     const map = new Map<number, string>()
-    request.questions.forEach((_, idx) => map.set(idx, ''))
+    questions.forEach((_, idx) => map.set(idx, ''))
     return map
   })
 
@@ -116,7 +118,7 @@ export function QuestionDialog({
 
   // 提交
   const handleSubmit = useCallback(() => {
-    const result: QuestionAnswer[] = request.questions.map((q, idx) => {
+    const result: QuestionAnswer[] = questions.map((q, idx) => {
       const selected = Array.from(answers.get(idx) || [])
       const isCustomEnabled = customEnabled.get(idx)
       const customValue = customValues.get(idx)?.trim()
@@ -136,10 +138,10 @@ export function QuestionDialog({
       }
     })
     onReply(result)
-  }, [request.questions, answers, customEnabled, customValues, onReply])
+  }, [questions, answers, customEnabled, customValues, onReply])
 
   // 检查能否提交
-  const canSubmit = request.questions.every((q, idx) => {
+  const canSubmit = questions.every((q, idx) => {
     const selected = answers.get(idx) || new Set()
     const isCustomEnabled = customEnabled.get(idx)
     const customValue = customValues.get(idx)?.trim()
@@ -204,7 +206,7 @@ export function QuestionDialog({
           paddingBottom: 'max(8px, var(--safe-area-inset-bottom, 8px))',
         }}
       >
-        <div className="border border-border-300/40 rounded-xl shadow-float bg-bg-100 overflow-hidden">
+        <div className="border border-border-300/70 rounded-xl shadow-float bg-bg-100 overflow-hidden">
           <div className="bg-bg-000 rounded-t-xl">
             {/* Header */}
             <div className="flex items-center justify-between py-3 px-4">
@@ -242,7 +244,7 @@ export function QuestionDialog({
 
             {/* Questions */}
             <div className="px-4 py-3 space-y-5 max-h-[50vh] overflow-y-auto custom-scrollbar">
-              {request.questions.map((question, qIdx) => (
+              {questions.map((question, qIdx) => (
                 <QuestionItem
                   key={qIdx}
                   question={question}

@@ -38,6 +38,7 @@ vi.mock('../api', () => ({
   probeLightweightSupport: vi.fn(async () => false),
   revertMessage: (...args: unknown[]) => revertMessageMock(...args),
   unrevertSession: vi.fn(),
+  encodeBeforeCursor: (message: unknown) => `cursor:${(message as { info?: { id?: string } }).info?.id ?? ''}`,
   extractUserMessageContent: (message: unknown) => extractUserMessageContentMock(message),
 }))
 
@@ -131,6 +132,41 @@ describe('useSessionManager', () => {
       expect.anything(),
     )
     expect(messageStoreMock.prependMessages).toHaveBeenCalledWith('session-1', [apiMessage], true, 'cursor-2')
+  })
+
+  it('stops auto-loading when a has-cursor page overlaps fully with loaded messages', async () => {
+    // v2 边界：带游标翻页，服务端却返回与内存完全重叠的一页（且仍报 hasMore）。
+    // 去重后没有任何新内容 —— 不能把 hasMoreHistory 续成 true，也不能保留耗尽的游标，
+    // 否则 ChatArea 在顶部反复触发 loadMore，形成「加载历史记录…」无限循环。
+    const kept = { info: { id: 'message-1', role: 'user', time: { created: 2 } }, content: [], parts: [] }
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [kept],
+      loadState: 'loaded',
+      isStale: false,
+      directory: '/workspace/demo',
+      hasMoreHistory: true,
+      historyCursor: 'cursor-1',
+    })
+    messageStoreMock.getTrimmedCount.mockReturnValue(0)
+    getSessionTurnPageMock.mockResolvedValue({ messages: [kept], nextCursor: 'cursor-2', hasMore: true })
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'session-1', directory: '/workspace/demo' }),
+    )
+
+    await act(async () => {
+      await result.current.loadMoreHistory()
+    })
+
+    // 有游标 → 确实发起了翻页，但一条都没补到：hasMore=false 且游标清空，循环终止
+    expect(getSessionTurnPageMock).toHaveBeenCalledWith(
+      'session-1',
+      HISTORY_TURN_BATCH_SIZE,
+      'cursor-1',
+      '/workspace/demo',
+      expect.anything(),
+    )
+    expect(messageStoreMock.prependMessages).toHaveBeenCalledWith('session-1', [], false, undefined)
   })
 
   it('loads older history by turn batch when the server returns no cursor', async () => {
@@ -322,6 +358,43 @@ describe('useSessionManager', () => {
     const [sid, candidates] = messageStoreMock.prependMessages.mock.calls.at(-1) as [string, unknown[]]
     expect(sid).toBe('session-1')
     expect(candidates).toEqual([older])
+  })
+
+  it('gap recovery fetches OLDER from the oldest loaded message, not the newest page', async () => {
+    // 回归：大会话（2245 条）窗口被裁出缺口后，旧实现用 before=undefined 重拉
+    // 「最新一页」——与内存窗口重叠、去重后 0 条，缺口永不归零，ChatArea 在顶部
+    // 无限自动加载「加载历史记录…」。正确做法是从「内存里最旧一条」向前翻页。
+    const oldest = { info: { id: 'msg-oldest', role: 'user', time: { created: 100 } }, content: [], parts: [] }
+    const newer = { info: { id: 'msg-newer', role: 'assistant', time: { created: 200 } }, content: [], parts: [] }
+    const older = { info: { id: 'msg-older', role: 'user', time: { created: 50 } }, content: [], parts: [] }
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [oldest, newer],
+      loadState: 'loaded',
+      isStale: false,
+      directory: '/workspace/demo',
+      hasMoreHistory: true,
+      historyCursor: undefined,
+    })
+    messageStoreMock.getTrimmedCount.mockReturnValue(700)
+    getSessionTurnPageMock.mockResolvedValue({ messages: [older], nextCursor: 'cursor-next', hasMore: true })
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'session-1', directory: '/workspace/demo' }),
+    )
+
+    await act(async () => {
+      await result.current.loadMoreHistory()
+    })
+
+    // 关键：带上了指向最旧一条之前的游标，而不是 before=undefined 重拉最新端
+    expect(getSessionTurnPageMock).toHaveBeenCalledWith(
+      'session-1',
+      HISTORY_TURN_BATCH_SIZE,
+      'cursor:msg-oldest',
+      '/workspace/demo',
+      expect.anything(),
+    )
+    expect(messageStoreMock.prependMessages).toHaveBeenCalledWith('session-1', [older], true, 'cursor-next')
   })
 
   it('does not attempt gap recovery when nothing was trimmed', async () => {

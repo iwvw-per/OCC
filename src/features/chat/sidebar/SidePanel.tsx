@@ -25,7 +25,7 @@ import {
   FolderMinusIcon,
   CheckIcon,
 } from '../../../components/Icons'
-import { useDirectory, useKeybindingLabel, useGitWorkspaceCatalog } from '../../../hooks'
+import { useDirectory, useKeybindingLabel, useGitWorkspaceCatalog, useMissingDirectories } from '../../../hooks'
 import { Spinner } from '../../../components/ui/Spinner'
 import { useProjectLastUsedAt } from '../../../hooks/useProjectLastUsedAt'
 import { useSessionContext } from '../../../contexts/useSessionContext'
@@ -179,6 +179,16 @@ export function SidePanel({
     activeServerId,
   ).className
   const { catalog: gitWorkspaceCatalog } = useGitWorkspaceCatalog(catalogDirectories, catalogServerId)
+  // 已保存目录里磁盘上已不存在的（项目整体迁移后留下的旧路径）：只从侧栏隐藏，
+  // 不删存储 —— 目录若重新出现会自动恢复显示，误判也不会丢用户配置。
+  const missingDirectories = useMissingDirectories(
+    savedDirectories.map(directory => directory.path),
+    activeServerId,
+  )
+  const visibleSavedDirectories = useMemo(
+    () => savedDirectories.filter(directory => !missingDirectories.has(normalizeToForwardSlash(directory.path))),
+    [savedDirectories, missingDirectories],
+  )
   const { sidebarChildSessions, sidebarProjectSortField, sidebarProjectSortDesc } = useLayoutStore()
   // all = 始终列出全部子会话；active = 只列活跃/正在查看；off = 不额外列出
   const showAllChildSessions = sidebarChildSessions === 'all'
@@ -587,8 +597,8 @@ export function SidePanel({
   )
 
   const folderProjectGroups = useMemo<ProjectItem[]>(() => {
-    return buildProjectGroups(savedDirectories)
-  }, [buildProjectGroups, savedDirectories])
+    return buildProjectGroups(visibleSavedDirectories)
+  }, [buildProjectGroups, visibleSavedDirectories])
 
   const globalProject = useMemo<ProjectItem>(
     () => ({

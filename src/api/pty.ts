@@ -3,7 +3,13 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
-import { nativeListPtySessions, nativeCreatePtySession, nativeUpdatePtySession, nativeRemovePtySession } from './v2NativePty'
+import {
+  nativeListPtySessions,
+  nativeCreatePtySession,
+  nativeGetPtySession,
+  nativeUpdatePtySession,
+  nativeRemovePtySession,
+} from './v2NativePty'
 import { getApiBaseUrl, getAuthHeader, buildQueryString } from './http'
 import { formatPathForApi } from '../utils/directoryUtils'
 import { serverStore, getUnifiedFetch } from '../store/serverStore'
@@ -71,6 +77,20 @@ export async function createPtySession(params: PtyCreateParams, directory?: stri
   }
   const sdk = getSDKClient(serverId)
   return normalizePty(unwrap(await sdk.pty.create({ directory: formatPathForApi(directory, serverId), ...params })) as LegacyPty)
+}
+
+/**
+ * 获取单个 PTY 会话（含退出状态与 exitCode）。
+ */
+export async function getPtySession(ptyId: string, directory?: string, serverId?: string): Promise<Pty> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  if (serverStore.getApiVersion(sid) === 'v2') {
+    return nativeGetPtySession(sid, { ptyID: ptyId, directory })
+  }
+  const sdk = getSDKClient(serverId)
+  return normalizePty(
+    unwrap(await sdk.pty.get({ ptyID: ptyId, directory: formatPathForApi(directory, serverId) })) as LegacyPty,
+  )
 }
 
 /**

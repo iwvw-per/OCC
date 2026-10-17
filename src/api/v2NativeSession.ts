@@ -8,6 +8,7 @@
 
 import { getV2Client } from './sdkV2'
 import { adaptSession, adaptDataList } from './v2/session'
+import { rec } from './v2/adapt'
 import type { ApiSession } from './types'
 
 /**
@@ -19,6 +20,8 @@ export async function nativeListSessions(
   input: { directory?: string; search?: string; limit?: number; cursor?: string } = {},
 ): Promise<{ sessions: ApiSession[]; nextCursor?: string; prevCursor?: string }> {
   const client = getV2Client(serverId)
+  // 注：v2 session.list 返回的会话含 parentID（子代理会话也在此列出），
+  // root 过滤由调用方（getSessions）按 parentID 剔除，见 session.ts。
   const res = await client.session.list({
     directory: input.directory,
     search: input.search,
@@ -59,18 +62,28 @@ export async function nativeCreateSession(
 }
 
 /**
- * 原生更新会话（v2 session.update，仅支持 title/metadata/permissions；归档用 metadata）。
+ * 原生更新会话（v2 session.update：title / metadata / permissions）。
+ *
+ * 注意：SDK 的 session.update body 只透传 { title, metadata, permissions }，会丢弃
+ * `time`；且后端对 metadata 是整段替换（实测 PATCH {a:1,b:2} 后再 PATCH {a:9}
+ * 只剩 {a:9}）。因此归档不能写 time.archived，也不能直接覆盖 metadata——必须读出
+ * 现有 metadata 合并后只改 __archived，避免抹掉后端/其它客户端写入的键。
  */
 export async function nativeUpdateSession(
   serverId: string | undefined,
   input: { sessionID: string; title?: string; archived?: number },
 ): Promise<ApiSession> {
   const client = getV2Client(serverId)
-  const params: { sessionID: string; title?: string; metadata?: Record<string, unknown> } = { sessionID: input.sessionID }
+  const params: {
+    sessionID: string
+    title?: string
+    metadata?: Record<string, unknown>
+  } = { sessionID: input.sessionID }
   if (input.title !== undefined) params.title = input.title
-  // v2 无 time.archived 更新端点；归档语义用 metadata.__archived 表达（v2 客户端处理）
   if (input.archived !== undefined) {
-    params.metadata = { __archived: input.archived }
+    const current = await client.session.get({ sessionID: input.sessionID })
+    const existing = rec(rec(current).metadata)
+    params.metadata = { ...existing, __archived: input.archived }
   }
   await client.session.update(params as never)
   return adaptSession(await client.session.get({ sessionID: input.sessionID }))
@@ -146,6 +159,29 @@ export async function nativeListChildSessions(
   const client = getV2Client(serverId)
   const res = await client.session.list({ parentID })
   return adaptDataList(res).map(adaptSession)
+}
+
+/**
+ * 原生回复表单（v2 session.form.reply）。
+ * v2 用 Form 体系取代 question；answer 是 fieldKey → 值 的映射。
+ */
+export async function nativeReplyForm(
+  serverId: string | undefined,
+  input: { sessionID: string; formID: string; answer: Record<string, string | number | boolean | string[]> },
+): Promise<void> {
+  const client = getV2Client(serverId)
+  await client.session.form.reply({ sessionID: input.sessionID, formID: input.formID, answer: input.answer })
+}
+
+/**
+ * 原生取消表单（v2 session.form.cancel）。
+ */
+export async function nativeCancelForm(
+  serverId: string | undefined,
+  input: { sessionID: string; formID: string },
+): Promise<void> {
+  const client = getV2Client(serverId)
+  await client.session.form.cancel({ sessionID: input.sessionID, formID: input.formID })
 }
 
 /**

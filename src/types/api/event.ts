@@ -38,6 +38,17 @@ export interface SessionErrorPayload {
 
 export type SessionStatusPayload = SDKEventSessionStatus['properties']
 
+/**
+ * 会话压缩结果（v2 `session.compaction.ended` / `session.compaction.failed`）。
+ * 失败时带 error.message（如 "Nothing to compact yet"），用于提示用户。
+ */
+export interface SessionCompactedPayload {
+  sessionID: string
+  status: 'started' | 'completed' | 'failed'
+  reason?: 'auto' | 'manual'
+  error?: string
+}
+
 export type SessionDiffPayload = SDKEventSessionDiff['properties']
 
 export type PartRemovedPayload = SDKEventMessagePartRemoved['properties']
@@ -79,6 +90,8 @@ export interface NextToolSettledPayload {
   status: 'completed' | 'error'
   output?: string
   error?: string
+  /** 工具结果 metadata（v2 的 task 工具用它携带子会话 sessionId，供子代理识别） */
+  metadata?: Record<string, unknown>
 }
 
 // ============================================
@@ -200,6 +213,8 @@ export interface EventCallbacks {
   onSessionRetryScheduled?: (data: { sessionID: string; assistantMessageID: string }) => void
   onSessionDeleted?: (sessionId: string) => void
   onSessionIdle?: (data: SessionIdlePayload) => void
+  /** 会话压缩结束（v2）：成功/失败都回调，用于提示与刷新消息 */
+  onSessionCompacted?: (data: SessionCompactedPayload) => void
   onSessionError?: (data: SessionErrorPayload) => void
   onSessionStatus?: (data: SessionStatusPayload) => void
   onPermissionAsked?: (request: PermissionRequest) => void

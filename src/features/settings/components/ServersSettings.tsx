@@ -182,6 +182,7 @@ function ServerItem({
           <Switch
             checked={server.enabled !== false}
             onCheckedChange={next => onToggleEnabled(next)}
+            onClick={e => e.stopPropagation()}
             aria-label={t('servers.enableServer', { name: server.name })}
           />
         </div>
@@ -529,7 +530,7 @@ export function ServersSettings() {
     getHealth,
     setServerEnabled,
   } = useServerStore()
-  const { navigateHome, sessionId: routeSessionId } = useRouter()
+  const { restoreWorkspace, sessionId: routeSessionId, directory } = useRouter()
   /**
    * 连接清单的显示顺序：Local 固定第一，其余保持配置顺序。
    *
@@ -548,7 +549,10 @@ export function ServersSettings() {
     checkAllHealth()
   }, [checkAllHealth])
 
-  // 切换服务器：设置 active + 清理当前 session + 导航回首页
+  // 切换服务器：设置 active + 清理当前 session + 把路由落到新服务器首页。
+  // 用 restoreWorkspace（replaceState）而不是 navigateHome（hash 导航）——
+  // hash 变更会被 Dialog 的 useBackClose 当作「返回」触发 popstate，把设置面板
+  // 弹掉；replaceState 不产生新历史项、不触发 popstate，切换主机时设置保持打开。
   const handleSelectServer = useCallback(
     (id: string) => {
       if (activeServer?.id === id) return // 没变，不做事
@@ -559,10 +563,10 @@ export function ServersSettings() {
       }
 
       setActiveServer(id) // 内部触发 serverChangeListeners → reconnectSSE()
-      navigateHome()
+      restoreWorkspace(id, null, directory)
       void checkHealth(id)
     },
-    [activeServer?.id, checkHealth, routeSessionId, setActiveServer, navigateHome],
+    [activeServer?.id, checkHealth, routeSessionId, setActiveServer, restoreWorkspace, directory],
   )
 
   return (

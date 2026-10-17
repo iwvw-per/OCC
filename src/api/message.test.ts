@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { messagesMock, messageMock, getSDKClientMock, getApiVersionMock, getActiveServerIdMock } = vi.hoisted(() => ({
-  messagesMock: vi.fn(),
-  messageMock: vi.fn(),
-  getSDKClientMock: vi.fn(),
-  getApiVersionMock: vi.fn(),
-  getActiveServerIdMock: vi.fn(),
+const { messagesMock, messageMock, getSDKClientMock, getApiVersionMock, getActiveServerIdMock, nativeListMessagesMock } =
+  vi.hoisted(() => ({
+    messagesMock: vi.fn(),
+    messageMock: vi.fn(),
+    getSDKClientMock: vi.fn(),
+    getApiVersionMock: vi.fn(),
+    getActiveServerIdMock: vi.fn(),
+    nativeListMessagesMock: vi.fn(),
+  }))
+
+vi.mock('./v2NativeMessage', () => ({
+  nativeListMessages: (...args: unknown[]) => nativeListMessagesMock(...args),
+  nativePrompt: vi.fn(),
 }))
 
 vi.mock('./sdk', () => ({
@@ -54,6 +61,7 @@ beforeEach(() => {
   getApiVersionMock.mockReturnValue(undefined)
   getActiveServerIdMock.mockReset()
   getActiveServerIdMock.mockReturnValue('srv')
+  nativeListMessagesMock.mockReset()
 })
 
 import {
@@ -406,6 +414,32 @@ describe('getSessionTurnPage', () => {
     expect(messagesMock).toHaveBeenCalledTimes(4)
     expect(result.messages).toHaveLength(120)
     expect(result.hasMore).toBe(true)
+  })
+
+  it('v2: a full page without a next cursor means no more history (no spurious auto-load)', async () => {
+    getApiVersionMock.mockReturnValue('v2')
+    const page = Array.from({ length: 30 }, (_, index) => userMsg(index))
+    nativeListMessagesMock.mockResolvedValue({ messages: page, nextCursor: undefined })
+
+    const result = await getSessionTurnPage('ses-1', 3)
+
+    // 30 条恰好一满页、但游标已空：v2 的 cursor 权威，判定为已到最早
+    expect(result.hasMore).toBe(false)
+    expect(result.nextCursor).toBeUndefined()
+  })
+
+  it('v2: an empty page with a residual next cursor stops and clears the cursor', async () => {
+    getApiVersionMock.mockReturnValue('v2')
+    nativeListMessagesMock
+      .mockResolvedValueOnce({ messages: [userMsg(1)], nextCursor: 'c1' })
+      .mockResolvedValueOnce({ messages: [], nextCursor: 'c2' })
+
+    const result = await getSessionTurnPage('ses-1', 3)
+
+    expect(nativeListMessagesMock).toHaveBeenCalledTimes(2)
+    // 空页即到最早：不再把残留游标当「还有历史」，并清掉游标避免继续触发加载
+    expect(result.hasMore).toBe(false)
+    expect(result.nextCursor).toBeUndefined()
   })
 })
 

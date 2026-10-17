@@ -208,7 +208,17 @@
     "parent": ".. (Parent)",
     "noMatchingFolders": "No matching folders",
     "addCurrent": "Add current",
-    "pickInFileManager": "System folder"
+    "pickInFileManager": "System folder",
+    "cloneGit": "Clone Git repo",
+    "cloneGitTitle": "Clone a Git repository into the current directory",
+    "cloneUrlPlaceholder": "Repository URL, e.g. https://github.com/user/repo.git",
+    "cloneInto": "Clone into",
+    "cloneDirNamePlaceholder": "Directory name",
+    "cloneStart": "Clone",
+    "cloning": "Cloning...",
+    "cloneInvalidUrl": "Enter a valid Git repository URL",
+    "cloneInvalidName": "Directory name is required and cannot contain / or \\",
+    "cloneFailed": "Clone failed (exit code {{code}}). See the output below."
   },
   "inputToolbar": {
     "default": "Default",
@@ -353,6 +363,9 @@
     "aiWaitingForInput": "AI is waiting for your input",
     "sessionCompleted": "Session completed",
     "sessionError": "Session error",
+    "compactionFailed": "Session compaction failed",
+    "compactionFailedHint": "There is nothing to compact yet",
+    "compactionDone": "History compacted",
     "permissionTitle": "{{session}} — Permission",
     "questionTitle": "{{session}} — Question"
   },

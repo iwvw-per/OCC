@@ -145,14 +145,92 @@ describe('v2 event → GlobalEvent', () => {
     expect(part?.text).toBe('')
   })
 
-  it('maps permission.asked', () => {
-    const p = payloadOf({ type: 'permission.asked', data: { request: { id: 'p1' } }, location: { directory: '/w' } })
+  it('maps permission.asked to flat permission properties', () => {
+    const p = payloadOf({
+      type: 'permission.asked',
+      data: { id: 'p1', sessionID: 's', permission: 'bash', patterns: ['ls'] },
+      location: { directory: '/w' },
+    })
     expect(p?.type).toBe(EventTypes.PERMISSION_ASKED)
+    expect(p?.properties).toMatchObject({ id: 'p1', sessionID: 's', permission: 'bash' })
+    expect(p?.properties.request).toBeUndefined()
   })
 
-  it('maps form.created to QUESTION_ASKED', () => {
+  it('maps question.asked to flat QUESTION_ASKED', () => {
+    const p = payloadOf({
+      type: 'question.asked',
+      data: { id: 'q1', sessionID: 's', questions: [{ header: 'H' }] },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.QUESTION_ASKED)
+    expect(p?.properties.id).toBe('q1')
+    expect(p?.properties.request).toBeUndefined()
+  })
+
+  it('maps form.created to flat QUESTION_ASKED', () => {
     const p = payloadOf({ type: 'form.created', data: { form: { id: 'f1' } }, location: { directory: '/w' } })
     expect(p?.type).toBe(EventTypes.QUESTION_ASKED)
+    expect(p?.properties.id).toBe('f1')
+  })
+
+  it('converts OMO form fields into questions so InlineQuestion never sees undefined questions', () => {
+    const p = payloadOf({
+      type: 'form.created',
+      data: {
+        form: {
+          id: 'f1',
+          sessionID: 's',
+          title: 'Pick env',
+          fields: [
+            { key: 'env', type: 'string', title: 'Environment', options: [{ value: 'prod', label: 'Production' }] },
+            { key: 'debug', type: 'boolean', title: 'Enable debug' },
+            { key: 'tags', type: 'multiselect', title: 'Tags', options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] },
+            { key: 'port', type: 'integer', title: 'Port' },
+          ],
+        },
+      },
+      location: { directory: '/w' },
+    })
+    const questions = p?.properties.questions as Array<Record<string, unknown>>
+    expect(Array.isArray(questions)).toBe(true)
+    expect(questions).toHaveLength(4)
+    // string 字段：选项直取 value，带 custom 输入兜底
+    expect(questions[0]).toMatchObject({ fieldKey: 'env', fieldType: 'string', options: [{ label: 'prod' }] })
+    // boolean 字段：true/false 二选一
+    expect(questions[1]).toMatchObject({ fieldKey: 'debug', fieldType: 'boolean', options: [{ label: 'true' }, { label: 'false' }] })
+    // multiselect：multiple
+    expect(questions[2]).toMatchObject({ fieldKey: 'tags', fieldType: 'multiselect', multiple: true })
+    // integer：走 custom 文本输入
+    expect(questions[3]).toMatchObject({ fieldKey: 'port', fieldType: 'integer', multiple: false })
+  })
+
+  it('keeps questions array intact when question.asked already carries it', () => {
+    const p = payloadOf({
+      type: 'question.asked',
+      data: { id: 'q1', sessionID: 's', questions: [{ header: 'H' }] },
+      location: { directory: '/w' },
+    })
+    expect((p?.properties.questions as unknown[]).length).toBe(1)
+  })
+
+  it('maps v2 permission.asked to v1 shape with tool.callID derived from source', () => {
+    const p = payloadOf({
+      type: 'permission.asked',
+      data: {
+        id: 'perm-1',
+        sessionID: 's',
+        action: 'bash',
+        resources: ['/x'],
+        source: { type: 'tool', messageID: 'm-1', id: 'call-1' },
+      },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.PERMISSION_ASKED)
+    const props = p?.properties as Record<string, unknown>
+    expect(props.permission).toBe('bash')
+    expect((props.patterns as string[])).toEqual(['/x'])
+    expect((props.tool as { callID: string }).callID).toBe('call-1')
+    expect((props.tool as { messageID: string }).messageID).toBe('m-1')
   })
 
   it('maps tool.input.started to a pending tool part carrying the tool name', () => {
@@ -239,5 +317,34 @@ describe('v2 event → GlobalEvent', () => {
 
   it('drops unmapped events', () => {
     expect(v2EventToGlobalEvent({ type: 'session.usage.updated', data: {}, location: { directory: '/w' } })).toBeNull()
+  })
+
+  it('maps session.compaction.failed to SESSION_COMPACTED with error message', () => {
+    const p = payloadOf({
+      type: 'session.compaction.failed',
+      data: {
+        sessionID: 's',
+        reason: 'manual',
+        error: { type: 'compaction.unavailable', message: 'Nothing to compact yet' },
+      },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
+    expect(p?.properties).toMatchObject({
+      sessionID: 's',
+      status: 'failed',
+      reason: 'manual',
+      error: 'Nothing to compact yet',
+    })
+  })
+
+  it('maps session.compaction.ended to SESSION_COMPACTED completed', () => {
+    const p = payloadOf({
+      type: 'session.compaction.ended',
+      data: { sessionID: 's', reason: 'manual', text: 'summary' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
+    expect(p?.properties).toMatchObject({ sessionID: 's', status: 'completed', reason: 'manual' })
   })
 })

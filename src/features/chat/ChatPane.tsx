@@ -45,7 +45,7 @@ import { useWorkStatus } from '../../store/workStatusStore'
 import { WorkStatusPanel } from '../workStatus/WorkStatusPanel'
 import { useWorkStatusVisibility } from '../workStatus/useWorkStatusVisibility'
 import { setWorkStatusPanelVisible, clearWorkStatusPanelVisible } from '../workStatus/workStatusVisibilityStore'
-import type { Attachment } from '../../api'
+import type { Attachment, QuestionAnswer } from '../../api'
 import type { MessageError } from '../../types/message'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
@@ -381,6 +381,7 @@ export const ChatPane = memo(function ChatPane({
     loadError,
     hasMoreHistory,
     hasTrimmedHistory,
+    compactedAt,
     retryStatus,
     effectiveDirectory,
 
@@ -965,11 +966,21 @@ export const ChatPane = memo(function ChatPane({
   )
 
   // 内嵌模式下，如果请求没能匹配到任何已渲染的工具部件（子 session 关系还没注册、
-  // 工具部件不在当前会话等），内嵌卡片不会出现。这里挑出这些「落空」的请求，
-  // 用浮层兜底，避免提问彻底不可见地挂住。
+  // 工具部件不在当前会话、v2 表单没有工具关联等），内嵌卡片不会出现。这里挑出这些
+  // 「落空」的请求，直接渲染在消息流末尾（ChatArea 内），而不是浮层弹窗。
   const unmatchedPendingQuestions = useMemo(
     () => (inlineToolRequests ? findUnmatchedQuestions(pendingQuestionRequests, renderedMessages) : []),
     [inlineToolRequests, renderedMessages, pendingQuestionRequests],
+  )
+  const inlineQuestionEntries = useMemo(
+    () =>
+      unmatchedPendingQuestions.map(request => ({
+        request,
+        onReply: (answers: QuestionAnswer[]) => handleQuestionReply(request.id, answers, effectiveDirectory),
+        onReject: () => handleQuestionReject(request.id, effectiveDirectory),
+        isReplying,
+      })),
+    [unmatchedPendingQuestions, handleQuestionReply, handleQuestionReject, effectiveDirectory, isReplying],
   )
 
   const revertedMessage = inputRestoreContent
@@ -1073,6 +1084,7 @@ export const ChatPane = memo(function ChatPane({
                 onReloadSession={reloadSession}
                 hasMoreHistory={hasMoreHistory}
                 hasTrimmedHistory={hasTrimmedHistory}
+                compactedAt={compactedAt}
                 onLoadMore={loadMoreHistory}
                 onHydrateTurn={hydrateTurn}
                 onUndo={handleUndoWithAnimation}
@@ -1083,6 +1095,7 @@ export const ChatPane = memo(function ChatPane({
                 bottomPadding={inputBoxHeight}
                 onVisibleMessageIdsChange={handleVisibleIdsChange}
                 onAtBottomChange={setIsAtBottom}
+                inlineQuestions={inlineToolRequests ? inlineQuestionEntries : []}
               />
             )}
           </ErrorBoundary>
@@ -1195,13 +1208,13 @@ export const ChatPane = memo(function ChatPane({
                 : undefined
             }
             collapsedQuestion={
+              !inlineToolRequests &&
               pendingPermissionRequests.length === 0 &&
               pendingQuestionRequests.length > 0 &&
-              (!inlineToolRequests || unmatchedPendingQuestions.length > 0) &&
               questionCollapsed
                 ? {
                     label: t('chat:questionDialog.title'),
-                    queueLength: inlineToolRequests ? unmatchedPendingQuestions.length : pendingQuestionRequests.length,
+                    queueLength: pendingQuestionRequests.length,
                     onExpand: () => setQuestionCollapsed(false),
                   }
                 : undefined
@@ -1232,25 +1245,14 @@ export const ChatPane = memo(function ChatPane({
         />
       )}
 
-      {pendingPermissionRequests.length === 0 &&
-        pendingQuestionRequests.length > 0 &&
-        (!inlineToolRequests || unmatchedPendingQuestions.length > 0) && (
+      {!inlineToolRequests &&
+        pendingPermissionRequests.length === 0 &&
+        pendingQuestionRequests.length > 0 && (
           <QuestionDialog
-            request={inlineToolRequests ? unmatchedPendingQuestions[0] : pendingQuestionRequests[0]}
-            onReply={answers =>
-              handleQuestionReply(
-                (inlineToolRequests ? unmatchedPendingQuestions[0] : pendingQuestionRequests[0]).id,
-                answers,
-                effectiveDirectory,
-              )
-            }
-            onReject={() =>
-              handleQuestionReject(
-                (inlineToolRequests ? unmatchedPendingQuestions[0] : pendingQuestionRequests[0]).id,
-                effectiveDirectory,
-              )
-            }
-            queueLength={inlineToolRequests ? unmatchedPendingQuestions.length : pendingQuestionRequests.length}
+            request={pendingQuestionRequests[0]}
+            onReply={answers => handleQuestionReply(pendingQuestionRequests[0].id, answers, effectiveDirectory)}
+            onReject={() => handleQuestionReject(pendingQuestionRequests[0].id, effectiveDirectory)}
+            queueLength={pendingQuestionRequests.length}
             isReplying={isReplying}
             collapsed={questionCollapsed}
             onCollapsedChange={setQuestionCollapsed}

@@ -343,6 +343,21 @@ class MessageStore {
     return this.sessions.get(this.resolveKey(sessionId))?.trimmedCount ?? 0
   }
 
+  /**
+   * 把内存缺口标记为「已确认无法补回」并清零。
+   *
+   * 当 loadMoreHistory 从最旧一条向前翻页却拿不到任何更早内容（说明它本就是会话
+   * 第一条，缺口是误记），用它清掉 trimmedCount，否则 hasTrimmedHistory 恒真会让
+   * ChatArea 在顶部反复空拉。
+   */
+  clearTrimmedGap(sessionId: string | null): void {
+    if (!sessionId) return
+    const state = this.sessions.get(this.resolveKey(sessionId))
+    if (!state || !state.trimmedCount) return
+    state.trimmedCount = 0
+    this.notify([this.resolveKey(sessionId)])
+  }
+
   getSessionDirectory(sessionId: string | null): string {
     if (!sessionId) return ''
     return this.sessions.get(this.resolveKey(sessionId))?.directory ?? ''
@@ -641,6 +656,7 @@ class MessageStore {
       loadState?: SessionState['loadState']
       shareUrl?: string
       loadError?: MessageError
+      compactedAt?: number
     },
   ) {
     sessionId = this.resolveKey(sessionId)
@@ -655,6 +671,7 @@ class MessageStore {
     if (options.loadState !== undefined) state.loadState = options.loadState
     if (options.loadError !== undefined) state.loadError = options.loadError
     if (options.shareUrl !== undefined) state.shareUrl = options.shareUrl
+    if (options.compactedAt !== undefined) state.compactedAt = options.compactedAt
 
     this.notify([sessionId])
   }
@@ -749,6 +766,7 @@ class MessageStore {
       historyCursor?: string
       revertState?: ApiSession['revert'] | null
       shareUrl?: string
+      compactedAt?: number
     },
   ) {
     sessionId = this.resolveKey(sessionId, true)
@@ -774,6 +792,7 @@ class MessageStore {
     state.directory = options?.directory ?? ''
     if (options?.title !== undefined) state.title = options.title
     state.shareUrl = options?.shareUrl
+    state.compactedAt = options?.compactedAt
     state.isStale = false
 
     // D5：HTTP 快照是权威全量，此前因乱序暂存的 delta 已被快照覆盖，丢弃以免重复回放
@@ -1314,7 +1333,7 @@ class MessageStore {
   settleToolByCallID(
     sessionId: string,
     callID: string,
-    outcome: { status: 'completed' | 'error'; output?: string; error?: string },
+    outcome: { status: 'completed' | 'error'; output?: string; error?: string; metadata?: Record<string, unknown> },
   ): void {
     sessionId = this.resolveKey(sessionId)
     const state = this.sessions.get(sessionId)
@@ -1328,6 +1347,7 @@ class MessageStore {
         status: outcome.status,
         output: outcome.output,
         error: outcome.error,
+        metadata: outcome.metadata,
         errorFallback: i18n.t('message:toolPart.toolFailed'),
       },
       now,

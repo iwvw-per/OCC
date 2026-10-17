@@ -131,7 +131,14 @@
     "error": "Error",
     "stop": "Stop",
     "openSession": "Open session",
-    "waitingForResponse": "Waiting for response..."
+    "waitingForResponse": "Waiting for response...",
+    "backgroundRunning": "Running in background"
+  },
+  "agent": {
+    "general": "General",
+    "explore": "Explore",
+    "build": "Build",
+    "plan": "Plan"
   },
   "system": {
     "retryAttempt": "Retry attempt {{attempt}}",

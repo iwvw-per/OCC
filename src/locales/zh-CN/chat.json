@@ -208,7 +208,17 @@
     "parent": "..（上级目录）",
     "noMatchingFolders": "没有匹配的文件夹",
     "addCurrent": "添加当前目录",
-    "pickInFileManager": "系统文件夹"
+    "pickInFileManager": "系统文件夹",
+    "cloneGit": "克隆 Git 仓库",
+    "cloneGitTitle": "克隆 Git 仓库到当前目录",
+    "cloneUrlPlaceholder": "仓库地址，如 https://github.com/user/repo.git",
+    "cloneInto": "克隆到",
+    "cloneDirNamePlaceholder": "目录名",
+    "cloneStart": "开始克隆",
+    "cloning": "克隆中...",
+    "cloneInvalidUrl": "请填写有效的 Git 仓库地址",
+    "cloneInvalidName": "目录名不能为空，且不能包含 / 或 \\",
+    "cloneFailed": "克隆失败（退出码 {{code}}），请查看下方输出"
   },
   "inputToolbar": {
     "default": "默认",
@@ -353,6 +363,9 @@
     "aiWaitingForInput": "AI 正在等待你的输入",
     "sessionCompleted": "会话已完成",
     "sessionError": "会话出错",
+    "compactionFailed": "会话压缩失败",
+    "compactionFailedHint": "当前没有可压缩的内容",
+    "compactionDone": "历史已压缩",
     "permissionTitle": "{{session}} — 权限",
     "questionTitle": "{{session}} — 提问"
   },

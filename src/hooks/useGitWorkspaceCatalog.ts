@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getCurrentProject, listWorktrees, type ApiProject } from '../api'
+import { getCurrentProject, listWorktrees, directoryExists, type ApiProject } from '../api'
 import { subscribeToEvents } from '../api/events'
 import { serverStore } from '../store/serverStore'
 import { normalizeToForwardSlash } from '../utils'
@@ -31,6 +31,15 @@ export interface GitWorkspaceMeta {
   rootDirectory: string
   // root workspace 放第一位，后面才是 sandbox worktree
   workspaces: string[]
+  /**
+   * 根目录本身是否在本机真实存在。
+   *
+   * 仓库整体搬家（/opt/a → /opt/b）后，opencode 仍按 git 仓库身份返回
+   * `worktree=旧路径`，旧路径只存在于历史记录里、磁盘上已不存在；
+   * 此时新目录会出现在 `sandboxes` 里。侧栏据此决定是否还可聚合到旧根，
+   * 否则新目录会被挂进旧项目行，新建对话也会沿用旧目录。
+   */
+  rootExists?: boolean
 }
 
 export type GitWorkspaceCatalog = Map<string, GitWorkspaceMeta>
@@ -124,7 +133,25 @@ export function useGitWorkspaceCatalog(directories: string[], serverId?: string)
         }
       }
 
+      // 根目录存在性：git 仓库整体搬家后，服务端仍返回旧 worktree，
+      // 旧路径在磁盘上已不存在。这里并发探一次，供侧栏判断能否继续聚合到旧根。
       const rootDirectoryList = Array.from(rootDirectories)
+      const rootExistsResults = await Promise.allSettled(
+        rootDirectoryList.map(async rootDirectory => ({
+          rootDirectory,
+          exists: await directoryExists(rootDirectory, serverId),
+        })),
+      )
+      const rootExistsMap = new Map<string, boolean>()
+      for (let index = 0; index < rootExistsResults.length; index++) {
+        const result = rootExistsResults[index]
+        if (result.status === 'fulfilled') {
+          rootExistsMap.set(result.value.rootDirectory, result.value.exists)
+        } else {
+          // 探测失败：保守视为存在，避免网络抖动时把项目拆散
+          rootExistsMap.set(rootDirectoryList[index], true)
+        }
+      }
 
       const workspaceResults = await Promise.allSettled(
         rootDirectoryList.map(async rootDirectory => ({
@@ -157,6 +184,7 @@ export function useGitWorkspaceCatalog(directories: string[], serverId?: string)
           isGit: true,
           rootDirectory,
           workspaces: rootToWorkspaces.get(rootDirectory) ?? [rootDirectory],
+          rootExists: rootExistsMap.get(rootDirectory) ?? true,
         })
       }
 

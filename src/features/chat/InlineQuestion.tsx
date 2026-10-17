@@ -4,7 +4,7 @@
  * 紧凑的 inline 卡片，选项清晰，自定义输入居中对齐。
  */
 
-import { memo, useState, useCallback, useRef, useEffect } from 'react'
+import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckIcon, QuestionIcon, TimerIcon } from '../../components/Icons'
 import { ApprovalCard } from '../../components/ui/ApprovalCard'
@@ -28,21 +28,25 @@ export const InlineQuestion = memo(function InlineQuestion({
 }: InlineQuestionProps) {
   const { t } = useTranslation(['chat', 'common'])
 
+  // 兜底：任何来源的请求都必须带 questions 数组（v2 表单已由事件层转成 questions）。
+  // 缺省时按空卡片渲染，绝不因 questions 为 undefined 崩溃。
+  const questions = useMemo(() => (Array.isArray(request.questions) ? request.questions : []), [request.questions])
+
   const [answers, setAnswers] = useState<Map<number, Set<string>>>(() => {
     const map = new Map<number, Set<string>>()
-    request.questions.forEach((_, idx) => map.set(idx, new Set()))
+    questions.forEach((_, idx) => map.set(idx, new Set()))
     return map
   })
 
   const [customEnabled, setCustomEnabled] = useState<Map<number, boolean>>(() => {
     const map = new Map<number, boolean>()
-    request.questions.forEach((_, idx) => map.set(idx, false))
+    questions.forEach((_, idx) => map.set(idx, false))
     return map
   })
 
   const [customValues, setCustomValues] = useState<Map<number, string>>(() => {
     const map = new Map<number, string>()
-    request.questions.forEach((_, idx) => map.set(idx, ''))
+    questions.forEach((_, idx) => map.set(idx, ''))
     return map
   })
 
@@ -100,7 +104,7 @@ export const InlineQuestion = memo(function InlineQuestion({
   }, [])
 
   const handleSubmit = useCallback(() => {
-    const result: QuestionAnswer[] = request.questions.map((q, idx) => {
+    const result: QuestionAnswer[] = questions.map((q, idx) => {
       const selected = Array.from(answers.get(idx) || [])
       const isCustom = customEnabled.get(idx)
       const customValue = customValues.get(idx)?.trim()
@@ -110,7 +114,7 @@ export const InlineQuestion = memo(function InlineQuestion({
       return isCustom && customValue ? [customValue] : selected
     })
     onReply(request.id, result)
-  }, [request, answers, customEnabled, customValues, onReply])
+  }, [request, questions, answers, customEnabled, customValues, onReply])
 
   const handleAutoSelect = useCallback(() => {
     if (canAutoSelect(request)) {
@@ -122,18 +126,18 @@ export const InlineQuestion = memo(function InlineQuestion({
 
   const autoSelectRemaining = useQuestionAutoSelect(request.id, handleAutoSelect, !isReplying)
 
-  const canSubmit = request.questions.every((_q, idx) => {
+  const canSubmit = questions.every((_q, idx) => {
     const selected = answers.get(idx) || new Set()
     const isCustom = customEnabled.get(idx)
     const customValue = customValues.get(idx)?.trim()
     return selected.size > 0 || (isCustom && !!customValue)
   })
 
-  const totalQuestions = request.questions.length
+  const totalQuestions = questions.length
   const isPaged = totalQuestions > 1
   const [page, setPage] = useState(0)
   const safePage = Math.min(page, totalQuestions - 1)
-  const answeredCount = request.questions.reduce((acc, _q, idx) => {
+  const answeredCount = questions.reduce((acc, _q, idx) => {
     const selected = answers.get(idx) || new Set()
     const isCustom = customEnabled.get(idx)
     const customValue = customValues.get(idx)?.trim()
@@ -164,7 +168,7 @@ export const InlineQuestion = memo(function InlineQuestion({
 
   return (
     <ApprovalCard
-      className="focus-within:border-border-300/60"
+      className="border-border-300/70 focus-within:border-accent-main-100/80"
       header={
         <>
           <QuestionIcon size={14} className="shrink-0 text-text-400" />
@@ -175,7 +179,7 @@ export const InlineQuestion = memo(function InlineQuestion({
                 {t('chat:questionDialog.pageOf', { current: safePage + 1, total: totalQuestions })}
               </span>
               <span className="flex items-center gap-1">
-                {request.questions.map((_q, idx) => (
+                {questions.map((_q, idx) => (
                   <span
                     key={idx}
                     className={`size-1 rounded-full transition-colors ${
@@ -246,7 +250,7 @@ export const InlineQuestion = memo(function InlineQuestion({
       }
     >
       <div className="space-y-3" onKeyDown={handleKeyDown}>
-        {(isPaged ? [request.questions[safePage]] : request.questions).map((question, i) => {
+        {(isPaged ? [questions[safePage]] : questions).map((question, i) => {
           const qIdx = isPaged ? safePage : i
           return (
             <InlineQuestionItem

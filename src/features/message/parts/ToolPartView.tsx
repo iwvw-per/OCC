@@ -5,11 +5,12 @@ import { DisclosureRow } from '../../../components/ui/DisclosureRow'
 import { StopIcon, TaskDoneIcon } from '../../../components/Icons'
 import { ToolParamChip } from './ToolParamChip'
 import type { ToolPart } from '../../../types/message'
+import { isSubagentToolName, getSubagentSessionId, isBackgroundSubagentOutput } from '../subagentUtils'
 import { useCompositorExpand, useDisclosureScrollLock } from '../../../hooks'
 import { useNow } from '../../../hooks/useNow'
 import { useMinDurationActive } from '../../../hooks/useMinDurationActive'
 import { serverStore } from '../../../store/serverStore'
-import { childSessionStore } from '../../../store/childSessionStore'
+import { childSessionStore, useChildSessionStatus } from '../../../store/childSessionStore'
 import { messageStore } from '../../../store/messageStore'
 import { useSessionStatus } from '../../../store/activeSessionStore'
 import { useSessionNavigation } from '../../../contexts/SessionNavigationContext'
@@ -58,6 +59,8 @@ import { useMessageExpandRender } from '../messageExpandShared'
  */
 const STUCK_TOOL_THRESHOLD_MS = 60_000
 const STUCK_TOOL_STALL_MS = 120_000
+/** 工具耗时不可能超过 30 天；超过说明 start 是坏值（0 或单位错），视为缺失，避免「两万天」读数。 */
+const MAX_TOOL_DURATION_MS = 30 * 24 * 60 * 60 * 1000
 
 interface ToolPartViewProps {
   part: ToolPart
@@ -88,15 +91,42 @@ export const ToolPartView = memo(function ToolPartView({
   const isActive = state.status === 'running' || state.status === 'pending'
   const isError = state.status === 'error'
   const isInterrupted = state.status === 'interrupted'
+
+  // 子代理（task/subagent）。v2 支持「后台子代理」：父工具调用已返回（completed），
+  // 子会话仍在后台运行。此时按「后台运行中」呈现——保留转圈与停止按钮，
+  // 否则用户会以为任务已经结束。子会话 id 从 metadata / 输出解析（含 v2 后台文本格式）。
+  const childSessionId = getTaskChildSessionId(part)
+  const subagentChildKey = useMemo(() => {
+    if (!childSessionId) return null
+    if (childSessionId.includes('::')) return childSessionId
+    const serverId = splitSessionKey(part.sessionID).serverId || serverStore.getActiveServerId()
+    return makeSessionKey(serverId, childSessionId)
+  }, [childSessionId, part.sessionID])
+  const childStatus = useChildSessionStatus(subagentChildKey)
+  // 「后台子代理」需同时满足：输出是后台回执、父工具已返回、子会话仍在跑。
+  // 用后台回执文本作门控，避免前台子代理在「父工具已完成、子会话 idle 尚未到达」
+  // 的窗口内被误标为后台运行。
+  const backgroundRunning =
+    isSubagentToolName(toolName) &&
+    isBackgroundSubagentOutput(state.output) &&
+    !isActive &&
+    childStatus === 'running'
+
   // 运行态视觉至少保持 300ms：工具跑得极快时扫光只闪一帧，看起来像界面在抖。
   // 计时读数仍用真实 isActive，只有视觉（扫光、图标旋转）用这个。
-  const showRunningVisual = useMinDurationActive(isActive, 300)
+  const showRunningVisual = useMinDurationActive(isActive || backgroundRunning, 300)
   const now = useNow(250, isActive)
-  const startTime = state.time?.start
+  const rawStart = state.time?.start
+  const startTime = typeof rawStart === 'number' && rawStart > 0 ? rawStart : undefined
   const calibratedNow = isActive ? serverStore.getActiveCalibratedNow() : undefined
   const endTime = state.time?.end ?? (isActive ? (calibratedNow ?? now) : undefined)
   const rawDuration = startTime !== undefined && endTime !== undefined ? endTime - startTime : undefined
-  const duration = rawDuration !== undefined && isActive ? Math.max(0, rawDuration) : rawDuration
+  const duration =
+    rawDuration === undefined || rawDuration > MAX_TOOL_DURATION_MS
+      ? undefined
+      : isActive
+        ? Math.max(0, rawDuration)
+        : rawDuration
 
   // 会话是否还在运行（busy/retry）。会话已停但 part 仍 active，即为悬空。
   const sessionStatus = useSessionStatus(part.sessionID)
@@ -123,7 +153,6 @@ export const ToolPartView = memo(function ToolPartView({
 
   const { pendingPermissions, pendingQuestions, onPermissionReply, onQuestionReply, onQuestionReject, isReplying } =
     useInlineToolRequests()
-  const childSessionId = getTaskChildSessionId(part)
   const permissionRequest = inlineToolRequests
     ? findPermissionRequestForTool(pendingPermissions, part.callID, childSessionId)
     : undefined
@@ -170,7 +199,7 @@ export const ToolPartView = memo(function ToolPartView({
   const hideToolBodyForPermission = isEditWritePermission
   // 精简模式：ToolBody 已渲染时，InlinePermission 只显示按钮
   // task 工具除外：task renderer 无法显示详细的工具请求内容，需要完整展示权限信息
-  const isTaskTool = toolName.toLowerCase() === 'task'
+  const isTaskTool = isSubagentToolName(toolName)
   const permissionContentHidden =
     compactInlinePermission && !isEditWritePermission && !isTaskTool && !!permissionRequest
   const isReadable = isReadableTool(toolName)
@@ -238,14 +267,15 @@ export const ToolPartView = memo(function ToolPartView({
   // 其它工具图标代表类型，不旋转（转一个文件/终端图标没有意义）。
   // task 完成后换成绿色空心圆对勾，明确表达「子任务已结束」。
   // 已完成的中性态按工具类别着色（多彩），运行中/失败仍用语义色。
-  const isTaskDone = toolName.toLowerCase() === 'task' && state.status === 'completed'
-  const iconSpins = showRunningVisual && toolName.toLowerCase() === 'task'
-  const neutralColorClass = !isActive && !isError && !isInterrupted && !isTaskDone ? getToolColorClass(toolName) : ''
+  const isTaskDone = isSubagentToolName(toolName) && state.status === 'completed' && !backgroundRunning
+  const iconSpins = showRunningVisual && isSubagentToolName(toolName)
+  const neutralColorClass =
+    !isActive && !backgroundRunning && !isError && !isInterrupted && !isTaskDone ? getToolColorClass(toolName) : ''
   const toolIcon = (
     <div
       className={`
       relative flex items-center justify-center transition-colors duration-200
-      ${isActive ? 'text-accent-main-100' : ''}
+      ${isActive || backgroundRunning ? 'text-accent-main-100' : ''}
       ${isError ? 'text-danger-100' : ''}
       ${isInterrupted ? 'text-warning-100' : ''}
       ${isTaskDone ? 'text-success-100' : ''}
@@ -271,7 +301,7 @@ export const ToolPartView = memo(function ToolPartView({
   const taskAgentLabel = taskSubagentType || (isTaskTool ? 'general' : undefined)
   const taskBadgeTone = isError
     ? 'danger'
-    : isActive
+    : isActive || backgroundRunning
       ? 'accent'
       : state.status === 'completed'
         ? 'success'
@@ -280,6 +310,11 @@ export const ToolPartView = memo(function ToolPartView({
     <span className="flex items-center gap-2">
       <TaskAgentBadge agentType={taskAgentLabel} tone={taskBadgeTone} sessionId={childSessionId} />
       {title && <span className="min-w-0 truncate text-[length:var(--fs-sm)]">{title}</span>}
+      {backgroundRunning && (
+        <span className="shrink-0 text-[length:var(--fs-xxs)] font-medium text-accent-main-100">
+          {t('task.backgroundRunning')}
+        </span>
+      )}
     </span>
   ) : null
 
@@ -301,7 +336,7 @@ export const ToolPartView = memo(function ToolPartView({
     },
     [childSessionId, currentSessionId],
   )
-  const taskStopButton = isTaskTool && isActive && childSessionId ? (
+  const taskStopButton = isTaskTool && (isActive || backgroundRunning) && childSessionId ? (
     <button
       type="button"
       onClick={handleStopTask}
@@ -673,7 +708,7 @@ const ToolBody = memo(function ToolBody({
   const { tool } = part
   const lowerTool = tool.toLowerCase()
 
-  if (lowerTool === 'task') {
+  if (isSubagentToolName(lowerTool)) {
     return <TaskRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
   }
 
@@ -691,9 +726,7 @@ const ToolBody = memo(function ToolBody({
 })
 
 function getTaskChildSessionId(part: ToolPart): string | undefined {
-  if (part.tool.toLowerCase() !== 'task') return undefined
-  const metadata = part.state.metadata as Record<string, unknown> | undefined
-  return metadata?.sessionId as string | undefined
+  return getSubagentSessionId(part)
 }
 
 /** Extract description from tool input as title fallback (available while running) */

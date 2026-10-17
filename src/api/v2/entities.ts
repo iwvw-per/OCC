@@ -11,8 +11,20 @@ export function adaptPermission(raw: unknown): PermissionRequest {
     patterns: Array.isArray(p.resources) ? (p.resources as string[]) : (Array.isArray(p.patterns) ? (p.patterns as string[]) : []),
     metadata: rec(p.metadata),
     always: Array.isArray(p.save) ? (p.save as string[]) : (Array.isArray(p.always) ? (p.always as string[]) : []),
-    tool: p.source as PermissionRequest['tool'],
+    // v2 的 tool 来源是 source: { type:'tool', messageID, id }，id 即工具调用 callID。
+    // 映射成 v1 { messageID, callID }，内嵌提问/权限才能按 callID 匹配到对应工具。
+    tool: adaptPermissionTool(p.source),
   } as PermissionRequest
+}
+
+/** v2 PermissionSource → v1 tool 引用（{ messageID, callID }）。 */
+function adaptPermissionTool(source: unknown): PermissionRequest['tool'] {
+  const s = rec(source)
+  if (s.type !== 'tool') return undefined
+  const callID = str(s.id) ?? ''
+  const messageID = str(s.messageID) ?? ''
+  if (!callID && !messageID) return undefined
+  return { messageID, callID }
 }
 
 /** v2 Agent → v1 Agent（id→name，permissions→permission） */
@@ -34,6 +46,7 @@ export function adaptAgent(raw: unknown): Agent {
 /** v2 Pty → v1 Pty（v2 无 size，补默认值） */
 export function adaptPty(raw: unknown): Pty {
   const p = rec(raw)
+  const exitCode = num(p.exitCode)
   return {
     id: String(p.id ?? ''),
     title: str(p.title) ?? '',
@@ -43,6 +56,8 @@ export function adaptPty(raw: unknown): Pty {
     status: (str(p.status) ?? 'running') as Pty['status'],
     pid: num(p.pid) ?? 0,
     size: { rows: 24, cols: 80 },
+    // v2 在 exited 时回填退出码；SDK 的 Pty 类型未声明该字段，故显式补上。
+    ...(exitCode !== undefined ? { exitCode } : {}),
   } as Pty
 }
 

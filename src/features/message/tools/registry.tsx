@@ -289,9 +289,9 @@ export const toolRegistry: ToolRegistry = [
     colorClass: 'tool-color-todo',
   },
 
-  // Task (子 agent)
+  // Task (子 agent)：v1 叫 task，v2/OMO 叫 subagent
   {
-    match: exact('task'),
+    match: exact('task', 'subagent', 'sub_agent', 'task_agent'),
     icon: <TaskIcon />,
     colorClass: 'tool-color-task',
   },

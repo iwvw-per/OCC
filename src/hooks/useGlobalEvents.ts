@@ -22,6 +22,7 @@ import { subscribeToServerEvents, getSessionStatus, getPendingPermissions, getPe
 import { invalidateSessionListCache } from '../api/sessionListCache'
 import { sessionListIndexStore } from '../store/sessionListIndexStore'
 import type { EventCallbacks } from '../types/api/event'
+import type { SessionCompactedPayload } from '../types/api/event'
 import { replyPermission } from '../api/permission'
 import { stripMessageSummaryDiffs, sanitizeStreamPart } from '../api/sanitize'
 import { autoApproveStore } from '../store/autoApproveStore'
@@ -44,6 +45,8 @@ export interface SessionEventCallbacks {
   onQuestionRejected?: (data: { sessionID: string; requestID: string }) => void
   onScrollRequest?: () => void
   onSessionIdle?: (sessionID: string) => void
+  /** 会话压缩结束（v2）：用于刷新消息或提示 */
+  onSessionCompacted?: (data: SessionCompactedPayload) => void
   onSessionError?: (sessionID: string) => void
   onReconnected?: (reason: 'network' | 'server-switch', serverId: string) => void
 }
@@ -714,6 +717,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             status: data.status,
             output: data.output,
             error: data.error,
+            metadata: data.metadata,
           })
         },
 
@@ -770,6 +774,34 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 子 agent 运行结束：自动关闭其分屏 pane
           paneLayoutStore.closeSubtaskSession(scopedId)
           dispatchToConsumers(scopedId, cb => cb.onSessionIdle?.(scopedId))
+        },
+
+        onSessionCompacted: data => {
+          if (isEphemeralSession(data.sessionID)) return
+          const scopedId = scope(data.sessionID)
+          // started 只是开始信号：标记一下并等待结果，不提示也不刷新。
+          if (data.status === 'started') return
+
+          // 失败：后端明确拒绝（如 "Nothing to compact yet"）。必须提示，
+          // 否则用户点 /compact 后界面毫无反应，会误以为功能坏掉。
+          // 自动压缩失败不打扰用户（后台行为，下一轮仍会重试）。
+          if (data.status === 'failed') {
+            if (data.reason === 'auto') return
+            notificationStore.toast(
+              'error',
+              i18n.t('chat:notification.compactionFailed'),
+              data.error || i18n.t('chat:notification.compactionFailedHint'),
+            )
+            return
+          }
+
+          // 成功：压缩改写了历史消息（生成摘要、裁剪旧轮次），本地缓存必须重拉，
+          // 否则用户看不到「历史已压缩」分隔与精简后的内容。
+          if (data.reason !== 'auto') {
+            notificationStore.toast('completed', i18n.t('chat:notification.compactionDone'))
+          }
+          messageStore.markServerSessionsStale(sessionKeyToServerId(scopedId))
+          dispatchToConsumers(scopedId, cb => cb.onSessionCompacted?.(data))
         },
 
         onSessionError: error => {

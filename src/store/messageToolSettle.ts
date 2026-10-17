@@ -103,6 +103,8 @@ export interface ToolSettleOutcome {
   status: 'completed' | 'error'
   output?: string
   error?: string
+  /** 工具结果 metadata（如 task 的子会话 sessionId），并入 part.state.metadata */
+  metadata?: Record<string, unknown>
   /** 错误时的兜底文案（调用方注入，保持本模块无 i18n 依赖） */
   errorFallback: string
 }
@@ -126,6 +128,9 @@ export function settleToolByCallID(
       partsChanged = true
       changed = true
       const start = part.state.time?.start ?? now
+      const metadata = outcome.metadata
+        ? { ...(part.state.metadata ?? {}), ...outcome.metadata }
+        : part.state.metadata
       if (outcome.status === 'error') {
         return {
           ...part,
@@ -133,6 +138,7 @@ export function settleToolByCallID(
             ...part.state,
             status: 'error' as const,
             error: outcome.error ?? part.state.error ?? outcome.errorFallback,
+            metadata,
             time: { ...(part.state.time ?? {}), start, end: now },
           },
         } as ToolPart
@@ -143,6 +149,7 @@ export function settleToolByCallID(
           ...part.state,
           status: 'completed' as const,
           output: outcome.output ?? part.state.output ?? '',
+          metadata,
           time: { ...(part.state.time ?? {}), start, end: now },
         },
       } as ToolPart

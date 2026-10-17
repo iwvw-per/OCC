@@ -82,6 +82,7 @@ const EMPTY_SESSION_STATE = {
   hasTrimmedHistory: false,
   directory: '',
   title: null,
+  compactedAt: undefined as number | undefined,
 } as const
 
 interface UseChatSessionOptions {
@@ -179,6 +180,7 @@ export function useChatSession({
   const revertedContent = perSessionState.revertedContent
   const hasMoreHistory = perSessionState.hasMoreHistory
   const hasTrimmedHistory = perSessionState.hasTrimmedHistory
+  const compactedAt = perSessionState.compactedAt
   const loadState = routeSessionId ? perSessionState.loadState : ('idle' as const)
   const loadError = routeSessionId ? perSessionState.loadError : undefined
 
@@ -464,6 +466,11 @@ export function useChatSession({
         }
         // 应用内 toast 已在 useGlobalEvents 中统一处理
       },
+      onSessionCompacted: (_data: import('../types/api/event').SessionCompactedPayload) => {
+        // 压缩改写了历史（摘要 + 裁剪旧轮次），强制重拉当前会话，
+        // 否则界面仍显示压缩前的完整历史，看不到「历史已压缩」分隔。
+        if (routeSessionId) void loadSession(routeSessionId, { force: true })
+      },
       onSessionError: (sessionID: string) => {
         // 页面不在前台时通知用户 session 出错
         const title = buildNotificationTitle(sessionID, i18n.t('chat:notification.sessionError'))
@@ -538,6 +545,7 @@ export function useChatSession({
       onQuestionRejected: data => sseCallbacksRef.current.onQuestionRejected(data),
       onScrollRequest: () => sseCallbacksRef.current.onScrollRequest(),
       onSessionIdle: sid => sseCallbacksRef.current.onSessionIdle(sid),
+      onSessionCompacted: data => sseCallbacksRef.current.onSessionCompacted?.(data),
       onSessionError: sid => sseCallbacksRef.current.onSessionError(sid),
       onReconnected: (reason, serverId) => sseCallbacksRef.current.onReconnected(reason, serverId),
     })
@@ -1284,6 +1292,7 @@ export function useChatSession({
     loadError,
     hasMoreHistory,
     hasTrimmedHistory,
+    compactedAt,
     retryStatus,
     agents,
     selectedAgent,

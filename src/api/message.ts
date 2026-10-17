@@ -63,6 +63,8 @@ export interface SessionMessagePage {
   messages: ApiMessageWithParts[]
   /** 继续向前翻页的游标（服务端 X-Next-Cursor）；缺省表示没有更早的消息 */
   nextCursor?: string
+  /** 本页内最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
+  compactedAt?: number
 }
 
 /**
@@ -121,7 +123,7 @@ export async function getSessionMessagePage(
           })
           // nativeListMessages 已把 v2 的 desc 结果反转为时间升序；v1 分支同样重排为升序。
           const messages = project ? projectPageMessages(page.messages) : page.messages
-          return { messages, nextCursor: page.nextCursor }
+          return { messages, nextCursor: page.nextCursor, compactedAt: page.compactedAt }
         }
         const sdk = getSDKClient(target.serverId)
         const result = await sdk.session.messages({
@@ -144,8 +146,12 @@ export async function getSessionMessagePage(
 /**
  * 轻量消息拉取的一次性上限。轻量响应已被主机 Agent 投影（只含对话 + 元数据），
  * 体积小，用一个大 limit 即可一次拿全整个会话的所有轮次。
+ *
+ * 取 5000 而非 100000：messageStore 的内存上限本就是 20000 条，正常会话的
+ * 消息数远达不到 5000，这个值已能覆盖「一次拿全」的语义；而异常超大会话
+ * （实测有单次 3MB+ 的响应）在 100000 下会把整段历史一次性拉下来，代价很高。
  */
-export const LIGHTWEIGHT_MESSAGE_LIMIT = 100000
+export const LIGHTWEIGHT_MESSAGE_LIMIT = 5000
 
 /** 轻量投影响应的标记头：主机 Agent 命中投影时回填，用于判定服务端是否支持。 */
 const LIGHTWEIGHT_HEADER = 'X-Lightweight'
@@ -244,7 +250,7 @@ async function fetchV2LightweightMessages(
   const body: unknown = await res.json()
   const page = adaptMessagePage(body)
   // Agent 按 desc（最新在前）累积返回，这里反转为时间升序，与前端渲染顺序一致。
-  return { messages: [...page.messages].reverse(), hasMore: false }
+  return { messages: [...page.messages].reverse(), hasMore: false, compactedAt: page.compactedAt }
 }
 
 /**
@@ -324,6 +330,8 @@ export interface LightweightMessages {
   messages: ApiMessageWithParts[]
   /** 是否还有更早的消息（返回条数达到 limit 时保守视为还有） */
   hasMore: boolean
+  /** 最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
+  compactedAt?: number
 }
 
 /**
@@ -405,6 +413,8 @@ export interface SessionTurnPage {
   nextCursor?: string
   /** 是否还有更早的历史（服务端给了游标即视为还有） */
   hasMore: boolean
+  /** 本批内最近一次已完成压缩的时间戳 */
+  compactedAt?: number
 }
 
 /** 一条消息是否为用户消息（轮次分隔点） */
@@ -534,11 +544,14 @@ export async function getSessionTurnPage(
   serverId?: string,
   options?: { project?: boolean; signal?: AbortSignal },
 ): Promise<SessionTurnPage> {
+  const resolvedServerId = serverId ?? serverStore.getActiveServerId()
+  const isV2 = resolvedServerId ? serverStore.getApiVersion(resolvedServerId) === 'v2' : false
   const collected: ApiMessageWithParts[] = []
   let cursor = before
-  let hasMore = true
   let pagesFetched = 0
   let lastPageFull = true
+  let reachedEnd = false
+  let compactedAt: number | undefined
 
   while (true) {
     const page = await getSessionMessagePage(sessionId, TURN_FETCH_MESSAGE_LIMIT, cursor, directory, serverId, options)
@@ -546,13 +559,13 @@ export async function getSessionTurnPage(
     pagesFetched += 1
     lastPageFull = page.messages.length >= TURN_FETCH_MESSAGE_LIMIT
     cursor = page.nextCursor
-
-    if (!cursor) {
-      hasMore = false
-      break
+    if (page.compactedAt != null && (compactedAt == null || page.compactedAt > compactedAt)) {
+      compactedAt = page.compactedAt
     }
-    if (page.messages.length === 0) {
-      hasMore = false
+
+    // 无游标（v1 新 serve 到最早 / v2 到最早）或空页（残留游标）都算到最早。
+    if (!cursor || page.messages.length === 0) {
+      reachedEnd = true
       break
     }
 
@@ -561,11 +574,13 @@ export async function getSessionTurnPage(
     if (pagesFetched >= TURN_FETCH_MAX_PAGES) break
   }
 
-  // 旧版 serve 不给游标但返回满页：无法区分「已到最早」与「还有更多」，
-  // 按「可能还有」处理，与旧分页的兜底判定一致，避免漏掉更早历史。
-  hasMore = cursor != null || lastPageFull
+  // v2：cursor 权威——已到最早（无游标 / 空页）即没有更早，不再被「末页恰好满 30 条」
+  // 误判成还有历史（否则点开别端已建的会话，拉完仍会无限自动上滑加载更多）。
+  // v1：旧版 serve 不给游标但返回满页，无法区分「到最早」与「还有更多」，保守视为还有。
+  const hasMore = isV2 ? !reachedEnd && cursor != null : cursor != null || lastPageFull
 
-  return { messages: collected, nextCursor: cursor, hasMore }
+  // 已到最早时清掉游标，避免 loadMoreHistory 因残留游标继续触发空拉。
+  return { messages: collected, nextCursor: reachedEnd ? undefined : cursor, hasMore, compactedAt }
 }
 
 // ============================================

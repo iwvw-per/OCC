@@ -34,6 +34,7 @@ import { MessageErrorView } from '../message/parts'
 import type { ChangedFile } from '../message/parts/changedFiles'
 import type { Message, MessageError } from '../../types/message'
 import { RetryStatusInline, type RetryStatusInlineData } from './RetryStatusInline'
+import { InlineQuestion } from './InlineQuestion'
 import {
   buildVisibleMessageEntries,
   getVisibleMessageForkTargetId,
@@ -47,6 +48,7 @@ import {
   buildTurnLatestAssistantIdSet,
   collectTurnChangedFiles,
   reuseProcessTimelineItems,
+  shouldShowCompactionDivider,
   type ProcessTimelineItem,
 } from './chatPageModel'
 import { useTheme } from '../../hooks/useTheme'
@@ -149,6 +151,8 @@ interface ChatAreaProps {
    * 才说明「上滑能拿到新内容」——否则会陷入空拉循环。
    */
   hasTrimmedHistory?: boolean
+  /** 最近一次已完成压缩的时间戳；有值时在消息流末尾显示「历史已压缩」分隔条 */
+  compactedAt?: number
   onLoadMore?: () => void | Promise<void>
   /** 展开被压缩的历史轮次时，按需回拉该轮完整过程内容 */
   onHydrateTurn?: (turnUserMessageId: string) => void | Promise<void>
@@ -160,6 +164,13 @@ interface ChatAreaProps {
   bottomPadding?: number
   onVisibleMessageIdsChange?: (ids: string[]) => void
   onAtBottomChange?: (atBottom: boolean) => void
+  /** 内嵌模式（inlineToolRequests）下未匹配到工具的待处理提问，渲染在消息流末尾 */
+  inlineQuestions?: Array<{
+    request: import('../../api').ApiQuestionRequest
+    onReply: (answers: import('../../api').QuestionAnswer[]) => void
+    onReject: () => void
+    isReplying?: boolean
+  }>
 }
 
 export type ChatAreaHandle = {
@@ -431,6 +442,7 @@ export const ChatArea = memo(
         onReloadSession,
         hasMoreHistory = false,
         hasTrimmedHistory = false,
+        compactedAt,
         onLoadMore,
         onHydrateTurn,
         onUndo,
@@ -441,6 +453,7 @@ export const ChatArea = memo(
         bottomPadding = 0,
         onVisibleMessageIdsChange,
         onAtBottomChange,
+        inlineQuestions = [],
       },
       ref,
     ) => {
@@ -1198,8 +1211,37 @@ export const ChatArea = memo(
               })}
             </div>
 
-            {/* 顺序必须是：消息 → 重试/错误提示 → 输入框占位。
+            {/* 压缩分隔条：仅在「最后一次压缩晚于当前最后一条消息」时显示在消息流末尾。
+                一旦用户又发了新消息，说明压缩点已经不在末尾，分隔条自然消失，
+                避免它一直悬在最新对话下方造成误解。 */}
+            {shouldShowCompactionDivider(visibleMessages, compactedAt) && (
+              <div className={`w-full mx-auto ${paddingClass}`} style={chatContentMaxWidthStyle}>
+                <div className="flex items-center gap-3 py-2 text-[length:var(--fs-xs)] text-text-400" data-compaction-divider>
+                  <span className="flex-1 h-px bg-border-200/70" />
+                  <span className="shrink-0 leading-none">{t('message:system.contextCompacted')}</span>
+                  <span className="flex-1 h-px bg-border-200/70" />
+                </div>
+              </div>
+            )}
+
+            {/* 顺序必须是：消息 → 内嵌提问 → 重试/错误提示 → 输入框占位。
                 旧 Virtuoso Footer 就是这样；换 virtualizer 后 paddingEnd 在前、提示在后，会叠到输入框下。 */}
+            {inlineQuestions.length > 0 && (
+              <div className={`w-full mx-auto ${paddingClass}`} style={chatContentMaxWidthStyle}>
+                <div className="space-y-2">
+                  {inlineQuestions.map(entry => (
+                    <InlineQuestion
+                      key={entry.request.id}
+                      request={entry.request}
+                      onReply={(_requestId, answers) => entry.onReply(answers)}
+                      onReject={entry.onReject}
+                      isReplying={entry.isReplying ?? false}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {retryStatus && (
               <div className={`w-full mx-auto ${paddingClass}`} style={chatContentMaxWidthStyle}>
                 <div className="flex justify-start">

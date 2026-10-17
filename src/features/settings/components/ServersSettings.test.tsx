@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ServersSettings } from './ServersSettings'
 
-const { useServerStoreMock, navigateHomeMock, clearSessionMock } = vi.hoisted(() => ({
+const { useServerStoreMock, restoreWorkspaceMock, clearSessionMock } = vi.hoisted(() => ({
   useServerStoreMock: vi.fn(),
-  navigateHomeMock: vi.fn(),
+  restoreWorkspaceMock: vi.fn(),
   clearSessionMock: vi.fn(),
 }))
 
@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../../hooks', () => ({
   useServerStore: useServerStoreMock,
-  useRouter: () => ({ navigateHome: navigateHomeMock, sessionId: 'session-1' }),
+  useRouter: () => ({ restoreWorkspace: restoreWorkspaceMock, sessionId: 'session-1', directory: '/foo' }),
 }))
 
 vi.mock('../../../store', () => ({
@@ -34,7 +34,7 @@ describe('ServersSettings', () => {
   beforeEach(() => {
     checkHealthMock.mockReset()
     setActiveServerMock.mockReset()
-    navigateHomeMock.mockReset()
+    restoreWorkspaceMock.mockReset()
     clearSessionMock.mockReset()
     useServerStoreMock.mockReturnValue({
       servers: [localServer, remoteServer],
@@ -60,7 +60,7 @@ describe('ServersSettings', () => {
       expect(checkHealthMock).toHaveBeenCalledWith('remote')
     })
     expect(setActiveServerMock).toHaveBeenCalledWith('remote')
-    expect(navigateHomeMock).toHaveBeenCalled()
+    expect(restoreWorkspaceMock).toHaveBeenCalledWith('remote', null, '/foo')
     expect(clearSessionMock).toHaveBeenCalledWith('session-1')
   })
 })

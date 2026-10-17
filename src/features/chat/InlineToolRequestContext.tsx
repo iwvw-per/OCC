@@ -9,6 +9,7 @@
 import { createContext, useContext } from 'react'
 import type { ApiPermissionRequest, ApiQuestionRequest, PermissionReply, QuestionAnswer } from '../../api'
 import { childSessionStore } from '../../store'
+import { isSubagentToolName, parseSubagentSessionId } from '../message/subagentUtils'
 import { makeSessionKey, splitSessionKey } from '../../utils/sessionKey'
 
 export interface InlineToolRequestContextValue {
@@ -76,6 +77,7 @@ export function findPermissionRequestForTool(
 /**
  * 根据 callID 查找关联的提问请求。
  * 对于 task tool，额外传入 childSessionId。
+ * v2 表单没有 tool 关联，不在此匹配——统一走 ChatArea 消息流末尾的内嵌渲染。
  */
 export function findQuestionRequestForTool(
   pendingQuestions: ApiQuestionRequest[],
@@ -101,9 +103,19 @@ export function findQuestionRequestForTool(
 }
 
 interface ToolPartLike {
+  sessionID: string
   callID: string
   tool: string
-  state: { metadata?: unknown }
+  state: { metadata?: unknown; output?: unknown }
+}
+
+/** 取子代理工具的子会话 id：优先 metadata.sessionId，回退到输出里的 <subagent sessionID="...">。 */
+function subagentChildSessionId(part: ToolPartLike): string | undefined {
+  if (!isSubagentToolName(part.tool)) return undefined
+  const metadata = part.state.metadata as Record<string, unknown> | undefined
+  const fromMetadata = metadata?.sessionId
+  if (typeof fromMetadata === 'string' && fromMetadata) return fromMetadata
+  return parseSubagentSessionId(part.state.output)
 }
 
 /**
@@ -123,10 +135,7 @@ export function findUnmatchedQuestions(
     for (const rawPart of message.content) {
       if (rawPart.type !== 'tool') continue
       const part = rawPart as unknown as ToolPartLike
-      const childSessionId =
-        typeof part.tool === 'string' && part.tool.toLowerCase() === 'task'
-          ? ((part.state.metadata as Record<string, unknown> | undefined)?.sessionId as string | undefined)
-          : undefined
+      const childSessionId = subagentChildSessionId(part)
       const question = findQuestionRequestForTool(pendingQuestions, part.callID, childSessionId)
       if (question) matched.add(question.id)
     }

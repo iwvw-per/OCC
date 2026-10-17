@@ -1,7 +1,9 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { FolderIcon, FolderOpenIcon, ArrowUpIcon, SpinnerIcon, PlusIcon } from '../../components/Icons'
-import { listDirectory, getPath } from '../../api'
+import { FolderIcon, FolderOpenIcon, ArrowUpIcon, SpinnerIcon, PlusIcon, GitBranchIcon } from '../../components/Icons'
+import { listDirectory, getPath, directoryExists } from '../../api'
+import { runPtyCommand } from '../../api/ptyRun'
+import { inferRepoName, isLikelyGitUrl } from './gitCloneUrl'
 import { fileErrorHandler } from '../../utils'
 import { canUseSystemDirectoryPicker } from '../../utils/nativeFileIntegration'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
@@ -72,6 +74,15 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // ---- Git clone ----
+  const [cloneOpen, setCloneOpen] = useState(false)
+  const [cloneUrl, setCloneUrl] = useState('')
+  const [cloneDirName, setCloneDirName] = useState('')
+  const [cloneRunning, setCloneRunning] = useState(false)
+  const [cloneOutput, setCloneOutput] = useState('')
+  const [cloneError, setCloneError] = useState<string | null>(null)
+  const cloneInputRef = useRef<HTMLInputElement>(null)
 
   // Refs
   const loadedPathRef = useRef<string>('')
@@ -276,6 +287,88 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
     }
   }, [onSelect, onClose, t])
 
+  // ---- Git clone ----
+  const resetCloneState = useCallback(() => {
+    setCloneUrl('')
+    setCloneDirName('')
+    setCloneOutput('')
+    setCloneError(null)
+    setCloneRunning(false)
+  }, [])
+
+  const openClone = useCallback(() => {
+    resetCloneState()
+    setCloneOpen(true)
+    // 克隆到当前浏览的目录下
+    window.setTimeout(() => cloneInputRef.current?.focus(), 50)
+  }, [resetCloneState])
+
+  const handleCloneUrlChange = useCallback((value: string) => {
+    setCloneUrl(value)
+    // 目录名只在用户没手动改过时跟随 URL
+    setCloneDirName(prev => (prev === '' || prev === inferRepoName(cloneUrl) ? inferRepoName(value) : prev))
+  }, [cloneUrl])
+
+  /**
+   * 执行 git clone。
+   *
+   * 目标目录 = 当前浏览目录 / 目录名。成功后把该目录作为项目返回；
+   * 失败时把 git 的报错留在对话框里（常见：目录已存在、无权限、认证失败）。
+   */
+  const handleClone = useCallback(async () => {
+    const url = cloneUrl.trim()
+    const dirName = cloneDirName.trim()
+    if (!isLikelyGitUrl(url)) {
+      setCloneError(t('projectDialog.cloneInvalidUrl'))
+      return
+    }
+    if (!dirName || /[/\\]/.test(dirName) || dirName === '.' || dirName === '..') {
+      setCloneError(t('projectDialog.cloneInvalidName'))
+      return
+    }
+
+    const baseDir = getDirectoryPath(inputValue)
+    const targetDir = normalizePath(baseDir).replace(/\/+$/, '') + PATH_SEP + dirName
+
+    setCloneRunning(true)
+    setCloneError(null)
+    setCloneOutput('')
+
+    try {
+      const result = await runPtyCommand({
+        command: 'git',
+        args: ['clone', '--progress', url, targetDir],
+        cwd: baseDir || PATH_SEP,
+        directory: serverId ? baseDir : undefined,
+        serverId,
+      })
+      setCloneOutput(result.output)
+
+      // 退出码不可全信：PTY 在进程结束后可能被服务端立即回收，
+      // 此时拿不到真实退出码（runPtyCommand 按 0 处理）。用「目标目录是否
+      // 已出现」作为最终判据 —— 这是用户真正关心的结果。
+      const cloned = await directoryExists(targetDir, serverId).catch(() => false)
+      if (!cloned) {
+        setCloneError(t('projectDialog.cloneFailed', { code: result.exitCode }))
+        return
+      }
+
+      onSelect(targetDir)
+      onClose()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setCloneError(message)
+    } finally {
+      setCloneRunning(false)
+    }
+  }, [cloneUrl, cloneDirName, inputValue, serverId, onSelect, onClose, t])
+
+  const closeClone = useCallback(() => {
+    if (cloneRunning) return
+    setCloneOpen(false)
+    resetCloneState()
+  }, [cloneRunning, resetCloneState])
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       const hasGoUp = inputValue.split(PATH_SEP).filter(Boolean).length > 0
@@ -434,6 +527,112 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
         )}
       </div>
 
+      {/* Git clone 面板：仅在点击「克隆 Git 仓库」后展开 */}
+      {cloneOpen && (
+        <div className="shrink-0 border-t border-border-200/40 p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <GitBranchIcon className="w-3.5 h-3.5 shrink-0 text-text-400" />
+            <span className="text-[length:var(--fs-sm)] font-medium text-text-200">
+              {t('projectDialog.cloneGitTitle')}
+            </span>
+          </div>
+
+          <input
+            ref={cloneInputRef}
+            type="text"
+            value={cloneUrl}
+            onChange={e => handleCloneUrlChange(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !cloneRunning) {
+                e.preventDefault()
+                void handleClone()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                closeClone()
+              }
+            }}
+            placeholder={t('projectDialog.cloneUrlPlaceholder')}
+            disabled={cloneRunning}
+            className="w-full rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 font-mono text-[length:var(--fs-sm)] text-text-100 outline-none placeholder:text-text-400 focus:border-accent-main-100/50 disabled:opacity-60"
+            autoComplete="off"
+            spellCheck={false}
+          />
+
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 font-mono text-[length:var(--fs-xxs)] text-text-400">
+              {t('projectDialog.cloneInto')}
+            </span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-xxs)] text-text-300" title={inputValue}>
+              {inputValue}
+            </span>
+          </div>
+
+          <input
+            type="text"
+            value={cloneDirName}
+            onChange={e => setCloneDirName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !cloneRunning) {
+                e.preventDefault()
+                void handleClone()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                closeClone()
+              }
+            }}
+            placeholder={t('projectDialog.cloneDirNamePlaceholder')}
+            disabled={cloneRunning}
+            className="w-full rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 font-mono text-[length:var(--fs-sm)] text-text-100 outline-none placeholder:text-text-400 focus:border-accent-main-100/50 disabled:opacity-60"
+            autoComplete="off"
+            spellCheck={false}
+          />
+
+          {cloneError && (
+            <div className="rounded-md border border-danger-100/40 bg-danger-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100">
+              {cloneError}
+            </div>
+          )}
+
+          {cloneOutput && (
+            <pre className="max-h-28 overflow-auto rounded-md border border-border-200/40 bg-bg-000/60 p-2 font-mono text-[length:var(--fs-xxs)] leading-4 text-text-300 whitespace-pre-wrap break-all">
+              {cloneOutput}
+            </pre>
+          )}
+
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeClone}
+              disabled={cloneRunning}
+              className={cn(
+                'rounded-md px-3 py-1.5 text-[length:var(--fs-sm)] text-text-300 transition-colors hover:bg-bg-200 disabled:opacity-50',
+                interactive.subtle,
+              )}
+            >
+              {t('common:cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleClone()}
+              disabled={cloneRunning || !cloneUrl.trim() || !cloneDirName.trim()}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md bg-accent-main-100 px-3 py-1.5 text-[length:var(--fs-sm)] font-medium text-oncolor-100 transition-colors hover:bg-accent-main-200 disabled:opacity-50',
+                interactive.accent,
+              )}
+            >
+              {cloneRunning ? (
+                <>
+                  <SpinnerIcon className="w-3 h-3 animate-spin" size={12} />
+                  {t('projectDialog.cloning')}
+                </>
+              ) : (
+                t('projectDialog.cloneStart')
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
       <div className="relative p-3 flex items-center gap-3 shrink-0">
         <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-border-200/30" />
@@ -454,6 +653,17 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             {t('projectDialog.pickInFileManager')}
           </button>
         )}
+        <button
+          type="button"
+          onClick={openClone}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap',
+            interactive.subtle,
+          )}
+        >
+          <GitBranchIcon className="w-3 h-3" />
+          {t('projectDialog.cloneGit')}
+        </button>
         <button
           onClick={handleConfirmCurrent}
           className={cn(

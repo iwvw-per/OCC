@@ -16,9 +16,11 @@ const subscribeToEventsMock = vi.fn()
 const onServerChangeMock = vi.fn()
 let latestServerChange: (() => void) | undefined
 
+const directoryExistsMock = vi.fn<(directory: string, serverId?: string) => Promise<boolean>>(() => Promise.resolve(true))
 vi.mock('../api', () => ({
   getCurrentProject: (...args: unknown[]) => getCurrentProjectMock(...args),
   listWorktrees: (...args: unknown[]) => listWorktreesMock(...args),
+  directoryExists: (directory: string, serverId?: string) => directoryExistsMock(directory, serverId),
 }))
 
 vi.mock('../api/events', () => ({
@@ -35,6 +37,8 @@ describe('useGitWorkspaceCatalog', () => {
   beforeEach(() => {
     getCurrentProjectMock.mockReset()
     listWorktreesMock.mockReset()
+    directoryExistsMock.mockReset()
+    directoryExistsMock.mockResolvedValue(true)
     subscribeToEventsMock.mockReset()
     onServerChangeMock.mockReset()
     latestServerChange = undefined
@@ -83,5 +87,24 @@ describe('useGitWorkspaceCatalog', () => {
 
     expect(result.current.catalog.get('C:/repo')?.rootDirectory).toBe('C:/repo')
     expect(result.current.catalog.get('C:/repo')?.workspaces).toEqual(['C:/repo', 'C:/repo-worktree'])
+  })
+
+  it('marks a git root as missing when its directory no longer exists', async () => {
+    getCurrentProjectMock.mockResolvedValue({
+      vcs: 'git',
+      worktree: '/opt/komidash',
+      sandboxes: ['/opt/code/komidash'],
+    })
+    listWorktreesMock.mockResolvedValue(['/opt/komidash', '/opt/code/komidash'])
+    directoryExistsMock.mockImplementation((directory: string) =>
+      Promise.resolve(directory !== '/opt/komidash'),
+    )
+    subscribeToEventsMock.mockReturnValue(() => {})
+
+    const { result } = renderHook(() => useGitWorkspaceCatalog(['/opt/code/komidash'], 'server-1'))
+
+    await waitFor(() => {
+      expect(result.current.catalog.get('/opt/code/komidash')?.rootExists).toBe(false)
+    })
   })
 })

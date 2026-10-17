@@ -51,6 +51,8 @@ export interface SessionState {
   shareUrl?: string
   /** 断线重连后是否需要重新全量拉取 */
   isStale: boolean
+  /** 最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
+  compactedAt?: number
 }
 
 export interface SendRollbackSnapshot {
@@ -92,6 +94,8 @@ export interface SessionStateSnapshot {
   hasTrimmedHistory: boolean
   directory: string
   title: string | null
+  /** 最近一次已完成压缩的时间戳；有值时消息流末尾展示压缩分隔条 */
+  compactedAt?: number
 }
 
 // Re-export Part for convenience

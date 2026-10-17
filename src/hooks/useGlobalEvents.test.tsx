@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerSessionConsumer, useGlobalEvents } from './useGlobalEvents'
+import { messageStore } from '../store'
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void
@@ -116,6 +117,7 @@ vi.mock('../store', () => ({
     handlePartRemoved: vi.fn(),
     handleSessionIdle: vi.fn(),
     handleSessionError: vi.fn(),
+    markServerSessionsStale: vi.fn(),
     getSessionState: vi.fn(() => null),
     updateSessionMetadata: vi.fn(),
   },
@@ -332,6 +334,48 @@ describe('useGlobalEvents', () => {
     // 会残留「运行中」标识或未读点。
     expect(activeSessionStoreMock.removeSession).toHaveBeenCalledWith('local::archived-session')
     expect(removeSessionNotificationsMock).toHaveBeenCalledWith('local::archived-session')
+  })
+
+  it('toasts when a manual compaction fails (e.g. nothing to compact)', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompacted?.({
+      sessionID: 'ses_1',
+      status: 'failed',
+      reason: 'manual',
+      error: 'Nothing to compact yet',
+    })
+
+    // 用户手动 /compact 后必须得到反馈，否则会以为功能失效
+    expect(notificationToastMock).toHaveBeenCalledWith(
+      'error',
+      expect.any(String),
+      'Nothing to compact yet',
+    )
+    expect(messageStore.markServerSessionsStale).not.toHaveBeenCalled()
+  })
+
+  it('invalidates cached messages when a manual compaction succeeds', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'completed', reason: 'manual' })
+
+    // 压缩改写了历史，必须重拉，否则看不到压缩后的内容
+    expect(messageStore.markServerSessionsStale).toHaveBeenCalled()
   })
 
   it('reconciles full server status when SSE reconnects to drop stale busy entries', async () => {

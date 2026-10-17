@@ -39,6 +39,7 @@ export { useVcsInfo } from './useVcsInfo'
 export type { UseVcsInfoResult } from './useVcsInfo'
 export { useGitWorkspaceCatalog, requestGitWorkspaceCatalogRefresh } from './useGitWorkspaceCatalog'
 export type { GitWorkspaceCatalog, GitWorkspaceMeta } from './useGitWorkspaceCatalog'
+export { useMissingDirectories } from './useMissingDirectories'
 
 // Re-export from contexts
 export {

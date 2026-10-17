@@ -4,8 +4,11 @@
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
+import { getV2Client } from './sdkV2'
 import { nativeListPermissions } from './v2NativeAgent'
-import { resolveSessionTarget } from '../utils/sessionKey'
+import { nativeReplyForm, nativeCancelForm } from './v2NativeSession'
+import { adaptFormToQuestionRequest } from './v2/form'
+import { resolveSessionTarget, splitSessionKey } from '../utils/sessionKey'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
 import { microCache, invalidateMicroCache } from '../utils/microCache'
@@ -125,25 +128,55 @@ export async function getPendingQuestions(
   const questions = await microCache(
     pendingScopeKey('question', directory, serverId),
     async () => {
+      const resolvedServer = serverId ?? serverStore.getActiveServerId()
+      if (serverStore.getApiVersion(resolvedServer) === 'v2') {
+        // v2 用 Form 体系取代 question：列出目录下待处理表单并适配成 QuestionRequest，
+        // 否则刷新/重连后未回答的提问不会重新出现（facade 的 question.list 为空）。
+        const res = await getV2Client(resolvedServer).form.list({
+          location: { directory: formatPathForApi(directory, resolvedServer) },
+        })
+        const data = (res as { data?: unknown } | undefined)?.data
+        return Array.isArray(data) ? data.map(adaptFormToQuestionRequest) : []
+      }
       const sdk = getSDKClient(serverId)
       return unwrap(await sdk.question.list({ directory: formatPathForApi(directory, serverId) }))
     },
     { ttlMs: PENDING_TTL_MS },
   )
-  if (!sessionId) return questions
+  if (!sessionId) return questions as ApiQuestionRequest[]
   const target = resolveSessionTarget(sessionId, serverId)
-  return questions.filter((q: ApiQuestionRequest) => q.sessionID === target.sessionId)
+  return (questions as ApiQuestionRequest[]).filter(q => q.sessionID === target.sessionId)
 }
 
 /**
  * 回复问题请求
+ *
+ * v2 用 Form 体系取代 question：sessionID + fields（form 字段的 key/type，由事件层
+ * 内嵌在 request.questions 上）把 answers 映射回 { fieldKey: value } 再调 form.reply。
  */
 export async function replyQuestion(
   requestId: string,
   answers: QuestionAnswer[],
   directory?: string,
   serverId?: string,
+  sessionID?: string,
+  fields: Array<{ key: string; type: string }> = [],
 ): Promise<boolean> {
+  const resolvedServer = serverId ?? serverStore.getActiveServerId()
+  // 只有「确属表单」的请求（questions 上带 fieldKey → fields 非空）才走 v2 form.reply。
+  // v2 原生 question.asked 没有 fieldKey，映射后 fields 为空——若仍走 form.reply 会提交
+  // 一个空 answer；这类请求退回 SDK 路径处理。
+  if (serverStore.getApiVersion(resolvedServer) === 'v2' && fields.length > 0) {
+    if (!sessionID) return false
+    // SSE 事件给请求的 sessionID 是复合 key（serverId::ses_x），form.reply 要原始 id
+    await nativeReplyForm(resolvedServer, {
+      sessionID: splitSessionKey(sessionID).sessionId,
+      formID: requestId,
+      answer: answersToFormAnswer(answers, fields),
+    })
+    invalidatePending('question', directory, resolvedServer)
+    return true
+  }
   const sdk = getSDKClient(serverId)
   unwrap(
     await sdk.question.reply({
@@ -156,10 +189,47 @@ export async function replyQuestion(
   return true
 }
 
+/** 把 InlineQuestion 的逐题 answers（string[][]）映射回 form 的 { fieldKey: value }。 */
+export function answersToFormAnswer(
+  answers: QuestionAnswer[],
+  fields: Array<{ key: string; type: string }>,
+): Record<string, string | number | boolean | string[]> {
+  const out: Record<string, string | number | boolean | string[]> = {}
+  fields.forEach((field, idx) => {
+    const values = answers[idx] ?? []
+    switch (field.type) {
+      case 'boolean':
+        out[field.key] = values[0] === 'true'
+        break
+      case 'number':
+      case 'integer':
+        out[field.key] = values[0] !== undefined ? Number(values[0]) : ''
+        break
+      default:
+        out[field.key] = field.type === 'multiselect' ? values : values[0] ?? ''
+    }
+  })
+  return out
+}
+
 /**
  * 拒绝问题请求
  */
-export async function rejectQuestion(requestId: string, directory?: string, serverId?: string): Promise<boolean> {
+export async function rejectQuestion(
+  requestId: string,
+  directory?: string,
+  serverId?: string,
+  sessionID?: string,
+  fields: Array<{ key: string; type: string }> = [],
+): Promise<boolean> {
+  const resolvedServer = serverId ?? serverStore.getActiveServerId()
+  // 同 replyQuestion：只有表单请求（fields 非空）才 form.cancel；原生 question 退回 SDK。
+  if (serverStore.getApiVersion(resolvedServer) === 'v2' && fields.length > 0) {
+    if (!sessionID) return false
+    await nativeCancelForm(resolvedServer, { sessionID: splitSessionKey(sessionID).sessionId, formID: requestId })
+    invalidatePending('question', directory, resolvedServer)
+    return true
+  }
   const sdk = getSDKClient(serverId)
   unwrap(
     await sdk.question.reject({

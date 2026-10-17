@@ -111,6 +111,7 @@ export type {
   SessionIdlePayload,
   SessionErrorPayload,
   SessionStatusPayload,
+  SessionCompactedPayload,
   SessionDiffPayload,
   PartDeltaPayload,
   PartRemovedPayload,

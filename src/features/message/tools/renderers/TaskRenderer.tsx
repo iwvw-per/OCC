@@ -17,6 +17,7 @@ import { formatToolName } from '../../../../utils/formatUtils'
 import type { ToolRendererProps } from '../types'
 import type { Message, TextPart, ToolPart } from '../../../../types/message'
 import { isVisibleTextContent } from '../../../../types/message'
+import { getSubagentSessionId } from '../../subagentUtils'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -64,7 +65,8 @@ export const TaskBody = memo(function TaskBody({
   const prompt = (input?.prompt as string) || ''
 
   const metadata = state.metadata as Record<string, unknown> | undefined
-  const targetSessionId = metadata?.sessionId as string | undefined
+  // v2 的子会话 id 可能在输出里（<subagent sessionID="...">），统一从 helper 取
+  const targetSessionId = getSubagentSessionId(part) ?? (metadata?.sessionId as string | undefined)
 
   const isCompleted = state.status === 'completed'
   const isError = state.status === 'error'
@@ -264,8 +266,10 @@ export const TaskAgentBadge = memo(function TaskAgentBadge({
 }) {
   const { t } = useTranslation('message')
   const openSession = useOpenTaskSession(sessionId)
+  // 子代理类型名（general/explore/...）走 i18n 映射；未知 agent 回退原名
+  const label = agentType ? t(`agent.${agentType}`, { defaultValue: agentType }) : agentType
 
-  if (!sessionId) return <Chip tone={tone}>{agentType}</Chip>
+  if (!sessionId) return <Chip tone={tone}>{label}</Chip>
 
   return (
     <button
@@ -279,7 +283,7 @@ export const TaskAgentBadge = memo(function TaskAgentBadge({
       className="inline-flex items-center cursor-pointer rounded-sm transition-opacity hover:opacity-80"
       title={t('task.openSession')}
     >
-      <Chip tone={tone}>{agentType}</Chip>
+      <Chip tone={tone}>{label}</Chip>
     </button>
   )
 })

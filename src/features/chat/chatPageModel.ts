@@ -1015,6 +1015,19 @@ export function buildProcessTimeline(
   return items
 }
 
+/**
+ * 是否在消息流末尾展示「历史已压缩」分隔条。
+ *
+ * 条件：存在一次已完成的压缩，且它发生在当前最后一条消息之后（或同时）。
+ * 用户随后发新消息时，压缩点已不在末尾，分隔条自然消失——否则它会一直悬在
+ * 最新对话下方，让人误以为新内容也被压缩了。
+ */
+export function shouldShowCompactionDivider(messages: Message[], compactedAt: number | undefined): boolean {
+  if (compactedAt == null || messages.length === 0) return false
+  const lastCreated = messages[messages.length - 1]?.info.time.created ?? 0
+  return compactedAt >= lastCreated
+}
+
 /** 一个回合里所有助手消息的改动文件（按消息 id 去重后聚合） */
 export function collectTurnChangedFiles(messages: Message[]): ChangedFile[] {
   const byId = new Map<string, Message>()

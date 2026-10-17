@@ -327,4 +327,38 @@ describe('subscribeToEvents', () => {
     secondFetch.reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
     unsubscribe()
   })
+
+  it('aborts the previous stream when the heartbeat-timeout path reconnects (no double-append)', async () => {
+    vi.useFakeTimers()
+    try {
+      // 一条永不结束的流：reader 停在 read() 上，模拟持续连接但暂无事件。
+      const firstSignals: AbortSignal[] = []
+      const openStream = () =>
+        new ReadableStream<Uint8Array>({ start() { /* 不 close，保持挂起 */ } })
+      const fetchMock = vi.fn((_url: string, init?: { signal?: AbortSignal }) => {
+        if (init?.signal) firstSignals.push(init.signal)
+        return Promise.resolve({ ok: true, body: openStream() })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { subscribeToEvents } = await import('./events')
+      const unsubscribe = subscribeToEvents({})
+
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      const firstSignal = firstSignals[0]
+      expect(firstSignal?.aborted).toBe(false)
+
+      // 心跳超时（HEARTBEAT_TIMEOUT=60s）→ scheduleReconnect（首次退避 1s）→ connectServer。
+      // 这条路径不经过 reconnectServerSSE，正是此前漏掉 generation++/abort、留下并发双流的路径。
+      await vi.advanceTimersByTimeAsync(60_000)
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      // 旧流的 controller 必须被 abort（否则两条流并存，同一条 delta 被追加两次 → 正文成倍重复）
+      expect(firstSignal.aborted).toBe(true)
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2)
+      unsubscribe()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

@@ -6,6 +6,7 @@ export function adaptSession(raw: unknown): ApiSession {
   const s = rec(raw)
   const location = rec(s.location)
   const time = rec(s.time)
+  const meta = rec(s.metadata)
   const tokens = rec(s.tokens)
   const cache = rec(tokens.cache)
   return {
@@ -36,7 +37,8 @@ export function adaptSession(raw: unknown): ApiSession {
       created: num(time.created) ?? 0,
       updated: num(time.updated) ?? 0,
       compacting: num(time.compacting),
-      archived: num(time.archived),
+      // 兼容两种归档落点：标准 time.archived，或旧实现的 metadata.__archived
+      archived: num(time.archived) ?? num(meta.__archived),
     },
     permission: s.permissions as ApiSession['permission'],
     revert: s.revert as ApiSession['revert'],

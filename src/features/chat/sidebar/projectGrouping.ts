@@ -6,19 +6,36 @@ export function isWorkspaceRootDirectory(directory: string, meta: GitWorkspaceMe
   return meta.workspaces.some(workspace => isSameDirectory(workspace, directory))
 }
 
-export function getProjectGroupIdentity(directory: string, meta: GitWorkspaceMeta | undefined) {
+/**
+ * 解析一个目录所属的项目分组身份。
+ *
+ * 当 git 根目录已不存在（仓库整体搬家：project.current 仍返回旧 worktree，
+ * 旧路径磁盘上已没有）时，**不再**聚合到旧根，直接以目录自身为身份。
+ * 否则新目录会被挂进旧项目行，行上的 worktree 仍是旧路径 —— 表现为
+ * 「在新位置导入项目，新建对话/会话列表却回到旧目录」。
+ */
+export function getProjectGroupIdentity(
+  directory: string,
+  meta: GitWorkspaceMeta | undefined,
+) {
   const normalizedDirectory = normalizeToForwardSlash(directory)
 
-  if (isWorkspaceRootDirectory(normalizedDirectory, meta) && meta) {
+  if (isWorkspaceRootDirectory(normalizedDirectory, meta) && meta && meta.rootExists !== false) {
     return {
       projectId: meta.rootDirectory,
       workspaceDirectories: meta.workspaces,
     }
   }
 
+  // 根已失效：只保留本目录自己，sandboxes 里其它仍存在的目录各自成组，
+  // 不要把失效旧根继续塞进工作区列表。
+  const liveWorkspaces = meta?.isGit && meta.rootExists === false
+    ? meta.workspaces.filter(workspace => normalizeToForwardSlash(workspace) !== meta.rootDirectory)
+    : undefined
+
   return {
     projectId: normalizedDirectory,
-    workspaceDirectories: undefined,
+    workspaceDirectories: liveWorkspaces && liveWorkspaces.length > 1 ? liveWorkspaces : undefined,
   }
 }
 

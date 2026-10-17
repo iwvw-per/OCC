@@ -22,6 +22,30 @@ describe('getProjectGroupIdentity', () => {
       workspaceDirectories: ['/workspace/project-root', '/workspace/project-worktree'],
     })
   })
+
+  it('does not group into a git root that no longer exists on disk', () => {
+    // 仓库整体迁移后，服务端仍返回旧 worktree（磁盘上已不存在），
+    // 新目录只出现在 sandboxes 里。此时必须以新目录自身为身份，
+    // 否则新项目会被挂进旧项目行、新建对话沿用旧目录。
+    const movedMeta: GitWorkspaceMeta = {
+      isGit: true,
+      rootDirectory: '/opt/komidash',
+      workspaces: ['/opt/komidash', '/opt/code/komidash'],
+      rootExists: false,
+    }
+    expect(getProjectGroupIdentity('/opt/code/komidash', movedMeta)).toEqual({
+      projectId: '/opt/code/komidash',
+      workspaceDirectories: undefined,
+    })
+  })
+
+  it('keeps grouping when the git root still exists', () => {
+    const liveMeta: GitWorkspaceMeta = { ...gitMeta, rootExists: true }
+    expect(getProjectGroupIdentity('/workspace/project-worktree', liveMeta)).toEqual({
+      projectId: '/workspace/project-root',
+      workspaceDirectories: ['/workspace/project-root', '/workspace/project-worktree'],
+    })
+  })
 })
 
 describe('sortProjects', () => {

@@ -30,15 +30,6 @@ import { INITIAL_TURN_LIMIT, HISTORY_TURN_BATCH_SIZE, RECENT_FULL_TURNS } from '
 import i18n from '../i18n'
 import type { MessageError } from '../types/message'
 
-/**
- * 补内存缺口时额外多拉的余量。
- *
- * 缺口补拉按「现有 + 缺失 + 余量」请求，余量留一点是为了顺带探测是否还有更早
- * 的内容（服务端以轮次边界对齐，条数不是精确对应）。不额外多拉的话，补完缺口
- * 后无法判断「是否真的到最早一条」，会把 hasMoreHistory 误判成 false。
- */
-const GAP_RECOVERY_HEADROOM = 50
-
 function toLoadMessageError(error: unknown): MessageError {
   const message = error instanceof Error ? error.message : String(error || i18n.t('chat:errors.loadSession'))
   return {
@@ -249,7 +240,11 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
             messageStore.updateSessionMetadata(sid, {
               ...(pageResult.ok
-                ? { hasMoreHistory: pageResult.page.hasMore, historyCursor: pageResult.page.nextCursor }
+                ? {
+                    hasMoreHistory: pageResult.page.hasMore,
+                    historyCursor: pageResult.page.nextCursor,
+                    compactedAt: pageResult.page.compactedAt,
+                  }
                 : {}),
               directory: sessionInfo?.directory ?? dir ?? '',
               title: sessionInfo?.title,
@@ -302,6 +297,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
                     messages: r.messages,
                     nextCursor: undefined as string | undefined,
                     hasMore: r.hasMore,
+                    compactedAt: r.compactedAt,
                   }))
                 : getSessionTurnPage(sid, INITIAL_TURN_LIMIT, undefined, dir, serverId, {
                     signal: abortController.signal,
@@ -334,6 +330,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
             title: sessionInfo?.title,
             loadState: 'loaded',
             shareUrl: sessionInfo?.share?.url,
+            compactedAt: page.compactedAt,
           })
           onLoadComplete?.()
           return
@@ -348,6 +345,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           ...paging,
           revertState: sessionInfo?.revert ?? null,
           shareUrl: sessionInfo?.share?.url,
+          compactedAt: page.compactedAt,
         })
         // 首屏只覆盖最近 INITIAL_TURN_LIMIT 轮，无需压缩；保留调用以应对
         // SSE 已把更早轮次推入内存的情况。
@@ -425,13 +423,20 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         let page: Awaited<ReturnType<typeof getSessionTurnPage>>
         if (before) {
           page = await getSessionTurnPage(sid, targetTurns, before, dir, serverId)
+        } else if (trimmed > 0) {
+          // 有内存缺口（窗口超字节上限被从最旧端裁掉）：必须从「内存里最旧一条」
+          // 向前翻页补回。此前用 before=undefined 重拉的是**最新**一页，与内存窗口
+          // 高度重叠 → 去重后 0 条 → trimmedCount 永不归零 → hasTrimmedHistory 恒真
+          // → ChatArea 在顶部无限自动加载（表现为「加载历史记录…」一直转）。
+          const oldest = state.messages[0]
+          const gapCursor = oldest
+            ? encodeBeforeCursor({ info: oldest.info, parts: [] } as ApiMessageWithParts, serverId)
+            : undefined
+          page = await getSessionTurnPage(sid, targetTurns, gapCursor, dir, serverId)
         } else {
-          // 缺口补拉要一次覆盖「内存现有 + 缺失」的全部条数，否则补不干净会残留
-          // 缺口（下次还得再补一轮）。多留一档余量以便顺带探测更早内容。
-          const wanted =
-            trimmed > 0
-              ? state.messages.length + trimmed + GAP_RECOVERY_HEADROOM
-              : Math.max(targetTurns, Math.ceil(state.messages.length / 2))
+          // 无游标也无缺口：服务端说还有更早（旧版 serve 不给游标），从最新端
+          // 按增大条数重拉，避免 limit 递增的 O(N²) 重拉。
+          const wanted = Math.max(targetTurns, Math.ceil(state.messages.length / 2))
           page = await getSessionTurnPage(sid, wanted, undefined, dir, serverId)
         }
 
@@ -449,16 +454,22 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
       // 补拉结果必须与「本次是否真的补到了更早的连续内容」一致。
       //
-      // 无游标的重拉路径拉回的是**最新**一页：它与内存窗口高度重叠，去重后
-      // 可能一条不剩。此时若照抄 page.hasMore，就会把「其实没有更早内容」写成
-      // 「还有历史」，ChatArea 随即再次触发上滑加载 —— 空拉循环。
-      // 因此：无游标时只在「确实补进了更早内容」且服务端仍报 hasMore 时，
-      // 才认定还有历史。
-      const hasMoreAfter = before
-        ? page.hasMore
-        : prependCandidates.length > 0 && page.hasMore
+      // 重拉路径（无游标）或 v2 边界返回的重叠页（有游标但内容全是已加载的），去重后
+      // 可能一条不剩。此时若照抄 page.hasMore，就会把「其实没有更早内容」写成「还有
+      // 历史」，ChatArea 随即在顶部反复自动加载 —— 空拉循环。因此只有「确实补进了更早
+      // 内容」且服务端仍报 hasMore 时才认定还有历史。
+      //
+      // 游标：补到内容就前进到新游标；本来没游标（裁剪缺口补拉）也保留新游标，让下一次
+      // 能继续向更早翻；只有在「带着游标却没补到任何内容」时清空游标——该游标已耗尽，
+      // 留着只会让下一轮拿它再拉一次重叠页，循环不止。
+      const madeProgress = prependCandidates.length > 0
+      const hasMoreAfter = madeProgress && page.hasMore
+      const nextHistoryCursor = madeProgress || !before ? page.nextCursor : undefined
 
-        messageStore.prependMessages(sid, prependCandidates, hasMoreAfter, page.nextCursor)
+      messageStore.prependMessages(sid, prependCandidates, hasMoreAfter, nextHistoryCursor)
+        // 缺口补拉却没拿到任何更早内容 → 最旧一条其实就是会话第一条，缺口是误记。
+        // 清掉它，否则 hasTrimmedHistory 恒真会让 ChatArea 在顶部反复空拉。
+        if (trimmed > 0 && !madeProgress) messageStore.clearTrimmedGap(sid)
         // 前插后，超出最近 RECENT_FULL_TURNS 轮的旧轮次压缩，控制内存与渲染成本
         messageStore.compressHistoricalTurns(sid, RECENT_FULL_TURNS)
       } catch (error) {

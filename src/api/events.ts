@@ -14,6 +14,7 @@ import { parseAndCoalesce } from './sseEvents'
 import { normalizeTodoItems } from './todo'
 import { getV2Client } from './sdkV2'
 import { v2EventToGlobalEvent } from './v2/events'
+import { toolResultMetadata } from './v2/adapt'
 import { isTauri } from '../utils/tauri'
 import { createSseEventPump } from '../lib/sseWorkerClient'
 import { serverStore } from '../store/serverStore'
@@ -24,6 +25,7 @@ import type {
   NextToolSettledPayload,
   ServerConnectedPayload,
   SessionErrorPayload,
+  SessionCompactedPayload,
   TodoUpdatedPayload,
 } from './types'
 import { EventTypes } from '../types/api/event'
@@ -238,13 +240,18 @@ function connectServer(serverId: string) {
           `[SSE] connectServer: ${serverId} state=connected but stale (${Math.round(timeSinceLastEvent / 1000)}s), forcing disconnect`,
         )
       }
-      conn.generation++
-      teardownConnectionTransport(conn)
       updateConnectionState(serverId, { state: 'disconnected' })
     } else {
       return // 连接确实还活着
     }
   }
+
+  // 建立新传输前，务必彻底终止上一条流：递增代次让旧的 for-await / reader 循环
+  // 在下一次迭代退出，并 abort 旧 controller 触发其 AbortError 提前结束。
+  // 若漏掉这一步，心跳超时经 scheduleReconnect 重连时（该路径不改代次）会留下
+  // 两条并发流，同一条 text.delta 被两条流各追加一次 → 正文成倍重复。
+  conn.generation++
+  teardownConnectionTransport(conn)
 
   conn.isConnecting = true
 
@@ -817,6 +824,9 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     case EventTypes.SESSION_IDLE:
       callbacks.onSessionIdle?.(payload.properties)
       break
+    case EventTypes.SESSION_COMPACTED:
+      callbacks.onSessionCompacted?.(payload.properties as unknown as SessionCompactedPayload)
+      break
     case EventTypes.SESSION_STATUS:
       callbacks.onSessionStatus?.(payload.properties)
       break
@@ -896,7 +906,7 @@ function normalizeNextToolSettled(
           ? properties.error.name
           : undefined
       : undefined
-    return { sessionID, callID, status, error }
+    return { sessionID, callID, status, error, metadata: settledMetadata(properties) }
   }
 
   // shell.ended 的 output 是字符串；tool.success 的 content 是文本块数组。
@@ -910,8 +920,15 @@ function normalizeNextToolSettled(
     if (texts.length > 0) output = texts.join('\n')
   }
 
-  return { sessionID, callID, status, output }
+  return { sessionID, callID, status, output, metadata: settledMetadata(properties) }
 }
+
+/**
+ * 从工具结束事件里取工具结果 metadata。
+ * 与 v2 事件适配层共用同一个 helper（候选字段 metadata / structured / result），
+ * 供前端把 task 行识别成「子代理」而非普通工具。
+ */
+const settledMetadata = toolResultMetadata
 
 function normalizeServerConnected(properties: unknown): ServerConnectedPayload {
   if (!isRecord(properties)) return {}

@@ -5,7 +5,10 @@ import { TaskHeader, TaskBody } from './TaskRenderer'
 import type { ToolPart } from '../../../../types/message'
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: { defaultValue?: string }) =>
+      key.startsWith('agent.') ? (options?.defaultValue ?? key) : key,
+  }),
 }))
 
 vi.mock('../../../../store', () => ({

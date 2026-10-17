@@ -292,6 +292,7 @@ export function useSessionState(sessionId: string | null): SessionStateSnapshot 
       hasTrimmedHistory: (state.trimmedCount ?? 0) > 0,
       directory: state.directory,
       title: state.title ?? null,
+      compactedAt: state.compactedAt,
     }
 
     cacheSessionSnapshot(sessionId, { version, snapshot })

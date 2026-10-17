@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProjectDialog } from './ProjectDialog'
+import { inferRepoName, isLikelyGitUrl } from './gitCloneUrl'
 import { getPath, listDirectory } from '../../api'
 
 const { isTauriMock, isTauriMobileMock } = vi.hoisted(() => ({
@@ -77,5 +78,25 @@ describe('ProjectDialog', () => {
     render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} serverId="local" />)
     expect(await screen.findByText('Add current')).toBeInTheDocument()
     expect(screen.queryByText('System folder')).toBeNull()
+  })
+})
+
+describe('git clone helpers', () => {
+  it('infers the repo name from common URL shapes', () => {
+    expect(inferRepoName('https://github.com/user/repo.git')).toBe('repo')
+    expect(inferRepoName('https://github.com/user/repo/')).toBe('repo')
+    expect(inferRepoName('git@github.com:org/my-repo.git')).toBe('my-repo')
+    expect(inferRepoName('ssh://git@host:22/team/proj.git')).toBe('proj')
+    expect(inferRepoName('')).toBe('')
+  })
+
+  it('accepts http(s), ssh, git and scp-style URLs only', () => {
+    expect(isLikelyGitUrl('https://github.com/u/r.git')).toBe(true)
+    expect(isLikelyGitUrl('http://host/r')).toBe(true)
+    expect(isLikelyGitUrl('ssh://git@host/r.git')).toBe(true)
+    expect(isLikelyGitUrl('git://host/r.git')).toBe(true)
+    expect(isLikelyGitUrl('git@github.com:org/r.git')).toBe(true)
+    expect(isLikelyGitUrl('not a url')).toBe(false)
+    expect(isLikelyGitUrl('')).toBe(false)
   })
 })

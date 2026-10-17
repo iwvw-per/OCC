@@ -13,8 +13,10 @@
 import type { GlobalEvent } from '../types'
 import type { ApiSession } from '../../types'
 import { EventTypes } from '../../types/api/event'
-import { rec, str, num } from './adapt'
+import { rec, str, num, toolResultMetadata } from './adapt'
 import { adaptSession } from './session'
+import { adaptFormToQuestionRequest } from './form'
+import { adaptPermission } from './entities'
 
 function globalEvent(directory: string, type: string, properties: Record<string, unknown>): GlobalEvent {
   return { directory, payload: { type, properties } } as unknown as GlobalEvent
@@ -103,6 +105,17 @@ function toolContentToText(content: unknown): string | undefined {
     })
     .filter((t): t is string => typeof t === 'string')
   return texts.length > 0 ? texts.join('\n') : undefined
+}
+
+/**
+ * 把 v2 提问/表单事件归一成 v1 QuestionRequest 形状。
+ * - question.* 自带 questions[]，直接透传；
+ * - OMO form.created 是 { id, sessionID, title, fields }，把 fields 转成 questions[]
+ *   （沿用 InlineQuestion 的 Q&A 卡片），避免 request.questions 为 undefined 而崩溃。
+ */
+function normalizeQuestionRequest(request: Record<string, unknown>): Record<string, unknown> {
+  if (Array.isArray(request.questions)) return request
+  return adaptFormToQuestionRequest(request)
 }
 
 /**
@@ -251,7 +264,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
           messageID,
           type: 'reasoning',
           text: '',
-          time: { start: num(e.created) ?? 0 },
+          time: { start: num(e.created) ?? Date.now() },
         },
       })
     }
@@ -342,7 +355,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
           type: 'tool',
           callID,
           tool: str(data.name) ?? '',
-          state: { status: 'pending', input: {}, time: { start: num(e.created) ?? 0 } },
+          state: { status: 'pending', input: {}, time: { start: num(e.created) ?? Date.now() } },
         },
       })
     }
@@ -361,7 +374,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
           type: 'tool',
           callID,
           tool: str(data.name) ?? '',
-          state: { status: 'running', input, time: { start: num(e.created) ?? 0 } },
+          state: { status: 'running', input, time: { start: num(e.created) ?? Date.now() } },
         },
       })
     }
@@ -372,28 +385,51 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         callID: str(data.callID) ?? str(data.id) ?? '',
         // v2 工具结果正文是 content[]（文本块数组），不是 output 字符串。
         output: toolContentToText(data.content),
+        // task 工具的子会话 id 在结果 metadata 里（metadata.sessionId），透传供子代理识别。
+        metadata: toolResultMetadata(data),
       })
     case 'session.tool.failed':
       return globalEvent(directory, EventTypes.SESSION_NEXT_TOOL_FAILED, {
         sessionID,
         callID: str(data.callID) ?? str(data.id) ?? '',
         error: errorMessage(rec(data.error)) ?? str(data.error),
+        metadata: toolResultMetadata(data),
       })
 
-    case 'permission.asked':
-      return globalEvent(directory, EventTypes.PERMISSION_ASKED, { request: data.request ?? data })
+    case 'permission.asked': {
+      // v2 的 properties 本身扁平（id/sessionID/action/resources/source），
+      // 用 adaptPermission 归成 v1 形状（action→permission、resources→patterns、
+      // source→tool.callID），与轮询路径一致，内嵌权限才能按 callID 匹配对应工具。
+      const request = rec(data.request ?? data)
+      return globalEvent(directory, EventTypes.PERMISSION_ASKED, adaptPermission(request))
+    }
     case 'permission.replied':
       return globalEvent(directory, EventTypes.PERMISSION_REPLIED, {
         sessionID,
         requestID: str(data.requestID) ?? str(data.id) ?? '',
       })
 
+    // v2 标准事件名是 question.*（properties 扁平，含 id/sessionID/questions）；
+    // 另有 question.v2.* 变体（questions 结构与 v1 一致）；OMO 另有一套 form.*。
+    // 三者都取本体（兼容包在 form 里的变体）。
+    case 'question.asked':
+    case 'question.v2.asked':
     case 'form.created':
-      return globalEvent(directory, EventTypes.QUESTION_ASKED, { request: data.form ?? data })
+      return globalEvent(directory, EventTypes.QUESTION_ASKED, normalizeQuestionRequest(rec(data.form ?? data)))
+    case 'question.replied':
+    case 'question.v2.replied':
     case 'form.replied':
-      return globalEvent(directory, EventTypes.QUESTION_REPLIED, { requestID: str(data.id) ?? '', sessionID })
+      return globalEvent(directory, EventTypes.QUESTION_REPLIED, {
+        sessionID,
+        requestID: str(data.requestID) ?? str(data.id) ?? '',
+      })
+    case 'question.rejected':
+    case 'question.v2.rejected':
     case 'form.cancelled':
-      return globalEvent(directory, EventTypes.QUESTION_REJECTED, { requestID: str(data.id) ?? '', sessionID })
+      return globalEvent(directory, EventTypes.QUESTION_REJECTED, {
+        sessionID,
+        requestID: str(data.requestID) ?? str(data.id) ?? '',
+      })
 
     case 'pty.created':
       return globalEvent(directory, EventTypes.PTY_CREATED, { info: data.pty ?? data })
@@ -422,8 +458,27 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       return globalEvent(directory, EventTypes.FILE_EDITED, { ...data })
 
     case 'session.compaction.started':
+      return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
+        sessionID,
+        status: 'started',
+        reason: str(data.reason),
+      })
+    // v2 压缩成功：携带压缩摘要文本，落定后需要刷新消息列表才能看到压缩分隔与
+    // 精简后的历史。失败（如 "Nothing to compact yet"）同样要提示，否则用户点了
+    // /compact 后界面毫无反应，误以为功能失效。
     case 'session.compaction.ended':
-      return globalEvent(directory, EventTypes.SESSION_COMPACTED, { sessionID })
+      return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
+        sessionID,
+        status: 'completed',
+        reason: str(data.reason),
+      })
+    case 'session.compaction.failed':
+      return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
+        sessionID,
+        status: 'failed',
+        reason: str(data.reason),
+        error: str(rec(data.error).message) ?? str(data.error) ?? '',
+      })
 
     default:
       // 未映射的 v2 事件（step/text.started/ended、usage、inbox、retry 等）

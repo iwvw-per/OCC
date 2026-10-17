@@ -60,6 +60,27 @@ describe('v2 message adapter', () => {
     const page = adaptMessagePage({ data: [], cursor: { next: 'c1', previous: null } })
     expect(page.nextCursor).toBe('c1')
   })
+
+  it('exposes the latest completed compaction timestamp', () => {
+    const page = adaptMessagePage({
+      data: [
+        { id: 'c1', sessionID: 's', type: 'compaction', status: 'failed', time: { created: 100 } },
+        { id: 'c2', sessionID: 's', type: 'compaction', status: 'completed', time: { created: 200 } },
+        { id: 'c3', sessionID: 's', type: 'compaction', status: 'completed', time: { created: 150 } },
+        { id: 'u1', sessionID: 's', type: 'user', text: 'hi', time: { created: 300 } },
+      ],
+      cursor: {},
+    })
+    expect(page.compactedAt).toBe(200)
+  })
+
+  it('leaves compactedAt undefined when no compaction completed', () => {
+    const page = adaptMessagePage({
+      data: [{ id: 'c1', sessionID: 's', type: 'compaction', status: 'failed', time: { created: 100 } }],
+      cursor: {},
+    })
+    expect(page.compactedAt).toBeUndefined()
+  })
 })
 
 describe('v2 entity adapters', () => {

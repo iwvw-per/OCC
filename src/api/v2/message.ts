@@ -216,14 +216,25 @@ export function adaptMessagePage(raw: unknown): {
   messages: MessageWithParts[]
   nextCursor?: string
   prevCursor?: string
+  /** 本页内最近一次「已完成」压缩的时间戳；用于在消息流末尾展示压缩分隔条 */
+  compactedAt?: number
 } {
   const r = rec(raw)
   const cursor = rec(r.cursor)
+  const data = list(r.data)
+  let compactedAt: number | undefined
+  for (const item of data) {
+    const m = rec(item)
+    if (str(m.type) !== 'compaction' || str(m.status) !== 'completed') continue
+    const created = num(rec(m.time).created)
+    if (created != null && (compactedAt == null || created > compactedAt)) compactedAt = created
+  }
   return {
-    messages: list(r.data)
+    messages: data
       .map(adaptMessage)
       .filter((m): m is MessageWithParts => m != null),
     nextCursor: str(cursor.next) ?? undefined,
     prevCursor: str(cursor.previous) ?? undefined,
+    compactedAt,
   }
 }

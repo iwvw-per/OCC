@@ -357,7 +357,7 @@ function getSessionFamilySnapshot(sessionId: string | null): string[] {
 // React Hook
 // ============================================
 
-import { useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 
 /**
  * 获取某个 session 的子 session 列表
@@ -378,5 +378,24 @@ export function useSessionFamily(sessionId: string | null): string[] {
     onStoreChange => childSessionStore.subscribe(onStoreChange),
     () => getSessionFamilySnapshot(sessionId),
     () => getSessionFamilySnapshot(sessionId),
+  )
+}
+
+/**
+ * 订阅单个子会话的状态（'running' | 'idle' | 'error'）。
+ *
+ * 返回状态字符串而非 ChildSessionInfo 对象：info 是就地 mutate 的（Object.assign），
+ * 引用恒定，直接返回对象 useSyncExternalStore 会因引用不变而不重渲染。
+ * 状态字符串是原始值，能正确触发更新。传入的 id 需为复合 key（含 serverId）。
+ */
+export function useChildSessionStatus(sessionId: string | null): ChildSessionInfo['status'] | undefined {
+  const getSnapshot = useCallback(
+    () => (sessionId ? childSessionStore.getSessionInfo(sessionId)?.status : undefined),
+    [sessionId],
+  )
+  return useSyncExternalStore(
+    onStoreChange => childSessionStore.subscribe(onStoreChange),
+    getSnapshot,
+    getSnapshot,
   )
 }

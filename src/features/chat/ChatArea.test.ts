@@ -15,6 +15,7 @@ import {
   reconcileStableChatPages,
   reuseProcessTimelineItems,
   seedMeasuredPageHeightsFromPreviousPages,
+  shouldShowCompactionDivider,
 } from './chatPageModel'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
 import { buildVisibleMessageEntries, getVisibleMessageForkTargetId } from './chatAreaVisibility'
@@ -1399,6 +1400,23 @@ describe('computeAnchorRestoreScrollDelta', () => {
 
   it('returns a negative value when the anchor drifted upward', () => {
     expect(computeAnchorRestoreScrollDelta(180, 24)).toBe(-156)
+  })
+})
+
+describe('shouldShowCompactionDivider', () => {
+  it('shows the divider when the last compaction is newer than the last message', () => {
+    const messages = [createUserMessage('u1', 100), createAssistantMessage('a1', [], 110)]
+    expect(shouldShowCompactionDivider(messages, 120)).toBe(true)
+  })
+
+  it('hides the divider once a newer message arrives after compaction', () => {
+    const messages = [createUserMessage('u1', 100), createAssistantMessage('a1', [], 130)]
+    expect(shouldShowCompactionDivider(messages, 120)).toBe(false)
+  })
+
+  it('hides the divider when there is no compaction or no messages', () => {
+    expect(shouldShowCompactionDivider([createUserMessage('u1', 100)], undefined)).toBe(false)
+    expect(shouldShowCompactionDivider([], 120)).toBe(false)
   })
 })
 

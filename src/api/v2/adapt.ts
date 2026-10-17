@@ -27,3 +27,18 @@ export function num(value: unknown): number | undefined {
 export function list(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
+
+/**
+ * 取工具结果的 metadata。
+ *
+ * v2 的 task（子代理）工具把子会话 id 放在结果 metadata 里（`metadata.sessionId`）。
+ * 不同事件在 data.metadata / data.structured / data.result 之一携带，取第一个非空对象。
+ * 事件适配层与 SSE 归一层共用，避免两处候选列表不一致。
+ */
+export function toolResultMetadata(data: Record<string, unknown>): Record<string, unknown> | undefined {
+  for (const candidate of [data.metadata, data.structured, data.result]) {
+    const value = rec(candidate)
+    if (Object.keys(value).length > 0) return value
+  }
+  return undefined
+}

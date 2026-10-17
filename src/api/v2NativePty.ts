@@ -42,6 +42,25 @@ export async function nativeCreatePtySession(
 }
 
 /**
+ * 原生获取单个 PTY 会话（v2 pty.get）。
+ *
+ * 用于轮询命令退出状态：`status: 'exited'` + `exitCode` 是判断
+ * 「git clone 是否成功」的唯一可靠信号（PTY 的 stdout 走 WebSocket，
+ * 不适合只为拿退出码而建立终端会话）。
+ */
+export async function nativeGetPtySession(
+  serverId: string | undefined,
+  input: { ptyID: string; directory?: string },
+): Promise<Pty> {
+  const client = getV2Client(serverId)
+  const res = await client.pty.get({
+    ptyID: input.ptyID,
+    location: input.directory ? { directory: input.directory } : undefined,
+  })
+  return adaptPty(adaptEnvelope(res))
+}
+
+/**
  * 原生更新 PTY 会话（v2 pty.update）。
  */
 export async function nativeUpdatePtySession(

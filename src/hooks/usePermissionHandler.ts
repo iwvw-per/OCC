@@ -2,7 +2,7 @@
 // usePermissionHandler - Permission & Question 处理 (Enhanced)
 // ============================================
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   replyPermission,
   replyQuestion,
@@ -91,6 +91,26 @@ export function usePermissionHandler(serverId: string): UsePermissionHandlerResu
   const serverIdRef = useRef(serverId)
   serverIdRef.current = serverId
 
+  // v2 表单回复/取消需要 request 上的 sessionID 与字段（fieldKey/fieldType）。
+  // 回调保持稳定 identity，用 ref 镜像当前列表，避免 stale closure。
+  const pendingQuestionRequestsRef = useRef<ApiQuestionRequest[]>([])
+  useEffect(() => {
+    pendingQuestionRequestsRef.current = pendingQuestionRequests
+  }, [pendingQuestionRequests])
+
+  /** 从当前 pending 提问里取会话与表单字段（fieldKey 为空则说明不是 v2 表单）。 */
+  const questionTarget = useCallback((requestId: string) => {
+    const request = pendingQuestionRequestsRef.current.find(r => r.id === requestId)
+    const sessionID = request?.sessionID
+    const fields = (request?.questions ?? [])
+      .map(q => ({
+        key: (q as { fieldKey?: string }).fieldKey ?? '',
+        type: (q as { fieldType?: string }).fieldType ?? 'string',
+      }))
+      .filter(f => !!f.key)
+    return { sessionID, fields }
+  }, [])
+
   const handlePermissionReply = useCallback(
     async (requestId: string, reply: PermissionReply, directory?: string, sessionId?: string): Promise<boolean> => {
       // 防止重复回复
@@ -141,7 +161,11 @@ export function usePermissionHandler(serverId: string): UsePermissionHandlerResu
       setIsReplying(true)
 
       try {
-        await withRetry(() => replyQuestion(requestId, answers, directory, serverIdRef.current))
+        // v2 表单：取 request 的 sessionID + 字段（fieldKey/fieldType）映射回 form answer
+        const { sessionID, fields } = questionTarget(requestId)
+        await withRetry(() =>
+          replyQuestion(requestId, answers, directory, serverIdRef.current, sessionID, fields),
+        )
         setPendingQuestionRequests(prev => prev.filter(r => r.id !== requestId))
         activeSessionStore.resolvePendingRequest(requestId)
         return true
@@ -156,7 +180,7 @@ export function usePermissionHandler(serverId: string): UsePermissionHandlerResu
         setIsReplying(false)
       }
     },
-    [],
+    [questionTarget],
   )
 
   const handleQuestionReject = useCallback(async (requestId: string, directory?: string): Promise<boolean> => {
@@ -168,7 +192,8 @@ export function usePermissionHandler(serverId: string): UsePermissionHandlerResu
     setIsReplying(true)
 
     try {
-      await withRetry(() => rejectQuestion(requestId, directory, serverIdRef.current))
+      const { sessionID, fields } = questionTarget(requestId)
+      await withRetry(() => rejectQuestion(requestId, directory, serverIdRef.current, sessionID, fields))
       setPendingQuestionRequests(prev => prev.filter(r => r.id !== requestId))
       activeSessionStore.resolvePendingRequest(requestId)
       return true
@@ -180,7 +205,7 @@ export function usePermissionHandler(serverId: string): UsePermissionHandlerResu
       replyingIdsRef.current.delete(requestId)
       setIsReplying(false)
     }
-  }, [])
+  }, [questionTarget])
 
   // 主动轮询获取 pending 请求（用于 SSE 可能丢失事件的情况）
   // 一次拉取全量数据，用 sessionFamily 过滤后直接替换本地状态

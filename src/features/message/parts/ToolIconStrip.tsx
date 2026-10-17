@@ -3,6 +3,7 @@ import { getToolIcon, getToolColorClass } from '../tools'
 import { TaskDoneIcon } from '../../../components/Icons'
 import { cn } from '../../../utils/cn'
 import type { ToolPart } from '../../../types/message'
+import { isSubagentToolName } from '../subagentUtils'
 
 const MAX_VISIBLE = 6
 
@@ -30,7 +31,7 @@ export const ToolIconStrip = memo(function ToolIconStrip({ parts, className }: T
         {visible.map(part => {
           const isError = part.state.status === 'error'
           const isActive = part.state.status === 'running' || part.state.status === 'pending'
-          const isTask = part.tool.toLowerCase() === 'task'
+          const isTask = isSubagentToolName(part.tool)
           // 子代理完成：折叠条里也用绿色对勾，与展开后的行图标保持一致
           const isTaskDone = isTask && part.state.status === 'completed'
           // 已完成的中性态按工具类别着色（多彩）；运行中/失败用语义色

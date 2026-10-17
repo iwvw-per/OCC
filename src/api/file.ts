@@ -40,6 +40,24 @@ async function fetchDirectory(path: string, directory?: string, serverId?: strin
 }
 
 /**
+ * 探测某绝对目录在服务器上是否存在（只列一层，失败即视为不存在）。
+ *
+ * 用于识别「项目根目录已迁移/删除」：opencode 按 git 仓库身份记项目，
+ * 仓库整体搬家后 project.current 仍返回旧 worktree，靠它判断会一直把
+ * 新目录挂到旧项目下。该请求失败（目录不存在时服务端返回 500）即判定不存在。
+ */
+export async function directoryExists(path: string, serverId?: string): Promise<boolean> {
+  if (!path) return false
+  try {
+    // 把待测目录当作 location、列其根（path='.'）：目录不存在时服务端返回 500。
+    await listDirectory('.', path, serverId)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * 搜索文件或目录
  */
 export async function searchFiles(

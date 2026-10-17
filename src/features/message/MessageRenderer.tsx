@@ -38,6 +38,7 @@ import {
   MessageErrorView,
 } from './parts'
 import { ToolIconStrip } from './parts/ToolIconStrip'
+import { isSubagentToolName, getSubagentSessionId } from './subagentUtils'
 import { DiffChips } from './parts/DiffChips'
 import { collectChangedFiles, sumChangedFiles } from './parts/changedFiles'
 import type { ChangedFile } from './parts/changedFiles'
@@ -1353,7 +1354,7 @@ function getToolSummaryCategory(toolName: string): ToolSummaryCategory {
   const lower = toolName.toLowerCase()
 
   if (lower.includes('todo')) return 'todo'
-  if (lower === 'task') return 'task'
+  if (isSubagentToolName(lower)) return 'task'
   if (lower.includes('question') || lower.includes('ask')) return 'question'
   if (lower.includes('skill')) return 'skill'
   if (
@@ -1393,7 +1394,5 @@ function isToolPartActive(part: ToolPart): boolean {
 }
 
 function getTaskChildSessionId(part: ToolPart): string | undefined {
-  if (part.tool.toLowerCase() !== 'task') return undefined
-  const metadata = part.state.metadata as Record<string, unknown> | undefined
-  return metadata?.sessionId as string | undefined
+  return getSubagentSessionId(part)
 }
