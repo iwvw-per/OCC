@@ -54,6 +54,7 @@ import {
 import { useTheme } from '../../hooks/useTheme'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
+import { estimateTimelineItemSize, processReasoningCount, processStepCount, sessionCacheKey } from './chatAreaTimeline'
 import { chatContentMaxWidthStyle, getContentPaddingClass } from './contentWidth'
 import { getChatWidthDragging, subscribeChatWidthDrag } from './chatWidthDrag'
 import { getChatMorphing, subscribeChatMorphing } from './chatMorph'
@@ -61,9 +62,7 @@ import { useAutoScroll } from './virtual/useAutoScroll'
 import { useEmptyWorkingShellGate } from './virtual/useEmptyWorkingShellGate'
 
 const NOOP = () => {}
-const ROW_ESTIMATE = 60
 /** 过程壳 header 行高（Working / Worked 一行） */
-const PROCESS_SHELL_HEADER = 36
 /** 用户入场生长结束后，空 Working 壳再等多久（有 assistant 则立刻挂，不等） */
 const EMPTY_WORKING_SHELL_EXTRA_DELAY_MS = 500
 const DEFAULT_BOTTOM_SPACER = 256
@@ -75,54 +74,6 @@ const bottomSpacerHeight = (bottomPadding: number) => (bottomPadding > 0 ? botto
 
 /** 无改动时的稳定空数组（避免每次渲染新建引用） */
 const EMPTY_FILES: ChangedFile[] = []
-
-/** 过程壳 header 统计：工具调用数 / 思考段数（折叠时展示，避免展开才知道规模） */
-type ProcessShellChild = { message: Message; processContentScope: 'process' | 'inline' }
-
-function processStepCount(children: ProcessShellChild[]): number {
-  let count = 0
-  for (const child of children) {
-    // 压缩态 reasoning/工具输出已清空，用压缩前记录的统计补齐
-    if (child.message.isCompressed && child.message.compressedStats) {
-      count += child.message.compressedStats.stepCount
-      continue
-    }
-    for (const part of child.message.content) {
-      if (part.type === 'tool') count++
-    }
-  }
-  return count
-}
-
-function processReasoningCount(children: ProcessShellChild[]): number {
-  let count = 0
-  for (const child of children) {
-    if (child.message.isCompressed && child.message.compressedStats) {
-      count += child.message.compressedStats.reasoningCount
-      continue
-    }
-    for (const part of child.message.content) {
-      if (part.type === 'reasoning' && part.text?.trim()) count++
-    }
-  }
-  return count
-}
-
-function estimateTimelineItemSize(item: ProcessTimelineItem | undefined): number {
-  if (!item) return ROW_ESTIMATE
-  if (item.kind === 'message') return ROW_ESTIMATE
-  // 进行中默认展开：header + 壳内消息（空回合至少占 header）
-  if (item.isActive) {
-    const body = Math.max(item.children.length, 1) * ROW_ESTIMATE
-    return PROCESS_SHELL_HEADER + body
-  }
-  // 结束后默认折叠：只估 header + 壳外 final，避免刷新时 120→36 的假高度再回弹
-  return PROCESS_SHELL_HEADER + (item.finalMessage ? ROW_ESTIMATE : 0)
-}
-
-function sessionCacheKey(sessionId: string, processCollapseEnabled: boolean): string {
-  return `${sessionId}:${processCollapseEnabled ? 'process' : 'flat'}`
-}
 
 // ─── 接口定义（保持不变） ───────────────────────────────────────
 

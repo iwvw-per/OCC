@@ -6,7 +6,7 @@
 
 import { getV2Client } from './sdkV2'
 import type { ApiMessageWithParts } from './types'
-import { adaptMessagePage } from './v2/message'
+import { adaptMessagePageAsync } from './v2/message'
 
 export interface V2PromptInput {
   sessionID: string
@@ -71,18 +71,18 @@ export async function nativeListMessages(
   input: { sessionID: string; limit?: number; cursor?: string; order?: 'desc'; headers?: Record<string, string> },
 ): Promise<{ messages: ApiMessageWithParts[]; nextCursor?: string; prevCursor?: string; compactedAt?: number }> {
   const client = getV2Client(serverId)
-  const page = adaptMessagePage(
-    await client.message.list(
-      {
-        sessionID: input.sessionID,
-        limit: input.limit,
-        cursor: input.cursor,
-        // 有 cursor 时不能传 order（服务端 400）；首页显式 desc，与官方客户端一致。
-        ...(input.cursor ? {} : { order: input.order ?? 'desc' }),
-      },
-      input.headers ? { headers: input.headers } : undefined,
-    ),
+  const res = await client.message.list(
+    {
+      sessionID: input.sessionID,
+      limit: input.limit,
+      cursor: input.cursor,
+      // 有 cursor 时不能传 order（服务端 400）；首页显式 desc，与官方客户端一致。
+      ...(input.cursor ? {} : { order: input.order ?? 'desc' }),
+    },
+    input.headers ? { headers: input.headers } : undefined,
   )
+  // 分块适配：一页几千条时避免长时间占用主线程
+  const page = await adaptMessagePageAsync(res)
   // desc（最新在前）→ 升序（时间正序），与前端渲染顺序一致。
   return { ...page, messages: [...page.messages].reverse() }
 }

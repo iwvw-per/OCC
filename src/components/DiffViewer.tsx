@@ -11,13 +11,22 @@
 
 import { memo, useMemo, useRef, useState, useEffect, useCallback, useSyncExternalStore, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
-import { diffLines, diffWordsWithSpace } from 'diff'
 import { useSyntaxHighlight, type HighlightTokens } from '../hooks/useSyntaxHighlight'
+import {
+  computePairedLines,
+  computeUnifiedLines,
+  diffSize,
+  LARGE_DIFF_THRESHOLD,
+  scheduleIdle,
+  type PairedLine,
+  type UnifiedLine,
+} from '../utils/diffLines'
 import { useDynamicVirtualScroll } from '../hooks/useDynamicVirtualScroll'
 import { themeStore } from '../store/themeStore'
 import type { DiffStyle } from '../store/themeStore'
 import { getLineCount, getLineNumberColumnWidth } from '../utils/lineNumberUtils'
 import { useUiState } from '../utils/uiDisclosureState'
+import { Spinner } from './ui/Spinner'
 
 // ============================================
 // 常量
@@ -55,29 +64,15 @@ export interface DiffViewerData {
   pairedLines: PairedLine[]
   unifiedLines: UnifiedLine[]
   lineNumberWidth: number
+  /** 行计算被推迟（大文件）时置真：渲染加载态而不是「无改动」 */
+  pending?: boolean
 }
 
-export type LineType = 'add' | 'delete' | 'context' | 'empty'
+export type { LineType } from '../utils/diffLines'
 
-interface DiffLine {
-  type: LineType
-  content: string
-  lineNo?: number
-  /** 词级别 diff 标记（结构化），与 syntax token 共存 */
-  wordDiffSegments?: WordDiffSegment[]
-}
-
-/** 词级别 diff 的单个片段 */
-interface WordDiffSegment {
-  text: string
-  /** 'add' | 'delete' 表示增删标记，undefined 表示无变化 */
-  diffType?: 'add' | 'delete'
-}
-
-interface PairedLine {
-  left: DiffLine
-  right: DiffLine
-}
+type LineType = import('../utils/diffLines').LineType
+type DiffLine = import('../utils/diffLines').DiffLine
+type WordDiffSegment = import('../utils/diffLines').WordDiffSegment
 
 /** 折叠的 context 行占位 */
 interface CollapsedPairedLine {
@@ -92,10 +87,6 @@ interface CollapsedPairedLine {
 
 type PairedLineOrCollapsed = PairedLine | CollapsedPairedLine
 
-interface UnifiedLine extends DiffLine {
-  oldLineNo?: number
-  newLineNo?: number
-}
 
 interface CollapsedUnifiedLine {
   collapsed: true
@@ -519,13 +510,31 @@ export function useDiffViewerData(before: string, after: string, language = 'tex
     enabled: shouldHighlight,
   })
   const skipWordDiff = isResizing
-  const pairedLines = useMemo(() => (enabled ? computePairedLines(before, after, skipWordDiff) : []), [before, after, enabled, skipWordDiff])
-  const unifiedLines = useMemo(() => (enabled ? computeUnifiedLines(before, after) : []), [before, after, enabled])
+  // 大文件的行计算（含逐行字级 diff）是纯 CPU 工作：同步跑会卡住首帧。
+  // 先渲染「未就绪」一步让骨架出来，空闲帧再补算；小文件仍同步完成，避免闪烁。
+  const large = enabled && diffSize(before, after) > LARGE_DIFF_THRESHOLD
+  // 已就绪的 diff 签名：签名变化即回到「未就绪」（渲染期派生，无需 setState）
+  const diffSignature = `${before.length}:${after.length}:${enabled}:${skipWordDiff}`
+  const [readySignature, setReadySignature] = useState<string | null>(null)
+  const idleReady = !large || readySignature === diffSignature
+  useEffect(() => {
+    if (!large) return
+    return scheduleIdle(() => setReadySignature(diffSignature))
+  }, [large, diffSignature])
+  const canCompute = enabled && idleReady
+  const pairedLines = useMemo(
+    () => (canCompute ? computePairedLines(before, after, skipWordDiff) : []),
+    [before, after, canCompute, skipWordDiff],
+  )
+  const unifiedLines = useMemo(
+    () => (canCompute ? computeUnifiedLines(before, after) : []),
+    [before, after, canCompute],
+  )
   const lineNumberWidth = useDiffLineNumberWidth(enabled ? before : '', enabled ? after : '')
 
   return useMemo(
-    () => ({ beforeTokens, afterTokens, pairedLines, unifiedLines, lineNumberWidth }),
-    [afterTokens, beforeTokens, lineNumberWidth, pairedLines, unifiedLines],
+    () => ({ beforeTokens, afterTokens, pairedLines, unifiedLines, lineNumberWidth, pending: large && !idleReady }),
+    [afterTokens, beforeTokens, idleReady, large, lineNumberWidth, pairedLines, unifiedLines],
   )
 }
 
@@ -556,6 +565,16 @@ const DiffViewerContent = memo(function DiffViewerContent({
   const resolvedWordWrap = wordWrap ?? codeWordWrap
   const lineHeight = codeLineHeight(codeFontScale)
   const resolvedData = data
+
+  // 大文件行计算尚未就绪：先给加载态，避免各视图误报「无改动」。
+  // 必须先于拆分视图缓存（useMemo/提前 return）路径判断。
+  if (resolvedData.pending) {
+    return (
+      <div className="h-full flex items-center justify-center text-text-400 text-[length:var(--fs-base)]">
+        <Spinner size="sm" tone="accent" />
+      </div>
+    )
+  }
 
   // 纯增加或纯删除时，split 模式另一边是空的没意义，自动降级为 unified
   const isAddOnly = !before.trim()
@@ -1611,7 +1630,6 @@ const WrappedUnifiedDiffView = memo(function WrappedUnifiedDiffView({
 // ============================================
 
 type HighlightToken = HighlightTokens[number][number]
-type WordDiffChange = ReturnType<typeof diffWordsWithSpace>[number]
 
 const LineContent = memo(function LineContent({ line, tokens }: { line: DiffLine; tokens: HighlightTokens | null }) {
   const lineTokens = tokens && line.lineNo ? tokens[line.lineNo - 1] : null
@@ -1714,179 +1732,4 @@ function MergedWordDiffLine({ segments, lineTokens }: { segments: WordDiffSegmen
   return <>{result}</>
 }
 
-// ============================================
-// Diff Computation
-// ============================================
 
-function computePairedLines(before: string, after: string, skipWordDiff: boolean): PairedLine[] {
-  const changes = diffLines(before, after)
-  const result: PairedLine[] = []
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
-
-  let oldIdx = 0,
-    newIdx = 0,
-    i = 0
-
-  while (i < changes.length) {
-    const change = changes[i]
-    const count = change.count || 0
-
-    if (change.removed) {
-      const next = changes[i + 1]
-      if (next?.added) {
-        const addCount = next.count || 0
-        const maxCount = Math.max(count, addCount)
-
-        for (let j = 0; j < maxCount; j++) {
-          const oldLine = j < count ? beforeLines[oldIdx + j] : undefined
-          const newLine = j < addCount ? afterLines[newIdx + j] : undefined
-
-          let leftSegments: WordDiffSegment[] | undefined
-          let rightSegments: WordDiffSegment[] | undefined
-
-          if (!skipWordDiff && oldLine !== undefined && newLine !== undefined) {
-            const wordDiff = computeWordDiff(oldLine, newLine)
-            if (!isTooFragmented(wordDiff.changes)) {
-              leftSegments = wordDiff.left
-              rightSegments = wordDiff.right
-            }
-          }
-
-          result.push({
-            left:
-              oldLine !== undefined
-                ? { type: 'delete', content: oldLine, lineNo: oldIdx + j + 1, wordDiffSegments: leftSegments }
-                : { type: 'empty', content: '' },
-            right:
-              newLine !== undefined
-                ? { type: 'add', content: newLine, lineNo: newIdx + j + 1, wordDiffSegments: rightSegments }
-                : { type: 'empty', content: '' },
-          })
-        }
-
-        oldIdx += count
-        newIdx += addCount
-        i += 2
-        continue
-      }
-
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'delete', content: beforeLines[oldIdx + j] || '', lineNo: oldIdx + j + 1 },
-          right: { type: 'empty', content: '' },
-        })
-      }
-      oldIdx += count
-    } else if (change.added) {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'empty', content: '' },
-          right: { type: 'add', content: afterLines[newIdx + j] || '', lineNo: newIdx + j + 1 },
-        })
-      }
-      newIdx += count
-    } else {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'context', content: beforeLines[oldIdx + j] || '', lineNo: oldIdx + j + 1 },
-          right: { type: 'context', content: afterLines[newIdx + j] || '', lineNo: newIdx + j + 1 },
-        })
-      }
-      oldIdx += count
-      newIdx += count
-    }
-    i++
-  }
-
-  return result
-}
-
-function computeUnifiedLines(before: string, after: string): UnifiedLine[] {
-  const changes = diffLines(before, after)
-  const result: UnifiedLine[] = []
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
-
-  let oldIdx = 0,
-    newIdx = 0
-
-  for (const change of changes) {
-    const count = change.count || 0
-
-    if (change.removed) {
-      for (let j = 0; j < count; j++) {
-        result.push({ type: 'delete', content: beforeLines[oldIdx + j] || '', oldLineNo: oldIdx + j + 1 })
-      }
-      oldIdx += count
-    } else if (change.added) {
-      for (let j = 0; j < count; j++) {
-        result.push({ type: 'add', content: afterLines[newIdx + j] || '', newLineNo: newIdx + j + 1 })
-      }
-      newIdx += count
-    } else {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          type: 'context',
-          content: afterLines[newIdx + j] || '',
-          oldLineNo: oldIdx + j + 1,
-          newLineNo: newIdx + j + 1,
-        })
-      }
-      oldIdx += count
-      newIdx += count
-    }
-  }
-
-  return result
-}
-
-function isTooFragmented(changes: WordDiffChange[]): boolean {
-  let commonLength = 0,
-    totalLength = 0
-  for (const change of changes) {
-    totalLength += change.value.length
-    if (!change.added && !change.removed) commonLength += change.value.length
-  }
-  return totalLength > 10 && commonLength / totalLength < 0.4
-}
-
-function computeWordDiff(
-  oldLine: string,
-  newLine: string,
-): { left: WordDiffSegment[]; right: WordDiffSegment[]; changes: WordDiffChange[] } {
-  const changes = diffWordsWithSpace(oldLine, newLine)
-
-  const mergedChanges: WordDiffChange[] = []
-  for (let i = 0; i < changes.length; i++) {
-    const current = changes[i]
-    const prev = mergedChanges[mergedChanges.length - 1]
-
-    if (prev && !current.added && !current.removed && /^\s*$/.test(current.value)) {
-      const next = changes[i + 1]
-      if ((prev.removed && next?.removed) || (prev.added && next?.added)) {
-        prev.value += current.value
-        continue
-      }
-    }
-
-    if (prev && ((prev.added && current.added) || (prev.removed && current.removed))) {
-      prev.value += current.value
-    } else {
-      mergedChanges.push({ ...current })
-    }
-  }
-
-  const left: WordDiffSegment[] = []
-  const right: WordDiffSegment[] = []
-  for (const change of mergedChanges) {
-    if (change.removed) left.push({ text: change.value, diffType: 'delete' })
-    else if (change.added) right.push({ text: change.value, diffType: 'add' })
-    else {
-      left.push({ text: change.value })
-      right.push({ text: change.value })
-    }
-  }
-
-  return { left, right, changes: mergedChanges }
-}

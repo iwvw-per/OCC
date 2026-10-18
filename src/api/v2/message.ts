@@ -1,5 +1,6 @@
 import type { MessageWithParts, Part, TextPart, ReasoningPart, ToolPart, FilePart, AgentPart } from '../../types'
 import { rec, str, num, list } from './adapt'
+import { mapInSlices } from '../../utils/chunkedWork'
 
 function adaptToolState(raw: unknown): ToolPart['state'] {
   const state = rec(raw)
@@ -222,6 +223,41 @@ export function adaptMessagePage(raw: unknown): {
   const r = rec(raw)
   const cursor = rec(r.cursor)
   const data = list(r.data)
+  return {
+    messages: data.map(adaptMessage).filter((m): m is MessageWithParts => m != null),
+    nextCursor: str(cursor.next) ?? undefined,
+    prevCursor: str(cursor.previous) ?? undefined,
+    compactedAt: findCompactedAt(data),
+  }
+}
+
+/**
+ * 分块版：逐条适配，每 ~6ms 让出一帧。
+ *
+ * 一页可达数千条消息，同步 `map(adaptMessage)`（含 content[] 展开、part 构造）
+ * 在低端设备上会卡住主线程数百毫秒——正好落在首屏/上滑加载这些用户能感知的时机。
+ * 结果与同步版完全一致，仅执行节奏不同。
+ */
+export async function adaptMessagePageAsync(raw: unknown): Promise<{
+  messages: MessageWithParts[]
+  nextCursor?: string
+  prevCursor?: string
+  compactedAt?: number
+}> {
+  const r = rec(raw)
+  const cursor = rec(r.cursor)
+  const data = list(r.data)
+  const messages = await mapInSlices(data, adaptMessage)
+  return {
+    messages: messages.filter((m): m is MessageWithParts => m != null),
+    nextCursor: str(cursor.next) ?? undefined,
+    prevCursor: str(cursor.previous) ?? undefined,
+    compactedAt: findCompactedAt(data),
+  }
+}
+
+/** 本页内最近一次「已完成」压缩的时间戳。 */
+function findCompactedAt(data: unknown[]): number | undefined {
   let compactedAt: number | undefined
   for (const item of data) {
     const m = rec(item)
@@ -229,12 +265,5 @@ export function adaptMessagePage(raw: unknown): {
     const created = num(rec(m.time).created)
     if (created != null && (compactedAt == null || created > compactedAt)) compactedAt = created
   }
-  return {
-    messages: data
-      .map(adaptMessage)
-      .filter((m): m is MessageWithParts => m != null),
-    nextCursor: str(cursor.next) ?? undefined,
-    prevCursor: str(cursor.previous) ?? undefined,
-    compactedAt,
-  }
+  return compactedAt
 }
