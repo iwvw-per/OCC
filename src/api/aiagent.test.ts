@@ -71,6 +71,38 @@ describe('aiagent account integration', () => {
     expect(serverStore.getActiveServerId()).toBe(created?.id)
   })
 
+  it('retries without If-None-Match when the preflight rejects the header', async () => {
+    const seen: string[] = []
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers || {})
+      const conditional = headers.get('If-None-Match')
+      seen.push(conditional ?? '(none)')
+      // 预检拒绝 If-None-Match 时，浏览器直接把 fetch 丢掉（TypeError）
+      if (conditional) throw new TypeError('Failed to fetch')
+      return new Response(JSON.stringify({ success: true, data: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { accountRequestWithMeta } = await import('./aiagent')
+    const account = { domain: 'https://panel.example.com', username: 'u', token: 't', loginAt: 0 }
+
+    const first = await accountRequestWithMeta<unknown>(account, '/api/aiagent/preferences', {
+      headers: { 'If-None-Match': 'W/"abc"' },
+    })
+    expect(first.notModified).toBe(false)
+    expect(seen).toEqual(['W/"abc"', '(none)'])
+
+    // 第二次直接不带条件头，不再触发一次失败的预检
+    seen.length = 0
+    await accountRequestWithMeta<unknown>(account, '/api/aiagent/preferences', {
+      headers: { 'If-None-Match': 'W/"abc"' },
+    })
+    expect(seen).toEqual(['(none)'])
+  })
+
   it('sends bearer token when listing instances', async () => {
     const seen: Record<string, string> = {}
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

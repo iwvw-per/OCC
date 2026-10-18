@@ -108,6 +108,30 @@ export async function accountRequest<T>(account: AiAgentAccount, path: string, i
   return (isRecord(payload) ? payload.data : payload) as T
 }
 
+/**
+ * 记录「该面板的 CORS 预检不放行 If-None-Match」的域。
+ *
+ * 面板的 `Access-Control-Allow-Headers` 是白名单：旧版本没有 `If-None-Match`，
+ * 浏览器预检直接失败，连 304 优化都带崩整个请求。首次失败后记住该域，后续
+ * 一律不带条件头，避免每轮轮询都在控制台刷一条 CORS 报错。
+ */
+const conditionalEtagBlocked = new Set<string>()
+
+function hasIfNoneMatch(init?: RequestInit): boolean {
+  const headers = init?.headers
+  if (!headers) return false
+  if (headers instanceof Headers) return headers.has('If-None-Match')
+  if (Array.isArray(headers)) return headers.some(([k]) => k.toLowerCase() === 'if-none-match')
+  return Object.keys(headers as Record<string, string>).some(k => k.toLowerCase() === 'if-none-match')
+}
+
+function withoutIfNoneMatch(init?: RequestInit): RequestInit | undefined {
+  if (!init?.headers) return init
+  const headers = new Headers(init.headers as HeadersInit)
+  headers.delete('If-None-Match')
+  return { ...init, headers }
+}
+
 /** accountRequest 的带响应头版本：供需要 ETag 条件请求的调用方使用。 */
 export async function accountRequestWithMeta<T>(
   account: AiAgentAccount,
@@ -115,14 +139,27 @@ export async function accountRequestWithMeta<T>(
   init?: RequestInit,
 ): Promise<{ data: T; notModified: boolean; etag: string | null }> {
   const requestFetch = await getUnifiedFetch()
-  const response = await requestFetch(`${account.domain}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${account.token}`,
-      ...(init?.headers || {}),
-    },
-  })
+  const send = (requestInit?: RequestInit) =>
+    requestFetch(`${account.domain}${path}`, {
+      ...requestInit,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${account.token}`,
+        ...(requestInit?.headers || {}),
+      },
+    })
+
+  const conditional = !!init && hasIfNoneMatch(init) && !conditionalEtagBlocked.has(account.domain)
+  let response: Response
+  try {
+    response = await send(conditional ? init : withoutIfNoneMatch(init))
+  } catch (err) {
+    // 预检被拒时浏览器只抛出 TypeError（看不到 OPTIONS 的响应头），
+    // 据此判定该域不支持 If-None-Match，降级重试一次。
+    if (!conditional) throw err
+    conditionalEtagBlocked.add(account.domain)
+    response = await send(withoutIfNoneMatch(init))
+  }
   // 304 没有响应体，且不是错误：调用方据此复用本地缓存。
   if (response.status === 304) {
     return { data: undefined as T, notModified: true, etag: response.headers.get('ETag') }
