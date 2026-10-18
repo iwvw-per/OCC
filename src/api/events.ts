@@ -24,6 +24,7 @@ import type {
   SessionCompactedPayload,
   TodoUpdatedPayload,
 } from './types'
+import type { PartDeltaPayload, PartRemovedPayload } from '../types/api/event'
 import { EventTypes } from '../types/api/event'
 
 // ============================================
@@ -560,11 +561,11 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
       break
     }
     case EventTypes.MESSAGE_PART_DELTA: {
-      callbacks.onPartDelta?.(payload.properties)
+      callbacks.onPartDelta?.(payload.properties as unknown as PartDeltaPayload)
       break
     }
     case EventTypes.MESSAGE_PART_REMOVED:
-      callbacks.onPartRemoved?.(payload.properties)
+      callbacks.onPartRemoved?.(payload.properties as unknown as PartRemovedPayload)
       break
     case EventTypes.SESSION_UPDATED: {
       callbacks.onSessionUpdated?.(payload.properties.info)

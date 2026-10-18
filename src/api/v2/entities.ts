@@ -1,4 +1,5 @@
-import type { PermissionRequest, Agent, Pty } from '../../types'
+import type { PermissionRequest, Agent } from '../../types'
+import type { Pty } from '../../types/domain/pty'
 import { rec, str, num } from './adapt'
 
 /** v2 PermissionRequest → v1 PermissionRequest（action/resources/save → permission/patterns/always） */

@@ -3,7 +3,7 @@
 // ============================================
 
 import { nativeListWorktrees, nativeCreateWorktree, nativeRemoveWorktree, nativeRefreshWorktrees } from './v2NativeWorktree'
-import type { Worktree, WorktreeCreateInput } from '../types/api/worktree'
+import type { Worktree, WorktreeCreateInput } from '../types/domain/worktree'
 import { serverStore } from '../store/serverStore'
 
 /**

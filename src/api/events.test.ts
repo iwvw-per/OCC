@@ -68,7 +68,7 @@ describe('subscribeToEvents (v2 stream)', () => {
       const unsubscribe = subscribeToEvents({
         onPartDelta(data) {
           unsubscribe()
-          resolve(data.delta)
+          resolve(data.delta ?? '')
         },
         onError(error) {
           unsubscribe()

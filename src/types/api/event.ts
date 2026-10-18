@@ -4,8 +4,6 @@
 // ============================================
 
 import type {
-  EventMessagePartDelta as SDKEventMessagePartDelta,
-  EventMessagePartRemoved as SDKEventMessagePartRemoved,
   EventPermissionReplied as SDKEventPermissionReplied,
   EventQuestionRejected as SDKEventQuestionRejected,
   EventQuestionReplied as SDKEventQuestionReplied,
@@ -51,9 +49,20 @@ export interface SessionCompactedPayload {
 
 export type SessionDiffPayload = SDKEventSessionDiff['properties']
 
-export type PartRemovedPayload = SDKEventMessagePartRemoved['properties']
+/** message.part.delta 载荷（v2 原生） */
+export interface PartDeltaPayload {
+  sessionID: string
+  assistantMessageID: string
+  ordinal: number
+  delta?: string
+}
 
-export type PartDeltaPayload = SDKEventMessagePartDelta['properties']
+/** message.part.removed 载荷 */
+export interface PartRemovedPayload {
+  sessionID: string
+  messageID: string
+  partID: string
+}
 
 export type PermissionRepliedPayload = SDKEventPermissionReplied['properties']
 

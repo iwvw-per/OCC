@@ -4,7 +4,7 @@
 
 import { nativeGetVcsInfo, nativeGetVcsDiff } from './v2NativeAgent'
 import type { FileDiff } from './types'
-import type { VcsDiffMode, VcsInfo } from '../types/api/vcs'
+import type { VcsDiffMode, VcsInfo } from '../types/domain/vcs'
 import { directoryCacheKey } from '../utils/directoryUtils'
 import { microCache } from '../utils/microCache'
 import { serverStore } from '../store/serverStore'

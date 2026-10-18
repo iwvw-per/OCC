@@ -15,7 +15,7 @@ import {
   SearchIcon,
 } from './Icons'
 import { getSkills } from '../api/skill'
-import type { Skill } from '../types/api/skill'
+import type { Skill } from '../types/domain/skill'
 import { useDirectory } from '../hooks'
 import { apiErrorHandler } from '../utils'
 

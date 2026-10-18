@@ -707,7 +707,14 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         onPartDelta: data => {
           const scopedId = scope(data.sessionID)
           activeSessionStore.touchSession(scopedId)
-          messageStore.handlePartDelta({ ...data, sessionID: scopedId })
+          // store 按 v1 形状索引 part：partID = `${messageID}-text-${ordinal}`
+          messageStore.handlePartDelta({
+            sessionID: scopedId,
+            messageID: data.assistantMessageID,
+            partID: `${data.assistantMessageID}-text-${data.ordinal}`,
+            field: 'text',
+            delta: data.delta ?? '',
+          })
           scheduleScroll(scopedId)
         },
 

@@ -5,7 +5,6 @@ import type {
   CompactionPart as SDKCompactionPart,
   FilePart as SDKFilePart,
   FilePartInput as SDKFilePartInput,
-  FilePartSource as SDKFilePartSource,
   PatchPart as SDKPatchPart,
   ReasoningPart as SDKReasoningPart,
   RetryPart as SDKRetryPart,
@@ -13,7 +12,6 @@ import type {
   StepFinishPart as SDKStepFinishPart,
   StepStartPart as SDKStepStartPart,
   SubtaskPart as SDKSubtaskPart,
-  SubtaskPartInput as SDKSubtaskPartInput,
   TextPart as SDKTextPart,
   TextPartInput as SDKTextPartInput,
   ToolPart as SDKToolPart,
@@ -37,9 +35,7 @@ export type ToolState = SDKToolState
 
 export type ToolPart = SDKToolPart
 
-export type FileSource = SDKFilePartSource
 
-export type FileSourceType = NonNullable<FileSource>['type']
 
 export type FilePart = SDKFilePart
 
@@ -90,4 +86,3 @@ export type FilePartInput = SDKFilePartInput
 
 export type AgentPartInput = SDKAgentPartInput
 
-export type SubtaskPartInput = SDKSubtaskPartInput

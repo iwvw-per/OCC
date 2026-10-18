@@ -6,7 +6,6 @@ import type {
   QuestionRequest as SDKQuestionRequest,
 } from '@opencode-ai/sdk/v2/client'
 
-export type PermissionToolInfo = NonNullable<SDKPermissionRequest['tool']>
 
 export type PermissionRequest = SDKPermissionRequest
 

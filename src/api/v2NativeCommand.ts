@@ -7,7 +7,7 @@
 import { getV2Client } from './sdkV2'
 import { adaptDataList } from './v2/session'
 import { adaptSkill } from './v2/entities'
-import type { SkillList } from '../types/api/skill'
+import type { SkillList } from '../types/domain/skill'
 
 export interface DomainCommandItem {
   name: string

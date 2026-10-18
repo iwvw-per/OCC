@@ -14,7 +14,7 @@ import { getApiBaseUrl, getAuthHeader, buildQueryString } from './http'
 import { formatPathForApi } from '../utils/directoryUtils'
 import { serverStore, getUnifiedFetch } from '../store/serverStore'
 import { isTauri } from '../utils/tauri'
-import type { Pty, PtyCreateParams, PtyUpdateParams } from '../types/api/pty'
+import type { Pty, PtyCreateParams, PtyUpdateParams } from '../types/domain/pty'
 
 export interface ShellInfo {
   path: string

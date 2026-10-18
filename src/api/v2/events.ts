@@ -246,6 +246,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       if (!messageID) return null
       return globalEvent(directory, EventTypes.MESSAGE_PART_DELTA, {
         sessionID,
+        assistantMessageID: messageID,
         messageID,
         partID: `${messageID}-text-${ordinal}`,
         field: 'text',

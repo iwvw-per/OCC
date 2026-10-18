@@ -6,7 +6,7 @@ import { nativeListSkills } from './v2NativeCommand'
 import { directoryCacheKey } from '../utils/directoryUtils'
 import { microCache } from '../utils/microCache'
 import { serverStore } from '../store/serverStore'
-import type { SkillList } from '../types/api/skill'
+import type { SkillList } from '../types/domain/skill'
 
 /**
  * 获取所有可用 Skills
