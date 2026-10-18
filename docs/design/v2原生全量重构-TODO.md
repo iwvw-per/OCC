@@ -29,8 +29,8 @@
 | `SidePanel.tsx` | 1321 | 796 | `useSessionSelection` / `useProjectGroups` / `useMissingSessionFetch` |
 | `FolderRecentList.tsx` | 1514 | 1275 | `useFolderList`（展开派生 / 拖拽期收起 / 重排 hook） |
 | `ChatPane.tsx` | 1352 | 1308 | `PaneInputDock`（欢迎层 / 提示 / 输入停靠） |
-| `ChatArea.tsx` | 1292 | 1321 | `chatAreaTimeline`（行高估算 / 过程壳统计 / 行相等判定） |
-| `InputBox.tsx` | 1941 | 1835 | `useMentionTrigger` / `useSlashTrigger` / `useLargePaste` / `inputMetrics` |
+| `ChatArea.tsx` | 1292 | 1243 | `chatAreaTimeline`（行高估算 / 过程壳统计 / 行相等判定） |
+| `InputBox.tsx` | 1941 | 1836 | `useMentionTrigger` / `useSlashTrigger` / `useLargePaste` / `inputMetrics` |
 
 ## 阶段 5 — UI 组件库（已完成基础）
 
@@ -57,8 +57,29 @@
 - [x] `docs/design/v2架构说明.md` 描述分层与硬约束
 - [x] `npm run validate` 全绿并部署
 
+## 阶段 8 — 借鉴 OpenCode Desktop（已完成）
+
+- [x] **预检缓存**：API Monitor 返回 `Access-Control-Max-Age: 7200`，
+      允许头逐项列出 `Authorization`（`*` 不被 Chromium 用于授权头）
+- [x] **写入合并**：`storage/writeBehind`，同 key 合并 + 生命周期强制 flush；
+      `createStore` 暴露 `flush()`
+- [x] **首屏状态前置**：Tauri 窗口创建时注入 `window.__OCC_BOOTSTRAP__`；
+      `utils/hostBootstrap` 提供读取与按窗口隔离的命名空间
+- [x] **预检诊断**：`api/corsDiagnostics` 判定是否会触发预检、Max-Age 是否生效
+- [x] **凭据归属**：`api/credentialModel` 记录现状/目标与迁移边界（迁移未做，见下）
+
 ## 后续可选（未排期）
 
+- [ ] **凭据注入下移**：Rust 侧保存凭据并按 origin 补头，前端不再持有密码。
+      收益：桌面端 GET 保持 CORS-simple、省掉预检、XSS 拿不到密码。
+      成本：跨 Web/桌面/Android 的鉴权归属迁移，回归面大，需单独排期
 - [ ] 超长会话（>2000 条消息）滚动帧率的真机实测与基线记录
 - [ ] Shiki 语法高亮迁移到 OffscreenCanvas/Worker 直出像素（进一步降低主线程占用）
 - [ ] `components/ui` 剩余手写按钮逐步替换为 primitives
+
+## 当前状态（v2-native 分支）
+
+- 相对 `main`：24 个提交，168 个文件，+5861 / −5329 行
+- `npm run validate`：**1624 passed / 20 skipped**
+- 已部署 `occ.dmuk.org`（v2.0.6）
+- 未推送远端（仅在本地分支）
