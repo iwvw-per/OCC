@@ -18,7 +18,12 @@ export function useSessionStatsFor(sessionId: string | null, contextLimit: numbe
 
   const getSnapshot = useCallback((): SessionStats => {
     const messages = messageStore.getVisibleMessages(sessionId)
-    const next = computeSessionStatsCached(messages, contextLimit)
+    const next = computeSessionStatsCached(
+      messages,
+      contextLimit,
+      messageStore.getCompactionUsage(sessionId),
+      messageStore.getSessionUsage(sessionId),
+    )
     const prev = cacheRef.current
     if (prev && isSameSessionStats(prev, next)) return prev
     cacheRef.current = next

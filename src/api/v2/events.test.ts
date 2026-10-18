@@ -316,7 +316,7 @@ describe('v2 event → GlobalEvent', () => {
   })
 
   it('drops unmapped events', () => {
-    expect(v2EventToGlobalEvent({ type: 'session.usage.updated', data: {}, location: { directory: '/w' } })).toBeNull()
+    expect(v2EventToGlobalEvent({ type: 'session.inbox.updated', data: {}, location: { directory: '/w' } })).toBeNull()
   })
 
   it('maps session.compaction.failed to SESSION_COMPACTED with error message', () => {
@@ -338,13 +338,64 @@ describe('v2 event → GlobalEvent', () => {
     })
   })
 
-  it('maps session.compaction.ended to SESSION_COMPACTED completed', () => {
-    const p = payloadOf({
-      type: 'session.compaction.ended',
-      data: { sessionID: 's', reason: 'manual', text: 'summary' },
-      location: { directory: '/w' },
+    it('maps session.compaction.ended to SESSION_COMPACTED completed', () => {
+      const p = payloadOf({
+        type: 'session.compaction.ended',
+        data: { sessionID: 's', reason: 'manual', text: 'summary' },
+        location: { directory: '/w' },
+      })
+      expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
+      expect(p?.properties).toMatchObject({ sessionID: 's', status: 'completed', reason: 'manual' })
     })
-    expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
-    expect(p?.properties).toMatchObject({ sessionID: 's', status: 'completed', reason: 'manual' })
+
+    it('carries the post-compaction context tokens on completion', () => {
+      // v2 在压缩结束时回报这次摘要请求的 tokens —— 压缩后的真实上下文占用。
+      // 丢掉它，前端只能估算，用户在压缩后看不到圆环下降。
+      const p = payloadOf({
+        type: 'session.compaction.ended',
+        data: {
+          sessionID: 's',
+          reason: 'auto',
+          text: 'summary',
+          cost: 0.5,
+          tokens: { input: 900, output: 100, reasoning: 50, cache: { read: 30, write: 20 } },
+        },
+        location: { directory: '/w' },
+        created: 1_700_000_000_000,
+      })
+      expect(p?.properties).toMatchObject({
+        status: 'completed',
+        tokens: { input: 900, output: 100, reasoning: 50, cache: { read: 30, write: 20 } },
+        cost: 0.5,
+        time: 1_700_000_000_000,
+      })
+    })
+
+    it('maps session.usage.updated to SESSION_USAGE_UPDATED', () => {
+      const p = payloadOf({
+        type: 'session.usage.updated',
+        data: {
+          sessionID: 's',
+          cost: 2,
+          tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 0 } },
+        },
+        location: { directory: '/w' },
+      })
+      expect(p?.type).toBe(EventTypes.SESSION_USAGE_UPDATED)
+      expect(p?.properties).toMatchObject({
+        sessionID: 's',
+        cost: 2,
+        tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 0 } },
+      })
+    })
+
+    it('drops a usage event whose tokens are all zero', () => {
+      // 全零不是「0 token」，是「没测到」，不能覆盖已有的累计值
+      const p = payloadOf({
+        type: 'session.usage.updated',
+        data: { sessionID: 's', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+        location: { directory: '/w' },
+      })
+      expect(p).toBeNull()
+    })
   })
-})

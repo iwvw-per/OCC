@@ -118,6 +118,8 @@ vi.mock('../store', () => ({
     handleSessionIdle: vi.fn(),
     handleSessionError: vi.fn(),
     markServerSessionsStale: vi.fn(),
+    recordCompactionResult: vi.fn(),
+    recordSessionUsage: vi.fn(),
     getSessionState: vi.fn(() => null),
     updateSessionMetadata: vi.fn(),
   },
@@ -376,6 +378,56 @@ describe('useGlobalEvents', () => {
 
     // 压缩改写了历史，必须重拉，否则看不到压缩后的内容
     expect(messageStore.markServerSessionsStale).toHaveBeenCalled()
+  })
+
+  it('records the post-compaction context usage before invalidating messages', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    const tokens = { input: 800, output: 120, reasoning: 0, cache: { read: 0, write: 0 } }
+    callbacks!.onSessionCompacted?.({
+      sessionID: 'ses_1',
+      status: 'completed',
+      reason: 'manual',
+      tokens,
+      cost: 0.02,
+      time: 1_700_000_000_000,
+    })
+
+    // 压缩事件的 tokens 是压缩后新上下文的权威测量：必须落进 store，
+    // 圆环/占用才能在重拉之前就掉到正确水位（用户报的「压缩完不更新」）。
+    expect(messageStore.recordCompactionResult).toHaveBeenCalledWith(
+      expect.stringContaining('ses_1'),
+      expect.objectContaining({ tokens, cost: 0.02, at: 1_700_000_000_000 }),
+    )
+    expect(messageStore.markServerSessionsStale).toHaveBeenCalled()
+  })
+
+  it('records session cumulative usage from session.usage.updated', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    const tokens = { input: 5000, output: 900, reasoning: 100, cache: { read: 300, write: 20 } }
+    callbacks!.onSessionUsageUpdated?.({ sessionID: 'ses_1', tokens, cost: 1.25 })
+
+    // 压缩裁掉旧轮次后，按可见消息汇总会变小；这份是服务端累计口径
+    expect(messageStore.recordSessionUsage).toHaveBeenCalledWith(
+      expect.stringContaining('ses_1'),
+      tokens,
+      1.25,
+    )
   })
 
   it('reconciles full server status when SSE reconnects to drop stale busy entries', async () => {

@@ -2,7 +2,7 @@
 // MessageStore Types
 // ============================================
 
-import type { Message, MessageError, Part } from '../types/message'
+import type { Message, MessageError, Part, TokenUsage } from '../types/message'
 
 export interface RevertState {
   /** 撤销点的消息 ID */
@@ -53,6 +53,20 @@ export interface SessionState {
   isStale: boolean
   /** 最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
   compactedAt?: number
+  /**
+   * 会话级累计用量（服务端 `session.usage.updated`）。
+   *
+   * 压缩会裁掉旧轮次，从可见消息汇总的累计 token/花费会凭空变小；这份值不随
+   * 裁剪变化，是累计口径的权威来源。缺省时回退到按消息汇总。
+   */
+  usage?: { tokens: TokenUsage; cost: number }
+  /**
+   * 压缩完成时服务端回报的上下文用量（即压缩后的新上下文占用）。
+   *
+   * 与 `usage` 不同：`usage` 是累计消耗，这个是「压缩后此刻的上下文大小」，
+   * 用于让圆环在压缩后立刻掉到正确水位。缺失时按消息文本估算。
+   */
+  compactionUsage?: { tokens: TokenUsage; cost?: number; at: number }
 }
 
 export interface SendRollbackSnapshot {
@@ -97,6 +111,5 @@ export interface SessionStateSnapshot {
   /** 最近一次已完成压缩的时间戳；有值时消息流末尾展示压缩分隔条 */
   compactedAt?: number
 }
-
 // Re-export Part for convenience
 export type { Message, Part }

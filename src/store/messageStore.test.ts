@@ -175,6 +175,32 @@ describe('messageStore', () => {
     expect(messageStore.isSessionStale('session-1')).toBe(false)
   })
 
+  it('records the post-compaction context usage and moves compactedAt forward', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    const tokens = { input: 900, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }
+
+    messageStore.recordCompactionResult('session-1', { tokens, cost: 0.1, at: 5000 })
+
+    expect(messageStore.getCompactionUsage('session-1')).toMatchObject({ tokens, cost: 0.1, at: 5000 })
+    expect(messageStore.getSessionState('session-1')?.compactedAt).toBe(5000)
+
+    // 更早的压缩结果不得把分隔条时间往回拨
+    messageStore.recordCompactionResult('session-1', { tokens, at: 4000 })
+    expect(messageStore.getSessionState('session-1')?.compactedAt).toBe(5000)
+  })
+
+  it('records server cumulative usage and ignores unknown sessions', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    const tokens = { input: 4000, output: 800, reasoning: 0, cache: { read: 100, write: 20 } }
+
+    messageStore.recordSessionUsage('session-1', tokens, 2.5)
+    expect(messageStore.getSessionUsage('session-1')).toEqual({ tokens, cost: 2.5 })
+
+    // 为不存在的会话建档会在侧栏冒出幽灵项，必须忽略
+    messageStore.recordSessionUsage('session-does-not-exist', tokens, 1)
+    expect(messageStore.getSessionState('session-does-not-exist')).toBeUndefined()
+  })
+
   it('accepts exported message envelopes that use message instead of info', () => {
     messageStore.setMessages('session-1', [
       {

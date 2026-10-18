@@ -25,7 +25,7 @@ import type {
   SessionCompactedPayload,
   TodoUpdatedPayload,
 } from './types'
-import type { PartDeltaPayload, PartRemovedPayload } from '../types/api/event'
+import type { PartDeltaPayload, PartRemovedPayload, SessionUsagePayload } from '../types/api/event'
 import { EventTypes } from '../types/api/event'
 
 // ============================================
@@ -549,6 +549,13 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
     const assistantMessageID = typeof props?.assistantMessageID === 'string' ? props.assistantMessageID : ''
     if (sessionID && assistantMessageID) callbacks.onSessionRetryScheduled?.({ sessionID, assistantMessageID })
+    return
+  }
+  if ((payload.type as string) === EventTypes.SESSION_USAGE_UPDATED) {
+    const props = (payload as { properties?: SessionUsagePayload }).properties
+    if (props && typeof props.sessionID === 'string' && props.tokens) {
+      callbacks.onSessionUsageUpdated?.(props)
+    }
     return
   }
   switch (payload.type) {

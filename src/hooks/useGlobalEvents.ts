@@ -808,13 +808,28 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             return
           }
 
-          // 成功：压缩改写了历史消息（生成摘要、裁剪旧轮次），本地缓存必须重拉，
-          // 否则用户看不到「历史已压缩」分隔与精简后的内容。
+          // 成功：先把服务端回报的压缩后上下文用量落进 store，再失效消息缓存。
+          //
+          // 顺序很重要：压缩事件的 tokens 是「压缩后新上下文」的权威测量，
+          // 必须在重拉之前写进去 —— 否则等待重拉的那几百毫秒里圆环仍停在
+          // 压缩前的水位，用户看到的就是「压缩完了占用没变」。
+          messageStore.recordCompactionResult(scopedId, {
+            tokens: data.tokens,
+            cost: data.cost,
+            at: data.time,
+          })
           if (data.reason !== 'auto') {
             notificationStore.toast('completed', i18n.t('chat:notification.compactionDone'))
           }
           messageStore.markServerSessionsStale(sessionKeyToServerId(scopedId))
           dispatchToConsumers(scopedId, cb => cb.onSessionCompacted?.(data))
+        },
+
+        onSessionUsageUpdated: data => {
+          if (isEphemeralSession(data.sessionID)) return
+          // 会话累计用量（tokens/cost）。压缩后旧轮次被裁掉，按可见消息汇总
+          // 会变小；这份是服务端口径，直接覆盖累计值。
+          messageStore.recordSessionUsage(scope(data.sessionID), data.tokens, data.cost)
         },
 
         onSessionError: error => {

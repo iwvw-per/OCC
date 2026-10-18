@@ -12,6 +12,7 @@
 
 import type { GlobalEvent } from '../types'
 import type { ApiSession } from '../../types'
+import type { CompactionTokenUsage } from '../../types/api/event'
 import { EventTypes } from '../../types/api/event'
 import { rec, str, num, toolResultMetadata } from './adapt'
 import { adaptSession } from './session'
@@ -20,6 +21,21 @@ import { adaptPermission } from './entities'
 
 function globalEvent(directory: string, type: string, properties: Record<string, unknown>): GlobalEvent {
   return { directory, payload: { type, properties } } as unknown as GlobalEvent
+}
+
+/** 归一 tokens 形状；全零/缺失时返回 null（调用方不应把 0 当成「有测量」）。 */
+function adaptTokenUsage(raw: unknown): CompactionTokenUsage | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const t = rec(raw)
+  const cache = rec(t.cache)
+  const usage: CompactionTokenUsage = {
+    input: num(t.input) ?? 0,
+    output: num(t.output) ?? 0,
+    reasoning: num(t.reasoning) ?? 0,
+    cache: { read: num(cache.read) ?? 0, write: num(cache.write) ?? 0 },
+  }
+  const total = usage.input + usage.output + usage.reasoning + usage.cache.read + usage.cache.write
+  return total > 0 ? usage : null
 }
 
 /**
@@ -130,6 +146,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
   const location = rec(e.location)
   const directory = str(location.directory) ?? ''
   const sessionID = str(data.sessionID) ?? str(e.sessionID) ?? ''
+  const eventCreated = num(e.created)
 
   switch (type) {
     case 'server.connected':
@@ -468,11 +485,18 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     // v2 压缩成功：携带压缩摘要文本，落定后需要刷新消息列表才能看到压缩分隔与
     // 精简后的历史。失败（如 "Nothing to compact yet"）同样要提示，否则用户点了
     // /compact 后界面毫无反应，误以为功能失效。
+    //
+    // 关键是 tokens/cost：压缩后上下文占用会骤降，这份用量是服务端对新上下文
+    // 的权威测量；以前在这里丢掉，前端只能按消息文本估算，用户看到的圆环与
+    // 占用数字在压缩完成后几乎不动 ——「压缩完了还是那么满」的根因。
     case 'session.compaction.ended':
       return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
         sessionID,
         status: 'completed',
         reason: str(data.reason),
+        ...(adaptTokenUsage(data.tokens) ? { tokens: adaptTokenUsage(data.tokens) } : {}),
+        ...(num(data.cost) != null ? { cost: num(data.cost) } : {}),
+        time: eventCreated ?? Date.now(),
       })
     case 'session.compaction.failed':
       return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
@@ -481,6 +505,15 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         reason: str(data.reason),
         error: str(rec(data.error).message) ?? str(data.error) ?? '',
       })
+    case 'session.usage.updated': {
+      const tokens = adaptTokenUsage(data.tokens)
+      if (!tokens) return null
+      return globalEvent(directory, EventTypes.SESSION_USAGE_UPDATED, {
+        sessionID,
+        tokens,
+        cost: num(data.cost) ?? 0,
+      })
+    }
 
     default:
       // 未映射的 v2 事件（step/text.started/ended、usage、inbox、retry 等）

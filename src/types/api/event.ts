@@ -40,11 +40,43 @@ export type SessionStatusPayload = SDKEventSessionStatus['properties']
  * 会话压缩结果（v2 `session.compaction.ended` / `session.compaction.failed`）。
  * 失败时带 error.message（如 "Nothing to compact yet"），用于提示用户。
  */
+/**
+ * v2 `session.compaction.ended` 的 tokens 形状。
+ *
+ * 压缩结束时服务端会带上「压缩后这次摘要请求的上下文用量」——这正是压缩后
+ * 新上下文的真实占用，比自己按消息文本估算准确得多。旧代码丢掉了它，
+ * 导致压缩完成后圆环仍按估算值显示。
+ */
+export interface CompactionTokenUsage {
+  input: number
+  output: number
+  reasoning: number
+  cache: { read: number; write: number }
+}
+
 export interface SessionCompactedPayload {
   sessionID: string
   status: 'started' | 'completed' | 'failed'
   reason?: 'auto' | 'manual'
   error?: string
+  /** 压缩后这次摘要请求的上下文用量（completed 才可能有） */
+  tokens?: CompactionTokenUsage
+  cost?: number
+  /** 压缩完成时间（服务端事件时间，缺失时由前端补） */
+  time?: number
+}
+
+/**
+ * 会话级累计用量（v2 `session.usage.updated`）。
+ *
+ * 会话被压缩后，历史轮次的 assistant 消息可能被裁掉/折叠，前端从可见消息
+ * 汇总出的「累计 token / 花费」会随之变小。服务端这份累计值不随消息裁剪
+ * 变化，是唯一正确的累计口径。
+ */
+export interface SessionUsagePayload {
+  sessionID: string
+  tokens: CompactionTokenUsage
+  cost: number
 }
 
 export type SessionDiffPayload = SDKEventSessionDiff['properties']
@@ -128,6 +160,8 @@ export const EventTypes = {
   SESSION_STATUS: 'session.status',
   SESSION_DIFF: 'session.diff',
   SESSION_COMPACTED: 'session.compacted',
+  /** v2 会话累计用量（tokens / cost），不随消息裁剪变化 */
+  SESSION_USAGE_UPDATED: 'session.usage.updated',
   /**
    * v2 重试信号：`session.retry.scheduled`。后端因限流/超时对某条 assistant
    * 消息发起重试时，会先广播此事件（带被放弃的 assistantMessageID），随后用
@@ -200,7 +234,14 @@ export const EventTypes = {
   PTY_UPDATED: 'pty.updated',
   PTY_EXITED: 'pty.exited',
   PTY_DELETED: 'pty.deleted',
-} as const satisfies Record<string, SDKGlobalEvent['payload']['type'] | 'session.renamed' | 'session.retry.scheduled'>
+} as const satisfies Record<
+  string,
+  // 前端自有的补充事件名：SDK 的类型联合里没有，但内部事件总线需要承载。
+  | SDKGlobalEvent['payload']['type']
+  | 'session.renamed'
+  | 'session.retry.scheduled'
+  | 'session.usage.updated'
+>
 
 export type EventType = SDKGlobalEvent['payload']['type']
 
@@ -224,6 +265,7 @@ export interface EventCallbacks {
   onSessionIdle?: (data: SessionIdlePayload) => void
   /** 会话压缩结束（v2）：成功/失败都回调，用于提示与刷新消息 */
   onSessionCompacted?: (data: SessionCompactedPayload) => void
+  onSessionUsageUpdated?: (data: SessionUsagePayload) => void
   onSessionError?: (data: SessionErrorPayload) => void
   onSessionStatus?: (data: SessionStatusPayload) => void
   onPermissionAsked?: (request: PermissionRequest) => void

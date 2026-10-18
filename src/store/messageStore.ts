@@ -9,7 +9,7 @@
 // 4. RAF 批量通知 React 组件更新
 
 import i18n from '../i18n'
-import type { Message, MessageError, Content, TextContent } from '../types/message'
+import type { Message, MessageError, Content, TextContent, TokenUsage } from '../types/message'
 import type { ApiMessageWithParts, ApiMessage, ApiPart, ApiSession, Attachment } from '../api/types'
 import { logger } from '../utils/logger'
 import { isUserUIMessage, toUIMessage, toUIMessageInfo, toUIPart } from '../utils/messageConversion'
@@ -714,6 +714,64 @@ class MessageStore {
     state.messages = nextMessages
     this.optimisticMessageIds.delete(messageId)
     this.notify([sessionId])
+  }
+
+  /**
+   * 记录会话级累计用量（服务端 `session.usage.updated`）。
+   *
+   * 压缩裁掉旧轮次后，按可见消息汇总的累计值会变小；服务端这份不受裁剪影响。
+   * 只在会话已存在时写入——为不存在的会话建档会让侧栏冒出幽灵项。
+   */
+  recordSessionUsage(sessionId: string, tokens: TokenUsage, cost: number) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    const prev = state.usage
+    if (
+      prev &&
+      prev.cost === cost &&
+      prev.tokens.input === tokens.input &&
+      prev.tokens.output === tokens.output &&
+      prev.tokens.reasoning === tokens.reasoning &&
+      prev.tokens.cache.read === tokens.cache.read &&
+      prev.tokens.cache.write === tokens.cache.write
+    ) {
+      return
+    }
+    state.usage = { tokens, cost }
+    this.notify([sessionId])
+  }
+
+  /**
+   * 记录压缩完成后的上下文用量。
+   *
+   * 这是圆环在压缩后能立刻掉下来的关键：压缩事件的 tokens 是服务端对新上下文
+   * 的权威测量，比按消息文本估算准确。同时把 compactedAt 前移，消息流末尾的
+   * 压缩分隔条才有依据。
+   */
+  recordCompactionResult(
+    sessionId: string,
+    options: { tokens?: TokenUsage; cost?: number; at?: number },
+  ) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    const at = options.at ?? Date.now()
+    if (options.tokens) {
+      state.compactionUsage = { tokens: options.tokens, cost: options.cost, at }
+    }
+    if (state.compactedAt === undefined || at > state.compactedAt) state.compactedAt = at
+    this.notify([sessionId])
+  }
+
+  getSessionUsage(sessionId: string | null): SessionState['usage'] {
+    if (!sessionId) return undefined
+    return this.sessions.get(this.resolveKey(sessionId))?.usage
+  }
+
+  getCompactionUsage(sessionId: string | null): SessionState['compactionUsage'] {
+    if (!sessionId) return undefined
+    return this.sessions.get(this.resolveKey(sessionId))?.compactionUsage
   }
 
   markAllSessionsStale() {
