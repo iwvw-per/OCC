@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.0.6] - 2026-10-18
+
+- fix(aiagent): 面板不支持 If-None-Match 时自动降级，避免同步整体失败 (290ef08d)
+- fix: 新建项目弹窗只处理绝对路径，返回上级改为削减一级 (8fabbc68)
+
 ## [v2.0.5] - 2026-10-17
 
 - fix: 检查更新地址指回 OCC 仓库，与 updater endpoint 保持一致（此前检查走旧仓库 OpenCodeUI，会「看到更新却装不上」）
