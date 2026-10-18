@@ -39,7 +39,7 @@ import { isSameDirectory } from '../../../utils'
 import { makeSessionKey, splitSessionKey } from '../../../utils/sessionKey'
 import { uiErrorHandler } from '../../../utils'
 import { useSessionSelection as useSessionSelection2 } from './useSessionSelection'
-import { useProjectGroups, type ProjectItem } from './useProjectGroups'
+import { resolveSavedProjectPaths, useProjectGroups, type ProjectItem } from './useProjectGroups'
 import { useMissingSessionFetch } from './useMissingSessionFetch'
 import { cn } from '../../../utils/cn'
 import { interactive } from '../../../utils/interaction'
@@ -266,7 +266,7 @@ export function SidePanel({
     setExpandedProjectIds: setExpandedRecentProjectIds,
     allProjectsCollapsed,
     projectLastUsedAt,
-    getProjectDirectoriesToRemove,
+    savedDirectoryPaths,
   } = projects
 
   // 需求 3：点击项目目录/名称不跳转（只展开/收起），只有点击会话才导航。
@@ -377,24 +377,27 @@ export function SidePanel({
   const handleBatchRemoveProjects = useCallback(() => {
     if (selectedProjectIds.size === 0) return
     for (const projectId of selectedProjectIds) {
-      getProjectDirectoriesToRemove(projectId).forEach(directory => removeDirectory(directory))
+      const project = folderProjects.find(item => item.id === projectId)
+      const targets = project ? resolveSavedProjectPaths(project, savedDirectoryPaths) : []
+      for (const directory of targets) removeDirectory(directory)
     }
     clearProjectSelection()
     setBatchRemoveProjectConfirm(false)
-  }, [getProjectDirectoriesToRemove, selectedProjectIds, removeDirectory, clearProjectSelection])
+  }, [folderProjects, savedDirectoryPaths, selectedProjectIds, removeDirectory, clearProjectSelection])
 
   // 单个项目移除：二次点击防误触（按钮层），这里直接执行。
   // 语义唯一：从「已保存项目」列表移除，不动磁盘文件、不动会话；随时可重新添加。
   //
-  // 派生项目（当前打开的目录 / 从会话推导的目录，未显式保存）直接跳过：
-  // 它不在已保存列表里，removeDirectory 是空操作，却会因为清掉 URL 目录而
-  // 表现为「点移除把当前项目关了」，属于误导性反馈。
+  // 派生项目（未显式保存、由服务器当前 worktree 推导）也可能是「用户确实保存过、
+  // 但被上一版过滤掉」的目录，因此不再一律跳过：按已保存路径匹配，
+  // 匹配到就照常移除；完全不在已保存列表里才视为无效操作。
   const handleRemoveProjectClick = useCallback(
     (project: FolderRecentProject) => {
-      if (project.isDerived) return
-      getProjectDirectoriesToRemove(project.id).forEach(directory => removeDirectory(directory))
+      // 按「已保存路径」精确匹配：派生项目若对应一个真实保存过的目录，也要能删掉
+      const targets = resolveSavedProjectPaths(project, savedDirectoryPaths)
+      for (const directory of targets) removeDirectory(directory)
     },
-    [getProjectDirectoriesToRemove, removeDirectory],
+    [removeDirectory, savedDirectoryPaths],
   )
 
   // 需求 4：在指定项目目录下新建会话。

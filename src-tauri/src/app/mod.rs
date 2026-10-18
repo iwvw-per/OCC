@@ -498,6 +498,9 @@ pub fn run() {
             commands::opencode::get_service_started_by_us,
             commands::opencode::confirm_close_app,
             commands::updater::updater_install,
+            commands::credentials::credential_set,
+            commands::credentials::credential_has,
+            commands::credentials::credential_delete,
         ]);
 
     // Android: 注册 bridge commands

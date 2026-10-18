@@ -40,6 +40,27 @@ export function projectExpandKey(project: ProjectItem): string {
   return project.name || project.worktree || project.id
 }
 
+/**
+ * 某项目条目在「已保存项目」里对应的目录。
+ *
+ * 派生项目（isDerived）没有 memberDirectories，但它的 worktree 可能恰好是一个
+ * 已保存目录——用户视角看它就是那个项目，移除时必须命中真实的已保存路径，
+ * 否则会出现「按钮点了没反应」。
+ */
+export function resolveSavedProjectPaths(
+  project: Pick<ProjectItem, 'id' | 'worktree' | 'memberDirectories' | 'workspaceDirectories'>,
+  savedPaths: readonly string[],
+): string[] {
+  const candidates = new Set<string>([
+    ...(project.memberDirectories ?? []),
+    project.worktree,
+    project.id,
+    ...(project.workspaceDirectories ?? []),
+  ])
+  const matched = savedPaths.filter(path => [...candidates].some(candidate => isSameDirectory(candidate, path)))
+  return Array.from(new Set(matched))
+}
+
 export function findProjectGroupForDirectory(projects: ProjectItem[], directory: string) {
   return projects.find(project => {
     if (isSameDirectory(project.id, directory) || isSameDirectory(project.worktree, directory)) return true
@@ -56,6 +77,8 @@ export interface UseProjectGroupsOptions {
 
 export interface UseProjectGroupsResult {
   folderProjects: ProjectItem[]
+  /** 只在「已保存项目」里的目录；不存在的派生项目可据此判断能否移除 */
+  savedDirectoryPaths: string[]
   sortedFolderProjects: ProjectItem[]
   currentProject: ProjectItem
   expandedProjectIds: string[]
@@ -63,7 +86,6 @@ export interface UseProjectGroupsResult {
   allProjectsCollapsed: boolean
   workspaceDirectoriesByProjectId: Map<string, string[]>
   projectLastUsedAt: Record<string, number>
-  getProjectDirectoriesToRemove: (projectId: string) => string[]
 }
 
 export function useProjectGroups({
@@ -322,16 +344,9 @@ export function useProjectGroups({
     [folderProjects, projectLastUsedAt, sidebarProjectSortField, sidebarProjectSortDesc, activityVersion],
   )
 
-  const getProjectDirectoriesToRemove = useCallback(
-    (projectId: string) => {
-      const project = folderProjects.find(item => isSameDirectory(item.id, projectId))
-      return project?.memberDirectories?.length ? project.memberDirectories : [projectId]
-    },
-    [folderProjects],
-  )
-
   return {
     folderProjects,
+    savedDirectoryPaths: visibleSavedDirectories.map(directory => directory.path),
     sortedFolderProjects,
     currentProject,
     expandedProjectIds,
@@ -339,6 +354,5 @@ export function useProjectGroups({
     allProjectsCollapsed,
     workspaceDirectoriesByProjectId,
     projectLastUsedAt,
-    getProjectDirectoriesToRemove,
   }
 }
