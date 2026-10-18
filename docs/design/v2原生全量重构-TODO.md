@@ -29,11 +29,11 @@
 
 ## 阶段 4 — 大组件拆分
 
-- [x] 4.1 `App.tsx` 1031 → 685 → **497** 行
+- [x] 4.1 `App.tsx` 1031 → **685** 行
       抽出 `useAppKeybindings` / `usePaletteCommands` / `useAppShell` / `useAppDialogs` / `useMainSwipe`
 - [x] 4.2 `SidePanel.tsx` 1321 → **795** 行
       抽出 `useSessionSelection` / `useProjectGroups` / `useMissingSessionFetch`
-- [x] 4.3 `FolderRecentList.tsx` 1514 → **1279** 行
+- [x] 4.3 `FolderRecentList.tsx` 1514 → **1275** 行
       抽出 `useFolderList`（展开派生、拖拽期收起、通用重排 hook）
 - [x] 4.4 `ChatPane.tsx` 1352 → **1308** 行
       抽出 `PaneInputDock`（欢迎层 / 提示气泡 / 输入停靠 / 半像素规避）
