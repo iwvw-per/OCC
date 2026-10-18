@@ -7,9 +7,9 @@
  */
 
 import { memo, useRef, useEffect, useState, useCallback, useMemo, useDeferredValue, useSyncExternalStore } from 'react'
-import { Trans, useTranslation } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 
-import { ChatArea, Header, InputBox, PermissionDialog, QuestionDialog, type ChatAreaHandle } from '.'
+import { ChatArea, Header, PermissionDialog, QuestionDialog, type ChatAreaHandle } from '.'
 import { type ModelSelectorHandle } from './ModelSelector'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { LoadingState } from '../../components/ui/LoadingState'
@@ -31,7 +31,7 @@ import {
 import { ChatViewportProvider, canUseSplitPane, useChatViewportMaybe, type ChatViewportValue } from './chatViewport'
 import { ChatWidthControls } from './ChatWidthControls'
 import { useChatPageViewModel } from './useChatPageViewModel'
-import { WelcomeHero, WelcomeProjectPill } from './welcome/WelcomeHero'
+import { PaneInputDock } from './PaneInputDock'
 import { SessionNavigationContext } from '../../contexts/SessionNavigationContext'
 import { useDirectory } from '../../contexts/useDirectory'
 import { usesCustomDesktopTitlebar } from '../../utils/tauri'
@@ -1110,118 +1110,74 @@ export const ChatPane = memo(function ChatPane({
         onScrollToMessageId={handleOutlineScrollToMessage}
       />
 
-      <div
-        ref={inputBoxWrapperRef}
-        className={`absolute left-0 right-0 z-10 pointer-events-none ${
-          hostSlideState.switching
-            ? 'transition-none'
-            : 'transition-[top] duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none'
-        }`}
-        style={{
-          // 欢迎态（无会话无消息）：输入框垂直居中悬浮，hero 在正上方；
-          // 发送后 showWelcome 翻 false，容器滑回贴底 —— 与原始设计一致。
-          //
-          // 用整数像素 top 定位，而不是 bottom:50% + translateY(50%)：
-          // 后者会产生非整数位移（实测 65.75px），让整个子树落在半像素上，
-          // 文字/图标子像素渲染发虚。这里显式取整，落到整数像素网格。
-          top:
-            showWelcome && chatContentHeight > 0
-              ? `${Math.round((chatContentHeight - inputBoxHeight) / 2)}px`
+      <PaneInputDock
+        inputBoxWrapperRef={inputBoxWrapperRef}
+        hostSlideSwitching={hostSlideState.switching}
+        showCompactShell={showCompactShell}
+        showWelcome={showWelcome}
+        chatContentHeight={chatContentHeight}
+        inputBoxHeight={inputBoxHeight}
+        showCancelHint={showCancelHint}
+        fullAutoHint={fullAutoHint}
+        isSubtaskPane={isSubtaskPane}
+        welcomeDirectory={effectiveDirectory || ''}
+        onWelcomeSelectProject={handleWelcomeSelectProject}
+        onWelcomeClearProject={handleWelcomeClearProject}
+        onWelcomeAddProject={handleWelcomeAddProject}
+        inputBoxProps={{
+          paneId,
+          onSend: handleSend,
+          onAbort: handleAbort,
+          onCommand: handleCommand,
+          disabled: inputDisabled,
+          isStreaming,
+          agents,
+          selectedAgent,
+          onAgentChange: handleAgentChange,
+          variants: currentModel?.variants ?? [],
+          selectedVariant,
+          onVariantChange: handleVariantChange,
+          fileCapabilities,
+          models: visibleModels,
+          selectedModelKey,
+          onModelChange: handleModelChange,
+          modelsLoading,
+          modelSelectorRef,
+          rootPath: effectiveDirectory,
+          sessionId: routeSessionId,
+          revertedText: revertedMessage?.text,
+          revertedAttachments: revertedMessage?.attachments,
+          canRedo,
+          revertSteps: redoSteps,
+          onRedo: handleRedoWithAnimation,
+          onRedoAll: handleRedoAll,
+          onClearRevert: clearRevert,
+          registerInputBox,
+          isAtBottom,
+          onScrollToBottom: handleScrollToBottom,
+          collapsedPermission:
+            !inlineToolRequests && pendingPermissionRequests.length > 0 && permissionCollapsed
+              ? {
+                  label: t('chat:permissionDialog.permission', {
+                    permission: pendingPermissionRequests[0].permission,
+                  }),
+                  queueLength: pendingPermissionRequests.length,
+                  onExpand: () => setPermissionCollapsed(false),
+                }
               : undefined,
-          bottom: showWelcome ? undefined : '0',
-          // 欢迎态且尚未测到容器/自身高度时先隐藏，避免贴顶闪一帧或半像素。
-          visibility: showWelcome && chatContentHeight === 0 ? 'hidden' : undefined,
+          collapsedQuestion:
+            !inlineToolRequests &&
+            pendingPermissionRequests.length === 0 &&
+            pendingQuestionRequests.length > 0 &&
+            questionCollapsed
+              ? {
+                  label: t('chat:questionDialog.title'),
+                  queueLength: pendingQuestionRequests.length,
+                  onExpand: () => setQuestionCollapsed(false),
+                }
+              : undefined,
         }}
-      >
-        {!showCompactShell && <WelcomeHero active={showWelcome} disableTransition={hostSlideState.switching} />}
-        {(showCancelHint || (fullAutoHint && !showCancelHint)) && (
-          <div className="absolute bottom-full inset-x-0 flex justify-center pb-2 pointer-events-none z-20">
-            <div className="px-3 py-1.5 glass border border-border-200/60 rounded-lg shadow-lg text-[length:var(--fs-sm)] text-text-300 animate-in fade-in slide-in-from-bottom-2 duration-150">
-              {showCancelHint ? (
-                <Trans
-                  i18nKey="chat:hints.pressEscAgain"
-                  components={{
-                    1: (
-                      <kbd className="mx-0.5 px-1.5 py-0.5 bg-bg-200 border border-border-200 rounded text-[length:var(--fs-xs)] font-mono font-medium text-text-200" />
-                    ),
-                  }}
-                />
-              ) : (
-                fullAutoHint
-              )}
-            </div>
-          </div>
-        )}
-        {!isSubtaskPane && (
-          <InputBox
-            paneId={paneId}
-            onSend={handleSend}
-            onAbort={handleAbort}
-            onCommand={handleCommand}
-            disabled={inputDisabled}
-            isStreaming={isStreaming}
-            agents={agents}
-            selectedAgent={selectedAgent}
-            onAgentChange={handleAgentChange}
-            variants={currentModel?.variants ?? []}
-            selectedVariant={selectedVariant}
-            onVariantChange={handleVariantChange}
-            fileCapabilities={fileCapabilities}
-            models={visibleModels}
-            selectedModelKey={selectedModelKey}
-            onModelChange={handleModelChange}
-            modelsLoading={modelsLoading}
-            modelSelectorRef={modelSelectorRef}
-            rootPath={effectiveDirectory}
-            sessionId={routeSessionId}
-            revertedText={revertedMessage?.text}
-            revertedAttachments={revertedMessage?.attachments}
-            canRedo={canRedo}
-            revertSteps={redoSteps}
-            onRedo={handleRedoWithAnimation}
-            onRedoAll={handleRedoAll}
-            onClearRevert={clearRevert}
-            registerInputBox={registerInputBox}
-            isAtBottom={isAtBottom}
-            onScrollToBottom={handleScrollToBottom}
-            hideFooter={showWelcome}
-            topAccessory={
-              !showCompactShell ? (
-                <WelcomeProjectPill
-                  active={showWelcome}
-                  directory={effectiveDirectory || ''}
-                  onSelectProject={handleWelcomeSelectProject}
-                  onClearProject={handleWelcomeClearProject}
-                  onAddProject={handleWelcomeAddProject}
-                />
-              ) : undefined
-            }
-            collapsedPermission={
-              !inlineToolRequests && pendingPermissionRequests.length > 0 && permissionCollapsed
-                ? {
-                    label: t('chat:permissionDialog.permission', {
-                      permission: pendingPermissionRequests[0].permission,
-                    }),
-                    queueLength: pendingPermissionRequests.length,
-                    onExpand: () => setPermissionCollapsed(false),
-                  }
-                : undefined
-            }
-            collapsedQuestion={
-              !inlineToolRequests &&
-              pendingPermissionRequests.length === 0 &&
-              pendingQuestionRequests.length > 0 &&
-              questionCollapsed
-                ? {
-                    label: t('chat:questionDialog.title'),
-                    queueLength: pendingQuestionRequests.length,
-                    onExpand: () => setQuestionCollapsed(false),
-                  }
-                : undefined
-            }
-          />
-        )}
-      </div>
+      />
 
       {/* 内容列宽拖拽手柄：只在非紧凑视图启用，两条手柄对称加宽 */}
       <ChatWidthControls container={chatContentEl} enabled={!showCompactShell} />
