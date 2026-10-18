@@ -348,8 +348,9 @@ const VirtualRow = memo(
   },
   (prev, next) =>
     prev.virtualItem.index === next.virtualItem.index &&
+    // 只比较起点与索引：size 由动态测量在渲染后回写，参与比较会让
+    // 「滚动导致重测」触发整行重渲染；行内内容变化由 item 引用兜住。
     prev.virtualItem.start === next.virtualItem.start &&
-    prev.virtualItem.size === next.virtualItem.size &&
     prev.item === next.item &&
     prev.paddingClass === next.paddingClass &&
     prev.rowYClass === next.rowYClass &&

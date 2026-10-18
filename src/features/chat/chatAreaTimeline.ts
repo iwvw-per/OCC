@@ -62,3 +62,34 @@ export function estimateTimelineItemSize(item: ProcessTimelineItem | undefined):
 export function sessionCacheKey(sessionId: string, processCollapseEnabled: boolean): string {
   return `${sessionId}:${processCollapseEnabled ? 'process' : 'flat'}`
 }
+
+/**
+ * 虚拟行的相等判定。
+ *
+ * 抽成纯函数便于单测：滚动时 react-virtual 会频繁回写 start/size，若 size
+ * 参与比较，每次测量都会把整行重新渲染一遍（长会话滚动卡顿的主因之一）。
+ */
+export interface RowComparable {
+  virtualIndex: number
+  virtualStart: number
+  item: unknown
+  paddingClass: string
+  rowYClass: string
+  canUndo: boolean | undefined
+  allowStreamingLayoutAnimation: boolean
+  sessionId: string | null | undefined
+  refs: ReadonlyArray<unknown>
+}
+
+export function areRowPropsEqual(prev: RowComparable, next: RowComparable): boolean {
+  if (prev.virtualIndex !== next.virtualIndex) return false
+  if (prev.virtualStart !== next.virtualStart) return false
+  if (prev.item !== next.item) return false
+  if (prev.paddingClass !== next.paddingClass) return false
+  if (prev.rowYClass !== next.rowYClass) return false
+  if (prev.canUndo !== next.canUndo) return false
+  if (prev.allowStreamingLayoutAnimation !== next.allowStreamingLayoutAnimation) return false
+  if (prev.sessionId !== next.sessionId) return false
+  if (prev.refs.length !== next.refs.length) return false
+  return prev.refs.every((ref, index) => ref === next.refs[index])
+}
