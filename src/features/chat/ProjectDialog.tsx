@@ -4,7 +4,7 @@ import { FolderIcon, FolderOpenIcon, ArrowUpIcon, SpinnerIcon, PlusIcon, GitBran
 import { listDirectory, getPath, directoryExists } from '../../api'
 import { runPtyCommand } from '../../api/ptyRun'
 import { inferRepoName, isLikelyGitUrl } from './gitCloneUrl'
-import { collapseDotSegments, fileErrorHandler, isAbsoluteDirectory } from '../../utils'
+import { fileErrorHandler, isAbsoluteDirectory } from '../../utils'
 import { canUseSystemDirectoryPicker } from '../../utils/nativeFileIntegration'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
 import { Dialog } from '../../components/ui/Dialog'
@@ -50,16 +50,14 @@ function normalizePath(p: string): string {
 /**
  * 把用户输入整理成可展示的绝对路径起点。
  *
- * 浏览器地址栏里的相对路径（`../code/OCC`）无法在远程后端上解析，这里把它
- * 折叠掉 `..`/`.`（`/opt/code/../code` → `/opt/code`）；仍不是绝对路径时返回
- * 空串，由调用方回落到服务端 home，避免把相对路径当成项目目录。
+ * 相对路径（`../code/OCC`、`code/`）一律返回空串 —— 这里只认绝对路径，
+ * 是否回落到服务端 home 交给调用方。
  */
 function toAbsoluteStartingPath(p: string | undefined): string {
   if (!p) return ''
-  const normalized = normalizePath(p)
-  const collapsed = collapseDotSegments(normalized)
-  if (!isAbsoluteDirectory(collapsed)) return ''
-  return collapsed.endsWith(PATH_SEP) ? collapsed : collapsed + PATH_SEP
+  const normalized = normalizePath(p.trim())
+  if (!isAbsoluteDirectory(normalized)) return ''
+  return normalized.endsWith(PATH_SEP) ? normalized : normalized + PATH_SEP
 }
 
 function getDirectoryPath(path: string): string {
@@ -107,6 +105,8 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const pendingSelectionRef = useRef<string | null>(null)
   const requestIdRef = useRef(0)
+  /** 用户已经手动改过路径：迟到的异步初始化不得再覆盖输入框 */
+  const userEditedRef = useRef(false)
 
   // Computed
   const currentDir = useMemo(() => getDirectoryPath(inputValue), [inputValue])
@@ -126,34 +126,30 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
     if (!isOpen) return
 
     let cancelled = false
+    userEditedRef.current = false
 
     const timer = window.setTimeout(() => {
       loadedPathRef.current = ''
       setItems([])
 
       const initPath = async () => {
-        // initialPath 可能来自 URL 等外部来源：相对路径在远程后端上无法解析，
-        // 先折叠 `..`，仍不是绝对路径就回落到服务端 home。
-        let path = toAbsoluteStartingPath(initialPath)
-        if (!path) {
-          try {
-            const p = await getPath(serverId)
-            path = p.home
-          } catch {
-            /* ignore */
-          }
+        // 输入框只处理绝对路径：initialPath 不是绝对路径时直接回落到服务端 home。
+        let home = ''
+        try {
+          const p = await getPath(serverId)
+          home = p.home || ''
+        } catch {
+          /* ignore */
         }
+        if (cancelled || userEditedRef.current) return
 
-        if (cancelled) return
-
-        path = toAbsoluteStartingPath(normalizePath(path))
+        let path = toAbsoluteStartingPath(initialPath) || toAbsoluteStartingPath(home)
         if (!path) {
           path = PATH_SEP
           setPathError(t('projectDialog.invalidPath'))
         } else {
           setPathError(null)
         }
-        if (!path.endsWith(PATH_SEP)) path += PATH_SEP
         setInputValue(path)
         setSelectedIndex(0)
         pendingSelectionRef.current = null
@@ -175,6 +171,9 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
 
   useEffect(() => {
     if (!isOpen || !currentDir) return
+    // 相对路径（用户正在输入 `../code/`）没法列目录：等输入变成绝对路径再加载，
+    // 避免一次必然失败的请求把列表清空成报错。
+    if (!isAbsoluteDirectory(currentDir)) return
     // 目录变化时始终重新加载
     if (currentDir === loadedPathRef.current) return
 
@@ -242,33 +241,55 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
     }
   }, [selectedIndex, filteredItems])
 
+  /**
+   * 保证输入框显示的就是 inputValue。
+   *
+   * 受控 input 正常情况下由 React 同步；但对话框在「上级 → 点目录」连点时，
+   * 若期间有其它渲染打断（或浏览器保留了输入法/选中态），DOM 会残留旧值，
+   * 后续点击就会基于旧路径拼出 `../code/...`。这里兜一层显式同步。
+   */
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (el && el.value !== inputValue) el.value = inputValue
+  }, [inputValue])
+
   // ==========================================
   // Handlers
   // ==========================================
 
+  /**
+   * 返回上一级：就在当前绝对路径上砍掉最后一段。
+   *
+   * `/opt/code/OCC/` → `/opt/code/`，`/opt/` → `/`。不做 dot-segment 折叠、
+   * 也不做任何补全 —— 输入框里只有绝对路径，砍一刀就是父目录。
+   */
   const handleGoBack = useCallback(() => {
-    let current = inputValue
-    if (!current.endsWith(PATH_SEP)) {
-      current = getDirectoryPath(current)
-    } else {
-      current = current.slice(0, -1)
-    }
-
-    const parent = getDirectoryPath(current)
-    // `..` 这类相对段在服务端无法解析：按字符串折叠掉，而不是继续截短成更早的路径。
-    const collapsedParent = normalizePath(collapseDotSegments(parent))
-    if (collapsedParent && collapsedParent !== normalizePath(current)) {
-      const folderName = current.split(PATH_SEP).filter(Boolean).pop()
-      if (folderName) pendingSelectionRef.current = folderName
-      setInputValue(collapsedParent)
-    }
+    userEditedRef.current = true
+    const normalized = normalizePath(inputValue.trim())
+    // 只处理绝对路径；相对路径（`../code/`）原样保留，不猜、不补全
+    if (!isAbsoluteDirectory(normalized)) return
+    // 去掉末尾斜杠后按最后一段切分；根路径（`/`、`C:/`）不再上退
+    const trimmed = normalized.replace(/\/+$/, '')
+    if (!trimmed || /^[a-zA-Z]:$/.test(trimmed)) return
+    const parent = getDirectoryPath(trimmed)
+    const folderName = trimmed.split(PATH_SEP).filter(Boolean).pop()
+    if (folderName) pendingSelectionRef.current = folderName
+    // 目录路径必须带尾斜杠：末尾是文件名时会被当成过滤词，列表看起来像空的
+    setInputValue(parent.endsWith(PATH_SEP) ? parent : parent + PATH_SEP)
   }, [inputValue])
 
-  const handleItemClick = useCallback((item: FileItem) => {
-    setInputValue(item.path + PATH_SEP)
-    setPathError(null)
-    inputRef.current?.focus()
-  }, [])
+  const handleItemClick = useCallback(
+    (item: FileItem) => {
+      userEditedRef.current = true
+      // 列表项自带绝对路径（来自 listDirectory 的 absolute），直接用它拼尾斜杠，
+      // 不依赖输入框当时的文本 —— 即使输入框因某种原因停留在旧目录，点哪进哪。
+      const absolute = isAbsoluteDirectory(item.path) ? item.path : loadedPathRef.current + item.name
+      setInputValue(toAbsoluteStartingPath(absolute))
+      setPathError(null)
+      inputRef.current?.focus()
+    },
+    [],
+  )
 
   const handleSelectFolder = useCallback(
     (folderPath: string) => {
@@ -278,16 +299,14 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
     [onSelect, onClose],
   )
 
+  /** 把当前输入作为项目目录提交（只接受绝对路径） */
   const handleConfirmCurrent = useCallback(() => {
     // 去掉尾斜杠，但保留根路径（/ 或 C:/）
-    let path = inputValue
-    if (path.endsWith(PATH_SEP) && path !== PATH_SEP && !/^[a-zA-Z]:\/$/.test(path)) {
-      path = path.slice(0, -1)
-    }
-    // 只阻止空路径和 "."
+    let path = inputValue.trim()
+    if (path !== PATH_SEP && !/^[a-zA-Z]:\/$/.test(path)) path = path.replace(/\/+$/, '')
     if (!path || path === '.') return
     // 后端只接受绝对路径：相对路径（`../code/OCC`、`foo/bar`）会让后续
-    // 列目录/查询会话全部失败，且被侧栏误判为「目录不存在」。这里直接拦下。
+    // 列目录/查询会话全部失败，且被侧栏误判为「目录不存在」。
     if (!isAbsoluteDirectory(path)) {
       setPathError(t('projectDialog.invalidPath'))
       return
@@ -435,7 +454,9 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
           const isAtStart = inputEl.selectionStart === 0 && inputEl.selectionEnd === 0
           if (isAtStart || inputValue.endsWith(PATH_SEP)) {
             e.preventDefault()
+            // 只在绝对路径上退一级；相对路径不动
             handleGoBack()
+            inputRef.current?.focus()
           }
           break
         }
@@ -448,15 +469,8 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
               onClose()
             }
           } else {
-            // 去掉尾斜杠，但保留根路径（/ 或 C:/）
-            let path = inputValue
-            if (path.endsWith(PATH_SEP) && path !== PATH_SEP && !/^[a-zA-Z]:\/$/.test(path)) {
-              path = path.slice(0, -1)
-            }
-            if (path && path !== '.') {
-              onSelect(path)
-              onClose()
-            }
+            // 与「添加当前目录」同一套校验，避免回车绕过绝对路径检查
+            handleConfirmCurrent()
           }
           break
         case 'Escape':
@@ -465,12 +479,15 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
           break
       }
     },
-    [filteredItems, selectedIndex, inputValue, handleGoBack, onSelect, onClose],
+    [filteredItems, selectedIndex, inputValue, handleGoBack, handleConfirmCurrent, onSelect, onClose],
   )
 
   // ==========================================
   // Render
   // ==========================================
+
+  const trimmedInput = inputValue.trim()
+  const relativeInput = !!trimmedInput && !isAbsoluteDirectory(trimmedInput)
 
   return (
     <Dialog
@@ -491,6 +508,8 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             type="text"
             value={inputValue}
             onChange={e => {
+              // 用户手动输入：标记后，迟到的异步初始化不得再覆盖
+              userEditedRef.current = true
               setInputValue(e.target.value)
               setSelectedIndex(0)
               if (pathError) setPathError(null)
@@ -515,6 +534,15 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
 
       {/* List */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-2 py-1 custom-scrollbar">
+        {/* 输入框不是绝对路径：说明后端不会接受，提示改成绝对路径 */}
+        {!error && relativeInput ? (
+          <div
+            className="rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 text-[length:var(--fs-xs)] text-text-400"
+            data-testid="relative-path-hint"
+          >
+            {t('projectDialog.invalidPath')}
+          </div>
+        ) : null}
         {error ? (
           <div className="flex items-center justify-center h-full text-danger-100 text-[length:var(--fs-sm)] px-4 text-center">
             {error}
@@ -694,35 +722,42 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             type="button"
             onClick={handleNativePick}
             title={t('projectDialog.pickInFileManager')}
+            aria-label={t('projectDialog.pickInFileManager')}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap',
+              'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap max-sm:px-2',
               interactive.subtle,
             )}
           >
-            <FolderOpenIcon className="w-3 h-3" />
-            {t('projectDialog.pickInFileManager')}
+            <FolderOpenIcon className="w-3 h-3 shrink-0" />
+            {/* 移动端空间紧张：只留图标，文案由 title/aria-label 提供 */}
+            <span className="hidden sm:inline">{t('projectDialog.pickInFileManager')}</span>
           </button>
         )}
         <button
           type="button"
           onClick={openClone}
+          title={t('projectDialog.cloneGit')}
+          aria-label={t('projectDialog.cloneGit')}
           className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap',
+            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap max-sm:px-2',
             interactive.subtle,
           )}
         >
-          <GitBranchIcon className="w-3 h-3" />
-          {t('projectDialog.cloneGit')}
+          <GitBranchIcon className="w-3 h-3 shrink-0" />
+          <span className="hidden sm:inline">{t('projectDialog.cloneGit')}</span>
         </button>
         <button
+          type="button"
           onClick={handleConfirmCurrent}
+          title={t('projectDialog.addCurrent')}
+          aria-label={t('projectDialog.addCurrent')}
           className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap',
+            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap max-sm:px-2',
             interactive.accent,
           )}
         >
-          <PlusIcon className="w-3 h-3" />
-          {t('projectDialog.addCurrent')}
+          <PlusIcon className="w-3 h-3 shrink-0" />
+          <span className="hidden sm:inline">{t('projectDialog.addCurrent')}</span>
         </button>
       </div>
     </Dialog>

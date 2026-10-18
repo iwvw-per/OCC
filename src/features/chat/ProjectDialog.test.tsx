@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProjectDialog } from './ProjectDialog'
 import { inferRepoName, isLikelyGitUrl } from './gitCloneUrl'
@@ -46,17 +46,89 @@ describe('ProjectDialog', () => {
     expect(screen.getByText('Add current')).toBeInTheDocument()
   })
 
-  it('reloads the same directory when reopened', async () => {
-    const { rerender } = render(<ProjectDialog key="first" isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} />)
+  it('keeps a trailing slash when going up a level', async () => {
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} />)
 
-    expect(await screen.findByText('src')).toBeInTheDocument()
+    const input = await screen.findByDisplayValue('/workspace/project/')
+    fireEvent.click(screen.getByText('.. (Parent)'))
 
-    rerender(<ProjectDialog key="closed" isOpen={false} onClose={vi.fn()} onSelect={vi.fn()} />)
-    rerender(<ProjectDialog key="second" isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} />)
+    // 少了尾斜杠会被当作过滤词，列表看起来是空的
+    await waitFor(() => expect(input).toHaveValue('/workspace/'))
+    expect(vi.mocked(listDirectory)).toHaveBeenLastCalledWith('/workspace/', undefined, undefined)
+  })
 
-    await waitFor(() => expect(vi.mocked(getPath).mock.calls.length).toBeGreaterThanOrEqual(2))
-    await waitFor(() => expect(vi.mocked(listDirectory).mock.calls.length).toBeGreaterThanOrEqual(2))
-    expect(await screen.findByText('src')).toBeInTheDocument()
+  it('goes up one level by trimming the absolute path', async () => {
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} initialPath="/opt/code/OCC/" />)
+
+    const input = await screen.findByDisplayValue('/opt/code/OCC/')
+    fireEvent.click(screen.getByText('.. (Parent)'))
+
+    // 直接砍掉一级，不做任何补全
+    await waitFor(() => expect(input).toHaveValue('/opt/code/'))
+    expect(vi.mocked(listDirectory)).toHaveBeenLastCalledWith('/opt/code/', undefined, undefined)
+  })
+
+  it('stops at the filesystem root when going up', async () => {
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} initialPath="/opt/" />)
+
+    const input = await screen.findByDisplayValue('/opt/')
+    fireEvent.click(screen.getByText('.. (Parent)'))
+
+    await waitFor(() => expect(input).toHaveValue('/'))
+  })
+
+  it('rejects relative input without rewriting it', async () => {
+    const onSelect = vi.fn()
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={onSelect} initialPath="/opt/code/" />)
+
+    const input = await screen.findByDisplayValue('/opt/code/')
+    fireEvent.change(input, { target: { value: '../code/' } })
+
+    expect(await screen.findByTestId('relative-path-hint')).toBeInTheDocument()
+
+    // 不猜、不补全：原样保留，交给用户改成绝对路径
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(input).toHaveValue('../code/')
+  })
+
+  it('leaves a relative path untouched when going up', async () => {
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} initialPath="/opt/code/" />)
+
+    const input = await screen.findByDisplayValue('/opt/code/')
+    fireEvent.change(input, { target: { value: '../code/' } })
+    fireEvent.click(screen.getByText('.. (Parent)'))
+
+    // 返回上级不猜相对路径：原样保留，绝不变成 `/code/`
+    expect(input).toHaveValue('../code/')
+  })
+
+  it('opens at home when the initial path is relative', async () => {
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} initialPath="../code/OCC" />)
+
+    await waitFor(() => expect(screen.getByDisplayValue('/workspace/project/')).toBeInTheDocument())
+  })
+
+  it('ignores a late async init after the user already navigated', async () => {
+    // getPath 很慢：初始化还没回来，用户已经手动改了路径
+    let resolvePath: (v: { home: string }) => void = () => {}
+    vi.mocked(getPath).mockImplementationOnce(
+      () =>
+        new Promise<{ home: string }>(r => {
+          resolvePath = r
+        }) as never,
+    )
+
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} initialPath="/opt/code/OCC/" />)
+    const input = document.querySelector('input') as HTMLInputElement
+    await waitFor(() => expect(input).not.toBeNull())
+
+    fireEvent.change(input, { target: { value: '/opt/' } })
+    expect(input).toHaveValue('/opt/')
+
+    // 迟到的 home 不能覆盖用户输入
+    resolvePath({ home: '/workspace/project' })
+    await waitFor(() => expect(input).toHaveValue('/opt/'))
   })
 
   it('offers the system folder picker for a local server on desktop', async () => {
