@@ -3,34 +3,27 @@ import { useContext, useEffect, type ContextType } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DirectoryContext } from './DirectoryContext.shared'
 import { DirectoryProvider } from './DirectoryContext'
+import { resetAppDataBindingForTests } from '../storage/appData'
 
-const { serverChangeListeners, getActiveServerIdMock, setJSONForMock, setJSONMock } = vi.hoisted(() => ({
+const { serverChangeListeners, getActiveServerIdMock } = vi.hoisted(() => ({
   serverChangeListeners: [] as Array<(id: string, reason: string) => void>,
   getActiveServerIdMock: vi.fn(() => 'aiagent:inst_work'),
-  setJSONForMock: vi.fn(),
-  setJSONMock: vi.fn(),
 }))
 
-vi.mock('../utils', async importOriginal => {
-  const actual = await importOriginal<typeof import('../utils')>()
-  return {
-    ...actual,
-    serverStorage: {
-      get: vi.fn(() => null),
-      getJSON: vi.fn(() => null),
-      set: vi.fn(),
-      setJSON: setJSONMock,
-      getFor: vi.fn(() => null),
-      getJSONFor: vi.fn(() => null),
-      setFor: vi.fn(),
-      setJSONFor: setJSONForMock,
-    },
-  }
-})
+/** 读取某个服务器桶里的项目列表 */
+function buckets(serverId: string): string[] {
+  const raw = localStorage.getItem(`srv:${serverId}:opencode-saved-directories`)
+  return raw ? (JSON.parse(raw) as Array<{ path: string }>).map(item => item.path) : []
+}
 
 vi.mock('../store/serverStore', () => ({
   serverStore: {
     getActiveServerId: getActiveServerIdMock,
+    getServerBaseUrl: () => 'http://127.0.0.1:4096',
+    getActiveBaseUrl: () => 'http://127.0.0.1:4096',
+    getServerAuth: () => undefined,
+    getActiveAuth: () => undefined,
+    getApiVersion: () => 'v2',
     onServerChange: (fn: (id: string, reason: string) => void) => {
       serverChangeListeners.push(fn)
       return () => {
@@ -82,40 +75,36 @@ describe('DirectoryContext per-server binding', () => {
 
   beforeEach(() => {
     localStorage.clear()
+    resetAppDataBindingForTests()
     serverChangeListeners.length = 0
     getActiveServerIdMock.mockReset().mockReturnValue('aiagent:inst_work')
-    setJSONForMock.mockReset()
-    setJSONMock.mockReset()
   })
 
-  it('writes back to the server the list was read from, not the current active one', async () => {
-    // 回归：写回曾用「当前活动服务器」，切换主机或同步引擎在别处触发重读时，
-    // 会把 A 主机的列表写进 B 主机的桶 —— 表现为「新建的项目一同步就没了」。
+  it('writes into the bucket of the server that is active at write time', async () => {
+    // 回归：写回曾用「读时绑定的 serverId」，切换主机后会把新列表写进旧桶 ——
+    // 表现为「新建的项目切回主机后消失」。现在 rebind 与写入同源，永远一致。
     render(
       <DirectoryProvider>
         <Probe />
       </DirectoryProvider>,
     )
 
-    // 切换活动服务器到 laptop（模拟用户在两端切主机 / 同步引擎触发）
+    await act(async () => {
+      latest?.addDirectory('/opt/code/OnWork')
+    })
+    expect(buckets('aiagent:inst_work')).toEqual(['/opt/code/OnWork'])
+
+    // 切到 laptop 后再添加：必须写进 laptop 的桶，且不污染 work 的桶
     getActiveServerIdMock.mockReturnValue('aiagent:inst_laptop')
     await act(async () => {
       serverChangeListeners.forEach(fn => fn('aiagent:inst_laptop', 'server-switch'))
     })
-    const callsBeforeSwitch = setJSONForMock.mock.calls.length
-
-    // 切换后再触发一次写入：必须写回 laptop（新绑定），而不是仍写 work
     await act(async () => {
-      latest?.addDirectory('D:/Code/AfterSwitch')
+      latest?.addDirectory('/opt/code/OnLaptop')
     })
 
-    const afterSwitch = setJSONForMock.mock.calls.slice(callsBeforeSwitch)
-    expect(afterSwitch.length).toBeGreaterThan(0)
-    for (const call of afterSwitch) {
-      expect(call[2]).toBe('aiagent:inst_laptop')
-    }
-    // 且不应再出现「写当前活动服务器」的旧路径
-    expect(setJSONMock).not.toHaveBeenCalled()
+    expect(buckets('aiagent:inst_laptop')).toEqual(['/opt/code/OnLaptop'])
+    expect(buckets('aiagent:inst_work')).toEqual(['/opt/code/OnWork'])
   })
 
   it('adds a directory and persists it under the bound server', async () => {
@@ -126,15 +115,11 @@ describe('DirectoryContext per-server binding', () => {
     )
 
     await act(async () => {
-      latest?.addDirectory('D:/Code/NewProject')
+      latest?.addDirectory('/opt/code/NewProject')
     })
 
-    const saved = latest?.savedDirectories.map(d => d.path) ?? []
-    expect(saved).toContain('D:/Code/NewProject')
-
-    const savedCalls = setJSONForMock.mock.calls.filter(call => String(call[0]).includes('saved-directories'))
-    expect(savedCalls.length).toBeGreaterThan(0)
-    expect(savedCalls[savedCalls.length - 1][2]).toBe('aiagent:inst_work')
+    expect(latest?.savedDirectories.map(d => d.path)).toContain('/opt/code/NewProject')
+    expect(buckets('aiagent:inst_work')).toContain('/opt/code/NewProject')
   })
 
   it('adds a directory only once when the same click fires twice', async () => {
@@ -155,20 +140,4 @@ describe('DirectoryContext per-server binding', () => {
     expect(saved.filter(p => p === '/opt/code/opencode-bg')).toHaveLength(1)
   })
 
-  it('writes the new directory under the active server bucket', async () => {
-    render(
-      <DirectoryProvider>
-        <Probe />
-      </DirectoryProvider>,
-    )
-
-    await act(async () => {
-      latest?.addDirectory('/opt/code/komidash')
-    })
-
-    const savedCalls = setJSONForMock.mock.calls.filter(call => String(call[0]).includes('saved-directories'))
-    expect(savedCalls.length).toBeGreaterThan(0)
-    // 必须写进「当前活动服务器」的桶；写进过期快照的桶会让项目切回主机后消失
-    expect(savedCalls[savedCalls.length - 1][2]).toBe(getActiveServerIdMock())
-  })
 })
