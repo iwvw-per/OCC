@@ -661,7 +661,7 @@ export function buildTurnDurationMap(messages: Message[], visibleMessages: Messa
   for (const message of messages) {
     if (message.info.role === 'user') {
       commitTurn()
-      currentUserCreated = message.info.time.created
+      currentUserCreated = message.info.time?.created ?? null
       currentVisibleAssistantId = null
       currentLastCompleted = null
       continue
@@ -958,7 +958,9 @@ export function buildProcessTimeline(
 
     const finalAssistant = assistants.length > 0 ? assistants[assistants.length - 1] : null
     const finalId = finalAssistant?.info.id ?? null
-    const startedAt = turn.user.info.time.created
+    // 缺 time（v2 轻量投影）时保持 undefined：回落成 0 会让「进行中」
+    // 计时器从 1970 年起算，界面显示成 Working for 56y…
+    const startedAt = turn.user.info.time?.created
     const durationMs = turnIsActive
       ? undefined
       : resolveTurnDurationMs(assistants, startedAt, turnDurationMap)
@@ -1026,7 +1028,7 @@ export function buildProcessTimeline(
  */
 export function shouldShowCompactionDivider(messages: Message[], compactedAt: number | undefined): boolean {
   if (compactedAt == null || messages.length === 0) return false
-  const lastCreated = messages[messages.length - 1]?.info.time.created ?? 0
+  const lastCreated = messages[messages.length - 1]?.info.time?.created ?? 0
   return compactedAt >= lastCreated
 }
 

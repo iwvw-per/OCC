@@ -197,6 +197,11 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       }
 
       setSavedState(prev => {
+        // 在 updater 里再判一次重：`savedDirectories` 是本次渲染的闭包快照，
+        // 同一点击若触发两次 addDirectory（双击、事件重复派发），两次都会读到
+        // 「不存在」，于是各追加一条 —— 项目列表里出现两条完全相同的目录。
+        // 以 prev 为准做幂等，保证一次添加只落一条。
+        if (prev.directories.some(d => isSameDirectory(d.path, newDir.path))) return prev
         const next = { ...prev, directories: [...prev.directories, newDir] }
         serverStorage.setJSONFor(STORAGE_KEY_SAVED, next.directories, next.serverId)
         return next

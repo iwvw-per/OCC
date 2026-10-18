@@ -37,7 +37,7 @@ export function useTokenRate(sessionId: string | null): TokenRateState {
         const message = messages[i]
         if (message.info.role !== 'assistant') continue
         const info = message.info
-        const created = info.time.created
+        const created = info.time?.created
         const completed = messageCompletedAt(message)
         if (!created || !completed || completed <= created) continue
 

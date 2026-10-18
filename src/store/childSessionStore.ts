@@ -101,7 +101,7 @@ class ChildSessionStore {
       title: session.title || i18n.t('chat:permissionDialog.subtaskFallback'),
       agent: session.agent,
       status: resolvedStatus,
-      createdAt: session.time.created,
+      createdAt: session.time?.created ?? 0,
     })
 
     this.notify()

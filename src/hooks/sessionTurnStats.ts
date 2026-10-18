@@ -118,7 +118,7 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
       continue
     }
 
-    const created = info.time.created
+    const created = info.time?.created
     // v2 轻量消息可能没有 time 字段：安全读取，避免整段统计崩溃
     const completed = messageCompletedAt(message)
 

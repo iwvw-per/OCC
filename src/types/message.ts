@@ -14,7 +14,12 @@ import type { Attachment } from '../features/attachment/types'
 // ============================================
 
 export interface MessageTime {
-  created: number
+  /**
+   * v2 轻量投影/流式消息可能整条没有 `time`，或只有 `created`/`completed` 之一。
+   * 读取方必须容忍缺失（`info.time?.created ?? 0`），否则渲染期会抛 TypeError
+   * 并被 ErrorBoundary 兜成整页「OCC ran into a problem」。
+   */
+  created?: number
   completed?: number
 }
 

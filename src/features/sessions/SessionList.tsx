@@ -138,7 +138,7 @@ export function SessionList({
     const monthAgo = today - 86400000 * 30
 
     sessions.forEach(session => {
-      const updated = session.time.updated ?? session.time.created
+      const updated = session.time?.updated ?? session.time?.created
       if (updated >= today) {
         groups.today.push(session)
       } else if (updated >= yesterday) {

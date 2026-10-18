@@ -136,4 +136,22 @@ describe('DirectoryContext per-server binding', () => {
     expect(savedCalls.length).toBeGreaterThan(0)
     expect(savedCalls[savedCalls.length - 1][2]).toBe('aiagent:inst_work')
   })
+
+  it('adds a directory only once when the same click fires twice', async () => {
+    render(
+      <DirectoryProvider>
+        <Probe />
+      </DirectoryProvider>,
+    )
+
+    // 同一点击触发两次 addDirectory（双击 / 事件重复派发）：闭包里的
+    // savedDirectories 两次都读到「不存在」，必须在 updater 内以 prev 去重。
+    await act(async () => {
+      latest?.addDirectory('/opt/code/opencode-bg')
+      latest?.addDirectory('/opt/code/opencode-bg/')
+    })
+
+    const saved = latest?.savedDirectories.map(d => d.path) ?? []
+    expect(saved.filter(p => p === '/opt/code/opencode-bg')).toHaveLength(1)
+  })
 })

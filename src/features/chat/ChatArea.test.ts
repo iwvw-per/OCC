@@ -605,6 +605,27 @@ describe('buildProcessTimeline', () => {
   const hasFinal = (message: Message) =>
     message.content.some(p => p.type === 'text')
 
+  it('survives lightweight messages whose info.time is missing', () => {
+    // v2 轻量投影可能整条没有 time：直接读 info.time.created 会抛
+    // "Cannot read properties of undefined (reading 'created')" 并白屏。
+    const user = createUserMessage('user-1', 1000)
+    delete (user.info as { time?: unknown }).time
+    const assistant = createAssistantMessage('assistant-1', [createTextPart('t', 'assistant-1', 'ok')], 1001)
+    delete (assistant.info as { time?: unknown }).time
+
+    const items = buildProcessTimeline([user, assistant], {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: true,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    // 缺 time 时 startedAt 保持 undefined，而不是回落成 0（否则计时从 1970 起算）
+    const shell = items.find(item => item.kind === 'process-shell')
+    expect(shell).toMatchObject({ kind: 'process-shell' })
+    expect((shell as { startedAt?: number }).startedAt).toBeUndefined()
+  })
+
   it('delays empty Working shell until entry-ready gate opens', () => {
     const messages = [createUserMessage('user-1', 1000)]
     // ChatArea 会在 user 入场完成后再额外 delay，再把 id 放进 ready 集合

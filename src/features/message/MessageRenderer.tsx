@@ -561,7 +561,7 @@ const PinActionButton = memo(function PinActionButton({ message, sessionId }: Pi
       messageId: message.info.id,
       role: message.info.role === 'user' ? 'user' : 'assistant',
       excerpt: buildPinnedMessageExcerpt(getMessageText(message)),
-      createdAt: message.info.time.created,
+      createdAt: message.info.time?.created ?? 0,
     })
   }, [message, sessionId])
 
@@ -674,7 +674,7 @@ const UserMessageView = memo(function UserMessageView({
   const { collapseUserMessages, renderUserMarkdown } = useTheme()
   const actionBarClass = useMessageActionBarClass()
 
-  const wrapperRef = useEntryGrowAnimation(info.time.created, true, info.id, onEntryGrowComplete)
+  const wrapperRef = useEntryGrowAnimation(info.time?.created ?? 0, true, info.id, onEntryGrowComplete)
 
   const textParts = content.filter((c): c is TextContent => c.type === 'text' && !c.synthetic)
   const syntheticParts = content.filter((c): c is TextContent => c.type === 'text' && !!c.synthetic)
@@ -830,7 +830,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
 
   // 壳内（process/inline）和壳外 final 都别做 height 0→N：final 也是拆分后新挂载，动画会顶布局
   const allowEntryGrow = processContentScope === 'all'
-  const wrapperRef = useEntryGrowAnimation(info.time.created, allowEntryGrow)
+  const wrapperRef = useEntryGrowAnimation(info.time?.created ?? 0, allowEntryGrow)
 
   useEffect(() => {
     if (content.length === 0 && onEnsureParts) {
