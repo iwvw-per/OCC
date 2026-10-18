@@ -119,6 +119,9 @@ export function SidePanel({
   const [batchDeleteSessionConfirm, setBatchDeleteSessionConfirm] = useState(false)
   const [batchRemoveProjectConfirm, setBatchRemoveProjectConfirm] = useState(false)
   const [isBatchDeleting, setIsBatchDeleting] = useState(false)
+  // 已用户手动移除的派生项目 worktree：它们不在 savedDirectories 里，
+  // removeDirectory 对它们无效，需要在视图层直接排除，避免点移除后仍出现在侧栏
+  const [removedDerivedWorktrees, setRemovedDerivedWorktrees] = useState<Set<string>>(new Set())
 
   const showLabels = isExpanded || isMobile
   const newChatShortcut = useKeybindingLabel('newSession')
@@ -378,8 +381,22 @@ export function SidePanel({
     if (selectedProjectIds.size === 0) return
     for (const projectId of selectedProjectIds) {
       const project = folderProjects.find(item => item.id === projectId)
-      const targets = project ? resolveSavedProjectPaths(project, savedDirectoryPaths) : []
-      for (const directory of targets) removeDirectory(directory)
+      if (!project) continue
+      const targets = resolveSavedProjectPaths(project, savedDirectoryPaths)
+      let removed = false
+      for (const directory of targets) {
+        removeDirectory(directory)
+        removed = true
+      }
+      // 派生项目未匹配到已保存路径：从视图中隐藏
+      if (!removed && project.isDerived && project.worktree) {
+        setRemovedDerivedWorktrees(prev => {
+          const next = new Set(prev)
+          next.add(project.worktree)
+          return next
+        })
+        removeDirectory(project.worktree)
+      }
     }
     clearProjectSelection()
     setBatchRemoveProjectConfirm(false)
@@ -388,14 +405,27 @@ export function SidePanel({
   // 单个项目移除：二次点击防误触（按钮层），这里直接执行。
   // 语义唯一：从「已保存项目」列表移除，不动磁盘文件、不动会话；随时可重新添加。
   //
-  // 派生项目（未显式保存、由服务器当前 worktree 推导）也可能是「用户确实保存过、
-  // 但被上一版过滤掉」的目录，因此不再一律跳过：按已保存路径匹配，
-  // 匹配到就照常移除；完全不在已保存列表里才视为无效操作。
+  // 派生项目（未显式保存、由服务器当前 worktree 推导）也不在 savedDirectories 里，
+  // removeDirectory 对它们无效。因此对派生项目，直接从视图中隐藏（加入
+  // removedDerivedWorktrees），并尽力调用 removeDirectory（以防它其实已保存）。
   const handleRemoveProjectClick = useCallback(
     (project: FolderRecentProject) => {
-      // 按「已保存路径」精确匹配：派生项目若对应一个真实保存过的目录，也要能删掉
+      // 先尝试按已保存路径匹配：已保存项目（包括派生项目对应的已保存目录）能删掉
       const targets = resolveSavedProjectPaths(project, savedDirectoryPaths)
-      for (const directory of targets) removeDirectory(directory)
+      let removed = false
+      for (const directory of targets) {
+        removeDirectory(directory)
+        removed = true
+      }
+      // 派生项目且未匹配到任何已保存路径：从视图中直接隐藏
+      if (!removed && project.isDerived && project.worktree) {
+        setRemovedDerivedWorktrees(prev => {
+          const next = new Set(prev)
+          next.add(project.worktree)
+          return next
+        })
+        removeDirectory(project.worktree)
+      }
     },
     [removeDirectory, savedDirectoryPaths],
   )
@@ -738,7 +768,7 @@ export function SidePanel({
             className={`flex-1 overflow-hidden ${hostSlide || 'animate-in fade-in duration-150'} ${isEditMode ? 'select-none' : ''}`}
           >
             <FolderRecentList
-              projects={sortedFolderProjects}
+              projects={sortedFolderProjects.filter(p => !removedDerivedWorktrees.has(p.worktree))}
               {...commonFolderRecentListProps}
               onReorderProject={handleReorderProjectGroup}
               workspaceDirectoriesByProjectId={projects.workspaceDirectoriesByProjectId}
