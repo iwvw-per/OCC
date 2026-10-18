@@ -14,6 +14,7 @@
 //      把写入放进 updater 会让时机与次数不可控（曾导致新加的项目被旧快照覆盖）。
 
 import type { z } from 'zod'
+import { createWriteBehind } from './writeBehind'
 
 export type StoreScope = { kind: 'global' } | { kind: 'server'; serverId: string }
 
@@ -24,7 +25,15 @@ export interface CreateStoreOptions<T> {
   /** 入口校验；不合法时回落到 defaultValue */
   schema: z.ZodType<T>
   defaultValue: T
-  /** 写入节流毫秒数（0 = 立即写） */
+  /**
+   * 写入合并窗口（ms）。
+   *
+   * - `0`（默认）：每次 commit 立即落盘，语义最直观；
+   * - `> 0`：同一 key 在窗口内的多次 commit 合并成一次写入（write-behind），
+   *   页面隐藏/卸载时强制冲刷，不会丢数据。
+   *
+   * 高频更新的 store（流式文本、拖动中的布局）建议开一个很小的窗口（50–200ms）。
+   */
   writeThrottleMs?: number
 }
 
@@ -39,6 +48,8 @@ export interface PersistentStore<T> {
   getStorageKey(): string
   /** 服务器切换：改绑到新 serverId 并重读（global scope 为空操作） */
   rebind(serverId: string): void
+  /** 立即落盘（写入合并模式下才有实际意义） */
+  flush(): void
   reset(): void
 }
 
@@ -87,28 +98,35 @@ export function createStore<T>({
   let snapshot = read(storageKey, schema, defaultValue)
   let version = 0
   const listeners = new Set<() => void>()
-  let timer: ReturnType<typeof setTimeout> | null = null
-  let dirty = false
-
   const notify = () => {
     version += 1
     listeners.forEach(fn => fn())
   }
 
-  const write = () => {
-    dirty = false
+  const writeNow = () => {
     localStorage.setItem(storageKey, JSON.stringify(snapshot))
   }
 
+  // 合并窗口内的多次 commit 只落盘一次：batch 里的值就是读取时的当前快照。
+  const writer =
+    writeThrottleMs > 0
+      ? createWriteBehind<string, void>({
+          delay: writeThrottleMs,
+          write: () => writeNow(),
+          onError: error => console.error(`[store:${key}] 写入失败，稍后重试`, error),
+        })
+      : null
+
   const scheduleWrite = () => {
-    if (writeThrottleMs <= 0) return write()
-    dirty = true
-    if (timer) return
-    timer = setTimeout(() => {
-      timer = null
-      if (dirty) write()
-    }, writeThrottleMs)
+    if (!writer) {
+      writeNow()
+      return
+    }
+    writer.set(key, undefined)
   }
+
+  /** 立即落盘（写入合并模式下用于外部强制保存）。 */
+  const flush = () => (writer ? writer.flush() : undefined)
 
   const store: PersistentStore<T> = {
     get: () => snapshot,
@@ -154,9 +172,11 @@ export function createStore<T>({
 
     reset() {
       snapshot = defaultValue
-      localStorage.setItem(storageKey, JSON.stringify(snapshot))
+      writeNow()
       notify()
     },
+
+    flush,
   }
 
   // 跨标签页：storage 事件只在「其他标签页写入」时触发，本页收不到自己的写入，

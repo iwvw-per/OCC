@@ -126,3 +126,39 @@ describe('createStore', () => {
     vi.useRealTimers()
   })
 })
+
+describe('createStore write-behind', () => {
+  it('exposes flush() that writes the pending value immediately', () => {
+    vi.useFakeTimers()
+    const store = createStore({
+      key: 'flush-k',
+      scope: { kind: 'global' },
+      schema,
+      defaultValue: [],
+      writeThrottleMs: 1000,
+    })
+
+    store.commit(list => [...list, { path: '/a', name: 'A' }])
+    expect(localStorage.getItem('flush-k')).toBeNull()
+
+    store.flush()
+    expect(JSON.parse(localStorage.getItem('flush-k') ?? '[]')).toHaveLength(1)
+    vi.useRealTimers()
+  })
+
+  it('reset() writes through immediately even in write-behind mode', () => {
+    vi.useFakeTimers()
+    const store = createStore({
+      key: 'reset-k',
+      scope: { kind: 'global' },
+      schema,
+      defaultValue: [],
+      writeThrottleMs: 1000,
+    })
+
+    store.commit(list => [...list, { path: '/a', name: 'A' }])
+    store.reset()
+    expect(localStorage.getItem('reset-k')).toBe('[]')
+    vi.useRealTimers()
+  })
+})
