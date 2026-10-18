@@ -1,5 +1,5 @@
 // ============================================
-// v2 事件 → v1 GlobalEvent 适配
+// v2 原生事件 → 内部 GlobalEvent 适配
 //
 // v2 的 event.subscribe() 产出 V2Event：`{ id, created, type, data, location }`，
 // 事件名与 v1 完全不同（如 session.text.delta / session.tool.success）。

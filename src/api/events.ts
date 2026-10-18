@@ -262,7 +262,7 @@ function connectServer(serverId: string) {
   registerLifecycleListeners()
 
   // 事件流走 @opencode/client 的 event.subscribe()（AsyncIterable）。
-  // v1 的 /global/event 通道已下线：v2 是唯一受支持的协议。
+  // 事件流：v2 是唯一受支持的协议。
   connectViaV2(conn)
 }
 
@@ -534,7 +534,7 @@ function broadcastEvent(conn: ServerConnection, globalEvent: GlobalEvent) {
 }
 
 function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: EventCallbacks) {
-  // v2 扩展事件：session.renamed 不在 v1 SDK 的事件联合里，先于 switch 处理。
+  // 扩展事件：session.renamed 不带完整 session，先于 switch 单独处理。
   if ((payload.type as string) === EventTypes.SESSION_RENAMED) {
     const props = (payload as { properties?: { sessionID?: unknown; title?: unknown } }).properties
     const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
