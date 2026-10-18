@@ -97,7 +97,7 @@ export const Sidebar = memo(function Sidebar({
       // 已存在时 addDirectory 只切换当前目录、不改列表，界面上几乎没有反馈，
       // 用户会以为「添加没生效」。这里明确提示，而不是静默吞掉。
       if (alreadySaved) {
-        notificationStore.toast('completed', t('sidebar.addProject'), t('projectDialog.alreadyInList'))
+        notificationStore.toast('completed', t('projectDialog.alreadyInListTitle'), t('projectDialog.alreadyInList'))
       }
       if (!isOverlay) {
         onOpen()

@@ -220,6 +220,7 @@
     "cloneInvalidName": "Directory name is required and cannot contain / or \\",
     "cloneFailed": "Clone failed (exit code {{code}}). See the output below.",
     "invalidPathTitle": "Cannot add project",
+    "alreadyInListTitle": "Project already exists",
     "alreadyInList": "This project is already in the list",
     "invalidPath": "Enter an absolute path (for example /home/user/project or C:/Users/name/project). Relative paths cannot be used as project directories."
   },
