@@ -63,15 +63,6 @@ function seedStorage() {
   sessionStorage.setItem('opencode-active-server', SERVER_ID)
 }
 
-/** v2 facade 暴露 session.experimental.list。 */
-type SessionClient = { session: { list: (q: never) => Promise<unknown> } }
-
-function listSessions(client: unknown) {
-  const sdk = client as SessionClient & { session: { experimental?: { list: (q: never) => Promise<unknown> } } }
-  if (sdk.session.experimental) return sdk.session.experimental.list({} as never)
-  return sdk.session.list({} as never)
-}
-
 describe('v2 client: only /api/* requests', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -93,11 +84,11 @@ describe('v2 client: only /api/* requests', () => {
     expect(requestLog).toEqual(['/api/info'])
   })
 
-  it('the client factory returns the v2 facade, hitting only /api/*', async () => {
-    const { getSDKClient } = await import('./sdk')
+  it('the v2 client hits only /api/*', async () => {
+    const { getV2Client } = await import('./sdkV2')
 
     requestLog.length = 0
-    await expect(listSessions(getSDKClient(SERVER_ID))).resolves.toBeDefined()
+    await expect(getV2Client(SERVER_ID).session.list({ limit: 5 })).resolves.toBeDefined()
     expect(requestLog.every(p => p.startsWith('/api/'))).toBe(true)
     expect(requestLog).not.toContain('/session')
   })

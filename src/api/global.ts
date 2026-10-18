@@ -3,9 +3,7 @@
 // ============================================
 
 import type { GlobalHealthResponse as HealthInfo } from '@opencode-ai/sdk/v2/client'
-import { getSDKClient, unwrap } from './sdk'
 import { getV2Client } from './sdkV2'
-import { formatPathForApi } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
 
 /**
@@ -20,10 +18,9 @@ export async function getHealth(): Promise<HealthInfo> {
 
 /**
  * 释放当前实例
+ *
+ * v2 无对应能力（实例由 server 进程管理），客户端退出/清理时调用，安全 no-op。
  */
-export async function disposeInstance(directory?: string): Promise<boolean> {
-  const sid = serverStore.getActiveServerId()
-  const sdk = getSDKClient(sid)
-  unwrap(await sdk.instance.dispose({ directory: formatPathForApi(directory, sid) }))
+export async function disposeInstance(_directory?: string): Promise<boolean> {
   return true
 }

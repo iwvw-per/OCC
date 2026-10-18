@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { createV2FacadeMock, getActiveBaseUrlMock, getActiveAuthMock, isTauriMock, getServerBaseUrlMock, getServerAuthMock, getActiveServerIdMock } =
+const { getActiveBaseUrlMock, getActiveAuthMock, isTauriMock, getServerBaseUrlMock, getServerAuthMock, getActiveServerIdMock } =
   vi.hoisted(() => ({
-    createV2FacadeMock: vi.fn(() => ({ kind: 'v2-facade' })),
     getActiveBaseUrlMock: vi.fn(() => 'http://127.0.0.1:4096'),
     getActiveAuthMock: vi.fn(() => null),
     isTauriMock: vi.fn(() => false),
@@ -12,7 +11,7 @@ const { createV2FacadeMock, getActiveBaseUrlMock, getActiveAuthMock, isTauriMock
   }))
 
 vi.mock('../store/serverStore', () => ({
-  makeBasicAuthHeader: vi.fn(() => 'Basic token'),
+  makeAuthHeader: vi.fn(() => 'Bearer token'),
   serverStore: {
     getActiveBaseUrl: getActiveBaseUrlMock,
     getActiveAuth: getActiveAuthMock,
@@ -22,69 +21,22 @@ vi.mock('../store/serverStore', () => ({
   },
 }))
 
-vi.mock('./clientFacade', () => ({
-  createV2Facade: createV2FacadeMock,
-}))
-
 vi.mock('../utils/tauri', () => ({
   isTauri: isTauriMock,
 }))
 
-describe('sdk client lifecycle', () => {
-  beforeEach(async () => {
-    vi.restoreAllMocks()
-    createV2FacadeMock.mockClear()
-    getActiveBaseUrlMock.mockReturnValue('http://127.0.0.1:4096')
-    getActiveAuthMock.mockReturnValue(null)
-    isTauriMock.mockReturnValue(false)
-    getServerBaseUrlMock.mockReturnValue('http://127.0.0.1:4096')
-    getServerAuthMock.mockReturnValue(null)
-    getActiveServerIdMock.mockReturnValue('srv-1')
-    const { abortInFlightApiRequests, invalidateSDKClient } = await import('./sdk')
-    abortInFlightApiRequests('reset test state')
-    invalidateSDKClient()
-  })
-
-  it('always returns the v2 facade and caches it per server', async () => {
-    const { getSDKClient } = await import('./sdk')
-
-    const first = getSDKClient() as unknown as { kind: string }
-    expect(first.kind).toBe('v2-facade')
-    // 同一 serverId 复用缓存，不重复构建
-    expect(getSDKClient()).toBe(first)
-  })
-
-  it('rebuilds the facade after invalidateSDKClient', async () => {
-    const { getSDKClient, invalidateSDKClient } = await import('./sdk')
-
-    const first = getSDKClient()
-    invalidateSDKClient()
-    const second = getSDKClient()
-
-    expect(second).not.toBe(first)
-  })
-
-  it('rebuilds the facade when the server endpoint changes', async () => {
-    const { getSDKClient } = await import('./sdk')
-
-    const first = getSDKClient('srv-1')
-    getServerBaseUrlMock.mockReturnValue('http://127.0.0.1:4599')
-    const second = getSDKClient('srv-1')
-
-    expect(second).not.toBe(first)
-  })
-})
-
 describe('trackedFetch lifecycle', () => {
   beforeEach(async () => {
     vi.restoreAllMocks()
-    const { abortInFlightApiRequests, invalidateSDKClient } = await import('./sdk')
+    isTauriMock.mockReturnValue(false)
+    getActiveAuthMock.mockReturnValue(null)
+    getServerAuthMock.mockReturnValue(null)
+    const { abortInFlightApiRequests } = await import('./sdk')
     abortInFlightApiRequests('reset test state')
-    invalidateSDKClient()
   })
 
   it('aborts in-flight requests when the server endpoint changes', async () => {
-    const { abortInFlightApiRequests } = await import('./sdk')
+    const { abortInFlightApiRequests, getApiRequestGeneration, trackedFetch } = await import('./sdk')
     let signal: AbortSignal | undefined
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => {
@@ -94,8 +46,7 @@ describe('trackedFetch lifecycle', () => {
       })
     })
 
-    const { trackedFetch, getApiRequestGeneration } = await import('./sdk')
-    const request = trackedFetch('http://127.0.0.1:4096/project/current', undefined, getApiRequestGeneration())
+    const request = trackedFetch('http://127.0.0.1:4096/api/project', undefined, getApiRequestGeneration())
 
     abortInFlightApiRequests('Server endpoint changed')
 
@@ -111,8 +62,24 @@ describe('trackedFetch lifecycle', () => {
     abortInFlightApiRequests('Server endpoint changed')
 
     await expect(
-      trackedFetch('http://127.0.0.1:4096/project/current', undefined, staleGeneration),
+      trackedFetch('http://127.0.0.1:4096/api/project', undefined, staleGeneration),
     ).rejects.toMatchObject({ name: 'AbortError' })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('buildHeaders', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    getActiveAuthMock.mockReturnValue(null as never)
+    getServerAuthMock.mockReturnValue(null as never)
+  })
+
+  it('adds Authorization only when credentials are configured', async () => {
+    const { buildHeaders } = await import('./sdk')
+    expect(buildHeaders('srv-1')).toEqual({})
+
+    getServerAuthMock.mockReturnValue({ username: 'u', password: 'p' } as never)
+    expect(buildHeaders('srv-1')).toEqual({ Authorization: 'Bearer token' })
   })
 })

@@ -2,10 +2,8 @@
 // Worktree API - Git Worktree 管理
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
-import { nativeListWorktrees, nativeCreateWorktree } from './v2NativeWorktree'
-import type { Worktree, WorktreeCreateInput, WorktreeRemoveInput, WorktreeResetInput } from '../types/api/worktree'
-import { formatPathForApi } from '../utils/directoryUtils'
+import { nativeListWorktrees, nativeCreateWorktree, nativeRemoveWorktree, nativeRefreshWorktrees } from './v2NativeWorktree'
+import type { Worktree, WorktreeCreateInput } from '../types/api/worktree'
 import { serverStore } from '../store/serverStore'
 
 /**
@@ -31,19 +29,18 @@ export async function createWorktree(params: WorktreeCreateInput, directory?: st
 /**
  * 删除 worktree
  */
-export async function removeWorktree(params: WorktreeRemoveInput, directory?: string): Promise<boolean> {
-  const sid = serverStore.getActiveServerId()
-  const sdk = getSDKClient(sid)
-  unwrap(await sdk.worktree.remove({ directory: formatPathForApi(directory, sid), worktreeRemoveInput: params }))
-  return true
+/**
+ * 删除 worktree
+ */
+export async function removeWorktree(directory: string, baseDirectory?: string, serverId?: string): Promise<boolean> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  return nativeRemoveWorktree(sid, { directory: baseDirectory, worktreeDirectory: directory, force: true })
 }
 
 /**
- * 重置 worktree
+ * 刷新 worktree 列表（v2 无 v1 的 reset 语义，这里等价于让服务端重新扫描）
  */
-export async function resetWorktree(params: WorktreeResetInput, directory?: string): Promise<boolean> {
-  const sid = serverStore.getActiveServerId()
-  const sdk = getSDKClient(sid)
-  unwrap(await sdk.worktree.reset({ directory: formatPathForApi(directory, sid), worktreeResetInput: params }))
-  return true
+export async function resetWorktree(_directory: string, baseDirectory?: string, serverId?: string): Promise<boolean> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  return nativeRefreshWorktrees(sid, { directory: baseDirectory })
 }

@@ -196,7 +196,7 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
         }
 
         await releaseWorktreeResources(directory)
-        await removeWorktree({ directory }, baseDirectory)
+        await removeWorktree(directory, baseDirectory)
         await loadWorktrees()
         requestGitWorkspaceCatalogRefresh()
       } catch (e) {
@@ -218,7 +218,7 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
       try {
         const baseDirectory = requireRootDirectory()
         await releaseWorktreeResources(directory)
-        await resetWorktree({ directory }, baseDirectory)
+        await resetWorktree(directory, baseDirectory)
         await loadWorktrees()
         requestGitWorkspaceCatalogRefresh()
       } catch (e) {

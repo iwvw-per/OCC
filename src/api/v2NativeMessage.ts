@@ -1,8 +1,7 @@
 // ============================================
 // v2 原生 Message 访问层
 //
-// 直接用 @opencode/client（v2 原生）调用消息相关接口，
-// 不经过 clientFacade 的 v1→v2 facade 层。
+// 直接用 @opencode/client（v2 原生）调用消息相关接口。
 // ============================================
 
 import { getV2Client } from './sdkV2'

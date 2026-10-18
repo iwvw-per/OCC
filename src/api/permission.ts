@@ -1,9 +1,8 @@
 // ============================================
 // Permission & Question API Functions
-// 基于 @opencode-ai/sdk: /permission, /question 相关接口
+// 权限：permission.* 原生接口；提问：v2 的 Form 体系
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
 import { getV2Client } from './sdkV2'
 import { nativeListPermissions } from './v2NativeAgent'
 import { nativeReplyForm, nativeCancelForm } from './v2NativeSession'
@@ -79,31 +78,16 @@ export async function replyPermission(
   sessionId?: string,
   serverId?: string,
 ): Promise<boolean> {
-  const sdk = getSDKClient(serverId)
-
-  if (sessionId) {
-    const target = resolveSessionTarget(sessionId, serverId)
-    unwrap(
-      await sdk.permission.respond({
-        sessionID: target.sessionId,
-        permissionID: requestId,
-        directory: formatPathForApi(directory, serverId),
-        response: reply,
-      }),
-    )
-    invalidatePending('permission', directory, serverId)
-    return true
-  }
-
-  unwrap(
-    await sdk.permission.reply({
-      requestID: requestId,
-      directory: formatPathForApi(directory, serverId),
-      reply,
-      message,
-    }),
-  )
-  invalidatePending('permission', directory, serverId)
+  if (!sessionId) return false
+  const sid = serverId ?? serverStore.getActiveServerId()
+  const target = resolveSessionTarget(sessionId, sid)
+  await getV2Client(sid).permission.reply({
+    sessionID: target.sessionId,
+    requestID: requestId,
+    decision: reply as never,
+    message,
+  })
+  invalidatePending('permission', directory, sid)
   return true
 }
 

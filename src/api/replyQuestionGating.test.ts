@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { nativeReplyFormMock, nativeCancelFormMock, getApiVersionMock, getActiveServerIdMock } = vi.hoisted(() => ({
+const { nativeReplyFormMock, nativeCancelFormMock, getActiveServerIdMock } = vi.hoisted(() => ({
   nativeReplyFormMock: vi.fn(),
   nativeCancelFormMock: vi.fn(),
-  getApiVersionMock: vi.fn(() => 'v2'),
   getActiveServerIdMock: vi.fn(() => 'srv'),
 }))
 
@@ -32,7 +31,6 @@ import { replyQuestion } from './permission'
 describe('replyQuestion form gating', () => {
   beforeEach(() => {
     nativeReplyFormMock.mockReset()
-    getApiVersionMock.mockReturnValue('v2')
     getActiveServerIdMock.mockReturnValue('srv')
   })
 

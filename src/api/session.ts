@@ -3,7 +3,6 @@
 // 基于 @opencode-ai/sdk: /session 相关接口
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
 import { getV2Client } from './sdkV2'
 import {
   nativeListSessions,
@@ -312,14 +311,9 @@ export async function deleteSession(sessionId: string, _directory?: string, serv
 /**
  * 中止 session
  */
-export async function abortSession(sessionId: string, directory?: string, serverId?: string): Promise<boolean> {
+export async function abortSession(sessionId: string, _directory?: string, serverId?: string): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
   return nativeInterruptSession(target.serverId, target.sessionId)
-  const sdk = getSDKClient(target.serverId)
-  unwrap(
-    await sdk.session.abort({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
-  )
-  return true
 }
 
 /**
@@ -328,25 +322,12 @@ export async function abortSession(sessionId: string, directory?: string, server
 export async function revertMessage(
   sessionId: string,
   messageId: string,
-  partId?: string,
-  directory?: string,
+  _partId?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
-  {
-    const session = await nativeRevertMessage(target.serverId, { sessionID: target.sessionId, messageID: messageId })
-    invalidateSessionMetaCache(target.serverId, target.sessionId)
-    return session
-  }
-  const sdk = getSDKClient(target.serverId)
-  const session = unwrap(
-    await sdk.session.revert({
-      sessionID: target.sessionId,
-      directory: formatPathForApi(directory, target.serverId),
-      messageID: messageId,
-      partID: partId,
-    }),
-  )
+  const session = await nativeRevertMessage(target.serverId, { sessionID: target.sessionId, messageID: messageId })
   invalidateSessionMetaCache(target.serverId, target.sessionId)
   return session
 }

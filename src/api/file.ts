@@ -3,9 +3,8 @@
 // 基于 @opencode-ai/sdk: /file, /find/file, /find/symbol 相关接口
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
 import { nativeListDirectory, nativeReadFile, nativeFindFiles } from './v2NativeFile'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import type { FileNode, FileContent, FileStatusItem, TextSearchMatch } from './types'
 import { serverStore } from '../store/serverStore'
 
@@ -138,15 +137,16 @@ export async function getFileContent(path: string, directory?: string, serverId?
 /**
  * 获取文件 git 状态
  */
-export async function getFileStatus(directory?: string, serverId?: string): Promise<FileStatusItem[]> {
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.file.status({ directory: formatPathForApi(directory, serverId) }))
+export async function getFileStatus(_directory?: string, _serverId?: string): Promise<FileStatusItem[]> {
+  // v2 没有「全仓库文件状态」端点：状态由 vcs.status / session.diff 提供。
+  return []
 }
 
 /**
  * 搜索文件正文内容
+ *
+ * v2 无全文搜索端点（file.find 只搜文件名），返回空结果。
  */
-export async function searchText(pattern: string, directory?: string, serverId?: string): Promise<TextSearchMatch[]> {
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.find.text({ pattern, directory: formatPathForApi(directory, serverId) }))
+export async function searchText(_pattern: string, _directory?: string, _serverId?: string): Promise<TextSearchMatch[]> {
+  return []
 }

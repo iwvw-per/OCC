@@ -1,6 +1,5 @@
 import { useSyncExternalStore, useCallback, useEffect } from 'react'
 import { getActiveModels, type ModelInfo } from '../api'
-import { getSDKClientAsync } from '../api/sdk'
 import { serverStore } from '../store/serverStore'
 import i18n from '../i18n'
 
@@ -49,7 +48,6 @@ async function _fetchModels(serverId: string, force = false) {
   const promise = (async () => {
     _setState(serverId, { isLoading: true, error: null })
     try {
-      await getSDKClientAsync(serverId)
       const data = await getActiveModels(undefined, serverId)
       if (generation === _fetchGenerations.get(serverId)) {
         _setState(serverId, { models: data, isLoading: false })

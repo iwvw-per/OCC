@@ -3,7 +3,6 @@
 //
 // 直接用 @opencode/client（v2 原生）调用 session 相关接口，
 // 适配回前端 ApiSession 形状（复用 v2/adapt 的 adaptSession），
-// 不经过 clientFacade 的 v1→v2 facade 层。
 // ============================================
 
 import { getV2Client } from './sdkV2'

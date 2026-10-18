@@ -1,16 +1,16 @@
 // ============================================
-// SDK Client - OpenCode 2.x 统一客户端
+// HTTP 基础设施 - OpenCode 2.x
 //
 // 职责：
-// 1. 按服务器缓存 SDK client
-// 2. 整合 baseUrl / auth / tauri fetch
-// 3. 为上层 API 模块提供统一的 client 获取方式
+// 1. Tauri / 浏览器统一 fetch（trackedFetch：超时、端点切换时取消）
+// 2. 认证头构造
+// 3. unwrap：从 SDK 返回值中取 data / 抛 error
+//
+// 具体的 SDK client 由 sdkV2.ts（@opencode/client）创建。
 // ============================================
 
-import type { OpencodeClient } from '@opencode-ai/sdk/v2/client'
 import { serverStore, makeAuthHeader } from '../store/serverStore'
 import { isTauri } from '../utils/tauri'
-import { createV2Facade } from './clientFacade'
 
 // Tauri fetch 缓存
 let _tauriFetch: typeof globalThis.fetch | null = null
@@ -118,23 +118,7 @@ export function abortInFlightApiRequests(reason = 'Server endpoint changed'): vo
   _apiRequestControllers.clear()
 }
 
-// Client 缓存：按 serverId → "baseUrl + authHash" 缓存实例，避免重复创建
-// 缺省 serverId（undefined）表示活动服务器
-interface CachedClientEntry {
-  key: string
-  client: OpencodeClient
-}
-
-const _cachedClients = new Map<string | undefined, CachedClientEntry>()
-
-export function buildCacheKey(serverId?: string): string {
-  const baseUrl = serverId ? serverStore.getServerBaseUrl(serverId) : serverStore.getActiveBaseUrl()
-  const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
-  const authPart = auth?.password ? `${auth.username}:${auth.password}` : ''
-  // 端点/凭据参与 key：服务器地址或凭据变更后缓存自动失效，避免继续用旧 client 发请求。
-  return `${baseUrl}|${authPart}`
-}
-
+/** 构造认证头（令牌走 Bearer，否则回退 Basic）。 */
 export function buildHeaders(serverId?: string): Record<string, string> {
   const headers: Record<string, string> = {}
   const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
@@ -142,51 +126,6 @@ export function buildHeaders(serverId?: string): Record<string, string> {
     headers['Authorization'] = makeAuthHeader(auth)
   }
   return headers
-}
-
-/**
- * 同步获取 SDK client。
- * 每次请求经 trackedFetch：fetch 已就绪时同步发起；Tauri 插件尚未加载完成时
- * 等待其就绪后再发，不会回退到 webview 原生 fetch。
- * @param serverId 指定服务器（缺省用活动服务器）
- */
-export function getSDKClient(serverId?: string): OpencodeClient {
-  const key = buildCacheKey(serverId)
-  const cached = _cachedClients.get(serverId)
-  if (cached && cached.key === key) {
-    return cached.client
-  }
-
-  // OCC 只支持 OpenCode 2.x：返回对内部形状的 facade（内部走 @opencode/client 并适配响应）。
-  const facade = createV2Facade(serverId)
-  _cachedClients.set(serverId, { key, client: facade })
-  return facade
-}
-
-/**
- * 异步获取 SDK client（确保 tauri fetch 已加载）
- * 在应用初始化时应该先调一次这个
- * @param serverId 指定服务器（缺省用活动服务器）
- */
-export async function getSDKClientAsync(serverId?: string): Promise<OpencodeClient> {
-  if (isTauri()) {
-    await getTauriFetch()
-  }
-  // 使 cache 失效以便用新的 tauri fetch 重建
-  _cachedClients.delete(serverId)
-  return getSDKClient(serverId)
-}
-
-/**
- * 强制重建 client（服务器切换时调用）
- * @param serverId 指定服务器（缺省全部失效）
- */
-export function invalidateSDKClient(serverId?: string): void {
-  if (serverId) {
-    _cachedClients.delete(serverId)
-  } else {
-    _cachedClients.clear()
-  }
 }
 
 /**

@@ -1,7 +1,7 @@
 // ============================================
 // v2 原生 Agent / MCP / VCS / Permission 访问层
 //
-// 直接用 @opencode/client（v2 原生）调用，不经过 clientFacade。
+// 直接用 @opencode/client（v2 原生）调用。
 // ============================================
 
 import { getV2Client } from './sdkV2'

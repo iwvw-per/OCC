@@ -11,7 +11,6 @@ const { nativeListSessionsMock } = vi.hoisted(() => ({
 vi.mock('../store/serverStore', () => ({
   serverStore: {
     getActiveServerId: () => 'srv',
-    getApiVersion: () => 'v2',
   },
 }))
 
@@ -30,7 +29,7 @@ vi.mock('./v2NativeSession', () => ({
   nativeActiveSessions: vi.fn(),
 }))
 
-vi.mock('./sdk', () => ({ getSDKClient: () => ({}), unwrap: (value: unknown) => value }))
+
 vi.mock('./sdkV2', () => ({ getV2Client: () => ({}) }))
 vi.mock('./sessionListCache', () => ({
   readSessionListCache: () => undefined,

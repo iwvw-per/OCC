@@ -1,15 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { messagesMock, messageMock, getSDKClientMock, getApiVersionMock, getActiveServerIdMock, nativeListMessagesMock, adaptPageMock } =
-  vi.hoisted(() => ({
-    adaptPageMock: vi.fn(),
-    messagesMock: vi.fn(),
-    messageMock: vi.fn(),
-    getSDKClientMock: vi.fn(),
-    getApiVersionMock: vi.fn(),
-    getActiveServerIdMock: vi.fn(),
-    nativeListMessagesMock: vi.fn(),
-  }))
+const { nativeListMessagesMock, adaptPageMock } = vi.hoisted(() => ({
+  adaptPageMock: vi.fn(),
+  nativeListMessagesMock: vi.fn(),
+}))
 
 vi.mock('./v2/message', () => ({
   adaptMessagePage: (...args: unknown[]) => adaptPageMock(...args),
@@ -21,18 +15,12 @@ vi.mock('./v2NativeMessage', () => ({
 }))
 
 vi.mock('./sdk', () => ({
-  getSDKClient: (...args: unknown[]) => getSDKClientMock(...args),
   buildHeaders: () => ({}),
-  unwrap: (result: { data?: unknown; error?: unknown }) => {
-    if (result.error != null) throw result.error
-    return result.data
-  },
 }))
 
 vi.mock('../store/serverStore', () => ({
   serverStore: {
-    getApiVersion: (...args: unknown[]) => getApiVersionMock(...args),
-    getActiveServerId: (...args: unknown[]) => getActiveServerIdMock(...args),
+    getActiveServerId: () => 'srv',
     getServerBaseUrl: (serverId: string) => `https://${serverId}.example.com`,
     getServerAuth: () => undefined,
     getActiveAuth: () => undefined,
@@ -66,12 +54,6 @@ const { storageMock } = vi.hoisted(() => {
 vi.mock('../utils/perServerStorage', () => ({ serverStorage: storageMock }))
 
 beforeEach(() => {
-  // 版本探测按会话协议分支：默认未知（走 v1），用例内用 mockReturnValueOnce 覆盖，
-  // 避免某个用例设的 'v2' 泄漏到后续用例。
-  getApiVersionMock.mockReset()
-  getApiVersionMock.mockReturnValue(undefined)
-  getActiveServerIdMock.mockReset()
-  getActiveServerIdMock.mockReturnValue('srv')
   nativeListMessagesMock.mockReset()
 })
 
@@ -104,9 +86,6 @@ function envelope(overrides: Partial<AnyMessage> = {}): AnyMessage {
 
 describe('getSessionMessagePage projection', () => {
   beforeEach(() => {
-    messagesMock.mockReset()
-    messageMock.mockReset()
-    getSDKClientMock.mockReset()
     nativeListMessagesMock.mockReset()
   })
 
@@ -325,9 +304,6 @@ describe('encodeBeforeCursor', () => {
 
 describe('getSessionTurnPage', () => {
   beforeEach(() => {
-    messagesMock.mockReset()
-    messageMock.mockReset()
-    getSDKClientMock.mockReset()
     nativeListMessagesMock.mockReset()
   })
 

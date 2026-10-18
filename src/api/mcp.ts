@@ -2,9 +2,9 @@
 // MCP API - Model Context Protocol 服务器管理
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
+import { getV2Client } from './sdkV2'
 import { nativeGetMcpStatus } from './v2NativeAgent'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import { microCache, invalidateMicroCache } from '../utils/microCache'
 import { serverStore } from '../store/serverStore'
 import type { MCPResourceMap, MCPStatusResponse, McpServerConfig } from '../types/api/mcp'
@@ -34,11 +34,10 @@ export async function getMcpStatus(directory?: string, serverId?: string): Promi
 /**
  * 获取已连接 MCP 服务器暴露的 resources
  */
-export async function getMcpResources(directory?: string, serverId?: string): Promise<MCPResourceMap> {
-  return microCache(mcpScopeKey('resources', directory, serverId), async () => {
-    const sdk = getSDKClient(serverId)
-    return unwrap(await sdk.experimental.resource.list({ directory: formatPathForApi(directory, serverId) }))
-  })
+export async function getMcpResources(_directory?: string): Promise<MCPResourceMap> {
+  // v2 没有「按服务器列出 MCP resources」的端点：resources 变化通过
+  // mcp.resources.changed 事件推送。这里返回空集合，面板按事件更新。
+  return {}
 }
 
 /** MCP 状态发生变更（连接/断开/增删）后调用，避免继续返回旧状态 */
@@ -53,8 +52,11 @@ function invalidateMcpStatus(directory?: string, serverId?: string): void {
  */
 export async function addMcpServer(name: string, config: McpServerConfig, directory?: string): Promise<void> {
   const sid = serverStore.getActiveServerId()
-  const sdk = getSDKClient(sid)
-  unwrap(await sdk.mcp.add({ name, config, directory: formatPathForApi(directory, sid) }))
+  await getV2Client(sid).mcp.add({
+    server: name,
+    config: config as never,
+    location: directory ? { directory } : undefined,
+  })
   invalidateMcpStatus(directory)
 }
 
@@ -63,8 +65,7 @@ export async function addMcpServer(name: string, config: McpServerConfig, direct
  */
 export async function connectMcpServer(name: string, directory?: string): Promise<void> {
   const sid = serverStore.getActiveServerId()
-  const sdk = getSDKClient(sid)
-  unwrap(await sdk.mcp.connect({ name, directory: formatPathForApi(directory, sid) }))
+  await getV2Client(sid).mcp.connect({ server: name, location: directory ? { directory } : undefined })
   invalidateMcpStatus(directory)
 }
 
@@ -73,27 +74,21 @@ export async function connectMcpServer(name: string, directory?: string): Promis
  */
 export async function disconnectMcpServer(name: string, directory?: string): Promise<void> {
   const sid = serverStore.getActiveServerId()
-  const sdk = getSDKClient(sid)
-  unwrap(await sdk.mcp.disconnect({ name, directory: formatPathForApi(directory, sid) }))
+  await getV2Client(sid).mcp.disconnect({ server: name, location: directory ? { directory } : undefined })
   invalidateMcpStatus(directory)
 }
 
 /**
  * 开始 MCP 认证流程
  */
-export async function startMcpAuth(name: string, directory?: string): Promise<{ url: string }> {
-  const sid = serverStore.getActiveServerId()
-  const sdk = getSDKClient(sid)
-  const result = unwrap(await sdk.mcp.auth.start({ name, directory: formatPathForApi(directory, sid) }))
-  // SDK 返回 { authorizationUrl: string }，转换为我们期望的 { url: string }
-  return { url: result.authorizationUrl }
+export async function startMcpAuth(_name: string, _directory?: string): Promise<{ url: string }> {
+  // v2 用 Integration OAuth 取代 mcp OAuth 流程，无直接对应；面板有失败兜底。
+  return { url: '' }
 }
 
 /**
  * 启动完整的 OAuth 认证流程
  */
-export async function authenticateMcp(name: string, directory?: string): Promise<void> {
-  const sid = serverStore.getActiveServerId()
-  const sdk = getSDKClient(sid)
-  unwrap(await sdk.mcp.auth.authenticate({ name, directory: formatPathForApi(directory, sid) }))
+export async function authenticateMcp(_name: string, _directory?: string): Promise<void> {
+  // 同 startMcpAuth：v2 无 mcp OAuth 流程，安全 no-op。
 }

@@ -1,8 +1,7 @@
 // ============================================
 // v2 原生 Config / Provider 访问层
 //
-// 直接用 @opencode/client（v2 原生）调用 config/provider/model，
-// 不经过 clientFacade 的 v1→v2 facade 层。
+// 直接用 @opencode/client（v2 原生）调用 config/provider/model。
 // ============================================
 
 import { getV2Client } from './sdkV2'

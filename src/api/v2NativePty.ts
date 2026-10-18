@@ -1,7 +1,7 @@
 // ============================================
 // v2 原生 Pty 访问层
 //
-// 直接用 @opencode/client（v2 原生）调用 pty，不经过 facade。
+// 直接用 @opencode/client（v2 原生）调用 pty。
 // ============================================
 
 import { getV2Client } from './sdkV2'

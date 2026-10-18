@@ -2,10 +2,10 @@
 // Command API - 命令列表和执行
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
+import { getV2Client } from './sdkV2'
 import { nativeListCommands, nativeListSkills } from './v2NativeCommand'
 import { resolveSessionTarget } from '../utils/sessionKey'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
 import i18n from '../i18n'
 
@@ -110,17 +110,14 @@ export async function executeCommand(
   sessionId: string,
   command: string,
   args: string = '',
-  directory?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<unknown> {
   const target = resolveSessionTarget(sessionId, serverId)
-  const sdk = getSDKClient(target.serverId)
-  return unwrap(
-    await sdk.session.command({
-      sessionID: target.sessionId,
-      directory: formatPathForApi(directory, target.serverId),
-      command,
-      arguments: args,
-    }),
-  )
+  await getV2Client(target.serverId).session.command({
+    sessionID: target.sessionId,
+    name: command,
+    text: args,
+  })
+  return undefined
 }
