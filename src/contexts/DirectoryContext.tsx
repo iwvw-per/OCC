@@ -17,7 +17,13 @@ import { serverStore } from '../store/serverStore'
 import { multiServerStore, useMultiServerStore } from '../store/multiServerStore'
 import { isTauri } from '../utils/tauri'
 import { DirectoryContext, type DirectoryContextValue, type SavedDirectory } from './DirectoryContext.shared'
-import { rebindAppData, recentProjectsStore, savedDirectoriesStore, touchRecentProject } from '../storage/appData'
+import {
+  rebindAppData,
+  recentProjectsStore,
+  savedDirectoriesStore,
+  touchRecentProject,
+  unhideProject,
+} from '../storage/appData'
 
 export function DirectoryProvider({ children }: { children: ReactNode }) {
   // 从 URL 获取 directory（替代 localStorage）
@@ -102,6 +108,8 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
 
       // 使用 isSameDirectory 检查是否已存在（处理大小写和斜杠差异）
       if (savedDirectories.some(d => isSameDirectory(d.path, normalized))) {
+        // 重新添加已隐藏的目录时解除隐藏，否则「加了却看不见」
+        unhideProject(normalized)
         setCurrentDirectory(normalized)
         return true
       }
@@ -112,6 +120,8 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
         addedAt: Date.now(),
       }
 
+      // 用户显式添加：解除隐藏（可能是之前隐藏过、现在又要了）
+      unhideProject(normalized)
       // 幂等：同一点击触发两次时，第二次在权威列表里已存在，直接跳过
       savedDirectoriesStore.commit(list =>
         list.some(d => isSameDirectory(d.path, newDir.path)) ? list : [...list, newDir],

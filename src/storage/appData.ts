@@ -33,6 +33,24 @@ const recentSchema: z.ZodType<Record<string, number>> = z.record(z.string(), z.u
   Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, number] => typeof entry[1] === 'number')),
 )
 
+/**
+ * 用户主动隐藏的项目目录。
+ *
+ * 侧栏里「服务器当前 worktree」会自动置顶成一个派生项目（见 useProjectGroups），
+ * 它不在 saved-directories 里，因此「移除」对它无效 —— 点完刷新就回来。
+ * 这份列表让「不想要它」这件事可持久化：命中的目录不再渲染，
+ * 用户重新添加该目录时会自动移出（见 unhideProject）。
+ */
+const hiddenProjectsSchema: z.ZodType<string[]> = z.array(z.unknown()).transform(items =>
+  Array.from(
+    new Set(
+      items
+        .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+        .map(item => normalizeToForwardSlash(item)),
+    ),
+  ),
+)
+
 const activeServerId = () => serverStore.getActiveServerId()
 
 // 模块加载时 serverStore 可能尚未就绪（测试、SSR、启动早期），绑定放在首次
@@ -53,12 +71,20 @@ const recentStore = createStore({
   defaultValue: {},
 })
 
+const hiddenStore = createStore({
+  key: 'opencode-hidden-projects',
+  scope: { kind: 'server', serverId: 'local' },
+  schema: hiddenProjectsSchema,
+  defaultValue: [],
+})
+
 function ensureBound() {
   const serverId = activeServerId()
   if (bound?.serverId === serverId) return
   bound = { serverId, stores: { saved: savedStore, recent: recentStore } }
   savedStore.rebind(serverId)
   recentStore.rebind(serverId)
+  hiddenStore.rebind(serverId)
 }
 
 /** 仅测试用：丢弃内存快照，强制下次访问重新读存储 */
@@ -66,6 +92,7 @@ export function resetAppDataBindingForTests(): void {
   bound = null
   savedStore.reset()
   recentStore.reset()
+  hiddenStore.reset()
 }
 
 /** 项目列表 store（首次访问时绑定到当前活动服务器） */
@@ -104,6 +131,39 @@ export const recentProjectsStore = {
   },
 }
 
+/** 被用户隐藏的项目目录 store */
+export const hiddenProjectsStore = {
+  get(): string[] {
+    ensureBound()
+    return hiddenStore.get()
+  },
+  commit(mutator: Parameters<typeof hiddenStore.commit>[0]) {
+    ensureBound()
+    hiddenStore.commit(mutator)
+  },
+  subscribe(listener: () => void) {
+    ensureBound()
+    return hiddenStore.subscribe(listener)
+  },
+}
+
+/** 隐藏一个项目目录（幂等）。 */
+export function hideProject(directory: string): void {
+  const normalized = normalizeToForwardSlash(directory)
+  if (!normalized) return
+  hiddenProjectsStore.commit(prev => (prev.includes(normalized) ? prev : [...prev, normalized]))
+}
+
+/** 取消隐藏（用户重新添加该项目时调用，避免「加了却看不见」）。 */
+export function unhideProject(directory: string): void {
+  const normalized = normalizeToForwardSlash(directory)
+  if (!normalized) return
+  hiddenProjectsStore.commit(prev => {
+    const next = prev.filter(item => item !== normalized)
+    return next.length === prev.length ? prev : next
+  })
+}
+
 /**
  * 把两个 store 重新绑定到当前活动服务器。
  *
@@ -114,6 +174,7 @@ export function rebindAppData(targetServerId = activeServerId()): void {
   bound = null
   savedStore.rebind(targetServerId)
   recentStore.rebind(targetServerId)
+  hiddenStore.rebind(targetServerId)
   bound = { serverId: targetServerId, stores: { saved: savedStore, recent: recentStore } }
 }
 

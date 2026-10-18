@@ -10,6 +10,11 @@ import { useTranslation } from 'react-i18next'
 import { useDirectory, useGitWorkspaceCatalog, useMissingDirectories } from '../../../hooks'
 import { layoutStore, useLayoutStore } from '../../../store'
 import { sessionActivityStore } from '../../../store/sessionActivityStore'
+import {
+  hideProject as persistHideProject,
+  hiddenProjectsStore,
+  unhideProject as persistUnhideProject,
+} from '../../../storage/appData'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
 import { getProjectGroupIdentity, sortProjects, mergeProjectLastUsed } from './projectGrouping'
 import { mergeExpandedProjectNames } from './expandedProjects'
@@ -79,6 +84,12 @@ export interface UseProjectGroupsResult {
   folderProjects: ProjectItem[]
   /** 只在「已保存项目」里的目录；不存在的派生项目可据此判断能否移除 */
   savedDirectoryPaths: string[]
+  /** 用户主动隐藏的派生项目目录（服务器当前 worktree 那类） */
+  hiddenProjectPaths: string[]
+  /** 隐藏一个项目目录（持久化；刷新后不再出现） */
+  hideProjectDirectory: (directory: string) => void
+  /** 取消隐藏（重新添加该项目时调用） */
+  unhideProjectDirectory: (directory: string) => void
   sortedFolderProjects: ProjectItem[]
   currentProject: ProjectItem
   expandedProjectIds: string[]
@@ -94,6 +105,17 @@ export function useProjectGroups({
 }: UseProjectGroupsOptions): UseProjectGroupsResult {
   const { t } = useTranslation(['chat', 'common'])
   const { savedDirectories, pathInfo, recentProjects } = useDirectory()
+  // 用户主动隐藏的派生项目（服务器当前 worktree 自动置顶的那类）。
+  // get() 返回 store 内部引用，只有 commit 时才变，满足 useSyncExternalStore 的稳定性要求。
+  const hiddenProjectPaths = useSyncExternalStore(
+    hiddenProjectsStore.subscribe,
+    () => hiddenProjectsStore.get(),
+    () => hiddenProjectsStore.get(),
+  )
+  const hiddenProjectSet = useMemo(
+    () => new Set(hiddenProjectPaths.map(path => normalizeToForwardSlash(path))),
+    [hiddenProjectPaths],
+  )
   const catalogDirectories = useMemo(
     () =>
       Array.from(
@@ -239,8 +261,21 @@ export function useProjectGroups({
       list.push({ ...currentProject, canReorder: false })
     }
     // 不展示「全局」文件夹：全局把所有会话堆在一起条目多且卡，用户只按项目打开会话。
-    return list
-  }, [serverCurrentProject, folderProjectGroups, currentDirectory, currentProject])
+    // 也不展示用户主动隐藏的目录（服务器当前 worktree 那类删不掉的派生项目）。
+    return list.filter(project => {
+      const worktree = normalizeToForwardSlash(project.worktree || '')
+      const id = normalizeToForwardSlash(project.id || '')
+      return !hiddenProjectSet.has(worktree) && !hiddenProjectSet.has(id)
+    })
+  }, [serverCurrentProject, folderProjectGroups, currentDirectory, currentProject, hiddenProjectSet])
+
+  const hideProjectDirectory = useCallback((directory: string) => {
+    persistHideProject(directory)
+  }, [])
+
+  const unhideProjectDirectory = useCallback((directory: string) => {
+    persistUnhideProject(directory)
+  }, [])
 
   // ---- 展开状态 ----
   // 状态存在 layoutStore 里，键是「项目名」而非 id：id 通常是 worktree 绝对路径
@@ -347,6 +382,9 @@ export function useProjectGroups({
   return {
     folderProjects,
     savedDirectoryPaths: visibleSavedDirectories.map(directory => directory.path),
+    hiddenProjectPaths,
+    hideProjectDirectory,
+    unhideProjectDirectory,
     sortedFolderProjects,
     currentProject,
     expandedProjectIds,

@@ -26,6 +26,10 @@ export const PER_SERVER_KEYS = {
   // ---- 服务器 scope（每台主机一份） ----
   'opencode-saved-directories': { scope: 'server', note: '项目列表' },
   'opencode-recent-projects': { scope: 'server', note: '项目最近使用时间' },
+  'opencode-hidden-projects': {
+    scope: 'server',
+    note: '用户主动隐藏的派生项目目录（服务器当前 worktree 自动置顶的那类，删不掉但可以隐藏）',
+  },
   'opencode-pinned-sessions': { scope: 'server', note: '置顶会话' },
   'opencode-pinned-messages': { scope: 'server', note: '置顶消息' },
   'opencode-auto-approve-settings': { scope: 'server', note: '自动批准开关' },

@@ -119,9 +119,6 @@ export function SidePanel({
   const [batchDeleteSessionConfirm, setBatchDeleteSessionConfirm] = useState(false)
   const [batchRemoveProjectConfirm, setBatchRemoveProjectConfirm] = useState(false)
   const [isBatchDeleting, setIsBatchDeleting] = useState(false)
-  // 已用户手动移除的派生项目 worktree：它们不在 savedDirectories 里，
-  // removeDirectory 对它们无效，需要在视图层直接排除，避免点移除后仍出现在侧栏
-  const [removedDerivedWorktrees, setRemovedDerivedWorktrees] = useState<Set<string>>(new Set())
 
   const showLabels = isExpanded || isMobile
   const newChatShortcut = useKeybindingLabel('newSession')
@@ -270,6 +267,7 @@ export function SidePanel({
     allProjectsCollapsed,
     projectLastUsedAt,
     savedDirectoryPaths,
+    hideProjectDirectory,
   } = projects
 
   // 需求 3：点击项目目录/名称不跳转（只展开/收起），只有点击会话才导航。
@@ -388,46 +386,30 @@ export function SidePanel({
         removeDirectory(directory)
         removed = true
       }
-      // 派生项目未匹配到已保存路径：从视图中隐藏
-      if (!removed && project.isDerived && project.worktree) {
-        setRemovedDerivedWorktrees(prev => {
-          const next = new Set(prev)
-          next.add(project.worktree)
-          return next
-        })
-        removeDirectory(project.worktree)
-      }
+      // 派生项目（服务器当前 worktree）不在已保存列表里：持久隐藏它
+      if (!removed && project.worktree) hideProjectDirectory(project.worktree)
     }
     clearProjectSelection()
     setBatchRemoveProjectConfirm(false)
-  }, [folderProjects, savedDirectoryPaths, selectedProjectIds, removeDirectory, clearProjectSelection])
+  }, [folderProjects, savedDirectoryPaths, selectedProjectIds, removeDirectory, clearProjectSelection, hideProjectDirectory])
 
   // 单个项目移除：二次点击防误触（按钮层），这里直接执行。
-  // 语义唯一：从「已保存项目」列表移除，不动磁盘文件、不动会话；随时可重新添加。
   //
-  // 派生项目（未显式保存、由服务器当前 worktree 推导）也不在 savedDirectories 里，
-  // removeDirectory 对它们无效。因此对派生项目，直接从视图中隐藏（加入
-  // removedDerivedWorktrees），并尽力调用 removeDirectory（以防它其实已保存）。
+  // 两种语义，按项目是否真的「已保存」分流：
+  //   - 在 saved-directories 里 → 从列表移除（不动磁盘文件、不动会话）；
+  //   - 不在（服务器当前 worktree 自动置顶的派生项目）→ 持久隐藏。
+  //     后者以前只是内存状态，刷新就回来 —— 用户报的「删了又出现」正是这个。
   const handleRemoveProjectClick = useCallback(
     (project: FolderRecentProject) => {
-      // 先尝试按已保存路径匹配：已保存项目（包括派生项目对应的已保存目录）能删掉
       const targets = resolveSavedProjectPaths(project, savedDirectoryPaths)
       let removed = false
       for (const directory of targets) {
         removeDirectory(directory)
         removed = true
       }
-      // 派生项目且未匹配到任何已保存路径：从视图中直接隐藏
-      if (!removed && project.isDerived && project.worktree) {
-        setRemovedDerivedWorktrees(prev => {
-          const next = new Set(prev)
-          next.add(project.worktree)
-          return next
-        })
-        removeDirectory(project.worktree)
-      }
+      if (!removed && project.worktree) hideProjectDirectory(project.worktree)
     },
-    [removeDirectory, savedDirectoryPaths],
+    [removeDirectory, savedDirectoryPaths, hideProjectDirectory],
   )
 
   // 需求 4：在指定项目目录下新建会话。
@@ -768,7 +750,7 @@ export function SidePanel({
             className={`flex-1 overflow-hidden ${hostSlide || 'animate-in fade-in duration-150'} ${isEditMode ? 'select-none' : ''}`}
           >
             <FolderRecentList
-              projects={sortedFolderProjects.filter(p => !removedDerivedWorktrees.has(p.worktree))}
+              projects={sortedFolderProjects}
               {...commonFolderRecentListProps}
               onReorderProject={handleReorderProjectGroup}
               workspaceDirectoriesByProjectId={projects.workspaceDirectoriesByProjectId}
