@@ -82,6 +82,34 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   }))
 
   const savedDirectories = savedState.directories
+
+  /**
+   * 最近一次「已经算好并落盘」的 savedState。
+   *
+   * 落盘不能依赖 setState 的 updater：应用运行在 StrictMode 下，React 会重复
+   * 调用 updater（也可能丢弃结果），把副作用写进 updater 会让写入时机不受控，
+   * 表现为「添加成功但刷新/切换后消失」。这里用 ref 维护权威值：先同步算出
+   * 新列表并落盘，再交给 setState 渲染，updater 保持纯函数。
+   */
+  const savedRef = useRef(savedState)
+  savedRef.current = savedState
+
+  /**
+   * 计算并落盘新的项目列表（纯计算在 updater 外完成，写入只发生一次）。
+   * mutate 接收当前权威列表，返回新列表；与旧值相同则不写、不渲染。
+   */
+  const commitSavedDirectories = useCallback((mutate: (list: SavedDirectory[]) => SavedDirectory[]): boolean => {
+    const prev = savedRef.current
+    const nextList = mutate(prev.directories)
+    if (nextList === prev.directories) return false
+    // 始终写回「当前活动服务器」的桶：绑定的 serverId 可能停留在切换前的快照
+    const targetServerId = serverStore.getActiveServerId() || prev.serverId
+    const next = { serverId: targetServerId, directories: nextList }
+    savedRef.current = next
+    serverStorage.setJSONFor(STORAGE_KEY_SAVED, next.directories, targetServerId)
+    setSavedState(next)
+    return true
+  }, [])
   const recentProjects = recentState.projects
 
   const [pathInfo, setPathInfo] = useState<ApiPath | null>(null)
@@ -196,37 +224,30 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
         addedAt: Date.now(),
       }
 
-      setSavedState(prev => {
-        // 在 updater 里再判一次重：`savedDirectories` 是本次渲染的闭包快照，
-        // 同一点击若触发两次 addDirectory（双击、事件重复派发），两次都会读到
-        // 「不存在」，于是各追加一条 —— 项目列表里出现两条完全相同的目录。
-        // 以 prev 为准做幂等，保证一次添加只落一条。
-        if (prev.directories.some(d => isSameDirectory(d.path, newDir.path))) return prev
-        const next = { ...prev, directories: [...prev.directories, newDir] }
-        serverStorage.setJSONFor(STORAGE_KEY_SAVED, next.directories, next.serverId)
-        return next
-      })
+      // 幂等：同一点击触发两次时，第二次在权威列表里已存在，直接跳过
+      commitSavedDirectories(list =>
+        list.some(d => isSameDirectory(d.path, newDir.path)) ? list : [...list, newDir],
+      )
       setCurrentDirectory(normalized)
       return true
     },
-    [savedDirectories, setCurrentDirectory],
+    [savedDirectories, setCurrentDirectory, commitSavedDirectories],
   )
 
   // 移除目录
   const removeDirectory = useCallback(
     (path: string) => {
       const normalized = normalizeToForwardSlash(path)
-      setSavedState(prev => {
-        const next = { ...prev, directories: prev.directories.filter(d => !isSameDirectory(d.path, normalized)) }
-        serverStorage.setJSONFor(STORAGE_KEY_SAVED, next.directories, next.serverId)
-        return next
+      commitSavedDirectories(list => {
+        const nextList = list.filter(d => !isSameDirectory(d.path, normalized))
+        return nextList.length === list.length ? list : nextList
       })
       if (isSameDirectory(urlDirectory, normalized)) {
         setCurrentDirectory(undefined)
       }
       return true
     },
-    [urlDirectory, setCurrentDirectory],
+    [urlDirectory, setCurrentDirectory, commitSavedDirectories],
   )
 
   /**
@@ -237,16 +258,14 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
    * 只在确实有非法项时写回，避免无谓的存储写入与同步。
    */
   const pruneInvalidDirectories = useCallback(() => {
-    setSavedState(prev => {
-      const valid = prev.directories.filter(directory => {
+    commitSavedDirectories(list => {
+      const valid = list.filter(directory => {
         const normalized = normalizeToForwardSlash(directory.path)
         return !!normalized && normalized !== '.' && isAbsoluteDirectory(normalized)
       })
-      if (valid.length === prev.directories.length) return prev
-      serverStorage.setJSONFor(STORAGE_KEY_SAVED, valid, prev.serverId)
-      return { ...prev, directories: valid }
+      return valid.length === list.length ? list : valid
     })
-  }, [])
+  }, [commitSavedDirectories])
 
   const reorderDirectories = useCallback((draggedPath: string, targetPath: string) => {
     const normalizedDragged = normalizeToForwardSlash(draggedPath)

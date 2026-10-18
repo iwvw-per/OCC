@@ -10,6 +10,7 @@ import { scrollItemIntoView } from '../../utils/scrollUtils'
 import { Dialog } from '../../components/ui/Dialog'
 import { cn } from '../../utils/cn'
 import { interactive } from '../../utils/interaction'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 // ============================================
 // Types
@@ -488,6 +489,8 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
 
   const trimmedInput = inputValue.trim()
   const relativeInput = !!trimmedInput && !isAbsoluteDirectory(trimmedInput)
+  // 触摸/窄屏没有 hover：「添加」按钮不能靠 hover 选中态显隐
+  const touchCapable = useIsMobile() || (typeof window !== 'undefined' && 'ontouchstart' in window)
 
   return (
     <Dialog
@@ -582,9 +585,16 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
                 isSelected={index === selectedIndex}
                 onClick={() => handleItemClick(item)}
                 onMouseEnter={() => setSelectedIndex(index)}
+                onPointerDown={() => setSelectedIndex(index)}
                 action={
-                  index === selectedIndex && (
+                  // 桌面端只在「选中行」显示，悬停即选中，视觉更干净。
+                  // 触摸设备没有 hover，selectedIndex 基本停在 0，若沿用同一条件，
+                  // 除第一行外的条目永远没有「添加」按钮 —— 表现为「条目上的添加无效」。
+                  // 触控下改为常显，并靠 onPointerDown 同步选中项。
+                  (touchCapable || index === selectedIndex) && (
                     <button
+                      type="button"
+                      aria-label={t('common:add')}
                       onClick={e => {
                         e.stopPropagation()
                         handleSelectFolder(item.path)
@@ -775,15 +785,18 @@ interface ListItemProps {
   isSelected: boolean
   onClick: () => void
   onMouseEnter: () => void
+  /** 触摸端用于同步选中项（没有 hover，selectedIndex 不会自己更新） */
+  onPointerDown?: () => void
   action?: React.ReactNode
 }
 
-function ListItem({ id, icon, label, isSelected, onClick, onMouseEnter, action }: ListItemProps) {
+function ListItem({ id, icon, label, isSelected, onClick, onMouseEnter, onPointerDown, action }: ListItemProps) {
   return (
     <div
       id={id}
       onClick={onClick}
       onMouseEnter={onMouseEnter}
+      onPointerDown={onPointerDown}
       className={`
         flex items-center justify-between px-3 py-2 rounded-md cursor-pointer transition-all duration-150
         ${isSelected ? 'bg-bg-200/60 text-text-100' : 'text-text-300 hover:bg-bg-200'}

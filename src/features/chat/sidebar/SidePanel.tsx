@@ -996,7 +996,9 @@ export function SidePanel({
             className="flex-1 overflow-hidden transition-[opacity] duration-300 ease-out min-w-0"
             style={{ opacity: showLabels ? 1 : 0 }}
           >
-            <a href="/" className="flex items-center whitespace-nowrap h-full">
+            {/* 用 hash 路由跳 home：`href="/"` 会触发整页导航，丢掉当前 hash，
+                未落盘的本地状态（如刚添加的项目）会因此看起来「消失」。 */}
+            <a href="#/" className="flex items-center whitespace-nowrap h-full">
               <span className="text-[length:var(--fs-heading-3)] font-semibold text-text-100 tracking-tight">
                 {t('header.openCode')}
               </span>
