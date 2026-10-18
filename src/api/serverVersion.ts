@@ -1,21 +1,13 @@
 // ============================================
-// Server API Version Detection
+// Server Version Detection
 //
-// opencode 有两代 HTTP API：
-//   - v1（1.18.x 及更早）：根路径 API，健康检查 GET /global/health 返回
-//     JSON `{healthy, version}`。
-//   - v2（2.0.x）：API 挂在 /api/* 前缀下，根路径 GET /global/health 会被
-//     前端 SPA 路由接管返回 HTML；版本信息在 GET /api/info。
-//
-// 客户端需要据此选择 SDK 与请求路径。本模块只做纯探测，不依赖 serverStore，
-// 由调用方注入 baseUrl / headers / fetch，避免循环依赖。
+// OCC 只支持 opencode 2.x：版本信息在 GET /api/info（2.0.x 的根路径
+// /global/health 会被前端 SPA 路由接管返回 HTML）。本模块只做纯探测，
+// 不依赖 serverStore，由调用方注入 baseUrl / headers / fetch，避免循环依赖。
 // ============================================
 
-export type ApiVersion = 'v1' | 'v2'
-
 export interface ServerVersionInfo {
-  apiVersion: ApiVersion
-  /** opencode 版本号（如 1.18.34 / 2.0.28），探测不到时缺省 */
+  /** opencode 版本号（如 2.0.28），探测不到时缺省 */
   version?: string
 }
 
@@ -28,33 +20,6 @@ export interface DetectOptions {
 
 function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '')
-}
-
-async function fetchJson(
-  fetchImpl: typeof globalThis.fetch,
-  url: string,
-  headers: Record<string, string> | undefined,
-  timeoutMs: number,
-): Promise<{ status: number; contentType: string; text: string } | undefined> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const response = await fetchImpl(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json', ...headers },
-      signal: controller.signal,
-    })
-    const text = await response.text().catch(() => '')
-    return {
-      status: response.status,
-      contentType: response.headers.get('content-type')?.toLowerCase() ?? '',
-      text,
-    }
-  } catch {
-    return undefined
-  } finally {
-    clearTimeout(timer)
-  }
 }
 
 function parseVersion(body: string): string | undefined {
@@ -70,30 +35,24 @@ function parseVersion(body: string): string | undefined {
 }
 
 /**
- * 探测某服务器的 opencode API 版本。
+ * 探测某服务器的 opencode 版本（GET /api/info）。
  *
- * 顺序：先探 v1 的 /global/health（返回 JSON 即 v1）；否则探 v2 的 /api/info。
- * 两者都失败时抛出，交由调用方按连接失败处理。
+ * 失败时抛出，交由调用方按连接失败处理。
  */
 export async function detectServerVersion(options: DetectOptions): Promise<ServerVersionInfo> {
   const base = trimTrailingSlash(options.baseUrl)
-  const timeoutMs = options.timeoutMs ?? 5000
-
-  const health = await fetchJson(options.fetch, `${base}/global/health`, options.headers, timeoutMs)
-  if (health && health.status >= 200 && health.status < 300 && health.contentType.includes('application/json')) {
-    return { apiVersion: 'v1', version: parseVersion(health.text) }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 5000)
+  try {
+    const response = await options.fetch(`${base}/api/info`, {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...options.headers },
+      signal: controller.signal,
+    })
+    if (!response.ok) throw new Error(`无法识别 opencode 服务：HTTP ${response.status}`)
+    const text = await response.text().catch(() => '')
+    return { version: parseVersion(text) }
+  } finally {
+    clearTimeout(timer)
   }
-
-  const info = await fetchJson(options.fetch, `${base}/api/info`, options.headers, timeoutMs)
-  if (info && info.status >= 200 && info.status < 300 && info.contentType.includes('application/json')) {
-    return { apiVersion: 'v2', version: parseVersion(info.text) }
-  }
-
-  // v2 的根路径返回 HTML（SPA）：health 拿到 HTML 且 /api/info 不可用，
-  // 仍倾向判定为 v2，避免把「v2 但 info 偶发失败」误报成 v1。
-  if (health && health.contentType.includes('text/html')) {
-    return { apiVersion: 'v2' }
-  }
-
-  throw new Error('无法识别 opencode API 版本')
 }

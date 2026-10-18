@@ -113,11 +113,7 @@ export async function getActiveModels(directory?: string, serverId?: string): Pr
 export async function getCurrentProject(directory?: string, serverId?: string): Promise<ApiProject> {
   const sid = serverId ?? serverStore.getActiveServerId()
   return singleFlight(`project-current:${sid}:${directoryCacheKey(directory)}`, async () => {
-    if (serverStore.getApiVersion(sid) === 'v2') {
-      return nativeGetCurrentProject(sid, { directory }) as unknown as ApiProject
-    }
-    const sdk = getSDKClient(serverId)
-    return unwrap(await sdk.project.current({ directory: formatPathForApi(directory, serverId) }))
+    return nativeGetCurrentProject(sid, { directory }) as unknown as ApiProject
   })
 }
 
@@ -129,27 +125,18 @@ export async function getCurrentProject(directory?: string, serverId?: string): 
 export async function getProjects(directory?: string, serverId?: string): Promise<ApiProject[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
   return singleFlight(`project-list:${sid}:${directoryCacheKey(directory)}`, async () => {
-    if (serverStore.getApiVersion(sid) === 'v2') {
-      return nativeListProjects(sid, { directory }) as unknown as ApiProject[]
-    }
-    const sdk = getSDKClient(serverId)
-    return requireArray<ApiProject>(
-      unwrap(await sdk.project.list({ directory: formatPathForApi(directory, serverId) })),
-      'Invalid OpenCode project list response',
-    )
+    return nativeListProjects(sid, { directory }) as unknown as ApiProject[]
   })
 }
 
 /**
  * 初始化 Git 仓库
  */
-export async function initGitProject(directory?: string, serverId?: string): Promise<ApiProject> {
+export async function initGitProject(_directory?: string, serverId?: string): Promise<ApiProject> {
+  // v2 的 initGit 以服务器当前 project 为作用域，不接受 directory 参数；
+  // 保留形参是为了不打断调用方签名。
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeInitGit(sid) as unknown as ApiProject
-  }
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.project.initGit({ directory: formatPathForApi(directory, serverId) }))
+  return nativeInitGit(sid) as unknown as ApiProject
 }
 
 // ============================================

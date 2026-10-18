@@ -13,15 +13,10 @@ vi.mock('./v2NativeSession', () => ({
 }))
 
 vi.mock('./v2NativeAgent', () => ({ nativeListPermissions: vi.fn() }))
-vi.mock('./sdk', () => ({
-  getSDKClient: () => ({ question: { reply: vi.fn(async () => ({ data: true })) } }),
-  unwrap: (v: unknown) => v,
-}))
 vi.mock('./sdkV2', () => ({ getV2Client: () => ({}) }))
 vi.mock('./v2/form', () => ({ adaptFormToQuestionRequest: (f: unknown) => f }))
 vi.mock('../store/serverStore', () => ({
   serverStore: {
-    getApiVersion: () => getApiVersionMock(),
     getActiveServerId: () => getActiveServerIdMock(),
   },
 }))
@@ -34,7 +29,7 @@ vi.mock('../utils/directoryUtils', () => ({ formatPathForApi: (d?: string) => d,
 
 import { replyQuestion } from './permission'
 
-describe('replyQuestion v2 form gating', () => {
+describe('replyQuestion form gating', () => {
   beforeEach(() => {
     nativeReplyFormMock.mockReset()
     getApiVersionMock.mockReturnValue('v2')
@@ -52,11 +47,11 @@ describe('replyQuestion v2 form gating', () => {
   })
 
   it('does not post an empty form answer for a native question without fields', async () => {
-    // v2 原生 question.asked 没有 fieldKey → fields 为空。若仍走 form.reply 会提交空 answer。
+    // v2 原生 question.asked 没有 fieldKey → fields 为空。若仍走 form.reply 会提交空 answer，
+    // 因此直接拒绝作答（返回 false），绝不调用 nativeReplyForm。
     const result = await replyQuestion('q_1', [['yes']], undefined, 'srv', 'srv::ses_1', [])
 
-    // 应退回非表单路径（此处 SDK mock 返回成功），绝不能调用 nativeReplyForm
     expect(nativeReplyFormMock).not.toHaveBeenCalled()
-    expect(result).toBe(true)
+    expect(result).toBe(false)
   })
 })

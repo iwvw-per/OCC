@@ -541,18 +541,8 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           })
       }
 
-      // 版本未知（首次同步的 v2 实例、或旧版本没留下 apiVersion 记录）：先探测
-      // 再拉数据。否则 getSDKClient 按 v1 建 client，首屏 /session、/agent、/path
-      // 打在 v2 服务器的 SPA 兜底上（text/html），列表直接加载失败。
-      // ensureApiVersion 与 SSE/健康轮询共享健康检查在途合并，不多花一次网络；
-      // 探测失败不阻塞，照常走原回退路径。
-      if (serverStore.getApiVersion(serverId)) {
-        startFetch()
-      } else {
-        void serverStore.ensureApiVersion(serverId).then(() => {
-          if (!disposed) startFetch()
-        })
-      }
+      // 数据拉取不依赖版本探测：v2 是唯一协议，直接开始拉取。
+      startFetch()
     }
 
     const refreshServerHealth = (serverId: string) => {

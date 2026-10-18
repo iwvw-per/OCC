@@ -1,21 +1,17 @@
-// 回归：连 v2 服务器（opencode 2.0.28）时，首屏请求不得打到 v1 根路径。
+// 回归：连 opencode 2.x 服务器时，所有请求都走 /api/* 前缀。
 //
-// 笔电症状（v0.6.129 仍复现）：
-//   [session] fetch sessions: Error: Request is not supported by this version of
-//   OpenCode Server (Server responded with text/html)
-// 根因：healthMap（内存态）在应用重启后清空，版本未知时 getSDKClient 按 v1 建
-// client，首屏 /session、/agent、/path 打在 v2 服务器的 SPA 兜底上返回 HTML。
-// 0.6.129 把 apiVersion 纳入缓存 key，只保证「探测完成后缓存失效」，不能阻止
-// 「探测完成前已发出的 v1 请求」。
+// 历史症状：版本探测窗口里 getSDKClient 按 v1 建 client，首屏 /session、/agent
+// 打在 v2 服务器的 SPA 兜底上返回 HTML，报
+//   Request is not supported by this version of OpenCode Server。
+// 现在 OCC 只支持 2.x：客户端工厂恒为 v2 facade，健康检查只探 /api/info。
 //
-// 用 stub fetch 精确复刻 v2 路由特征（src/api/serverVersion.ts 顶部注释）：
+// 用 stub fetch 复刻 v2 路由特征：
 //   GET /global/health -> 200 text/html（SPA 接管，v2 特征）
 //   GET /api/info      -> 200 application/json { version }
 //   GET /api/*         -> 200 application/json
-//   其余根路径          -> 200 text/html（v1 SDK 请求在 v2 上的下场）
+//   其余根路径          -> 200 text/html（v1 请求在 v2 上的下场）
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiVersion } from './serverVersion'
 
 const SPA_HTML = '<!doctype html><html><head><title>OpenCode</title></head><body><div id="root"></div></body></html>'
 
@@ -67,7 +63,7 @@ function seedStorage() {
   sessionStorage.setItem('opencode-active-server', SERVER_ID)
 }
 
-/** v2 facade 暴露 session.experimental；v1 路径 client 则是 session.list。 */
+/** v2 facade 暴露 session.experimental.list。 */
 type SessionClient = { session: { list: (q: never) => Promise<unknown> } }
 
 function listSessions(client: unknown) {
@@ -76,7 +72,7 @@ function listSessions(client: unknown) {
   return sdk.session.list({} as never)
 }
 
-describe('v2 client timing: no v1-root requests when talking to a v2 server', () => {
+describe('v2 client: only /api/* requests', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.restoreAllMocks()
@@ -88,19 +84,17 @@ describe('v2 client timing: no v1-root requests when talking to a v2 server', ()
     vi.restoreAllMocks()
   })
 
-  it('detects v2 via /global/health + /api/info without any root-path business request', async () => {
+  it('detects the server via /api/info without any root-path business request', async () => {
     const { serverStore } = await import('../store/serverStore')
-    expect(serverStore.getApiVersion(SERVER_ID)).toBeUndefined()
 
-    expect(await serverStore.ensureApiVersion(SERVER_ID)).toBe<ApiVersion>('v2')
-    expect(requestLog.every(p => p === '/global/health' || p.startsWith('/api/'))).toBe(true)
+    const health = await serverStore.checkHealth(SERVER_ID)
+    expect(health.status).toBe('online')
+    expect(health.version).toBe('2.0.28')
+    expect(requestLog).toEqual(['/api/info'])
   })
 
-  it('after detection the client factory returns the v2 facade, hitting only /api/*', async () => {
-    const { serverStore } = await import('../store/serverStore')
+  it('the client factory returns the v2 facade, hitting only /api/*', async () => {
     const { getSDKClient } = await import('./sdk')
-
-    await serverStore.ensureApiVersion(SERVER_ID)
 
     requestLog.length = 0
     await expect(listSessions(getSDKClient(SERVER_ID))).resolves.toBeDefined()
@@ -108,45 +102,13 @@ describe('v2 client timing: no v1-root requests when talking to a v2 server', ()
     expect(requestLog).not.toContain('/session')
   })
 
-  it('survives app restart: persisted apiVersion makes the first getSDKClient call a v2 facade', async () => {
-    // 第一轮：完整探测，产生 apiVersion 持久化记录
+  it('a server without /api/info is reported as error, still without root requests', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(SPA_HTML, { status: 200, headers: { 'content-type': 'text/html' } })),
+    )
     const { serverStore } = await import('../store/serverStore')
-    await serverStore.ensureApiVersion(SERVER_ID)
 
-    // 模拟应用重启：内存 healthMap 清空，store 重新实例化，localStorage 保留
-    vi.resetModules()
-    stubV2Fetch()
-    const { serverStore: store2 } = await import('../store/serverStore')
-    const { getSDKClient } = await import('./sdk')
-
-    expect(store2.getApiVersion(SERVER_ID)).toBe<ApiVersion>('v2')
-
-    requestLog.length = 0
-    await expect(listSessions(getSDKClient(SERVER_ID))).resolves.toBeDefined()
-    expect(requestLog.every(p => p.startsWith('/api/'))).toBe(true)
-    expect(requestLog).not.toContain('/session')
-  })
-
-  it('keeps the last known version when a health check fails (no downgrade to v1)', async () => {
-    const { serverStore } = await import('../store/serverStore')
-    await serverStore.ensureApiVersion(SERVER_ID)
-
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
-    const offline = await serverStore.checkHealth(SERVER_ID)
-    expect(offline.status).toBe('offline')
-    expect(offline.apiVersion).toBeUndefined()
-    expect(serverStore.getApiVersion(SERVER_ID)).toBe<ApiVersion>('v2')
-  })
-
-  it('guards the symptom itself: an unprobed v1-path client does fail on root paths', async () => {
-    // 修复的价值就是让这条路径不再被走到。这里锁住未探测时的真实行为：
-    // v1 SDK 打 /session 拿到 HTML，被响应拦截器抛 text/html。
-    const { getSDKClient } = await import('./sdk')
-    const { serverStore } = await import('../store/serverStore')
-    expect(serverStore.getApiVersion(SERVER_ID)).toBeUndefined()
-
-    requestLog.length = 0
-    await expect(listSessions(getSDKClient(SERVER_ID))).rejects.toThrow(/text\/html/)
-    expect(requestLog).toContain('/session')
+    const health = await serverStore.checkHealth(SERVER_ID)
+    expect(health.status).toBe('error')
   })
 })

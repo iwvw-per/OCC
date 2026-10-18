@@ -8,15 +8,11 @@
 //   getConnectionInfo()             == getServerConnectionInfo(activeServerId)
 // ============================================
 
-import { getApiBaseUrl, getAuthHeader } from './http'
-import { createSseTextParser } from './sse'
-import { parseAndCoalesce } from './sseEvents'
 import { normalizeTodoItems } from './todo'
 import { getV2Client } from './sdkV2'
 import { v2EventToGlobalEvent } from './v2/events'
 import { toolResultMetadata } from './v2/adapt'
 import { isTauri } from '../utils/tauri'
-import { createSseEventPump } from '../lib/sseWorkerClient'
 import { serverStore } from '../store/serverStore'
 import type {
   ApiMessage,
@@ -263,137 +259,11 @@ function connectServer(serverId: string) {
   // 注册生命周期监听器（首次连接时）
   registerLifecycleListeners()
 
-  // v2 服务器：事件流走 @opencode/client 的 event.subscribe()（AsyncIterable），
-  // 与 v1 的 /global/event SSE 是两条不同通道。
-  const resolvedServerId = serverId
-  if (serverStore.getApiVersion(resolvedServerId) === 'v2') {
-    connectViaV2(conn)
-    return
-  }
-
-  if (isTauri()) {
-    connectViaTauri(conn)
-  } else {
-    connectViaBrowser(conn)
-  }
+  // 事件流走 @opencode/client 的 event.subscribe()（AsyncIterable）。
+  // v1 的 /global/event 通道已下线：v2 是唯一受支持的协议。
+  connectViaV2(conn)
 }
 
-/** Unified bridge event from Rust (transparent proxy) */
-interface BridgeEvent {
-  event: 'connected' | 'data' | 'disconnected' | 'error'
-  data?: {
-    data?: string
-    code?: number
-    reason?: string
-    message?: string
-  }
-}
-
-async function connectViaTauri(conn: ServerConnection) {
-  const myGeneration = conn.generation
-  const serverId = conn.serverId
-
-  try {
-    // 等待上一次 disconnect 完成，避免 Rust 侧 connect/disconnect 竞争
-    await (pendingDisconnects.get(bridgeIdFor(serverId)) ?? Promise.resolve())
-
-    const { invoke, Channel } = await import('@tauri-apps/api/core')
-
-    const url = `${getApiBaseUrl(serverId)}/global/event`
-    const authHeader = getAuthHeader(serverId)['Authorization'] || null
-
-    const sseParser = createSseTextParser()
-
-    const onEvent = new Channel<BridgeEvent>()
-
-    onEvent.onmessage = (msg: BridgeEvent) => {
-      // 代次不匹配，说明已经 reconnect 过了，忽略旧连接的事件
-      if (myGeneration !== conn.generation) return
-
-      switch (msg.event) {
-        case 'connected': {
-          conn.isConnecting = false
-
-          updateConnectionState(serverId, {
-            state: 'connected',
-            reconnectAttempt: 0,
-            error: undefined,
-          })
-          resetHeartbeat(conn)
-          if (import.meta.env.DEV) {
-            console.log(`[SSE/Tauri] ${serverId} Connected`)
-          }
-          // 每次连接成功都通知订阅者刷新数据
-          // 覆盖场景：首次连接（先开 UI 后开 server）、网络重连、服务器切换
-          const reason = serverSwitchFlags.get(serverId) ? ('server-switch' as const) : ('network' as const)
-          serverSwitchFlags.delete(serverId)
-          broadcastReconnected(conn, reason)
-          break
-        }
-        case 'data': {
-          resetHeartbeat(conn)
-          if (!msg.data?.data) break
-
-          for (const globalEvent of parseAndCoalesce(sseParser.push(msg.data.data))) {
-            broadcastEvent(conn, globalEvent)
-          }
-          break
-        }
-        case 'disconnected': {
-          conn.isConnecting = false
-          if (import.meta.env.DEV) {
-            console.log(`[SSE/Tauri] ${serverId} Disconnected:`, msg.data?.reason)
-          }
-          updateConnectionState(serverId, { state: 'disconnected' })
-          scheduleReconnect(conn)
-          break
-        }
-        case 'error': {
-          conn.isConnecting = false
-          const errorMsg = msg.data?.message || 'Unknown error'
-          if (import.meta.env.DEV) {
-            console.warn(`[SSE/Tauri] ${serverId} Error:`, errorMsg)
-          }
-          updateConnectionState(serverId, {
-            state: 'error',
-            error: errorMsg,
-          })
-          conn.subscribers.forEach(cb => {
-            cb.onError?.(new Error(errorMsg))
-          })
-          scheduleReconnect(conn)
-          break
-        }
-      }
-    }
-
-    // 调用统一桥接命令
-    invoke('bridge_connect', {
-      args: { bridgeId: bridgeIdFor(serverId), url, authHeader },
-      onEvent,
-    }).catch((error: unknown) => {
-      if (!finalizeConnectionAttempt(conn, myGeneration)) return
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      if (import.meta.env.DEV) {
-        console.warn(`[SSE/Tauri] ${serverId} invoke error:`, errorMsg)
-      }
-      updateConnectionState(serverId, {
-        state: 'error',
-        error: errorMsg,
-      })
-      conn.subscribers.forEach(cb => {
-        cb.onError?.(new Error(errorMsg))
-      })
-      scheduleReconnect(conn)
-    })
-  } catch (error) {
-    if (!finalizeConnectionAttempt(conn, myGeneration)) return
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    console.warn(`[SSE/Tauri] ${serverId} Failed to initialize:`, errorMsg)
-    updateConnectionState(serverId, { state: 'error', error: errorMsg })
-    scheduleReconnect(conn)
-  }
-}
 
 // ============================================
 // v2 event stream (via @opencode/client event.subscribe)
@@ -446,112 +316,6 @@ function connectViaV2(conn: ServerConnection) {
 // Browser SSE (via fetch + ReadableStream)
 // ============================================
 
-function connectViaBrowser(conn: ServerConnection) {
-  conn.controller = new AbortController()
-
-  // 捕获当前连接代次
-  const myGeneration = conn.generation
-  const serverId = conn.serverId
-
-  fetch(`${getApiBaseUrl(serverId)}/global/event`, {
-    signal: conn.controller.signal,
-    headers: {
-      Accept: 'text/event-stream',
-      ...getAuthHeader(serverId),
-    },
-  })
-    .then(async response => {
-      if (myGeneration !== conn.generation) {
-        await response.body?.cancel?.().catch(() => {})
-        return
-      }
-
-      finalizeConnectionAttempt(conn, myGeneration)
-
-      if (!response.ok) {
-        throw new Error(`Failed to subscribe: ${response.status}`)
-      }
-
-      updateConnectionState(serverId, {
-        state: 'connected',
-        reconnectAttempt: 0,
-        error: undefined,
-      })
-      resetHeartbeat(conn)
-      if (import.meta.env.DEV) {
-        console.log(`[SSE] ${serverId} connected`)
-      }
-
-      // 每次连接成功都通知订阅者刷新数据
-      // 覆盖场景：首次连接（先开 UI 后开 server）、网络重连、服务器切换
-      const reason = serverSwitchFlags.get(serverId) ? ('server-switch' as const) : ('network' as const)
-      serverSwitchFlags.delete(serverId)
-      broadcastReconnected(conn, reason)
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('No response body')
-      }
-
-      // 解码 + SSE 帧解析 + delta 合并在 Worker 里做，主线程只接收已合并的事件。
-      // Worker 不可用时 pump 内部回退到主线程解析，行为一致。
-      const pump = createSseEventPump(bridgeIdFor(serverId), events => {
-        if (myGeneration !== conn.generation) return
-        for (const globalEvent of events) {
-          broadcastEvent(conn, globalEvent)
-        }
-      })
-
-      while (true) {
-        // 代次不匹配，说明已经 reconnect 过了，停止读取旧流
-        if (myGeneration !== conn.generation) {
-          reader.cancel().catch(() => {})
-          break
-        }
-
-        const { done, value } = await reader.read()
-        if (myGeneration !== conn.generation) {
-          reader.cancel().catch(() => {})
-          break
-        }
-
-        if (done) {
-          if (import.meta.env.DEV) {
-            console.log(`[SSE] ${serverId} Stream ended, reconnecting...`)
-          }
-          pump.reset()
-          updateConnectionState(serverId, { state: 'disconnected' })
-          scheduleReconnect(conn)
-          break
-        }
-
-        resetHeartbeat(conn)
-        pump.feed(value)
-      }
-    })
-    .catch(error => {
-      if (!finalizeConnectionAttempt(conn, myGeneration)) {
-        return
-      }
-
-      if (error.name === 'AbortError') {
-        return
-      }
-      // SSE stream error - logged for debugging
-      if (import.meta.env.DEV) {
-        console.warn(`[SSE] ${serverId} Event stream error:`, error)
-      }
-      updateConnectionState(serverId, {
-        state: 'error',
-        error: error.message || 'Connection failed',
-      })
-      // 通知所有订阅者出错
-      conn.subscribers.forEach(cb => {
-        cb.onError?.(error)
-      })
-      scheduleReconnect(conn)
-    })
-}
 
 function getMessageInfo(properties: unknown): ApiMessage | undefined {
   if (!isRecord(properties)) return undefined
@@ -899,13 +663,18 @@ function normalizeNextToolSettled(
   if (!sessionID || !callID) return null
 
   if (status === 'error') {
+    // 适配层已把错误归一成字符串；这里兼容 Error 对象（{name,message}）与纯字符串。
     const error = isRecord(properties.error)
       ? typeof properties.error.message === 'string'
         ? properties.error.message
         : typeof properties.error.name === 'string'
           ? properties.error.name
-          : undefined
-      : undefined
+          : typeof properties.error.type === 'string'
+            ? properties.error.type
+            : undefined
+      : typeof properties.error === 'string'
+        ? properties.error
+        : undefined
     return { sessionID, callID, status, error, metadata: settledMetadata(properties) }
   }
 
@@ -1092,13 +861,7 @@ export function subscribeToServerEvents(serverId: string, callbacks: EventCallba
     // 在 v2 服务器上同样被 SPA 兜底（text/html），探测完成后 connectServer
     // 会走 connectViaV2。ensureApiVersion 与首屏数据初始化路径共享健康检查
     // 在途合并，不会多花一次网络；探测失败不阻塞，按原「未知即 v1」回退。
-    if (serverStore.getApiVersion(serverId)) {
-      connectServer(serverId)
-    } else {
-      void serverStore.ensureApiVersion(serverId).then(() => {
-        if (conn.subscribers.size > 0) connectServer(serverId)
-      })
-    }
+    connectServer(serverId)
   }
 
   // 返回取消订阅函数

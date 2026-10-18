@@ -2,11 +2,10 @@
 // VCS API - 版本控制信息
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
 import { nativeGetVcsInfo, nativeGetVcsDiff } from './v2NativeAgent'
 import type { FileDiff } from './types'
 import type { VcsDiffMode, VcsInfo } from '../types/api/vcs'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import { microCache } from '../utils/microCache'
 import { serverStore } from '../store/serverStore'
 import { normalizeFileDiffs } from '../types/api/file'
@@ -23,11 +22,7 @@ export async function getVcsInfo(directory?: string, serverId?: string): Promise
     `vcs:info:${sid}:${directoryCacheKey(directory)}`,
     async () => {
       try {
-        if (serverStore.getApiVersion(sid) === 'v2') {
-          return nativeGetVcsInfo(sid, { directory }) as unknown as VcsInfo
-        }
-        const sdk = getSDKClient(serverId)
-        return unwrap(await sdk.vcs.get({ directory: formatPathForApi(directory, serverId) }))
+        return nativeGetVcsInfo(sid, { directory }) as unknown as VcsInfo
       } catch {
         // VCS 不可用时返回 null
         return null
@@ -45,26 +40,22 @@ export async function getVcsDiff(mode: VcsDiffMode, directory?: string, serverId
   return microCache(
     `vcs:diff:${mode}:${sid}:${directoryCacheKey(directory)}`,
     async () => {
-      if (serverStore.getApiVersion(sid) === 'v2') {
-        const raw = (await nativeGetVcsDiff(sid, { mode: String(mode), directory })) as Array<{
-          file?: string
-          patch?: string
-          additions?: number
-          deletions?: number
-          status?: 'added' | 'deleted' | 'modified'
-        }>
-        return normalizeFileDiffs(
-          raw.map(diff => ({
-            file: diff.file,
-            patch: diff.patch,
-            additions: diff.additions ?? 0,
-            deletions: diff.deletions ?? 0,
-            status: diff.status,
-          })),
-        )
-      }
-      const sdk = getSDKClient(serverId)
-      return normalizeFileDiffs(unwrap(await sdk.vcs.diff({ mode, directory: formatPathForApi(directory, serverId) })))
+      const raw = (await nativeGetVcsDiff(sid, { mode: String(mode), directory })) as Array<{
+        file?: string
+        patch?: string
+        additions?: number
+        deletions?: number
+        status?: 'added' | 'deleted' | 'modified'
+      }>
+      return normalizeFileDiffs(
+        raw.map(diff => ({
+          file: diff.file,
+          patch: diff.patch,
+          additions: diff.additions ?? 0,
+          deletions: diff.deletions ?? 0,
+          status: diff.status,
+        })),
+      )
     },
     // diff 比 info 更容易变（用户可能正在编辑），TTL 更短
     { ttlMs: 1500 },

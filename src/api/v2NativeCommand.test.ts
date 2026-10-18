@@ -14,7 +14,6 @@ const describeIf = enabled ? describe : describe.skip
 async function ensureServer() {
   serverStore.removeServer(SERVER_ID)
   serverStore.addServerWithId(SERVER_ID, { name: 'v2-native', url: URL!, auth: { username: 'opencode', password: PWD! } })
-  await serverStore.ensureApiVersion(SERVER_ID)
 }
 
 describeIf('v2 原生 command/skill 访问层', () => {

@@ -26,17 +26,7 @@ function getRootDirectoryCacheKey(directory?: string, serverId?: string): string
 
 async function fetchDirectory(path: string, directory?: string, serverId?: string): Promise<FileNode[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeListDirectory(sid, { directory, path })
-  }
-  const sdk = getSDKClient(serverId)
-  const isAbsolute = /^[a-zA-Z]:/.test(path) || path.startsWith('/')
-
-  if (isAbsolute && !directory) {
-    return unwrap(await sdk.file.list({ directory: formatPathForApi(path, serverId), path: '' }))
-  }
-
-  return unwrap(await sdk.file.list({ path, directory: formatPathForApi(directory, serverId) }))
+  return nativeListDirectory(sid, { directory, path })
 }
 
 /**
@@ -97,18 +87,7 @@ export async function searchFiles(
   } = {},
 ): Promise<string[]> {
   const sid = options.serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeFindFiles(sid, { directory: options.directory, query, type: options.type, limit: options.limit })
-  }
-  const sdk = getSDKClient(options.serverId)
-  return unwrap(
-    await sdk.find.files({
-      query,
-      directory: formatPathForApi(options.directory, options.serverId),
-      type: options.type,
-      limit: options.limit,
-    }),
-  ) as string[]
+  return nativeFindFiles(sid, { directory: options.directory, query, type: options.type, limit: options.limit })
 }
 
 /**
@@ -153,11 +132,7 @@ export async function prefetchRootDirectory(directory?: string, serverId?: strin
  */
 export async function getFileContent(path: string, directory?: string, serverId?: string): Promise<FileContent> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeReadFile(sid, { directory, path }) as unknown as FileContent
-  }
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.file.read({ path, directory: formatPathForApi(directory, serverId) }))
+  return nativeReadFile(sid, { directory, path }) as unknown as FileContent
 }
 
 /**

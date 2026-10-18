@@ -59,11 +59,7 @@ export async function getPendingPermissions(
     pendingScopeKey('permission', directory, serverId),
     async () => {
       const sid = serverId ?? serverStore.getActiveServerId()
-      if (serverStore.getApiVersion(sid) === 'v2') {
-        return nativeListPermissions(sid)
-      }
-      const sdk = getSDKClient(serverId)
-      return unwrap(await sdk.permission.list({ directory: formatPathForApi(directory, serverId) }))
+      return nativeListPermissions(sid)
     },
     { ttlMs: PENDING_TTL_MS },
   )
@@ -129,17 +125,13 @@ export async function getPendingQuestions(
     pendingScopeKey('question', directory, serverId),
     async () => {
       const resolvedServer = serverId ?? serverStore.getActiveServerId()
-      if (serverStore.getApiVersion(resolvedServer) === 'v2') {
-        // v2 用 Form 体系取代 question：列出目录下待处理表单并适配成 QuestionRequest，
-        // 否则刷新/重连后未回答的提问不会重新出现（facade 的 question.list 为空）。
-        const res = await getV2Client(resolvedServer).form.list({
-          location: { directory: formatPathForApi(directory, resolvedServer) },
-        })
-        const data = (res as { data?: unknown } | undefined)?.data
-        return Array.isArray(data) ? data.map(adaptFormToQuestionRequest) : []
-      }
-      const sdk = getSDKClient(serverId)
-      return unwrap(await sdk.question.list({ directory: formatPathForApi(directory, serverId) }))
+      // v2 用 Form 体系取代 question：列出目录下待处理表单并适配成 QuestionRequest，
+      // 否则刷新/重连后未回答的提问不会重新出现。
+      const res = await getV2Client(resolvedServer).form.list({
+        location: { directory: formatPathForApi(directory, resolvedServer) },
+      })
+      const data = (res as { data?: unknown } | undefined)?.data
+      return Array.isArray(data) ? data.map(adaptFormToQuestionRequest) : []
     },
     { ttlMs: PENDING_TTL_MS },
   )
@@ -163,10 +155,9 @@ export async function replyQuestion(
   fields: Array<{ key: string; type: string }> = [],
 ): Promise<boolean> {
   const resolvedServer = serverId ?? serverStore.getActiveServerId()
-  // 只有「确属表单」的请求（questions 上带 fieldKey → fields 非空）才走 v2 form.reply。
-  // v2 原生 question.asked 没有 fieldKey，映射后 fields 为空——若仍走 form.reply 会提交
-  // 一个空 answer；这类请求退回 SDK 路径处理。
-  if (serverStore.getApiVersion(resolvedServer) === 'v2' && fields.length > 0) {
+  // 只有「确属表单」的请求（questions 上带 fieldKey → fields 非空）才走 form.reply。
+  // 没有 fieldKey 的请求映射后 fields 为空——若仍走 form.reply 会提交一个空 answer。
+  if (fields.length > 0) {
     if (!sessionID) return false
     // SSE 事件给请求的 sessionID 是复合 key（serverId::ses_x），form.reply 要原始 id
     await nativeReplyForm(resolvedServer, {
@@ -177,16 +168,7 @@ export async function replyQuestion(
     invalidatePending('question', directory, resolvedServer)
     return true
   }
-  const sdk = getSDKClient(serverId)
-  unwrap(
-    await sdk.question.reply({
-      requestID: requestId,
-      directory: formatPathForApi(directory, serverId),
-      answers,
-    }),
-  )
-  invalidatePending('question', directory, serverId)
-  return true
+  return false
 }
 
 /** 把 InlineQuestion 的逐题 answers（string[][]）映射回 form 的 { fieldKey: value }。 */
@@ -223,20 +205,12 @@ export async function rejectQuestion(
   fields: Array<{ key: string; type: string }> = [],
 ): Promise<boolean> {
   const resolvedServer = serverId ?? serverStore.getActiveServerId()
-  // 同 replyQuestion：只有表单请求（fields 非空）才 form.cancel；原生 question 退回 SDK。
-  if (serverStore.getApiVersion(resolvedServer) === 'v2' && fields.length > 0) {
+  // 同 replyQuestion：只有表单请求（fields 非空）才 form.cancel。
+  if (fields.length > 0) {
     if (!sessionID) return false
     await nativeCancelForm(resolvedServer, { sessionID: splitSessionKey(sessionID).sessionId, formID: requestId })
     invalidatePending('question', directory, resolvedServer)
     return true
   }
-  const sdk = getSDKClient(serverId)
-  unwrap(
-    await sdk.question.reject({
-      requestID: requestId,
-      directory: formatPathForApi(directory, serverId),
-    }),
-  )
-  invalidatePending('question', directory, serverId)
-  return true
+  return false
 }

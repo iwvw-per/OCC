@@ -14,11 +14,7 @@ import type { ProvidersResponse } from '../types/api/model'
  */
 export async function getConfig(directory?: string): Promise<Config> {
   const sid = serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeGetConfig(sid, { directory }) as Config
-  }
-  const sdk = getSDKClient(sid)
-  return unwrap(await sdk.config.get({ directory: formatPathForApi(directory, sid) }))
+  return nativeGetConfig(sid, { directory }) as Config
 }
 
 /**
@@ -52,9 +48,5 @@ export async function updateGlobalConfig(config: Config): Promise<Config> {
  */
 export async function getProviderConfigs(directory?: string): Promise<ProvidersResponse> {
   const sid = serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeGetProviders(sid, { directory })
-  }
-  const sdk = getSDKClient(sid)
-  return unwrap(await sdk.config.providers({ directory: formatPathForApi(directory, sid) }))
+  return nativeGetProviders(sid, { directory })
 }

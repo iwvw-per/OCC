@@ -2,7 +2,7 @@
 // PTY API - 终端管理
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
+import { getV2Client } from './sdkV2'
 import {
   nativeListPtySessions,
   nativeCreatePtySession,
@@ -16,7 +16,6 @@ import { serverStore, getUnifiedFetch } from '../store/serverStore'
 import { isTauri } from '../utils/tauri'
 import type { Pty, PtyCreateParams, PtyUpdateParams } from '../types/api/pty'
 
-type LegacyPty = Pty & { running?: boolean; status?: Pty['status'] }
 export interface ShellInfo {
   path: string
   name: string
@@ -37,34 +36,21 @@ interface PtyConnectUrlOptions {
   streamToken?: string
 }
 
-function normalizePty(pty: LegacyPty): Pty {
-  if (pty.status) return pty as Pty
-  return {
-    ...pty,
-    status: pty.running ? 'running' : 'exited',
-  } as Pty
-}
-
 /**
  * 获取所有 PTY 会话列表
  */
 export async function listPtySessions(directory?: string, serverId?: string): Promise<Pty[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeListPtySessions(sid, { directory })
-  }
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.pty.list({ directory: formatPathForApi(directory, serverId) })).map(pty =>
-    normalizePty(pty as LegacyPty),
-  )
+  return nativeListPtySessions(sid, { directory })
 }
 
 /**
  * 获取当前机器可用 shell 列表，用于 opencode config.shell 的候选项。
  */
-export async function listAvailableShells(directory?: string, serverId?: string): Promise<ShellInfo[]> {
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.pty.shells({ directory: formatPathForApi(directory, serverId) }))
+export async function listAvailableShells(_directory?: string, serverId?: string): Promise<ShellInfo[]> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  const res = await getV2Client(sid).config.shells()
+  return res as unknown as ShellInfo[]
 }
 
 /**
@@ -72,11 +58,7 @@ export async function listAvailableShells(directory?: string, serverId?: string)
  */
 export async function createPtySession(params: PtyCreateParams, directory?: string, serverId?: string): Promise<Pty> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeCreatePtySession(sid, { directory, ...params })
-  }
-  const sdk = getSDKClient(serverId)
-  return normalizePty(unwrap(await sdk.pty.create({ directory: formatPathForApi(directory, serverId), ...params })) as LegacyPty)
+  return nativeCreatePtySession(sid, { directory, ...params })
 }
 
 /**
@@ -84,13 +66,7 @@ export async function createPtySession(params: PtyCreateParams, directory?: stri
  */
 export async function getPtySession(ptyId: string, directory?: string, serverId?: string): Promise<Pty> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeGetPtySession(sid, { ptyID: ptyId, directory })
-  }
-  const sdk = getSDKClient(serverId)
-  return normalizePty(
-    unwrap(await sdk.pty.get({ ptyID: ptyId, directory: formatPathForApi(directory, serverId) })) as LegacyPty,
-  )
+  return nativeGetPtySession(sid, { ptyID: ptyId, directory })
 }
 
 /**
@@ -99,30 +75,19 @@ export async function getPtySession(ptyId: string, directory?: string, serverId?
 export async function updatePtySession(
   ptyId: string,
   params: PtyUpdateParams,
-  directory?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<Pty> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeUpdatePtySession(sid, { ptyID: ptyId, ...params })
-  }
-  const sdk = getSDKClient(serverId)
-  return normalizePty(
-    unwrap(await sdk.pty.update({ ptyID: ptyId, directory: formatPathForApi(directory, serverId), ...params })) as LegacyPty,
-  )
+  return nativeUpdatePtySession(sid, { ptyID: ptyId, ...params })
 }
 
 /**
  * 删除 PTY 会话
  */
-export async function removePtySession(ptyId: string, directory?: string, serverId?: string): Promise<boolean> {
+export async function removePtySession(ptyId: string, _directory?: string, serverId?: string): Promise<boolean> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeRemovePtySession(sid, ptyId)
-  }
-  const sdk = getSDKClient(serverId)
-  unwrap(await sdk.pty.remove({ ptyID: ptyId, directory: formatPathForApi(directory, serverId) }))
-  return true
+  return nativeRemovePtySession(sid, ptyId)
 }
 
 /**
@@ -149,11 +114,9 @@ export function getPtyConnectUrl(
 
   const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
   const formatted = formatPathForApi(directory, serverId)
-  const isV2 = (serverId ? serverStore.getApiVersion(serverId) : serverStore.getApiVersion(serverStore.getActiveServerId() ?? '')) === 'v2'
-  // v1：/pty/{id}/connect?directory=；v2：/api/pty/{id}/connect?location[directory]=
-  const connectPath = isV2 ? `/api/pty/${ptyId}/connect` : `/pty/${ptyId}/connect`
-  const dirParam = isV2 ? 'location[directory]' : 'directory'
-
+  // v2：/api/pty/{id}/connect?location[directory]=
+  const connectPath = `/api/pty/${ptyId}/connect`
+  const dirParam = 'location[directory]'
   // Tauri bridge 不需要在 URL 里放认证
   if (!includeAuthInUrl) {
     return `${wsBase}${connectPath}${buildQueryString({ [dirParam]: formatted, cursor })}`

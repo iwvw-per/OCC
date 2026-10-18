@@ -3,12 +3,12 @@
 // 基于 @opencode-ai/sdk: /session/{sessionID}/message 相关接口
 // ============================================
 
-import { getSDKClient, unwrap, buildHeaders } from './sdk'
+import { buildHeaders } from './sdk'
 import { nativePrompt, nativeListMessages } from './v2NativeMessage'
 import { adaptMessagePage } from './v2/message'
 import { sanitizeMessageWithParts } from './sanitize'
 import { resolveSessionTarget } from '../utils/sessionKey'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import { sharedInflightRequest } from '../utils/singleFlight'
 import { serverStorage } from '../utils/perServerStorage'
 import { serverStore } from '../store/serverStore'
@@ -52,7 +52,14 @@ async function getWithTruncationRetry<T>(fn: () => Promise<T>, retries = 3, dela
   throw lastError
 }
 
-type PromptParams = Parameters<ReturnType<typeof getSDKClient>['session']['prompt']>[0]
+type PromptParams = {
+  sessionID: string
+  messageID?: string
+  parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+  model?: { providerID: string; modelID: string }
+  agent?: string
+  variant?: string
+}
 
 // ============================================
 // Message Query
@@ -114,30 +121,14 @@ export async function getSessionMessagePage(
     key,
     () =>
       getWithTruncationRetry(async () => {
-        const isV2 = serverStore.getApiVersion(target.serverId) === 'v2'
-        if (isV2) {
-          const page = await nativeListMessages(target.serverId, {
-            sessionID: target.sessionId,
-            limit: limit ? Math.min(limit, 200) : undefined,
-            cursor: before,
-          })
-          // nativeListMessages 已把 v2 的 desc 结果反转为时间升序；v1 分支同样重排为升序。
-          const messages = project ? projectPageMessages(page.messages) : page.messages
-          return { messages, nextCursor: page.nextCursor, compactedAt: page.compactedAt }
-        }
-        const sdk = getSDKClient(target.serverId)
-        const result = await sdk.session.messages({
+        const page = await nativeListMessages(target.serverId, {
           sessionID: target.sessionId,
-          directory: formatPathForApi(directory, target.serverId),
-          limit,
-          before,
+          limit: limit ? Math.min(limit, 200) : undefined,
+          cursor: before,
         })
-        const messages = unwrap<ApiMessageWithParts[]>(result)
-        const nextCursor = result.response?.headers?.get('X-Next-Cursor') ?? undefined
-        return {
-          messages: project ? projectPageMessages(messages) : messages,
-          nextCursor: nextCursor || undefined,
-        }
+        // nativeListMessages 已把 v2 的 desc 结果反转为时间升序。
+        const messages = project ? projectPageMessages(page.messages) : page.messages
+        return { messages, nextCursor: page.nextCursor, compactedAt: page.compactedAt }
       }),
     options?.signal,
   )
@@ -265,7 +256,7 @@ async function fetchV2LightweightMessages(
  */
 export async function probeLightweightSupport(
   sessionId: string,
-  directory?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
@@ -286,26 +277,10 @@ export async function probeLightweightSupport(
 
   const request = (async () => {
     try {
-      // v2：主机 Agent 同样支持轻量投影，但走的是 /api/session/{id}/message
-      // （v2 前缀）。v2 SDK 不透出响应头，故用裸 fetch 探测。
-      if (serverStore.getApiVersion(target.serverId) === 'v2') {
-        const supported = await probeV2LightweightSupport(target.serverId, target.sessionId)
-        lightweightSupportCache.set(cacheKey, supported)
-        if (supported) writePersistedSupport(cacheKey)
-        return supported
-      }
-      const sdk = getSDKClient(target.serverId)
-      const result = await sdk.session.messages(
-        {
-          sessionID: target.sessionId,
-          directory: formatPathForApi(directory, target.serverId),
-          limit: 1,
-        },
-        { headers: { [LIGHTWEIGHT_HEADER]: '1' } },
-      )
-      const supported = (result.response?.headers?.get(LIGHTWEIGHT_HEADER) ?? '') === '1'
+      // 主机 Agent 的轻量投影走 /api/session/{id}/message（v2 前缀）。
+      // v2 SDK 不透出响应头，故用裸 fetch 探测。
+      const supported = await probeV2LightweightSupport(target.serverId, target.sessionId)
       lightweightSupportCache.set(cacheKey, supported)
-      // 只持久化正结果，负结果留待下次冷启动重探（Agent 可能已升级）。
       if (supported) writePersistedSupport(cacheKey)
       return supported
     } catch {
@@ -371,22 +346,9 @@ export async function getSessionLightweightMessages(
   return sharedInflightRequest(
     key,
     async () => {
-      // v2：走原生的 /api/session/{id}/message + X-Lightweight，由主机 Agent 内部
+      // 走原生的 /api/session/{id}/message + X-Lightweight，由主机 Agent 内部
       // 分页取全并投影；v2 SDK 不便于读响应头，这里用裸 fetch。
-      if (serverStore.getApiVersion(target.serverId) === 'v2') {
-        return fetchV2LightweightMessages(target.serverId, target.sessionId, options?.signal)
-      }
-      const sdk = getSDKClient(target.serverId)
-      const result = await sdk.session.messages({
-        sessionID: target.sessionId,
-        directory: formatPathForApi(directory, target.serverId),
-        limit: LIGHTWEIGHT_MESSAGE_LIMIT,
-      }, { headers: { [LIGHTWEIGHT_HEADER]: '1' } })
-      const messages = unwrap<ApiMessageWithParts[]>(result)
-      return {
-        messages,
-        hasMore: messages.length >= LIGHTWEIGHT_MESSAGE_LIMIT,
-      }
+      return fetchV2LightweightMessages(target.serverId, target.sessionId, options?.signal)
     },
     options?.signal,
   )
@@ -482,17 +444,11 @@ export function encodeV2MessageCursor(
 }
 
 /**
- * 按服务器协议选择「取该消息更早一侧」的游标编码。
- *
- * v1 用 {id,time}（time=created 表示不含自身），v2 用 {id,order,direction:next}。
+ * 按 v2 协议编码「取该消息更早一侧」的游标（{id,order,direction:next}）。
  * 供 hydrateTurn（展开被压缩轮次）等需要本地自造游标的场景调用。
  */
-export function encodeBeforeCursor(message: ApiMessageWithParts, serverId?: string): string {
-  const resolvedServerId = serverId ?? serverStore.getActiveServerId()
-  if (resolvedServerId && serverStore.getApiVersion(resolvedServerId) === 'v2') {
-    return encodeV2MessageCursor(message, 'next')
-  }
-  return encodeMessageCursor(message, false)
+export function encodeBeforeCursor(message: ApiMessageWithParts, _serverId?: string): string {
+  return encodeV2MessageCursor(message, 'next')
 }
 
 /**
@@ -544,12 +500,9 @@ export async function getSessionTurnPage(
   serverId?: string,
   options?: { project?: boolean; signal?: AbortSignal },
 ): Promise<SessionTurnPage> {
-  const resolvedServerId = serverId ?? serverStore.getActiveServerId()
-  const isV2 = resolvedServerId ? serverStore.getApiVersion(resolvedServerId) === 'v2' : false
   const collected: ApiMessageWithParts[] = []
   let cursor = before
   let pagesFetched = 0
-  let lastPageFull = true
   let reachedEnd = false
   let compactedAt: number | undefined
 
@@ -557,13 +510,12 @@ export async function getSessionTurnPage(
     const page = await getSessionMessagePage(sessionId, TURN_FETCH_MESSAGE_LIMIT, cursor, directory, serverId, options)
     collected.unshift(...page.messages)
     pagesFetched += 1
-    lastPageFull = page.messages.length >= TURN_FETCH_MESSAGE_LIMIT
     cursor = page.nextCursor
     if (page.compactedAt != null && (compactedAt == null || page.compactedAt > compactedAt)) {
       compactedAt = page.compactedAt
     }
 
-    // 无游标（v1 新 serve 到最早 / v2 到最早）或空页（残留游标）都算到最早。
+    // 无游标或空页（残留游标）都算到最早。
     if (!cursor || page.messages.length === 0) {
       reachedEnd = true
       break
@@ -574,10 +526,9 @@ export async function getSessionTurnPage(
     if (pagesFetched >= TURN_FETCH_MAX_PAGES) break
   }
 
-  // v2：cursor 权威——已到最早（无游标 / 空页）即没有更早，不再被「末页恰好满 30 条」
+  // cursor 权威——已到最早（无游标 / 空页）即没有更早，不再被「末页恰好满 30 条」
   // 误判成还有历史（否则点开别端已建的会话，拉完仍会无限自动上滑加载更多）。
-  // v1：旧版 serve 不给游标但返回满页，无法区分「到最早」与「还有更多」，保守视为还有。
-  const hasMore = isV2 ? !reachedEnd && cursor != null : cursor != null || lastPageFull
+  const hasMore = !reachedEnd && cursor != null
 
   // 已到最早时清掉游标，避免 loadMoreHistory 因残留游标继续触发空拉。
   return { messages: collected, nextCursor: reachedEnd ? undefined : cursor, hasMore, compactedAt }
@@ -632,10 +583,10 @@ function toFileUrl(path: string): string {
 }
 
 /**
- * 构建 SDK 发送消息所需的参数
+ * 构建发送消息所需的参数
  */
-function buildPromptParams(params: SendMessageParams, serverId?: string): PromptParams {
-  const { sessionId, text, attachments, model, agent, variant, directory, messageID } = params
+function buildPromptParams(params: SendMessageParams, _serverId?: string): PromptParams {
+  const { sessionId, text, attachments, model, agent, variant, messageID } = params
 
   const parts: NonNullable<PromptParams['parts']> = []
 
@@ -691,7 +642,6 @@ function buildPromptParams(params: SendMessageParams, serverId?: string): Prompt
 
   return {
     sessionID: sessionId,
-    directory: formatPathForApi(directory, serverId),
     messageID,
     parts,
     model,
@@ -705,19 +655,15 @@ function buildPromptParams(params: SendMessageParams, serverId?: string): Prompt
  */
 export async function sendMessage(params: SendMessageParams, serverId?: string): Promise<SendMessageResponse> {
   const target = resolveSessionTarget(params.sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
-    await nativePrompt(target.serverId, {
-      sessionID: target.sessionId,
-      parts: built.parts as never,
-      model: built.model,
-      agent: built.agent,
-      messageID: built.messageID,
-    })
-    return { info: {} as SendMessageResponse['info'], parts: [] }
-  }
-  const sdk = getSDKClient(target.serverId)
-  return unwrap<SendMessageResponse>(await sdk.session.prompt(buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)))
+  const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
+  await nativePrompt(target.serverId, {
+    sessionID: target.sessionId,
+    parts: built.parts as never,
+    model: built.model,
+    agent: built.agent,
+    messageID: built.messageID,
+  })
+  return { info: {} as SendMessageResponse['info'], parts: [] }
 }
 
 /**
@@ -725,17 +671,12 @@ export async function sendMessage(params: SendMessageParams, serverId?: string):
  */
 export async function sendMessageAsync(params: SendMessageParams, serverId?: string): Promise<void> {
   const target = resolveSessionTarget(params.sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
-    await nativePrompt(target.serverId, {
-      sessionID: target.sessionId,
-      parts: built.parts as never,
-      model: built.model,
-      agent: built.agent,
-      messageID: built.messageID,
-    })
-    return
-  }
-  const sdk = getSDKClient(target.serverId)
-  unwrap(await sdk.session.promptAsync(buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)))
+  const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
+  await nativePrompt(target.serverId, {
+    sessionID: target.sessionId,
+    parts: built.parts as never,
+    model: built.model,
+    agent: built.agent,
+    messageID: built.messageID,
+  })
 }

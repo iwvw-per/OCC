@@ -13,13 +13,9 @@ import { serverStore } from '../store/serverStore'
  */
 export async function getHealth(): Promise<HealthInfo> {
   const sid = serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    const client = getV2Client(sid)
-    const info = await client.server.info()
-    return { healthy: true, version: info.version } as HealthInfo
-  }
-  const sdk = getSDKClient()
-  return unwrap(await sdk.global.health())
+  const client = getV2Client(sid)
+  const info = await client.server.info()
+  return { healthy: true, version: info.version } as HealthInfo
 }
 
 /**

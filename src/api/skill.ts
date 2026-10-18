@@ -2,9 +2,8 @@
 // Skill API
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
 import { nativeListSkills } from './v2NativeCommand'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import { microCache } from '../utils/microCache'
 import { serverStore } from '../store/serverStore'
 import type { SkillList } from '../types/api/skill'
@@ -20,11 +19,7 @@ export async function getSkills(directory?: string, serverId?: string): Promise<
   return microCache(
     `skill:${sid}:${directoryCacheKey(directory)}`,
     async () => {
-      if (serverStore.getApiVersion(sid) === 'v2') {
-        return nativeListSkills(sid, { directory })
-      }
-      const sdk = getSDKClient(serverId)
-      return unwrap(await sdk.app.skills({ directory: formatPathForApi(directory, serverId) }))
+      return nativeListSkills(sid, { directory })
     },
     { ttlMs: 60_000 },
   )

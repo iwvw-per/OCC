@@ -47,24 +47,15 @@ async function fetchCommands(directory?: string, serverId?: string): Promise<Com
 }
 
 async function fetchApiCommands(directory?: string, serverId?: string): Promise<ApiCommand[]> {
-  const isV2 = serverStore.getApiVersion(serverId ?? serverStore.getActiveServerId()) === 'v2'
   let apiCommands: ApiCommand[] = []
   try {
-    if (isV2) {
-      apiCommands = await nativeListCommands(serverId, { directory })
-    } else {
-      const sdk = getSDKClient(serverId)
-      apiCommands = unwrap(await sdk.command.list({ directory: formatPathForApi(directory, serverId) })) ?? []
-    }
+    apiCommands = await nativeListCommands(serverId, { directory })
   } catch {
     // Backend unreachable — frontend commands still available
   }
 
-  // v1 的 /command 会把 slash skill（source:'skill'）一起返回；v2 把 command 与
-  // skill 拆开（/api/command 只返回纯命令）。这里对 v2 服务器额外合并 skill，
-  // 使 slash 面板能继续通过 / 调出 skill。
-  if (!isV2) return apiCommands
-
+  // v2 把 command 与 skill 拆开（/api/command 只返回纯命令）。这里额外合并
+  // skill，使 slash 面板能继续通过 / 调出 skill。
   const existingNames = new Set(apiCommands.map(c => c.name))
   const skillCommands: ApiCommand[] = []
   try {

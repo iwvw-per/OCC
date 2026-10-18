@@ -392,7 +392,8 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       return globalEvent(directory, EventTypes.SESSION_NEXT_TOOL_FAILED, {
         sessionID,
         callID: str(data.callID) ?? str(data.id) ?? '',
-        error: errorMessage(rec(data.error)) ?? str(data.error),
+        // v2 的失败事件用 data.error（{type,message}）；兼容 content[] 文本块形状。
+        error: errorMessage(rec(data.error)) ?? str(data.error) ?? toolContentToText(data.content),
         metadata: toolResultMetadata(data),
       })
 

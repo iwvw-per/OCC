@@ -13,11 +13,7 @@ import { serverStore } from '../store/serverStore'
  */
 export async function listWorktrees(directory?: string, serverId?: string): Promise<string[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeListWorktrees(sid, { directory })
-  }
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.worktree.list({ directory: formatPathForApi(directory, serverId) }))
+  return nativeListWorktrees(sid, { directory })
 }
 
 /**
@@ -25,15 +21,11 @@ export async function listWorktrees(directory?: string, serverId?: string): Prom
  */
 export async function createWorktree(params: WorktreeCreateInput, directory?: string, serverId?: string): Promise<Worktree> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    const created = await nativeCreateWorktree(sid, {
-      directory,
-      name: params.name,
-    })
-    return created as unknown as Worktree
-  }
-  const sdk = getSDKClient(sid)
-  return unwrap(await sdk.worktree.create({ directory: formatPathForApi(directory, sid), worktreeCreateInput: params }))
+  const created = await nativeCreateWorktree(sid, {
+    directory,
+    name: params.name,
+  })
+  return created as unknown as Worktree
 }
 
 /**

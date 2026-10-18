@@ -20,7 +20,6 @@ import {
   nativeActiveSessions,
 } from './v2NativeSession'
 import { resolveSessionTarget } from '../utils/sessionKey'
-import { normalizeTodoItems } from './todo'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { getSessionMessages } from './message'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
@@ -44,11 +43,6 @@ import type { TodoItem } from '../types/api/event'
 
 export { invalidateSessionListCache }
 
-function normalizeSessionList(value: unknown): ApiSession[] {
-  if (Array.isArray(value)) return value as ApiSession[]
-  throw new Error('Invalid OpenCode session list response')
-}
-
 // ============================================
 // Session Status & Diff
 // ============================================
@@ -67,11 +61,7 @@ export async function getSessionStatus(directory?: string, serverId?: string): P
   return microCache(
     `status:${sid}:${directoryCacheKey(directory)}`,
     async () => {
-      if (serverStore.getApiVersion(sid) === 'v2') {
-        return nativeActiveSessions(sid) as unknown as SessionStatusMap
-      }
-      const sdk = getSDKClient(sid)
-      return unwrap(await sdk.session.status({ directory: formatPathForApi(directory, sid) }))
+      return nativeActiveSessions(sid) as unknown as SessionStatusMap
     },
     { ttlMs: 1500 },
   )
@@ -87,26 +77,14 @@ export async function getSessionStatus(directory?: string, serverId?: string): P
  */
 export async function getSessionDiff(
   sessionId: string,
-  directory?: string,
+  _directory?: string,
   serverId?: string,
-  messageId?: string,
+  _messageId?: string,
 ): Promise<FileDiff[]> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    const client = getV2Client(target.serverId)
-    const res = await client.session.diff({ sessionID: target.sessionId })
-    return normalizeFileDiffs(res as unknown as FileDiff[])
-  }
-  const sdk = getSDKClient(target.serverId)
-  return normalizeFileDiffs(
-    unwrap(
-      await sdk.session.diff({
-        sessionID: target.sessionId,
-        directory: formatPathForApi(directory, target.serverId),
-        messageID: messageId,
-      }),
-    ),
-  )
+  const client = getV2Client(target.serverId)
+  const res = await client.session.diff({ sessionID: target.sessionId })
+  return normalizeFileDiffs(res as unknown as FileDiff[])
 }
 
 function isUserMessage(message: ApiMessageWithParts): message is ApiMessageWithParts & { info: ApiUserMessage } {
@@ -169,7 +147,6 @@ export async function getSessions(
   // 此前直接传 serverId，调用方省略 serverId 时会落到活动服务器（可能是另一台
   // Windows 主机），把 Linux 路径 /opt/code/OCC 转成 \opt\code\OCC 后请求失败。
   const cacheServerId = serverId ?? serverStore.getActiveServerId()
-  const sdk = getSDKClient(cacheServerId)
   // 归一 roots：undefined 保持 undefined（让服务端用默认），否则规约成 boolean。
   // 列表默认只返回 root 会话；只有显式 roots===false（如归档全量）才保留子会话。
   const rootsFlag = roots === undefined ? undefined : roots !== false && roots !== 'false'
@@ -196,14 +173,13 @@ export async function getSessions(
   if (cached) return cached.filter(session => !isEphemeralSession(session.id))
 
   return dedupeSessionListRequest(cacheServerId, cacheQuery, async () => {
-    const isV2 = serverStore.getApiVersion(cacheServerId) === 'v2'
-    const sessions = isV2
-      ? (await nativeListSessions(cacheServerId, {
-          directory: formatPathForApi(directory, cacheServerId),
-          search,
-          limit,
-        })).sessions
-      : normalizeSessionList(unwrap(await sdk.experimental.session.list(sdkQuery)))
+    const sessions = (
+      await nativeListSessions(cacheServerId, {
+        directory: formatPathForApi(directory, cacheServerId),
+        search,
+        limit,
+      })
+    ).sessions
     const filtered = archivedOnly
       ? sessions.filter(session => Boolean(session.time?.archived))
       : includeArchived
@@ -272,12 +248,7 @@ export async function getSession(sessionId: string, directory?: string, serverId
   const session = await singleFlight(
     `session:${target.serverId}:${target.sessionId}:${directoryCacheKey(directory)}`,
     async () => {
-      const isV2 = serverStore.getApiVersion(target.serverId) === 'v2'
-      if (isV2) return nativeGetSession(target.serverId, target.sessionId)
-      const sdk = getSDKClient(target.serverId)
-      return unwrap(
-        await sdk.session.get({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
-      )
+      return nativeGetSession(target.serverId, target.sessionId)
     },
   )
   ttlCacheSet(cacheKey, session, SESSION_META_TTL_MS)
@@ -295,19 +266,9 @@ export async function createSession(
   } = {},
   serverId?: string,
 ): Promise<ApiSession> {
-  const sdk = getSDKClient(serverId)
   const { directory, title, parentID } = params
   const sid = serverId ?? serverStore.getActiveServerId()
-  const isV2 = serverStore.getApiVersion(sid) === 'v2'
-  const session = isV2
-    ? await nativeCreateSession(sid, { directory, title, parentID })
-    : unwrap(
-        await sdk.session.create({
-          directory: formatPathForApi(directory, sid),
-          title,
-          parentID,
-        }),
-      )
+  const session = await nativeCreateSession(sid, { directory, title, parentID })
   // 无显式 serverId 时按活动服务器失效，避免误伤其它服务器的列表缓存
   invalidateSessionListCache(serverId ?? serverStore.getActiveServerId())
   return session
@@ -319,28 +280,15 @@ export async function createSession(
 export async function updateSession(
   sessionId: string,
   params: { title?: string; time?: { archived?: number } },
-  directory?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    const session = await nativeUpdateSession(target.serverId, {
-      sessionID: target.sessionId,
-      title: params.title,
-      archived: params.time?.archived,
-    })
-    invalidateSessionMetaCache(target.serverId, target.sessionId)
-    invalidateSessionListCache(target.serverId)
-    return session
-  }
-  const sdk = getSDKClient(target.serverId)
-  const session = unwrap(
-    await sdk.session.update({
-      sessionID: target.sessionId,
-      directory: formatPathForApi(directory, target.serverId),
-      ...params,
-    }),
-  )
+  const session = await nativeUpdateSession(target.serverId, {
+    sessionID: target.sessionId,
+    title: params.title,
+    archived: params.time?.archived,
+  })
   invalidateSessionMetaCache(target.serverId, target.sessionId)
   invalidateSessionListCache(target.serverId)
   return session
@@ -349,18 +297,9 @@ export async function updateSession(
 /**
  * 删除 session
  */
-export async function deleteSession(sessionId: string, directory?: string, serverId?: string): Promise<boolean> {
+export async function deleteSession(sessionId: string, _directory?: string, serverId?: string): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    const ok = await nativeRemoveSession(target.serverId, target.sessionId)
-    invalidateSessionMetaCache(target.serverId, target.sessionId)
-    invalidateSessionListCache(target.serverId)
-    return ok
-  }
-  const sdk = getSDKClient(target.serverId)
-  unwrap(
-    await sdk.session.delete({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
-  )
+  await nativeRemoveSession(target.serverId, target.sessionId)
   invalidateSessionMetaCache(target.serverId, target.sessionId)
   invalidateSessionListCache(target.serverId)
   return true
@@ -375,9 +314,7 @@ export async function deleteSession(sessionId: string, directory?: string, serve
  */
 export async function abortSession(sessionId: string, directory?: string, serverId?: string): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    return nativeInterruptSession(target.serverId, target.sessionId)
-  }
+  return nativeInterruptSession(target.serverId, target.sessionId)
   const sdk = getSDKClient(target.serverId)
   unwrap(
     await sdk.session.abort({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
@@ -396,7 +333,7 @@ export async function revertMessage(
   serverId?: string,
 ): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
+  {
     const session = await nativeRevertMessage(target.serverId, { sessionID: target.sessionId, messageID: messageId })
     invalidateSessionMetaCache(target.serverId, target.sessionId)
     return session
@@ -417,20 +354,9 @@ export async function revertMessage(
 /**
  * 恢复已回退的消息
  */
-export async function unrevertSession(sessionId: string, directory?: string, serverId?: string): Promise<ApiSession> {
+export async function unrevertSession(sessionId: string, _directory?: string, serverId?: string): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    const session = await nativeUnrevertSession(target.serverId, target.sessionId)
-    invalidateSessionMetaCache(target.serverId, target.sessionId)
-    return session
-  }
-  const sdk = getSDKClient(target.serverId)
-  const session = unwrap(
-    await sdk.session.unrevert({
-      sessionID: target.sessionId,
-      directory: formatPathForApi(directory, target.serverId),
-    }),
-  )
+  const session = await nativeUnrevertSession(target.serverId, target.sessionId)
   invalidateSessionMetaCache(target.serverId, target.sessionId)
   return session
 }
@@ -438,31 +364,19 @@ export async function unrevertSession(sessionId: string, directory?: string, ser
 /**
  * 分享 session
  */
-export async function shareSession(sessionId: string, directory?: string, serverId?: string): Promise<ApiSession> {
+export async function shareSession(sessionId: string, _directory?: string, serverId?: string): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    // v2 无 share 能力，返回当前会话（安全 no-op）
-    return nativeGetSession(target.serverId, target.sessionId)
-  }
-  const sdk = getSDKClient(target.serverId)
-  return unwrap(
-    await sdk.session.share({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
-  )
+  // v2 无 share 能力，返回当前会话（安全 no-op）
+  return nativeGetSession(target.serverId, target.sessionId)
 }
 
 /**
  * 取消分享 session
  */
-export async function unshareSession(sessionId: string, directory?: string, serverId?: string): Promise<ApiSession> {
+export async function unshareSession(sessionId: string, _directory?: string, serverId?: string): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    // v2 无 share 能力，返回当前会话（安全 no-op）
-    return nativeGetSession(target.serverId, target.sessionId)
-  }
-  const sdk = getSDKClient(target.serverId)
-  return unwrap(
-    await sdk.session.unshare({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
-  )
+  // v2 无 share 能力，返回当前会话（安全 no-op）
+  return nativeGetSession(target.serverId, target.sessionId)
 }
 
 /**
@@ -471,21 +385,11 @@ export async function unshareSession(sessionId: string, directory?: string, serv
 export async function forkSession(
   sessionId: string,
   messageId?: string,
-  directory?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<ApiSession> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    return nativeForkSession(target.serverId, { sessionID: target.sessionId, messageID: messageId })
-  }
-  const sdk = getSDKClient(target.serverId)
-  return unwrap(
-    await sdk.session.fork({
-      sessionID: target.sessionId,
-      directory: formatPathForApi(directory, target.serverId),
-      messageID: messageId,
-    }),
-  )
+  return nativeForkSession(target.serverId, { sessionID: target.sessionId, messageID: messageId })
 }
 
 /**
@@ -493,23 +397,12 @@ export async function forkSession(
  */
 export async function summarizeSession(
   sessionId: string,
-  params: { providerID: string; modelID: string; auto?: boolean },
-  directory?: string,
+  _params: { providerID: string; modelID: string; auto?: boolean },
+  _directory?: string,
   serverId?: string,
 ): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    return nativeCompactSession(target.serverId, target.sessionId)
-  }
-  const sdk = getSDKClient(target.serverId)
-  unwrap(
-    await sdk.session.summarize({
-      sessionID: target.sessionId,
-      directory: formatPathForApi(directory, target.serverId),
-      ...params,
-    }),
-  )
-  return true
+  return nativeCompactSession(target.serverId, target.sessionId)
 }
 
 /**
@@ -517,20 +410,11 @@ export async function summarizeSession(
  */
 export async function getSessionChildren(
   sessionId: string,
-  directory?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<ApiSession[]> {
   const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    return nativeListChildSessions(target.serverId, target.sessionId)
-  }
-  const sdk = getSDKClient(target.serverId)
-  return unwrap(
-    await sdk.session.children({
-      sessionID: target.sessionId,
-      directory: formatPathForApi(directory, target.serverId),
-    }),
-  )
+  return nativeListChildSessions(target.serverId, target.sessionId)
 }
 
 /**
@@ -543,14 +427,9 @@ export type ApiTodo = TodoItem
  * SDK 的 Todo 没有 id 字段，用 index+content+status 合成
  */
 export async function getSessionTodos(sessionId: string, directory?: string, serverId?: string): Promise<ApiTodo[]> {
-  const target = resolveSessionTarget(sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    // v2 无 session.todo 主动拉取端点，todo 由 SSE 事件（session.todo）驱动，返回空
-    return []
-  }
-  const sdk = getSDKClient(target.serverId)
-  const todos = unwrap(
-    await sdk.session.todo({ sessionID: target.sessionId, directory: formatPathForApi(directory, target.serverId) }),
-  )
-  return normalizeTodoItems(todos)
+  void sessionId
+  void directory
+  void serverId
+  // v2 无 session.todo 主动拉取端点，todo 由 SSE 事件（session.todo）驱动，返回空
+  return []
 }

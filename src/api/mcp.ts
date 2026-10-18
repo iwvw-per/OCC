@@ -27,11 +27,7 @@ function mcpScopeKey(kind: 'status' | 'resources', directory?: string, serverId?
 export async function getMcpStatus(directory?: string, serverId?: string): Promise<MCPStatusResponse> {
   const sid = serverId ?? serverStore.getActiveServerId()
   return microCache(mcpScopeKey('status', directory, serverId), async () => {
-    if (serverStore.getApiVersion(sid) === 'v2') {
-      return (await nativeGetMcpStatus(sid)) as MCPStatusResponse
-    }
-    const sdk = getSDKClient(serverId)
-    return unwrap(await sdk.mcp.status({ directory: formatPathForApi(directory, serverId) }))
+    return (await nativeGetMcpStatus(sid)) as MCPStatusResponse
   })
 }
 

@@ -35,7 +35,6 @@ async function registerV2Server() {
 
 async function ensureV2() {
   await registerV2Server()
-  await serverStore.ensureApiVersion(SERVER_ID)
 }
 
 describeIf('v2 沙盒 facade 真实连接', () => {
@@ -50,7 +49,6 @@ describeIf('v2 沙盒 facade 真实连接', () => {
       fetch: globalThis.fetch,
       timeoutMs: 5000,
     })
-    expect(info.apiVersion).toBe('v2')
     expect(info.version).toMatch(/^2\./)
   })
 

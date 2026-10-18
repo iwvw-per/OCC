@@ -3,22 +3,11 @@ import { getCommands } from './command'
 
 const listMock = vi.fn()
 
-vi.mock('./sdk', () => ({
-  getSDKClient: () => ({
-    command: {
-      list: (...args: unknown[]) => listMock(...args),
-    },
-  }),
-  unwrap: (result: { data?: unknown }) => result.data,
-}))
-
-let apiVersion: string = 'v1'
 let skillList: unknown[] = []
 
 vi.mock('../store/serverStore', () => ({
   serverStore: {
     getActiveServerId: () => 'test-server',
-    getApiVersion: () => apiVersion,
   },
 }))
 
@@ -28,7 +17,7 @@ vi.mock('./skill', () => ({
 
 vi.mock('./v2NativeCommand', () => ({
   nativeListCommands: async () => {
-    const r = listMock()
+    const r = await listMock()
     return Array.isArray(r) ? r : (r?.data ?? [])
   },
   nativeListSkills: async () => skillList,
@@ -37,7 +26,6 @@ vi.mock('./v2NativeCommand', () => ({
 describe('getCommands', () => {
   beforeEach(() => {
     listMock.mockReset()
-    apiVersion = 'v1'
     skillList = []
   })
 
@@ -64,8 +52,7 @@ describe('getCommands', () => {
     ])
   })
 
-  it('v2 服务器合并 slash skill 到命令面板', async () => {
-    apiVersion = 'v2'
+  it('合并 slash skill 到命令面板', async () => {
     listMock.mockResolvedValue({ data: [{ name: 'init', description: 'Init project' }] })
     skillList = [
       { name: 'prototype', description: 'Build a throwaway prototype' },
