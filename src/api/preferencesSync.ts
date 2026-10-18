@@ -9,38 +9,21 @@
 // 安全边界：白名单制（收缩默认权限）
 // ============================================
 //
-// 只有下列键允许参与同步，其余一律拒绝：
+// 只有 SYNCABLE_PATTERNS 命中的键才允许同步，其余一律拒绝：
 //
-//   1. 全局外观/布局裸键（SYNCABLE_EXACT 集合，逐个人工登记）
-//   2. opencode: 前缀放行（sound-settings / update-check / toast-enabled /
-//      notification-event-settings），但排除本机运行时状态：
-//      opencode:notifications（通知历史含逐条已读标志，跨端同步会让已读被
-//      另一端的旧未读覆盖，表现为「点过已读，过一会儿又变未读」）
-//   3. opencode- 前缀放行，但排除本机专属键：opencode-servers、
-//      opencode-active-server、opencode-binary-path、
-//      opencode-auto-start-service、opencode-service-env-vars、
-//      opencode-terminal-layout、opencode-aiagent-account（登录凭证）、
-//      opencode-multi-server（多服务器订阅，含运行时状态）
-//   3b. 另排除「界面开合状态」：opencode-sidebar-expanded、
-//      opencode-sidebar-expanded-projects、opencode-panel-layout、
-//      opencode-work-status-enabled、opencode-work-status-expanded。
-//      这些是当前这一屏的浏览状态（侧栏/面板/板块此刻是否展开），不是用户
-//      偏好。跨端同步会让 A 端的开合动作把 B 端的界面折叠或弹开，用户在
-//      一端点开、另一端同步过来又给关掉，反复拉锯（详见下方「界面开合状态」）
-//   4. srv:aiagent: 前缀放行，但排除路径/统计类：last-directory、
-//      model-usage-stats、opencode-recent-projects
-//   5. srv: 其它分桶（srv:local:、srv:server-*）一律拒绝
-//   6. 其它一切键拒绝
+//   1. srv:aiagent:{id}:opencode-saved-directories —— 项目列表（按服务器分桶）
+//   2. opencode-pinned-sessions / opencode-pinned-messages —— 置顶
+//   3. opencode-read-watermarks / opencode-project-last-used —— 单调计数
+//   4. theme-preset / theme-mode —— 主题
 //
-// 白名单必须显式登记，不会因为新增一个 localStorage 键就自动同步。这是刻意
-// 的：安全优先，新增需要同步的键必须在 SYNCABLE_EXACT 里加一行，或者落在
-// 已经放行的前缀下。也就是说「意外泄露」被转换成「必须显式登记」。
+// **个性化设置不同步**：外观、布局、字号、音效、通知开关等一律不参与。
+// 它们对跨端一致性的要求低，却需要额外的时间戳仲裁与冲突处理；去掉之后
+// 同步层只剩「并集」与「取最大」两种幂等合并，多端同时操作天然不冲突。
 //
-// 历史教训：此前采用黑名单制（默认同步所有键），把面板凭据
-// （webRcloneAuth 含 Basic 认证串）、tileboard_cache_*、
-// ai-draw-nexus-chat-storage、dashboard_api_stats_cache_v1、
-// debug-err（含本地源码路径）、opencode-terminal-layout（含全盘目录列表）
-// 全量推上了服务端。
+// 白名单必须显式登记，不会因为新增一个 localStorage 键就自动同步
+// （「意外泄露」被转换成「必须显式登记」）。历史教训：此前采用黑名单制，
+// 把面板凭据（webRcloneAuth 含 Basic 认证串）、debug-err（含本地源码路径）、
+// opencode-terminal-layout（含全盘目录列表）等全量推上了服务端。
 //
 // ============================================
 // 本机专属键（保持排除，不参与同步）
@@ -182,7 +165,38 @@ function writePullEtag(account: AiAgentAccount, etag: string): void {
 
 const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-const SYNCABLE_EXACT = new Set([
+/**
+ * 跨设备同步的白名单。
+ *
+ * 只有「多端看到不一致会被当成 bug」的数据才能出现在这里：
+ *   - 项目列表（按服务器分桶）
+ *   - 置顶会话 / 置顶消息
+ *   - 已读水位、项目最后活跃时间
+ *   - 主题（preset + mode）
+ *
+ * 外观/布局/音效/通知等个性化设置**不参与同步**：它们对跨端一致性要求低，
+ * 却带来大量合并分支与流量，收益远小于成本。要新增同步项，必须在
+ * SYNCABLE_PATTERNS 里显式登记，并为其指定合并策略（见 MERGE_RULES）。
+ */
+const SYNCABLE_PATTERNS: RegExp[] = [
+  // 项目列表：按服务器分桶，数组并集 + 墓碑
+  /^srv:aiagent:[^:]+:opencode-saved-directories$/,
+  // 置顶会话 / 置顶消息
+  /^opencode-pinned-sessions$/,
+  /^opencode-pinned-messages$/,
+  // 已读水位、项目最后活跃时间（均为 map<id, 时间戳>，逐键取 max）
+  /^opencode-read-watermarks$/,
+  /^opencode-project-last-used$/,
+  // 主题：仅这两个键，标量 LWW
+  /^theme-(preset|mode)$/,
+]
+
+/**
+ * 已下线同步的历史键。新版不再读写它们，由 sync/cleanup 在首次同步后
+ * 从服务端删除（本地保留，因为本机仍在用这些设置）。
+ */
+export const DEPRECATED_SYNCABLE_KEYS: string[] = [
+  // 外观 / 布局
   'chat-content-width',
   'code-word-wrap',
   'collapse-user-messages',
@@ -200,58 +214,29 @@ const SYNCABLE_EXACT = new Set([
   'sidebar-width',
   'step-finish-display',
   'theme-custom-css',
-  'theme-mode',
-  'theme-preset',
-])
+  // 音效 / 通知 / 设备相关
+  'opencode:haptic-settings',
+  'opencode:large-text-paste',
+  'opencode:notification-event-settings',
+  'opencode:sound-settings',
+  'opencode:toast-enabled',
+  'opencode:update-check',
+]
 
 const SYNC_METADATA_KEYS = new Set([SYNC_ENABLED_KEY, SYNC_META_KEY, SYNC_STAMPS_KEY, TOMBSTONES_KEY])
-
-const EXCLUDED_OPENCODE_COLON_KEYS = new Set([
-  // 通知历史含逐条已读标志。它是本机运行时状态，不是跨端偏好：整键 last-write-wins
-  // 会让另一端的旧未读数组覆盖本地已读，而 notificationStore 不监听外部写入，
-  // 表现为「点过已读，过一会儿又变未读」。与界面开合状态同属应排除的一类。
-  'opencode:notifications',
-])
-
-const EXCLUDED_OPENCODE_DASH_KEYS = new Set([
-  'opencode-servers',
-  'opencode-active-server',
-  'opencode-binary-path',
-  'opencode-auto-start-service',
-  'opencode-service-env-vars',
-  'opencode-terminal-layout',
-  'opencode-aiagent-account',
-  'opencode-multi-server',
-  // 「打开项目目录」的目标程序：不同机器装的编辑器/终端不同，属本机专属偏好，
-  // 同步会让 A 端选定的方式覆盖 B 端（B 端可能根本没装那个工具）。
-  'opencode-open-directory-target',
-  // 界面开合状态：属当前这一屏的浏览状态，跨端同步会互相折叠/弹开（见文件头）
-  'opencode-sidebar-expanded',
-  'opencode-sidebar-expanded-projects',
-  'opencode-panel-layout',
-  'opencode-work-status-enabled',
-  'opencode-work-status-expanded',
-])
-
-const EXCLUDED_SRV_AIAGENT_SUFFIXES = ['last-directory', 'model-usage-stats', 'opencode-recent-projects']
 
 /**
  * 是否参与同步的 localStorage 键。
  *
- * 白名单制：只有落在准入前缀下且不在排除清单里的键才放行，未登记的键一律
- * 不同步。安全优先，新增键必须显式加入白名单。
+ * 白名单制：只放行 SYNCABLE_PATTERNS 命中的键，其余一律不同步。
+ * 安全优先——「意外泄露」被转换成「必须显式登记」。
  */
 export function isSyncableKey(key: string): boolean {
   if (!key) return false
   if (SYNC_METADATA_KEYS.has(key)) return false
-  if (SYNCABLE_EXACT.has(key)) return true
-  if (key.startsWith('opencode:')) return !EXCLUDED_OPENCODE_COLON_KEYS.has(key)
-  if (key.startsWith('opencode-')) return !EXCLUDED_OPENCODE_DASH_KEYS.has(key)
-  if (key.startsWith('srv:aiagent:')) {
-    return !EXCLUDED_SRV_AIAGENT_SUFFIXES.some(suffix => key.endsWith(`:${suffix}`))
-  }
-  return false
+  return SYNCABLE_PATTERNS.some(pattern => pattern.test(key))
 }
+
 
 /**
  * 列出 localStorage 中的所有键。

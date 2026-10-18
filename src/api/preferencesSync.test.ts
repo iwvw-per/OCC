@@ -3,27 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const SYNC_STAMPS_KEY = 'opencode-preferences-sync-stamps'
 const TOMBSTONES_KEY = 'opencode-preferences-sync-tombstones'
 
-const GLOBAL_WHITELIST = [
-  'chat-content-width',
-  'code-word-wrap',
-  'collapse-user-messages',
-  'descriptive-tool-steps',
-  'desktop-collapsed-input-dock',
-  'diff-style',
-  'external-file-drop-mode',
-  'font-scale',
-  'glass-effect',
-  'i18nextLng',
-  'process-collapse-enabled',
-  'queue-followup-messages',
-  'reasoning-display-mode',
-  'render-user-markdown',
-  'sidebar-width',
-  'step-finish-display',
-  'theme-custom-css',
-  'theme-mode',
-  'theme-preset',
-]
 
 describe('preferences sync', () => {
   beforeEach(() => {
@@ -83,7 +62,7 @@ describe('preferences sync', () => {
 
   it('sends If-None-Match and skips merge on 304', async () => {
     const account = await seedAccount()
-    localStorage.setItem('font-scale', '0.5')
+    localStorage.setItem('theme-preset', '0.5')
     // 首次拉取：服务端返回内容并下发 ETag。
     const ETAG = '"abc123"'
     let getCalls = 0
@@ -107,7 +86,7 @@ describe('preferences sync', () => {
         return new Response(
           JSON.stringify({
             success: true,
-            data: [{ key: 'font-scale', value: '0.1', updatedAt: '2030-01-01T00:00:00.000Z' }],
+            data: [{ key: 'theme-preset', value: '0.1', updatedAt: '2030-01-01T00:00:00.000Z' }],
           }),
           { status: 200, headers: { 'Content-Type': 'application/json', ETag: ETAG } },
         )
@@ -125,7 +104,7 @@ describe('preferences sync', () => {
     const first = await pullPreferences(account)
     expect(sawIfNoneMatch).toBeNull()
     expect(first).toBe(1)
-    expect(localStorage.getItem('font-scale')).toBe('0.1')
+    expect(localStorage.getItem('theme-preset')).toBe('0.1')
 
     // 第二次：带上 ETag，服务端回 304，不产生任何写入。
     const second = await pullPreferences(account)
@@ -134,31 +113,55 @@ describe('preferences sync', () => {
     expect(getCalls).toBe(2)
   })
 
-  it('admits every globally whitelisted key', async () => {
-    const { isSyncableKey } = await import('./preferencesSync')
-    for (const key of GLOBAL_WHITELIST) {
-      expect(isSyncableKey(key), key).toBe(true)
-    }
-  })
-
-  it('admits the opencode: and opencode- prefixes', async () => {
+  it('admits exactly the five cross-device data families', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
 
-    expect(isSyncableKey('opencode:sound-settings')).toBe(true)
-    expect(isSyncableKey('opencode:toast-enabled')).toBe(true)
-    expect(isSyncableKey('opencode:update-check')).toBe(true)
-    expect(isSyncableKey('opencode:notification-event-settings')).toBe(true)
-
-    expect(isSyncableKey('opencode-keybindings')).toBe(true)
-    expect(isSyncableKey('opencode-sidebar-project-sort')).toBe(true)
-    expect(isSyncableKey('opencode-bottom-panel-height')).toBe(true)
-    expect(isSyncableKey('opencode-right-panel-width')).toBe(true)
+    // 项目列表（按服务器分桶）
+    expect(isSyncableKey('srv:aiagent:inst_1:opencode-saved-directories')).toBe(true)
+    // 置顶
     expect(isSyncableKey('opencode-pinned-sessions')).toBe(true)
     expect(isSyncableKey('opencode-pinned-messages')).toBe(true)
-    // 已读水位：裸键，跨端同步「未读」依赖它
+    // 单调计数（逐键取 max，天然无冲突）
     expect(isSyncableKey('opencode-read-watermarks')).toBe(true)
-    // 项目最后活动时间：裸键，跨端同步项目顺序依赖它
     expect(isSyncableKey('opencode-project-last-used')).toBe(true)
+    // 主题
+    expect(isSyncableKey('theme-preset')).toBe(true)
+    expect(isSyncableKey('theme-mode')).toBe(true)
+  })
+
+  it('no longer syncs personalization settings', async () => {
+    const { isSyncableKey } = await import('./preferencesSync')
+
+    // 外观 / 布局 / 字号：不再跨端同步（见文件头「个性化设置不同步」）
+    for (const key of [
+      'chat-content-width',
+      'code-word-wrap',
+      'collapse-user-messages',
+      'descriptive-tool-steps',
+      'diff-style',
+      'font-scale',
+      'glass-effect',
+      'i18nextLng',
+      'reasoning-display-mode',
+      'sidebar-width',
+      'theme-custom-css',
+    ]) {
+      expect(isSyncableKey(key), key).toBe(false)
+    }
+
+    // 音效 / 通知 / 设备相关
+    for (const key of [
+      'opencode:sound-settings',
+      'opencode:toast-enabled',
+      'opencode:update-check',
+      'opencode:haptic-settings',
+      'opencode:large-text-paste',
+      'opencode-keybindings',
+      'opencode-sidebar-project-sort',
+      'opencode-right-panel-width',
+    ]) {
+      expect(isSyncableKey(key), key).toBe(false)
+    }
   })
 
   it('rejects UI open/collapse state so panels do not fight across devices', async () => {
@@ -176,23 +179,22 @@ describe('preferences sync', () => {
     expect(isSyncableKey('srv:aiagent:inst_1:opencode-saved-directories')).toBe(true)
   })
 
-  it('admits srv:aiagent: preferences but rejects path and stats keys', async () => {
+  it('rejects per-server settings other than the project list', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
 
-    expect(isSyncableKey('srv:aiagent:inst_1:model-variant-prefs')).toBe(true)
-    expect(isSyncableKey('srv:aiagent:inst_1:opencode-detected-path-style')).toBe(true)
-    expect(isSyncableKey('srv:aiagent:inst_1:opencode-hidden-directories')).toBe(true)
+    // 只有 saved-directories 一个 srv 键参与同步，其余 per-server 设置不下发
     expect(isSyncableKey('srv:aiagent:inst_1:opencode-saved-directories')).toBe(true)
-    expect(isSyncableKey('srv:aiagent:inst_1:opencode-auto-approve-enabled')).toBe(true)
-    expect(isSyncableKey('srv:aiagent:inst_1:opencode-path-mode')).toBe(true)
-    expect(isSyncableKey('srv:aiagent:inst_1:selected-agent:pane-1')).toBe(true)
-    expect(isSyncableKey('srv:aiagent:inst_1:selected-model-key')).toBe(true)
-    expect(isSyncableKey('srv:aiagent:inst_1:session-model-selection')).toBe(true)
-    expect(isSyncableKey('srv:aiagent:inst_1:hidden-model-keys')).toBe(true)
-
-    expect(isSyncableKey('srv:aiagent:inst_1:last-directory')).toBe(false)
-    expect(isSyncableKey('srv:aiagent:inst_1:model-usage-stats')).toBe(false)
-    expect(isSyncableKey('srv:aiagent:inst_1:opencode-recent-projects')).toBe(false)
+    for (const key of [
+      'srv:aiagent:inst_1:model-variant-prefs',
+      'srv:aiagent:inst_1:opencode-detected-path-style',
+      'srv:aiagent:inst_1:selected-model-key',
+      'srv:aiagent:inst_1:session-model-selection',
+      'srv:aiagent:inst_1:last-directory',
+      'srv:aiagent:inst_1:model-usage-stats',
+      'srv:aiagent:inst_1:opencode-recent-projects',
+    ]) {
+      expect(isSyncableKey(key), key).toBe(false)
+    }
   })
 
   it('rejects credentials, machine-local keys and other srv buckets', async () => {
@@ -227,7 +229,7 @@ describe('preferences sync', () => {
   })
 
   it('collects only whitelisted keys from localStorage', async () => {
-    localStorage.setItem('font-scale', '0.1')
+    localStorage.setItem('theme-preset', '0.1')
     localStorage.setItem('theme-preset', '"eucalyptus"')
     localStorage.setItem('i18nextLng', 'zh-CN')
     localStorage.setItem('opencode:notifications', '{"enabled":true}')
@@ -245,12 +247,12 @@ describe('preferences sync', () => {
     const { collectLocalPreferences } = await import('./preferencesSync')
     const entries = collectLocalPreferences()
 
-    expect(entries['font-scale']).toBe('0.1')
     expect(entries['theme-preset']).toBe('"eucalyptus"')
-    expect(entries['i18nextLng']).toBe('zh-CN')
-    expect(entries['opencode:sound-settings']).toBeDefined()
-    expect(entries['opencode-keybindings']).toBeDefined()
-    expect(entries['srv:aiagent:inst_1:selected-agent:pane-1']).toBeDefined()
+    // 个性化设置与 per-server 其它设置已不再同步
+    expect(entries['i18nextLng']).toBeUndefined()
+    expect(entries['opencode:sound-settings']).toBeUndefined()
+    expect(entries['opencode-keybindings']).toBeUndefined()
+    expect(entries['srv:aiagent:inst_1:selected-agent:pane-1']).toBeUndefined()
 
     expect(entries['opencode:notifications']).toBeUndefined()
     expect(entries['opencode-servers']).toBeUndefined()
@@ -264,7 +266,7 @@ describe('preferences sync', () => {
 
   it('pushes with lastWriteWins and per-key timestamps', async () => {
     await seedAccount()
-    localStorage.setItem('diff-style', '"markers"')
+    localStorage.setItem('theme-mode', '"markers"')
     localStorage.setItem('theme-preset', '"sakura"')
 
     let putUrl = ''
@@ -281,12 +283,12 @@ describe('preferences sync', () => {
 
     const values = sentBody as unknown as { values: Record<string, unknown> }
     const updatedAt = sentBody as unknown as { updatedAt: Record<string, string> }
-    expect(values.values['diff-style']).toEqual('markers')
+    expect(values.values['theme-mode']).toEqual('markers')
     expect(values.values['theme-preset']).toBe('sakura')
     expect(values.values['opencode-aiagent-account']).toBeUndefined()
-    expect(Object.keys(updatedAt.updatedAt).sort()).toEqual(['diff-style', 'theme-preset'])
+    expect(Object.keys(updatedAt.updatedAt).sort()).toEqual(['theme-mode', 'theme-preset'])
 
-    const firstDiffStamp = updatedAt.updatedAt['diff-style']
+    const firstDiffStamp = updatedAt.updatedAt['theme-mode']
 
     const callsBefore = fetchMock.mock.calls.length
     localStorage.setItem('theme-preset', '"ocean"')
@@ -295,7 +297,7 @@ describe('preferences sync', () => {
     expect(fetchMock.mock.calls.length).toBe(callsBefore + 1)
 
     const secondStamps = (sentBody as unknown as { updatedAt: Record<string, string> }).updatedAt
-    expect(secondStamps['diff-style']).toBe(firstDiffStamp)
+    expect(secondStamps['theme-mode']).toBe(firstDiffStamp)
     expect(secondStamps['theme-preset']).not.toBe(updatedAt.updatedAt['theme-preset'])
 
     const afterChange = fetchMock.mock.calls.length
@@ -306,7 +308,7 @@ describe('preferences sync', () => {
 
   it('uses the current time for every key on the first sync', async () => {
     await seedAccount()
-    localStorage.setItem('font-scale', '0.2')
+    localStorage.setItem('theme-preset', '0.2')
 
     let sentBody: Record<string, unknown> | null = null
     stubPreferencesFetch([], (_url, body) => {
@@ -317,28 +319,24 @@ describe('preferences sync', () => {
     await pushPreferences()
 
     const stamps = (sentBody as unknown as { updatedAt: Record<string, string> }).updatedAt
-    expect(stamps['font-scale']).toBeTruthy()
-    expect(Number.isNaN(Date.parse(stamps['font-scale']))).toBe(false)
+    expect(stamps['theme-preset']).toBeTruthy()
+    expect(Number.isNaN(Date.parse(stamps['theme-preset']))).toBe(false)
   })
 
   it('does not overwrite a newer local value with an older server value', async () => {
     const account = await seedAccount()
-    localStorage.setItem('font-scale', '0.5')
+    localStorage.setItem('theme-preset', '"local-newer"')
     localStorage.setItem(
       SYNC_STAMPS_KEY,
-      JSON.stringify({ stamps: { 'font-scale': '2030-01-01T00:00:00.000Z' }, known: {} }),
+      JSON.stringify({ stamps: { 'theme-preset': '2030-01-01T00:00:00.000Z' }, known: {} }),
     )
 
-    stubPreferencesFetch([
-      { key: 'font-scale', value: '0.1', updatedAt: '2020-01-01T00:00:00.000Z' },
-      { key: 'theme-preset', value: 'ocean', updatedAt: '2030-01-01T00:00:00.000Z' },
-    ])
+    stubPreferencesFetch([{ key: 'theme-preset', value: '"server-older"', updatedAt: '2020-01-01T00:00:00.000Z' }])
 
     const { pullPreferences } = await import('./preferencesSync')
-    const written = await pullPreferences(account)
-    expect(written).toBe(1)
-    expect(localStorage.getItem('font-scale')).toBe('0.5')
-    expect(localStorage.getItem('theme-preset')).toBe('ocean')
+    await pullPreferences(account)
+    // 服务端值更旧：本地保留
+    expect(localStorage.getItem('theme-preset')).toBe('"local-newer"')
   })
 
   it('does not let a pull clobber a local edit made since the last push', async () => {
@@ -372,8 +370,8 @@ describe('preferences sync', () => {
     const localToken = JSON.parse(localStorage.getItem('opencode-aiagent-account') || '{}').token
 
     stubPreferencesFetch([
-      { key: 'font-scale', value: '0.1', updatedAt: '2030-01-01T00:00:00Z' },
-      { key: 'theme-preset', value: 'ocean', updatedAt: '2030-01-01T00:00:00Z' },
+      { key: 'theme-preset', value: '"eucalyptus"', updatedAt: '2030-01-01T00:00:00Z' },
+      { key: 'theme-mode', value: '"dark"', updatedAt: '2030-01-01T00:00:00Z' },
       { key: 'opencode-aiagent-account', value: { token: 'must-be-ignored' }, updatedAt: '2030-01-01T00:00:00Z' },
       { key: 'opencode-servers', value: [{ url: 'http://evil' }], updatedAt: '2030-01-01T00:00:00Z' },
       { key: 'srv:local:opencode-hidden-directories', value: ['/other'], updatedAt: '2030-01-01T00:00:00Z' },
@@ -383,8 +381,8 @@ describe('preferences sync', () => {
     const written = await pullPreferences(account)
     expect(written).toBe(2)
 
-    expect(localStorage.getItem('font-scale')).toBe('0.1')
-    expect(localStorage.getItem('theme-preset')).toBe('ocean')
+    expect(localStorage.getItem('theme-preset')).toBe('"eucalyptus"')
+    expect(localStorage.getItem('theme-mode')).toBe('"dark"')
     expect(JSON.parse(localStorage.getItem('opencode-aiagent-account') || '{}').token).toBe(localToken)
     expect(localStorage.getItem('opencode-servers')).toBeNull()
     expect(localStorage.getItem('srv:local:opencode-hidden-directories')).toBeNull()
@@ -470,26 +468,15 @@ describe('preferences sync', () => {
     expect(merged['/server-only']).toBe(3000)
   })
 
-  it('merges per-server pinned sessions and saved directories as a union', async () => {
+  it('merges per-server saved directories as a union', async () => {
+    // per-server 只有项目列表参与同步（其它 srv 键已下线，见白名单）。
     const account = await seedAccount()
-    localStorage.setItem(
-      'srv:aiagent:inst_1:opencode-pinned-sessions',
-      JSON.stringify([{ sessionId: 'local-1', directory: '/local', title: 'Local' }]),
-    )
     localStorage.setItem(
       'srv:aiagent:inst_1:opencode-saved-directories',
       JSON.stringify([{ path: '/a', name: 'A', addedAt: 1 }]),
     )
 
     stubPreferencesFetch([
-      {
-        key: 'srv:aiagent:inst_1:opencode-pinned-sessions',
-        value: [
-          { sessionId: 'server-1', directory: '/server', title: 'Server' },
-          { sessionId: 'local-1', directory: '/server', title: 'Server copy' },
-        ],
-        updatedAt: '2030-01-01T00:00:00Z',
-      },
       {
         key: 'srv:aiagent:inst_1:opencode-saved-directories',
         value: [
@@ -502,9 +489,6 @@ describe('preferences sync', () => {
 
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
-
-    const pinned = JSON.parse(localStorage.getItem('srv:aiagent:inst_1:opencode-pinned-sessions') || '[]')
-    expect(pinned.map((entry: { sessionId: string }) => entry.sessionId)).toEqual(['local-1', 'server-1'])
 
     const saved = JSON.parse(localStorage.getItem('srv:aiagent:inst_1:opencode-saved-directories') || '[]')
     expect(saved.map((entry: { path: string }) => entry.path)).toEqual(['/a', '/b'])
@@ -586,18 +570,10 @@ describe('preferences sync', () => {
     expect(saved.map((entry: { path: string }) => entry.path)).toEqual(['/b', '/a'])
   })
 
-  it('keeps legacy hidden-directories on whole-key last-write-wins', async () => {
-    // 该键已废弃（项目列表不再自动发现，用户看到的项目由 saved-directories 决定），
-    // 但历史数据仍在准入前缀下，同步语义保持整键 LWW 不变，避免旧数据行为突变。
+  it('ignores legacy hidden-directories now that it is off the whitelist', async () => {
+    // opencode-hidden-directories 已不在同步白名单：服务端即使仍存有这个键，
+    // 拉取时也必须被忽略，不能写进本地。
     const account = await seedAccount()
-    localStorage.setItem('srv:aiagent:inst_1:opencode-hidden-directories', JSON.stringify(['/local-only']))
-    localStorage.setItem(
-      SYNC_STAMPS_KEY,
-      JSON.stringify({
-        stamps: { 'srv:aiagent:inst_1:opencode-hidden-directories': '2020-01-01T00:00:00.000Z' },
-        known: {},
-      }),
-    )
 
     stubPreferencesFetch([
       {
@@ -610,9 +586,7 @@ describe('preferences sync', () => {
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
 
-    expect(JSON.parse(localStorage.getItem('srv:aiagent:inst_1:opencode-hidden-directories') || '[]')).toEqual([
-      '/server-only',
-    ])
+    expect(localStorage.getItem('srv:aiagent:inst_1:opencode-hidden-directories')).toBeNull()
   })
 
   it('blocks a deleted entry from being resurrected through the union', async () => {
@@ -838,28 +812,31 @@ describe('preferences sync', () => {
     const { collectLocalPreferences, withinValueLimit } = await import('./preferencesSync')
 
     const huge = 'x'.repeat(257 * 1024)
-    localStorage.setItem('font-scale', '0.1')
+    localStorage.setItem('theme-preset', '0.1')
     localStorage.setItem('theme-custom-css', huge)
 
     expect(withinValueLimit(huge)).toBe(false)
     expect(withinValueLimit('small')).toBe(true)
 
     const entries = collectLocalPreferences()
-    expect(entries['font-scale']).toBe('0.1')
+    expect(entries['theme-preset']).toBe('0.1')
     expect(entries['theme-custom-css']).toBeUndefined()
   })
 
   it('keeps the request body under the server 1MB limit', async () => {
     await seedAccount()
     // 服务端 decodeJSON 用 io.LimitReader(1MB) 读取，超限时会在 JSON 中途截断并
-    // 报 "invalid JSON body"（掩盖真实原因）。这里构造一个整体超限的载荷，
+    // 报 "invalid JSON body"（掩盖真实原因）。白名单收窄后仍能构造超限载荷的
+    // 只有项目列表（单值上限 256KB），这里用多个实例桶拼出超过 1MB 的载荷，
     // 断言实际发出的请求体仍在 1MB 内。
     const big = 'y'.repeat(240 * 1024)
-    localStorage.setItem('font-scale', '0.1')
-    localStorage.setItem('theme-custom-css', big)
-    localStorage.setItem('opencode-keybindings', JSON.stringify({ k: big }))
-    localStorage.setItem('sidebar-width', big)
-    localStorage.setItem('i18nextLng', 'zh-CN')
+    for (let i = 0; i < 6; i += 1) {
+      localStorage.setItem(
+        `srv:aiagent:inst_${i}:opencode-saved-directories`,
+        JSON.stringify([{ path: `/${big}`, name: 'x', addedAt: 1 }]),
+      )
+    }
+    localStorage.setItem('theme-preset', '"eucalyptus"')
 
     let sentBody = ''
     vi.stubGlobal(
@@ -892,7 +869,7 @@ describe('preferences sync', () => {
     expect(bytes).toBeLessThanOrEqual(1024 * 1024)
 
     // 小键必须在裁剪后留下，不能被整体丢弃。
-    expect(JSON.parse(sentBody).values['i18nextLng']).toBe('zh-CN')
+    expect(JSON.parse(sentBody).values['theme-preset']).toBe('eucalyptus')
   })
 
   it('does not send an empty payload when no key is syncable', async () => {

@@ -22,6 +22,7 @@
 // ============================================
 
 import { readAccount } from './aiagent'
+import { cleanupDeprecatedSyncKeys } from './syncCleanup'
 import { subscribePreferenceEvents, type PreferenceEventsSubscription } from './preferencesEvents'
 import {
   collectLocalPreferences,
@@ -210,6 +211,13 @@ export async function startPreferencesSync(): Promise<void> {
   // 经 runSync 统一互斥：登录与轮询可能同时触发，直接调 syncPreferences 会
   // 绕过 inFlight 造成两条链路并发写 stamps。
   await runSync(true)
+
+  // 白名单收窄后的收尾：删除服务端残留的已下线键。
+  // 放在首次同步成功之后 —— 此时本机已不会再上报这些键，删除才不会被自己写回。
+  // 失败不影响同步（清理是可选动作），由 cleanup 内部静默处理。
+  if (getSyncState().status === 'synced') {
+    void cleanupDeprecatedSyncKeys().catch(() => {})
+  }
 
   startEventSubscription()
   startStorageSubscription()
