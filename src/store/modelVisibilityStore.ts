@@ -9,7 +9,7 @@ type Listener = () => void
 const STORAGE_KEY_HIDDEN_MODELS = 'hidden-model-keys'
 
 function loadHiddenModelKeys(): string[] {
-  const stored = serverStorage.getJSON<unknown>(STORAGE_KEY_HIDDEN_MODELS)
+  const stored = serverStorage.getJSON<unknown>(STORAGE_KEY_HIDDEN_MODELS, serverStore.getActiveServerId())
   if (!Array.isArray(stored)) return []
   return stored.filter((item): item is string => typeof item === 'string')
 }
@@ -37,7 +37,7 @@ class ModelVisibilityStore {
 
   private commit() {
     this.syncSnapshot()
-    serverStorage.setJSON(STORAGE_KEY_HIDDEN_MODELS, this.snapshot)
+    serverStorage.setJSON(STORAGE_KEY_HIDDEN_MODELS, this.snapshot, serverStore.getActiveServerId())
     this.emit()
   }
 

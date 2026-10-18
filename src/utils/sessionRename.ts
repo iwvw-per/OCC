@@ -95,7 +95,7 @@ export function resolveAiRenameModel(models: ModelInfo[], serverId?: string): Mo
     const stored = serverStorage.getJSONFor<string[]>(HIDDEN_MODELS_STORAGE_KEY, serverId)
     if (Array.isArray(stored)) stored.forEach(key => hidden.add(key))
   } else {
-    const stored = serverStorage.getJSON<string[]>(HIDDEN_MODELS_STORAGE_KEY)
+    const stored = serverStorage.getJSON<string[]>(HIDDEN_MODELS_STORAGE_KEY, serverStore.getActiveServerId())
     if (Array.isArray(stored)) stored.forEach(key => hidden.add(key))
   }
   const visible = models.filter(model => !hidden.has(getModelKey(model)))
@@ -110,7 +110,7 @@ export function resolveAiRenameModel(models: ModelInfo[], serverId?: string): Mo
   if (preferredModel && !hidden.has(getModelKey(preferredModel))) return preferredModel
 
   const remembered =
-    serverId ? serverStorage.getFor(STORAGE_KEY_SELECTED_MODEL, serverId) : serverStorage.get(STORAGE_KEY_SELECTED_MODEL)
+    serverId ? serverStorage.getFor(STORAGE_KEY_SELECTED_MODEL, serverId) : serverStorage.get(STORAGE_KEY_SELECTED_MODEL, serverStore.getActiveServerId())
   const rememberedModel = pick(remembered)
   if (rememberedModel && !hidden.has(getModelKey(rememberedModel))) return rememberedModel
 

@@ -117,14 +117,14 @@ export function useChatSession({
   // Agents
   const [agents, setAgents] = useState<ApiAgent[]>([])
   const [selectedAgent, setSelectedAgentRaw] = useState<string>(
-    () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`) || '',
+    () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`, serverStore.getActiveServerId()) || '',
   )
   const [restoredContent, setRestoredContent] = useState<{ sessionId: string; content: RevertHistoryItem } | null>(null)
 
   const setSelectedAgent = useCallback(
     (agentName: string) => {
       setSelectedAgentRaw(agentName)
-      serverStorage.set(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`, agentName)
+      serverStorage.set(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`, agentName, serverStore.getActiveServerId())
     },
     [paneId],
   )

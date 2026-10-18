@@ -7,19 +7,19 @@
 //
 // 用法：
 //   import { serverStorage } from '../utils/perServerStorage'
-//   serverStorage.get('last-directory')        // 读取当前服务器的值
-//   serverStorage.set('last-directory', '/foo') // 写入当前服务器的值
-//   serverStorage.remove('last-directory')      // 删除当前服务器的值
+//   serverStorage.get('last-directory', serverId)
+//   serverStorage.set('last-directory', '/foo', serverId)
+//   serverStorage.remove('last-directory', serverId)
+//
+// 所有方法都要求显式传 serverId：隐式「当前活动服务器」会让读写落在不同的桶。
 
-import { serverStore } from '../store/serverStore'
 
 /**
  * 生成带 serverId 前缀的 localStorage key
  * 格式: `srv:{serverId}:{key}`
  */
-function makeKey(key: string, serverId?: string): string {
-  const sid = serverId ?? serverStore.getActiveServerId()
-  return `srv:${sid}:${key}`
+function makeKey(key: string, serverId: string): string {
+  return `srv:${serverId}:${key}`
 }
 
 // 存储版本（写入时递增，供订阅者通过 getStorageVersion 感知变化触发刷新）
@@ -61,9 +61,10 @@ export const serverStorage = {
   /**
    * 读取当前服务器的存储值
    */
-  get(key: string): string | null {
+  /** 读取指定服务器的存储值（必须显式传 serverId） */
+  get(key: string, serverId: string): string | null {
     try {
-      return localStorage.getItem(makeKey(key))
+      return localStorage.getItem(makeKey(key, serverId))
     } catch {
       return null
     }
@@ -72,9 +73,10 @@ export const serverStorage = {
   /**
    * 写入当前服务器的存储值
    */
-  set(key: string, value: string): void {
+  /** 写入指定服务器的存储值（必须显式传 serverId） */
+  set(key: string, value: string, serverId: string): void {
     try {
-      localStorage.setItem(makeKey(key), value)
+      localStorage.setItem(makeKey(key, serverId), value)
       bumpVersion()
     } catch {
       // ignore
@@ -84,9 +86,10 @@ export const serverStorage = {
   /**
    * 删除当前服务器的存储值
    */
-  remove(key: string): void {
+  /** 删除指定服务器的存储值（必须显式传 serverId） */
+  remove(key: string, serverId: string): void {
     try {
-      localStorage.removeItem(makeKey(key))
+      localStorage.removeItem(makeKey(key, serverId))
       bumpVersion()
     } catch {
       // ignore
@@ -96,8 +99,8 @@ export const serverStorage = {
   /**
    * 读取当前服务器的 JSON 值（自动解析）
    */
-  getJSON<T>(key: string): T | null {
-    const raw = serverStorage.get(key)
+  getJSON<T>(key: string, serverId: string): T | null {
+    const raw = serverStorage.get(key, serverId)
     if (!raw) return null
     try {
       return JSON.parse(raw) as T
@@ -109,8 +112,8 @@ export const serverStorage = {
   /**
    * 写入当前服务器的 JSON 值（自动序列化）
    */
-  setJSON(key: string, value: unknown): void {
-    serverStorage.set(key, JSON.stringify(value))
+  setJSON(key: string, value: unknown, serverId: string): void {
+    serverStorage.set(key, JSON.stringify(value), serverId)
   },
 
   /**

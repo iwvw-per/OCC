@@ -5,7 +5,9 @@
  */
 
 import type { ModelInfo } from '../api'
-import { serverStorage } from './perServerStorage'
+import { z } from 'zod'
+import { createStore } from '../storage/createStore'
+import { serverStore } from '../store/serverStore'
 
 // ============================================
 // 模型唯一标识
@@ -49,6 +51,86 @@ const VARIANT_STORAGE_KEY = 'model-variant-prefs'
 const PINNED_STORAGE_KEY = 'model-pinned'
 const SESSION_SELECTION_STORAGE_KEY = 'session-model-selection'
 
+// ---- 持久化（统一走 createStore：单写入口 + schema 校验 + 切服 rebind） ----
+const usageSchema: z.ZodType<ModelUsageStats> = z
+  .record(z.string(), z.unknown())
+  .transform(raw =>
+    Object.fromEntries(
+      Object.entries(raw).flatMap(([k, v]) => {
+        const rec = v as { count?: unknown; lastUsed?: unknown } | null
+        if (!rec || typeof rec.count !== 'number' || typeof rec.lastUsed !== 'number') return []
+        return [[k, { count: rec.count, lastUsed: rec.lastUsed }]]
+      }),
+    ),
+  )
+
+const variantSchema: z.ZodType<ModelVariantPrefs> = z
+  .record(z.string(), z.unknown())
+  .transform(raw => Object.fromEntries(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === 'string')))
+
+const selectionSchema: z.ZodType<SessionModelSelections> = z
+  .record(z.string(), z.unknown())
+  .transform(raw =>
+    Object.fromEntries(
+      Object.entries(raw).flatMap(([sid, v]) => {
+        const rec = v as { modelKey?: unknown; variant?: unknown } | null
+        if (!rec || typeof rec.modelKey !== 'string') return []
+        return [[sid, typeof rec.variant === 'string' ? { modelKey: rec.modelKey, variant: rec.variant } : { modelKey: rec.modelKey }]]
+      }),
+    ),
+  )
+
+const pinnedSchema: z.ZodType<string[]> = z.array(z.unknown()).transform(items =>
+  items.filter((i): i is string => typeof i === 'string'),
+)
+
+const usageStore = createStore({
+  key: STORAGE_KEY,
+  scope: { kind: 'server', serverId: serverStore.getActiveServerId() },
+  schema: usageSchema,
+  defaultValue: {},
+})
+const variantStore = createStore({
+  key: VARIANT_STORAGE_KEY,
+  scope: { kind: 'server', serverId: serverStore.getActiveServerId() },
+  schema: variantSchema,
+  defaultValue: {},
+})
+const selectionStore = createStore({
+  key: SESSION_SELECTION_STORAGE_KEY,
+  scope: { kind: 'server', serverId: serverStore.getActiveServerId() },
+  schema: selectionSchema,
+  defaultValue: {},
+})
+const pinnedStore = createStore({
+  key: PINNED_STORAGE_KEY,
+  scope: { kind: 'server', serverId: serverStore.getActiveServerId() },
+  schema: pinnedSchema,
+  defaultValue: [],
+})
+
+// 惰性绑定：模块加载时 serverStore 可能尚未就绪（测试、SSR、启动早期），
+// 首次访问时再对齐到当前活动服务器，避免在模块顶层产生副作用。
+let boundServerId = ''
+let watchingServerChange = false
+function ensureServerBinding(): void {
+  if (!watchingServerChange) {
+    watchingServerChange = true
+    serverStore.onServerChange(() => {
+      // 切换服务器：先清空绑定，下次读取时重新对齐
+      boundServerId = ''
+      ensureServerBinding()
+    })
+  }
+  const sid = serverStore.getActiveServerId()
+  if (sid === boundServerId) return
+  boundServerId = sid
+  usageStore.rebind(sid)
+  variantStore.rebind(sid)
+  selectionStore.rebind(sid)
+  pinnedStore.rebind(sid)
+}
+
 interface ModelUsageStats {
   [modelKey: string]: {
     count: number
@@ -70,34 +152,21 @@ interface SessionModelSelections {
 /**
  * 获取所有模型的使用统计
  */
-export function getModelUsageStats(): ModelUsageStats {
-  try {
-    const stored = serverStorage.get(STORAGE_KEY)
-    return stored ? JSON.parse(stored) : {}
-  } catch {
-    return {}
-  }
+export function getModelUsageStats() {
+  ensureServerBinding()
+  return usageStore.get()
 }
 
 /**
  * 记录模型使用
  */
 export function recordModelUsage(model: ModelInfo): void {
+  ensureServerBinding()
   const key = getModelKey(model)
-  const stats = getModelUsageStats()
-
-  if (!stats[key]) {
-    stats[key] = { count: 0, lastUsed: 0 }
-  }
-
-  stats[key].count += 1
-  stats[key].lastUsed = Date.now()
-
-  try {
-    serverStorage.set(STORAGE_KEY, JSON.stringify(stats))
-  } catch (e) {
-    console.warn('Failed to save model usage stats:', e)
-  }
+  usageStore.commit(stats => {
+    const prev = stats[key] ?? { count: 0, lastUsed: 0 }
+    return { ...stats, [key]: { count: prev.count + 1, lastUsed: Date.now() } }
+  })
 }
 
 // ============================================
@@ -107,32 +176,23 @@ export function recordModelUsage(model: ModelInfo): void {
 /**
  * 获取所有模型的 variant 偏好
  */
-export function getModelVariantPrefs(): ModelVariantPrefs {
-  try {
-    const stored = serverStorage.get(VARIANT_STORAGE_KEY)
-    return stored ? JSON.parse(stored) : {}
-  } catch {
-    return {}
-  }
+export function getModelVariantPrefs() {
+  ensureServerBinding()
+  return variantStore.get()
 }
 
 /**
  * 保存模型的 variant 偏好
  */
 export function saveModelVariantPref(modelKey: string, variant: string | undefined): void {
-  const prefs = getModelVariantPrefs()
-
-  if (variant) {
-    prefs[modelKey] = variant
-  } else {
-    delete prefs[modelKey]
-  }
-
-  try {
-    serverStorage.set(VARIANT_STORAGE_KEY, JSON.stringify(prefs))
-  } catch (e) {
-    console.warn('Failed to save model variant pref:', e)
-  }
+  ensureServerBinding()
+  variantStore.commit(prefs => {
+    if (variant) return { ...prefs, [modelKey]: variant }
+    if (!(modelKey in prefs)) return prefs
+    const next = { ...prefs }
+    delete next[modelKey]
+    return next
+  })
 }
 
 /**
@@ -148,12 +208,7 @@ export function getModelVariantPref(modelKey: string): string | undefined {
 // ============================================
 
 export function getSessionModelSelections(): SessionModelSelections {
-  try {
-    const stored = serverStorage.get(SESSION_SELECTION_STORAGE_KEY)
-    return stored ? JSON.parse(stored) : {}
-  } catch {
-    return {}
-  }
+  return selectionStore.get()
 }
 
 export function getSessionModelSelection(sessionId: string): { modelKey: string; variant?: string } | undefined {
@@ -162,14 +217,11 @@ export function getSessionModelSelection(sessionId: string): { modelKey: string;
 }
 
 export function saveSessionModelSelection(sessionId: string, modelKey: string, variant: string | undefined): void {
-  const selections = getSessionModelSelections()
-  selections[sessionId] = variant ? { modelKey, variant } : { modelKey }
-
-  try {
-    serverStorage.set(SESSION_SELECTION_STORAGE_KEY, JSON.stringify(selections))
-  } catch (e) {
-    console.warn('Failed to save session model selection:', e)
-  }
+  ensureServerBinding()
+  selectionStore.commit(selections => ({
+    ...selections,
+    [sessionId]: variant ? { modelKey, variant } : { modelKey },
+  }))
 }
 
 // ============================================
@@ -288,12 +340,8 @@ export function getRecentModels(models: ModelInfo[], limit = 5): ModelInfo[] {
  * 获取所有置顶的模型 key 列表（有序）
  */
 export function getPinnedModelKeys(): string[] {
-  try {
-    const stored = serverStorage.get(PINNED_STORAGE_KEY)
-    return stored ? JSON.parse(stored) : []
-  } catch {
-    return []
-  }
+  ensureServerBinding()
+  return pinnedStore.get()
 }
 
 /**
@@ -308,24 +356,12 @@ export function isModelPinned(model: ModelInfo): boolean {
  * 切换模型置顶状态
  */
 export function toggleModelPin(model: ModelInfo): boolean {
+  ensureServerBinding()
   const key = getModelKey(model)
-  const pinned = getPinnedModelKeys()
-  const index = pinned.indexOf(key)
-  let nowPinned: boolean
-
-  if (index !== -1) {
-    pinned.splice(index, 1)
-    nowPinned = false
-  } else {
-    pinned.push(key)
-    nowPinned = true
-  }
-
-  try {
-    serverStorage.set(PINNED_STORAGE_KEY, JSON.stringify(pinned))
-  } catch (e) {
-    console.warn('Failed to save pinned models:', e)
-  }
+  const nowPinned = !getPinnedModelKeys().includes(key)
+  pinnedStore.commit(pinned =>
+    nowPinned ? [...pinned, key] : pinned.filter(k => k !== key),
+  )
   return nowPinned
 }
 
