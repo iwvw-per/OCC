@@ -674,6 +674,8 @@ const UserMessageView = memo(function UserMessageView({
   const { collapseUserMessages, renderUserMarkdown } = useTheme()
   const actionBarClass = useMessageActionBarClass()
 
+  // 缺 time（v2 轻量投影）时用 0：shouldPlayEntryGrow(0) 恒为 false，等价于
+  // 「不播入场动画」—— 比崩溃好，也不会让时间未知的旧消息闪一下。
   const wrapperRef = useEntryGrowAnimation(info.time?.created ?? 0, true, info.id, onEntryGrowComplete)
 
   const textParts = content.filter((c): c is TextContent => c.type === 'text' && !c.synthetic)

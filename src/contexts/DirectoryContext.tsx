@@ -30,9 +30,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
-// 项目目录列表按服务器独立保存（原版设计）：切换主机后显示对应主机的项目
-function readSavedDirectories(): SavedDirectory[] {
-  const saved = serverStorage.getJSON<unknown>(STORAGE_KEY_SAVED)
+/**
+ * 项目目录列表按服务器独立保存（原版设计）：切换主机后显示对应主机的项目。
+ *
+ * 必须按「目标服务器的桶」读取，不能隐式用「当前活动服务器」：
+ * 切换主机/同步回调里两者可能不一致，读错桶会把别的主机的项目当成自己的，
+ * 随后写回就覆盖掉了真正的列表。
+ */
+function readSavedDirectories(serverId?: string): SavedDirectory[] {
+  const saved = serverId
+    ? serverStorage.getJSONFor<unknown>(STORAGE_KEY_SAVED, serverId)
+    : serverStorage.getJSON<unknown>(STORAGE_KEY_SAVED)
   if (!Array.isArray(saved)) return []
 
   return saved.flatMap(item => {
@@ -51,8 +59,10 @@ function readSavedDirectories(): SavedDirectory[] {
   })
 }
 
-function readRecentProjects(): RecentProjects {
-  const recent = serverStorage.getJSON<unknown>(STORAGE_KEY_RECENT)
+function readRecentProjects(serverId?: string): RecentProjects {
+  const recent = serverId
+    ? serverStorage.getJSONFor<unknown>(STORAGE_KEY_RECENT, serverId)
+    : serverStorage.getJSON<unknown>(STORAGE_KEY_RECENT)
   if (!isRecord(recent)) return {}
 
   return Object.fromEntries(
@@ -73,12 +83,12 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   // 旧状态覆盖 —— 表现为「新建的项目一同步就没了」。
   const [savedState, setSavedState] = useState<{ serverId: string; directories: SavedDirectory[] }>(() => ({
     serverId: serverStore.getActiveServerId(),
-    directories: readSavedDirectories(),
+    directories: readSavedDirectories(serverStore.getActiveServerId()),
   }))
 
   const [recentState, setRecentState] = useState<{ serverId: string; projects: RecentProjects }>(() => ({
     serverId: serverStore.getActiveServerId(),
-    projects: readRecentProjects(),
+    projects: readRecentProjects(serverStore.getActiveServerId()),
   }))
 
   const savedDirectories = savedState.directories
@@ -124,8 +134,9 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
     return serverStore.onServerChange((_, reason) => {
       if (reason === 'server-switch') {
         // 连同 serverId 一起换：写回时才知道这份列表属于哪台服务器。
-        setSavedState({ serverId: serverStore.getActiveServerId(), directories: readSavedDirectories() })
-        setRecentState({ serverId: serverStore.getActiveServerId(), projects: readRecentProjects() })
+        const switchedId = serverStore.getActiveServerId()
+        setSavedState({ serverId: switchedId, directories: readSavedDirectories(switchedId) })
+        setRecentState({ serverId: switchedId, projects: readRecentProjects(switchedId) })
         // 目录（URL 的 dir 参数）不在这里清：切换主机时由 App 的「每主机工作区快照」
         // 统一决定目标主机的会话与目录（见 hostWorkspaceStore）。这里再动 URL 会与
         // 快照恢复竞态，把刚恢复的目录清掉。
@@ -157,13 +168,15 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       const activeId = serverStore.getActiveServerId()
       setSavedState(prev => {
         if (prev.serverId !== activeId) return prev
-        const next = readSavedDirectories()
-        return JSON.stringify(prev.directories) === JSON.stringify(next) ? prev : { serverId: activeId, directories: next }
+        // 显式按 prev.serverId 读：隐式读取用的是「当前活动服务器」，与 prev 的
+        // 绑定不一致时会读到别的桶，进而把错误列表渲染/写回。
+        const next = readSavedDirectories(prev.serverId)
+        return JSON.stringify(prev.directories) === JSON.stringify(next) ? prev : { serverId: prev.serverId, directories: next }
       })
       setRecentState(prev => {
         if (prev.serverId !== activeId) return prev
-        const next = readRecentProjects()
-        return JSON.stringify(prev.projects) === JSON.stringify(next) ? prev : { serverId: activeId, projects: next }
+        const next = readRecentProjects(prev.serverId)
+        return JSON.stringify(prev.projects) === JSON.stringify(next) ? prev : { serverId: prev.serverId, projects: next }
       })
     })
   }, [])
@@ -275,22 +288,22 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    setSavedState(prev => {
-      const next = [...prev.directories]
-      const draggedIndex = next.findIndex(directory => isSameDirectory(directory.path, normalizedDragged))
-      const targetIndex = next.findIndex(directory => isSameDirectory(directory.path, normalizedTarget))
+    // 与新增/删除统一走 commit：拖拽重排同样要在 updater 外落盘，且写回当前
+    // 活动服务器的桶，避免切主机后顺序写进过期快照的桶里。
+    commitSavedDirectories(list => {
+      const draggedIndex = list.findIndex(directory => isSameDirectory(directory.path, normalizedDragged))
+      const targetIndex = list.findIndex(directory => isSameDirectory(directory.path, normalizedTarget))
 
       if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
-        return prev
+        return list
       }
 
+      const next = [...list]
       const [draggedDirectory] = next.splice(draggedIndex, 1)
       next.splice(targetIndex, 0, draggedDirectory)
-      const updated = { ...prev, directories: next }
-      serverStorage.setJSONFor(STORAGE_KEY_SAVED, updated.directories, updated.serverId)
-      return updated
+      return next
     })
-  }, [])
+  }, [commitSavedDirectories])
 
   // Tauri: 启动时获取 CLI 传入的目录 + 监听后续 open-directory 事件
   // 用 ref 持有最新的 addDirectory 避免 stale closure

@@ -10,7 +10,7 @@ import { scrollItemIntoView } from '../../utils/scrollUtils'
 import { Dialog } from '../../components/ui/Dialog'
 import { cn } from '../../utils/cn'
 import { interactive } from '../../utils/interaction'
-import { useIsMobile } from '../../hooks/useIsMobile'
+import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 
 // ============================================
 // Types
@@ -489,8 +489,11 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
 
   const trimmedInput = inputValue.trim()
   const relativeInput = !!trimmedInput && !isAbsoluteDirectory(trimmedInput)
-  // 触摸/窄屏没有 hover：「添加」按钮不能靠 hover 选中态显隐
-  const touchCapable = useIsMobile() || (typeof window !== 'undefined' && 'ontouchstart' in window)
+  // 触摸设备没有 hover：条目的「添加」按钮不能只在 hover 选中行渲染。
+  // 用项目已有的输入能力检测（matchMedia 的 hover/pointer，带全局共享订阅），
+  // 比 `'ontouchstart' in window` 准确 —— 后者在触屏笔记本上会误判成纯触控。
+  const { canHover } = useInputCapabilities()
+  const touchOnly = !canHover
 
   return (
     <Dialog
@@ -591,7 +594,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
                   // 触摸设备没有 hover，selectedIndex 基本停在 0，若沿用同一条件，
                   // 除第一行外的条目永远没有「添加」按钮 —— 表现为「条目上的添加无效」。
                   // 触控下改为常显，并靠 onPointerDown 同步选中项。
-                  (touchCapable || index === selectedIndex) && (
+                  (touchOnly || index === selectedIndex) && (
                     <button
                       type="button"
                       aria-label={t('common:add')}

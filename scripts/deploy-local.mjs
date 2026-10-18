@@ -19,7 +19,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -66,26 +66,31 @@ if (skipBuild) {
 }
 
 // ---- 2. 校验产物里的版本号与 package.json 一致 ----
-// 版本号被注入到 entry chunk（assets/index-*.js）。找不到入口或被注入成旧值
-// 都说明 dist 过期，这正是「网页版版本号没更新」的成因，必须直接失败。
-const assetsDir = join(root, 'dist', 'assets')
-let entries
+// 版本号被注入到 entry chunk。真实入口以 dist/index.html 的引用为准：
+// dist/assets 里可能残留历次构建的旧 chunk，按 mtime 取最新会校验错文件。
+const indexPath = join(root, 'dist', 'index.html')
+let indexHtml
 try {
-  entries = readdirSync(assetsDir).filter(name => /^index-.*\.js$/.test(name))
+  indexHtml = readFileSync(indexPath, 'utf-8')
 } catch {
-  fail('未找到 dist/assets，构建可能没有产出')
+  fail('未找到 dist/index.html，构建可能没有产出')
 }
-if (entries.length === 0) fail('dist/assets 下没有入口 chunk（index-*.js）')
+const entryMatch = indexHtml.match(/<script[^>]+src="[^"]*?(\/assets\/[^"]+\.js)"/)
+if (!entryMatch) fail('dist/index.html 中找不到入口 script')
 
-const newest = entries
-  .map(name => ({ name, mtime: statSync(join(assetsDir, name)).mtimeMs }))
-  .sort((a, b) => b.mtime - a.mtime)[0].name
-const entrySource = readFileSync(join(assetsDir, newest), 'utf-8')
+const entryRel = entryMatch[1].replace(/^\//, '')
+const entryPath = join(root, 'dist', entryRel)
+let entrySource
+try {
+  entrySource = readFileSync(entryPath, 'utf-8')
+} catch {
+  fail(`入口文件不存在：dist/${entryRel}`)
+}
 
 if (!entrySource.includes(JSON.stringify(version).slice(1, -1))) {
-  fail(`产物 ${newest} 中找不到版本号 ${version}，dist 可能来自旧构建`)
+  fail(`产物 ${entryRel} 中找不到版本号 ${version}，dist 可能来自旧构建`)
 }
-log(`产物版本校验通过：${newest} 含 ${version}`)
+log(`产物版本校验通过：${entryRel} 含 ${version}`)
 
 // ---- 3. 重启预览服务 ----
 let serviceManaged = true
@@ -120,7 +125,7 @@ for (let i = 0; i < 15; i++) {
 if (!healthy) fail(`${HEALTH_URL} 未在 15 秒内返回 200，请查看 journalctl -u ${SERVICE}`)
 
 log(`完成：已部署 v${version}`)
-console.log(`  入口 chunk: ${newest}`)
+console.log(`  入口 chunk: ${entryRel}`)
 if (serviceManaged) {
   console.log(`  服务状态  : ${read('systemctl', ['is-active', SERVICE])}`)
 }

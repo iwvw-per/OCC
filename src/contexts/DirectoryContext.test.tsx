@@ -154,4 +154,21 @@ describe('DirectoryContext per-server binding', () => {
     const saved = latest?.savedDirectories.map(d => d.path) ?? []
     expect(saved.filter(p => p === '/opt/code/opencode-bg')).toHaveLength(1)
   })
+
+  it('writes the new directory under the active server bucket', async () => {
+    render(
+      <DirectoryProvider>
+        <Probe />
+      </DirectoryProvider>,
+    )
+
+    await act(async () => {
+      latest?.addDirectory('/opt/code/komidash')
+    })
+
+    const savedCalls = setJSONForMock.mock.calls.filter(call => String(call[0]).includes('saved-directories'))
+    expect(savedCalls.length).toBeGreaterThan(0)
+    // 必须写进「当前活动服务器」的桶；写进过期快照的桶会让项目切回主机后消失
+    expect(savedCalls[savedCalls.length - 1][2]).toBe(getActiveServerIdMock())
+  })
 })

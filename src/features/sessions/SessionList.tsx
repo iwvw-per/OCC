@@ -138,8 +138,12 @@ export function SessionList({
     const monthAgo = today - 86400000 * 30
 
     sessions.forEach(session => {
+      // 缺 time 的轻量会话：按「未知时间」处理，归到 older，且不能拿
+      // undefined 参与比较（undefined >= x 恒为 false，会静默落进最后一个分支）
       const updated = session.time?.updated ?? session.time?.created
-      if (updated >= today) {
+      if (updated == null) {
+        groups.older.push(session)
+      } else if (updated >= today) {
         groups.today.push(session)
       } else if (updated >= yesterday) {
         groups.yesterday.push(session)

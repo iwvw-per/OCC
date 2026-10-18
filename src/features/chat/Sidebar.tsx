@@ -86,8 +86,8 @@ export const Sidebar = memo(function Sidebar({
   const { focusedServerId } = useMultiServerStore()
   const handleAddProject = useCallback(
     (path: string) => {
-      // 项目目录列表跨服务器共享（saved-directories 不再按服务器隔离），
-      // 切到远程主机后同一份列表原样展示，实现无缝衔接
+      // 项目列表按服务器分桶（srv:{serverId}:opencode-saved-directories），
+      // 这里只写入当前活动主机的桶；切主机后各自看到自己的列表。
       const alreadySaved = savedDirectories.some(d => isSameDirectory(d.path, path))
       const added = addDirectory(path)
       if (!added) {
