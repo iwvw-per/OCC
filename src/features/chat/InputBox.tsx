@@ -19,6 +19,8 @@ import { ChatFab, type ChatFabMode } from './input/ChatFab'
 import { ArrowUpIcon } from '../../components/Icons'
 import { useMobileCollapse } from './input/useMobileCollapse'
 import { useAttachmentRail } from './input/useAttachmentRail'
+import { useMentionTrigger } from './input/useMentionTrigger'
+import { useSlashTrigger } from './input/useSlashTrigger'
 import { useInputHistory } from './input/useInputHistory'
 import { LargeTextPasteDialog } from './input/LargeTextPasteDialog'
 import {
@@ -262,15 +264,6 @@ function InputBoxComponent({
   const [pendingLargePaste, setPendingLargePaste] = useState<string | null>(null)
   const { behavior: largePasteBehavior } = useLargeTextPasteSettings()
 
-  // @ Mention 状态
-  const [mentionOpen, setMentionOpen] = useState(false)
-  const [mentionQuery, setMentionQuery] = useState('')
-  const [mentionStartIndex, setMentionStartIndex] = useState(-1)
-
-  // / Slash Command 状态
-  const [slashOpen, setSlashOpen] = useState(false)
-  const [slashQuery, setSlashQuery] = useState('')
-  const [slashStartIndex, setSlashStartIndex] = useState(-1)
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false)
@@ -545,6 +538,22 @@ function InputBoxComponent({
     [attachments, onClearRevert, onCommand, resetDraft, restoreDraft, text],
   )
 
+  // @ 提及与 / 命令的触发态（见 input/useMentionTrigger、input/useSlashTrigger）
+  const mention = useMentionTrigger({ text, setText, textareaRef })
+  const slash = useSlashTrigger({
+    text,
+    setText,
+    setAttachments,
+    textareaRef,
+    onCommand,
+    submitCommandOptimistically,
+  })
+  const { open: mentionOpen, query: mentionQuery } = mention
+  const setMentionOpen = mention.setOpen
+  const updateMentionQuery = mention.updateQuery
+  const { open: slashOpen, query: slashQuery } = slash
+  const setSlashOpen = slash.setOpen
+
   const runSubmit = useCallback(
     async (submit: () => Promise<boolean | void> | boolean | void, onSuccess?: () => void, onFailure?: () => void) => {
       if (isSubmitting) return false
@@ -631,28 +640,6 @@ function InputBoxComponent({
     text,
   ])
 
-  // 更新 @ 查询文本（用于进入/退出文件夹）
-  const updateMentionQuery = useCallback(
-    (newQuery: string) => {
-      if (!textareaRef.current) return
-
-      const beforeAt = text.slice(0, mentionStartIndex)
-      const afterQuery = text.slice(mentionStartIndex + 1 + mentionQuery.length)
-      const newText = beforeAt + '@' + newQuery + afterQuery
-
-      setText(newText)
-      setMentionQuery(newQuery)
-
-      // 移动光标到 @ 查询末尾
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return
-        const pos = mentionStartIndex + 1 + newQuery.length
-        textareaRef.current.setSelectionRange(pos, pos)
-        textareaRef.current.focus()
-      })
-    },
-    [text, mentionStartIndex, mentionQuery],
-  )
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -785,6 +772,8 @@ function InputBoxComponent({
       slashOpen,
       mentionQuery,
       updateMentionQuery,
+      setMentionOpen,
+      setSlashOpen,
       handleSend,
       text,
       attachments,
@@ -831,8 +820,7 @@ function InputBoxComponent({
       const trigger = detectMentionTrigger(newText, cursorPos, '@')
 
       if (trigger) {
-        setMentionQuery(trigger.query)
-        setMentionStartIndex(trigger.startIndex)
+        mention.updateQuery(trigger.query, trigger.startIndex)
         setMentionOpen(true)
         setSlashOpen(false) // 关闭斜杠菜单
       } else {
@@ -841,15 +829,14 @@ function InputBoxComponent({
         // 检测 / 触发（只在行首或空白后）
         const slashTrigger = detectSlashTrigger(newText, cursorPos)
         if (slashTrigger) {
-          setSlashQuery(slashTrigger.query)
-          setSlashStartIndex(slashTrigger.startIndex)
+          slash.updateQuery(slashTrigger.query, slashTrigger.startIndex)
           setSlashOpen(true)
         } else {
           setSlashOpen(false)
         }
       }
     },
-    [handleHistoryChange],
+    [handleHistoryChange, mention, slash, setMentionOpen, setSlashOpen],
   )
 
   const handleCompositionStart = useCallback(() => {
@@ -874,114 +861,21 @@ function InputBoxComponent({
   // @ Mention 选择处理
   const handleMentionSelect = useCallback(
     (item: MentionItem & { _enterFolder?: boolean }) => {
-      if (!textareaRef.current) return
-
-      // 如果是进入文件夹
-      if (item._enterFolder && item.type === 'folder') {
-        const basePath = (item.relativePath || item.displayName).replace(/\/+$/, '')
-        const folderPath = basePath + '/'
-        updateMentionQuery(folderPath)
-        return
-      }
-
-      // 构建 @ 文本
-      const mentionText = item.type === 'agent' ? `@${item.displayName}` : `@${item.relativePath || item.displayName}`
-
-      // 计算新文本
-      const beforeAt = text.slice(0, mentionStartIndex)
-      const afterQuery = text.slice(mentionStartIndex + 1 + mentionQuery.length)
-      const newText = beforeAt + mentionText + ' ' + afterQuery
-
-      // 创建附件
-      const attachment: Attachment = {
-        id: crypto.randomUUID(),
-        type: item.type,
-        displayName: item.displayName,
-        relativePath: item.relativePath,
-        url: item.type !== 'agent' ? item.value : undefined,
-        mime: item.type !== 'agent' ? 'text/plain' : undefined,
-        agentName: item.type === 'agent' ? item.displayName : undefined,
-        textRange: {
-          value: mentionText,
-          start: mentionStartIndex,
-          end: mentionStartIndex + mentionText.length,
-        },
-      }
-
-      setText(newText)
-      setAttachments(prev => [...prev, attachment])
-      setMentionOpen(false)
-
-      // 移动光标到 mention 后
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return
-        const newCursorPos = mentionStartIndex + mentionText.length + 1
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-        textareaRef.current.focus()
-      })
+      mention.selectItem(item)
     },
-    [text, mentionStartIndex, mentionQuery, updateMentionQuery],
+    [mention],
   )
 
-  const handleMentionClose = useCallback(() => {
-    setMentionOpen(false)
-    textareaRef.current?.focus()
-  }, [])
+  const handleMentionClose = mention.close
 
-  // / Slash Command 选择处理 - 类似 @ mention
   const handleSlashSelect = useCallback(
     (command: Command) => {
-      if (command.source === 'frontend') {
-        if (!onCommand) return
-
-        setSlashOpen(false)
-        submitCommandOptimistically(`/${command.name}`)
-        requestAnimationFrame(() => textareaRef.current?.focus())
-        return
-      }
-
-      if (!textareaRef.current) return
-
-      // 构建 /command 文本
-      const commandText = `/${command.name}`
-
-      // 计算新文本：替换 /query 为 /command
-      const beforeSlash = text.slice(0, slashStartIndex)
-      const afterQuery = text.slice(slashStartIndex + 1 + slashQuery.length)
-      const newText = beforeSlash + commandText + ' ' + afterQuery
-
-      // 创建 command attachment
-      const attachment: Attachment = {
-        id: crypto.randomUUID(),
-        type: 'command',
-        displayName: command.name,
-        commandName: command.name,
-        textRange: {
-          value: commandText,
-          start: slashStartIndex,
-          end: slashStartIndex + commandText.length,
-        },
-      }
-
-      setText(newText)
-      setAttachments(prev => [...prev, attachment])
-      setSlashOpen(false)
-
-      // 移动光标到命令后
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return
-        const newCursorPos = slashStartIndex + commandText.length + 1
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-        textareaRef.current.focus()
-      })
+      slash.select(command)
     },
-    [text, slashStartIndex, slashQuery, onCommand, submitCommandOptimistically],
+    [slash],
   )
 
-  const handleSlashClose = useCallback(() => {
-    setSlashOpen(false)
-    textareaRef.current?.focus()
-  }, [])
+  const handleSlashClose = slash.close
 
   // 通用文件上传 — 根据模型能力判断是否接受
   const handleFilesSelected = useCallback(
