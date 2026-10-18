@@ -220,6 +220,7 @@
     "cloneInvalidName": "目录名不能为空，且不能包含 / 或 \\",
     "cloneFailed": "克隆失败（退出码 {{code}}），请查看下方输出",
     "invalidPathTitle": "无法添加项目",
+    "alreadyInList": "该项目已在列表中",
     "invalidPath": "请填写绝对路径（如 /home/user/project 或 C:/Users/name/project），相对路径无法作为项目目录。"
   },
   "inputToolbar": {

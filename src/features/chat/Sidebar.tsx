@@ -5,7 +5,7 @@ import { ProjectDialog } from './ProjectDialog'
 import { useMultiServerStore } from '../../store/multiServerStore'
 import { notificationStore } from '../../store/notificationStore'
 import { useDirectory } from '../../hooks'
-import { isAbsoluteDirectory, normalizeToForwardSlash } from '../../utils'
+import { isAbsoluteDirectory, isSameDirectory, normalizeToForwardSlash } from '../../utils'
 import { canUseNativeDirectoryPicker } from '../../utils/nativeFileIntegration'
 import { getDesktopPlatform } from '../../utils/tauri'
 import { DESKTOP_TITLEBAR_HEIGHT } from '../../constants/desktopWindow'
@@ -88,16 +88,22 @@ export const Sidebar = memo(function Sidebar({
     (path: string) => {
       // 项目目录列表跨服务器共享（saved-directories 不再按服务器隔离），
       // 切到远程主机后同一份列表原样展示，实现无缝衔接
+      const alreadySaved = savedDirectories.some(d => isSameDirectory(d.path, path))
       const added = addDirectory(path)
       if (!added) {
         notificationStore.toast('error', t('projectDialog.invalidPathTitle'), t('projectDialog.invalidPath'))
         return
       }
+      // 已存在时 addDirectory 只切换当前目录、不改列表，界面上几乎没有反馈，
+      // 用户会以为「添加没生效」。这里明确提示，而不是静默吞掉。
+      if (alreadySaved) {
+        notificationStore.toast('completed', t('sidebar.addProject'), t('projectDialog.alreadyInList'))
+      }
       if (!isOverlay) {
         onOpen()
       }
     },
-    [addDirectory, isOverlay, onOpen, t],
+    [addDirectory, isOverlay, onOpen, savedDirectories, t],
   )
 
   const openProjectDialog = useCallback(async () => {
