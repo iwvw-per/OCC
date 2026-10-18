@@ -293,12 +293,17 @@ describe('preferences sync', () => {
     const callsBefore = fetchMock.mock.calls.length
     localStorage.setItem('theme-preset', '"ocean"')
     const second = await pushPreferences()
-    expect(second).toBe(2)
+    // 增量推送：只有改动的 theme-preset 会上传，theme-mode 与基线一致被跳过
+    expect(second).toBe(1)
     expect(fetchMock.mock.calls.length).toBe(callsBefore + 1)
 
-    const secondStamps = (sentBody as unknown as { updatedAt: Record<string, string> }).updatedAt
-    expect(secondStamps['theme-mode']).toBe(firstDiffStamp)
-    expect(secondStamps['theme-preset']).not.toBe(updatedAt.updatedAt['theme-preset'])
+    const secondBody = sentBody as unknown as {
+      values: Record<string, unknown>
+      updatedAt: Record<string, string>
+    }
+    expect(Object.keys(secondBody.values)).toEqual(['theme-preset'])
+    expect(secondBody.updatedAt['theme-mode']).toBeUndefined()
+    expect(secondBody.updatedAt['theme-preset']).not.toBe(firstDiffStamp)
 
     const afterChange = fetchMock.mock.calls.length
     const third = await pushPreferences()

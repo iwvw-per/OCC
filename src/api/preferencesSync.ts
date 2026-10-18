@@ -622,6 +622,41 @@ function entryIds(value: unknown, rule: MergeRule): Set<string> {
 // ============================================
 
 /** 稳定的内容指纹：键排序后拼接，用于判断是否需要上传。 */
+/**
+ * 挑出需要上传的键。
+ *
+ * 判定「有变化」= 当前值与该键上次成功推送时的基线不同（基线存在 `known` 里）。
+ * 基线缺失（首次同步、新键）一律上传。force 时返回全部。
+ *
+ * force 用于「用户点立即同步」：此时即使指纹一致也要把本地状态推一遍，
+ * 避免本端认为已同步、服务端却被别处改坏的情形。
+ */
+function pickChangedEntries(
+  entries: Record<string, string>,
+  known: Record<string, string>,
+  /** 存在待上传删除意图的键：必须整键上传，不受基线影响 */
+  pendingDeletionKeys: string[],
+): Record<string, string> {
+  // 基线未知（没有 known 记录）时无法判断是否变化，一律上传：宁可多推一次，
+  // 也不能因为「以为没变」而丢掉用户的删除/新增意图。
+  const forced = new Set(pendingDeletionKeys)
+  const hasBaseline = Object.keys(known).length > 0 && known.__snapshot__ !== undefined
+  if (!hasBaseline) return { ...entries }
+
+  const changed: Record<string, string> = {}
+  for (const [key, value] of Object.entries(entries)) {
+    if (forced.has(key) || known[key] !== value) changed[key] = value
+  }
+  // 删除到空也需要上传（墓碑语义依赖服务端收到空数组）。这类键在 entries 里
+  // 仍然存在（只是值为 []），所以上面的差分会命中；这里额外保证「基线里有、
+  // 本地已整个键消失」的聚合键也上报，否则删除意图永远传不出去。
+  for (const key of Object.keys(known)) {
+    if (key === '__snapshot__') continue
+    if (!(key in changed) && !(key in entries) && mergeRuleFor(key)) changed[key] = JSON.stringify([])
+  }
+  return changed
+}
+
 function fingerprint(entries: Record<string, string>): string {
   const keys = Object.keys(entries).sort()
   let hash = 2166136261
@@ -913,8 +948,12 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
             localStorage.setItem(key, raw)
             written += 1
           }
-          known[key] = raw
-          stamps[key] = new Date(Math.max(Number.isFinite(serverAt) ? serverAt : 0, Date.now())).toISOString()
+          // 本地相对基线已变更（尚未上传）时不能刷新基线：否则增量推送会把这次
+          // 本地改动误判成「已同步」，删除/新增意图永远传不出去。
+          if (!localChanged) {
+            known[key] = raw
+            stamps[key] = new Date(Math.max(Number.isFinite(serverAt) ? serverAt : 0, Date.now())).toISOString()
+          }
         } catch {
           // 单项写入失败不影响其余键
         }
@@ -980,15 +1019,24 @@ export async function pushPreferences(account?: AiAgentAccount | null, force = f
   const current = account ?? readAccount()
   if (!current) throw new Error('尚未登录')
 
-  const entries = collectLocalPreferences()
-  const currentFingerprint = fingerprint(entries)
+  const allEntries = collectLocalPreferences()
+  const currentFingerprint = fingerprint(allEntries)
   const meta = readSyncMeta()
   if (!force && currentFingerprint === meta.fingerprint) {
     return 0
   }
 
+  // 增量推送：只上传相对上次成功推送发生变化（或有缺省基线）的键。
+  // 白名单只有 6 类数据，全量上传的收益本来就低；真正省流量的是这里 ——
+  // 一次主题切换从「推全部键」降到「推 1 个键」。
+  const baselineKnown = readStampState().known
+  const pendingDeletions = Object.keys(readTombstones())
+  const entries = pickChangedEntries(allEntries, baselineKnown, pendingDeletions)
+
   const stampState = readStampState()
-  const tombstones = recordTombstones(entries, readTombstones())
+  // 墓碑必须基于「全量本地状态」计算：增量 entries 里不含未变化的键，
+  // 拿它做差分会把「没上传」误判成「已删除」，从而生成假墓碑。
+  const tombstones = recordTombstones(allEntries, readTombstones())
   const mergedEntries = { ...entries }
   for (const key of mergeRuleKeysFromSnapshot()) {
     const raw = entries[key]
