@@ -113,14 +113,19 @@ describe('preferences sync', () => {
     expect(getCalls).toBe(2)
   })
 
-  it('admits exactly the five cross-device data families', async () => {
+  it('admits exactly the cross-device data families', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
 
     // 项目列表（按服务器分桶）
     expect(isSyncableKey('srv:aiagent:inst_1:opencode-saved-directories')).toBe(true)
-    // 置顶
+    // 置顶：per-server 分桶；裸键形态保留兼容
+    expect(isSyncableKey('srv:aiagent:inst_1:opencode-pinned-sessions')).toBe(true)
+    expect(isSyncableKey('srv:aiagent:inst_1:opencode-pinned-messages')).toBe(true)
     expect(isSyncableKey('opencode-pinned-sessions')).toBe(true)
     expect(isSyncableKey('opencode-pinned-messages')).toBe(true)
+    // 模型可见性 / 置顶模型：一端隐藏了模型，另一端还列出来会被当成 bug
+    expect(isSyncableKey('srv:aiagent:inst_1:hidden-model-keys')).toBe(true)
+    expect(isSyncableKey('srv:aiagent:inst_1:model-pinned')).toBe(true)
     // 单调计数（逐键取 max，天然无冲突）
     expect(isSyncableKey('opencode-read-watermarks')).toBe(true)
     expect(isSyncableKey('opencode-project-last-used')).toBe(true)

@@ -72,6 +72,8 @@
 //   - opencode-pinned-sessions：数组，按 sessionId 去重并集
 //   - opencode-saved-directories：数组，按 path 去重并集
 //   - opencode-pinned-messages：数组，按 sessionId 去重并集
+//   - hidden-model-keys / model-pinned：字符串数组，元素本身即 id
+//   - opencode-hidden-projects：字符串数组（被隐藏的项目目录）
 //
 // 合并范围仅限「同一个键」：saved-directories 按实例分桶
 // （srv:aiagent:inst_X:opencode-saved-directories），各实例互不干扰。
@@ -171,19 +173,33 @@ const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000
  * 只有「多端看到不一致会被当成 bug」的数据才能出现在这里：
  *   - 项目列表（按服务器分桶）
  *   - 置顶会话 / 置顶消息
+ *   - 模型可见性（隐藏的模型）/ 置顶模型
+ *   - 被用户隐藏的派生项目
  *   - 已读水位、项目最后活跃时间
  *   - 主题（preset + mode）
  *
  * 外观/布局/音效/通知等个性化设置**不参与同步**：它们对跨端一致性要求低，
  * 却带来大量合并分支与流量，收益远小于成本。要新增同步项，必须在
  * SYNCABLE_PATTERNS 里显式登记，并为其指定合并策略（见 MERGE_RULES）。
+ *
+ * 判定标准是「用户是否会把不一致当成故障」：
+ *   - 隐藏模型后另一端仍列出它 → 用户认为隐藏没生效；
+ *   - 侧栏字号/动画速度不一致 → 用户认为是设备差异，不是 bug。
+ * 模型可见性与置顶模型属于前者，因此进白名单；它们都是字符串数组，
+ * 走 'string-array' 合并（并集 + 墓碑）。
  */
 const SYNCABLE_PATTERNS: RegExp[] = [
   // 项目列表：按服务器分桶，数组并集 + 墓碑
   /^srv:aiagent:[^:]+:opencode-saved-directories$/,
-  // 置顶会话 / 置顶消息
-  /^opencode-pinned-sessions$/,
-  /^opencode-pinned-messages$/,
+  // 置顶会话 / 置顶消息：同样是 per-server 分桶（历史上写成裸键导致从未真正同步，
+  // 这里同时接受带前缀与裸键两种形态，兼容旧客户端写下的数据）
+  /^(srv:aiagent:[^:]+:)?opencode-pinned-sessions$/,
+  /^(srv:aiagent:[^:]+:)?opencode-pinned-messages$/,
+  // 模型可见性 / 置顶模型：per-server 分桶的字符串数组
+  /^srv:aiagent:[^:]+:hidden-model-keys$/,
+  /^srv:aiagent:[^:]+:model-pinned$/,
+  // 用户主动隐藏的派生项目目录（与 saved-directories 对称）
+  /^srv:aiagent:[^:]+:opencode-hidden-projects$/,
   // 已读水位、项目最后活跃时间（均为 map<id, 时间戳>，逐键取 max）
   /^opencode-read-watermarks$/,
   /^opencode-project-last-used$/,
@@ -443,6 +459,11 @@ function resolveStamps(
 
 type MergeRule =
   | { kind: 'array'; id: (entry: Record<string, unknown>) => string | null; order?: 'newest' }
+  /**
+   * 纯字符串数组（如隐藏的模型键、置顶模型键）。与 'array' 的区别只在元素形态：
+   * 这里没有 `id` 提取函数，元素本身就是 id，因此不能走 asRecord。
+   */
+  | { kind: 'string-array' }
   | { kind: 'map-number' }
   /**
    * B 类缺陷 3：对象型键的字段级三方合并。此前这类键走整键 last-write-wins，
@@ -474,6 +495,19 @@ const MERGE_RULES: Record<string, MergeRule> = {
     kind: 'array',
     id: entry => (typeof entry.sessionId === 'string' ? entry.sessionId : null),
     order: 'newest',
+  },
+  // 模型可见性（被用户隐藏的模型键）与置顶模型：集合语义的字符串数组，
+  // 多端一致才符合直觉——一端隐藏了模型，另一端还列在候选里会被当成 bug。
+  'hidden-model-keys': {
+    kind: 'string-array',
+  },
+  'model-pinned': {
+    kind: 'string-array',
+  },
+  // 被用户隐藏的派生项目目录（服务器当前 worktree 自动置顶的那类）。
+  // 与 saved-directories 语义对称：一个是要显示的列表，一个是要隐藏的列表。
+  'opencode-hidden-projects': {
+    kind: 'string-array',
   },
   // 未读「已读水位」：{ [sessionId]: 校准时间戳 }，逐键取最大值（单调、收敛）。
   // 使一端已读后，另一端不会回退成未读。详见数据同步层设计 §10.3 C3。
@@ -508,6 +542,13 @@ function parseJson(raw: string): unknown {
   } catch {
     return undefined
   }
+}
+
+/** 解析为字符串数组；非法/非数组一律得到空数组。 */
+function parseStringArray(raw: string | null): string[] {
+  const parsed = raw === null ? undefined : parseJson(raw)
+  if (!Array.isArray(parsed)) return []
+  return parsed.filter((item): item is string => typeof item === 'string' && item !== '')
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -601,6 +642,13 @@ function recordTombstones(entries: Record<string, string>, state: TombstoneState
 function entryIds(value: unknown, rule: MergeRule): Set<string> {
   const ids = new Set<string>()
   if (value === undefined || value === null) return ids
+  if (rule.kind === 'string-array') {
+    if (!Array.isArray(value)) return ids
+    for (const item of value) {
+      if (typeof item === 'string' && item) ids.add(item)
+    }
+    return ids
+  }
   if (rule.kind === 'array') {
     if (!Array.isArray(value)) return ids
     for (const item of value) {
@@ -745,6 +793,25 @@ function mergeSyncValue(
   dead: Set<string>,
   serverNewer = false,
 ): MergeResult {
+  if (rule.kind === 'string-array') {
+    const baseList = parseStringArray(baseRaw)
+    const localList = localRaw === null ? null : parseStringArray(localRaw)
+    const serverList = Array.isArray(serverValue) ? serverValue.filter((item): item is string => typeof item === 'string') : null
+    if (localList === null || serverList === null) return { value: undefined, changed: false }
+
+    const keep = threeWayMergeIds(entryIds(baseList, rule), entryIds(localList, rule), entryIds(serverList, rule), dead)
+    // 保持本地顺序，追加服务端独有的项：这类列表是集合语义，顺序无意义，
+    // 但稳定的输出能避免每次 pull 都产生一次无谓的写入。
+    const merged: string[] = []
+    const seen = new Set<string>()
+    for (const item of [...localList, ...serverList]) {
+      if (!item || seen.has(item) || !keep.has(item)) continue
+      seen.add(item)
+      merged.push(item)
+    }
+    return { value: merged, changed: true }
+  }
+
   if (rule.kind === 'array') {
     const baseList = Array.isArray(parseJson(baseRaw ?? '')) ? (parseJson(baseRaw ?? '') as unknown[]) : []
     const localValue = localRaw === null ? undefined : parseJson(localRaw)
