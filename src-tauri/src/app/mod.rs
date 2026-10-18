@@ -161,6 +161,25 @@ fn extract_directory_from_args(args: &[String]) -> Option<String> {
     None
 }
 
+
+/// 首屏状态前置：把窗口标识注入到文档早期。
+///
+/// 参考 OpenCode Desktop 的 window bootstrap：窗口 id / 首启标记这类「渲染前就要
+/// 知道」的状态由宿主直接注入，渲染进程第一帧即可读取，不必等 IPC 通道建立，
+/// 也不会出现「先按默认值渲染、再由 effect 纠正」的一帧闪。
+///
+/// 注入的是同步脚本（initialization script），在页面脚本执行前运行，因此
+/// 前端 `readHostBootstrap()` 在模块初始化阶段就能拿到值。
+#[cfg(not(target_os = "android"))]
+fn bootstrap_initialization_script(window_id: &str) -> String {
+    // 只含 ASCII 标识符与固定字段名，无需走 JSON 序列化
+    let escaped = window_id.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        "window.__OCC_BOOTSTRAP__ = {{ windowId: \"{}\", host: \"tauri\" }};",
+        escaped
+    )
+}
+
 #[cfg(not(target_os = "android"))]
 fn create_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, tauri::Error> {
     if let Some(window) = app.get_webview_window("main") {
@@ -177,6 +196,7 @@ fn create_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, ta
         .expect("main window config missing");
 
     configure_desktop_window_builder(tauri::WebviewWindowBuilder::from_config(app, &config)?)
+        .initialization_script(bootstrap_initialization_script(&config.label))
         .visible(false)
         .build()
 }
@@ -210,7 +230,8 @@ fn create_hidden_content_window(
         tauri::WebviewUrl::App("index.html".into()),
     ))
     .title("OCC")
-    .inner_size(800.0, 600.0);
+    .inner_size(800.0, 600.0)
+    .initialization_script(bootstrap_initialization_script(label));
 
     builder.visible(false).build()
 }
