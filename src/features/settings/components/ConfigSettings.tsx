@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { logger } from '../../../utils/logger'
 import { useTranslation } from 'react-i18next'
 import {
   AlertCircleIcon,
@@ -283,7 +284,7 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
       } catch (refreshError) {
         if (request !== saveRequestRef.current) return
         setError(tx('Config was saved, but the effective config could not be refreshed.', '配置已保存，但无法刷新生效配置。', lang))
-        console.warn('[ConfigSettings] Failed to refresh effective config after save:', refreshError)
+        logger.warn('[ConfigSettings] Failed to refresh effective config after save:', refreshError)
       }
     } catch (err) {
       if (request !== saveRequestRef.current) return

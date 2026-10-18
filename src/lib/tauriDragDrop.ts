@@ -1,4 +1,5 @@
 import type { DragDropEvent } from '@tauri-apps/api/webview'
+import { logger } from '../utils/logger'
 import { getDesktopPlatform, isTauri } from '../utils/tauri'
 
 export type TauriDragDropEvent = DragDropEvent
@@ -116,7 +117,7 @@ export function subscribeTauriDragDrop(handler: (event: TauriDragDropEvent) => v
         trackCleanup(isDisposed, cleanups, onLeave)
       })
       .catch(err => {
-        console.warn('[tauriDragDrop] Failed to listen for macOS file-drop events:', err)
+        logger.warn('[tauriDragDrop] Failed to listen for macOS file-drop events:', err)
       })
   } else {
     void import('@tauri-apps/api/webview')
@@ -129,7 +130,7 @@ export function subscribeTauriDragDrop(handler: (event: TauriDragDropEvent) => v
         trackCleanup(isDisposed, cleanups, unlisten)
       })
       .catch(err => {
-        console.warn('[tauriDragDrop] Failed to listen for drag-drop events:', err)
+        logger.warn('[tauriDragDrop] Failed to listen for drag-drop events:', err)
       })
   }
 

@@ -5,6 +5,7 @@
 // ============================================
 
 import type { FileContent } from '../api/types'
+import { logger } from './logger'
 import { isBinaryContent } from './mimeUtils'
 import { isTauri } from './tauri'
 
@@ -90,7 +91,7 @@ export function downloadFileContent(content: FileContent, fileName: string): voi
 export function saveData(data: Uint8Array, fileName: string, mimeType = 'application/octet-stream'): void {
   if (isTauri()) {
     tauriSaveFile(data, fileName).catch(err => {
-      console.warn('[downloadUtils] Tauri save failed:', err)
+      logger.warn('[downloadUtils] Tauri save failed:', err)
     })
   } else {
     const blob = new Blob([data.buffer as ArrayBuffer], { type: mimeType })

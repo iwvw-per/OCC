@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { logger } from '../utils/logger'
 import morphdom from 'morphdom'
 import { useTranslation } from 'react-i18next'
 import { CodeBlock } from './CodeBlock'
@@ -567,7 +568,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
         if (!cancelled) setSvg(result)
       } catch (err) {
         if (import.meta.env.DEV) {
-          console.warn('[Markdown] Mermaid render failed:', err)
+          logger.warn('[Markdown] Mermaid render failed:', err)
         }
         if (!cancelled) {
           setSvg('')

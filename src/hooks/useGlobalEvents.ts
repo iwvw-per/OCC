@@ -9,6 +9,7 @@
 // 4. 与具体 session 无关，处理所有 session 的事件
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { logger } from '../utils/logger'
 import i18n from '../i18n'
 import { messageStore, childSessionStore, paneLayoutStore, serverStore } from '../store'
 import { activeSessionStore } from '../store/activeSessionStore'
@@ -820,7 +821,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           if (isEphemeralSession(error.sessionID ?? '')) return
           const isAbort = error.name === 'MessageAbortedError' || error.name === 'AbortError'
           if (!isAbort && import.meta.env.DEV) {
-            console.warn('[GlobalEvents] Session error:', error)
+            logger.warn('[GlobalEvents] Session error:', error)
           }
           if (error.sessionID == null || error.sessionID.length < 1) {
             return // Don't handle errors with no sessionID
@@ -1100,7 +1101,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
 
         onReconnected: reason => {
           if (import.meta.env.DEV) {
-            console.log(`[GlobalEvents] SSE reconnected (${serverId}, reason: ${reason}), notifying for data refresh`)
+            logger.log(`[GlobalEvents] SSE reconnected (${serverId}, reason: ${reason}), notifying for data refresh`)
           }
           // 网络抖动恢复后给用户一个明确的「已重连」提示：断网期间无任何界面
           // 反馈，恢复也只能靠藏在 Footer 菜单里的状态点，用户感知不到。

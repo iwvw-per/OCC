@@ -22,6 +22,7 @@
 // ============================================
 
 import { readAccount } from './aiagent'
+import { logger } from '../utils/logger'
 import { cleanupDeprecatedSyncKeys } from './syncCleanup'
 import { subscribePreferenceEvents, type PreferenceEventsSubscription } from './preferencesEvents'
 import {
@@ -119,7 +120,7 @@ async function runSync(force: boolean): Promise<void> {
     lastSyncAt = Date.now()
     setState({ status: 'synced', lastSyncedAt: Date.now(), error: undefined })
     if ((pulled > 0 || pushed > 0) && import.meta.env.DEV) {
-      console.log(`[prefs-sync] pulled ${pulled}, pushed ${pushed} preferences`)
+      logger.log(`[prefs-sync] pulled ${pulled}, pushed ${pushed} preferences`)
     }
   } catch (error) {
     setState({ status: 'error', error: error instanceof Error ? error.message : String(error) })

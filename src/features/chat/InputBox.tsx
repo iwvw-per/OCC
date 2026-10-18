@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore, useLayoutEffect, memo } from 'react'
+import { logger } from '../../utils/logger'
 import { useTranslation } from 'react-i18next'
 import { AttachmentPreview, type Attachment } from '../attachment'
 import {
@@ -914,7 +915,7 @@ function InputBoxComponent({
             mime,
           })
         } catch (err) {
-          console.warn('[InputBox] Failed to process file:', err)
+          logger.warn('[InputBox] Failed to process file:', err)
         }
       }
 
@@ -1195,7 +1196,7 @@ function InputBoxComponent({
           mime,
         }
       } catch (err) {
-        console.warn('[InputBox] Failed to read dropped file for upload:', err)
+        logger.warn('[InputBox] Failed to read dropped file for upload:', err)
         return null
       }
     },
@@ -1231,7 +1232,7 @@ function InputBoxComponent({
 
         insertDraggedFiles(mentionFiles)
       } catch (err) {
-        console.warn('[InputBox] Failed to process Tauri dropped paths:', err)
+        logger.warn('[InputBox] Failed to process Tauri dropped paths:', err)
       }
     },
     [

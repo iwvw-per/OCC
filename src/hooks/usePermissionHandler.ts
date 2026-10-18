@@ -3,6 +3,7 @@
 // ============================================
 
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { logger } from '../utils/logger'
 import {
   replyPermission,
   replyQuestion,
@@ -67,7 +68,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES, delay =
       return await fn()
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
-      console.warn(`[Permission] Attempt ${i + 1} failed:`, lastError.message)
+      logger.warn(`[Permission] Attempt ${i + 1} failed:`, lastError.message)
 
       if (i < retries - 1) {
         await new Promise(resolve => setTimeout(resolve, delay * (i + 1)))
@@ -115,7 +116,7 @@ export function usePermissionHandler(serverId: string): UsePermissionHandlerResu
     async (requestId: string, reply: PermissionReply, directory?: string, sessionId?: string): Promise<boolean> => {
       // 防止重复回复
       if (replyingIdsRef.current.has(requestId)) {
-        console.warn(`[Permission] Already replying to ${requestId}`)
+        logger.warn(`[Permission] Already replying to ${requestId}`)
         return false
       }
 
@@ -153,7 +154,7 @@ export function usePermissionHandler(serverId: string): UsePermissionHandlerResu
   const handleQuestionReply = useCallback(
     async (requestId: string, answers: QuestionAnswer[], directory?: string): Promise<boolean> => {
       if (replyingIdsRef.current.has(requestId)) {
-        console.warn(`[Question] Already replying to ${requestId}`)
+        logger.warn(`[Question] Already replying to ${requestId}`)
         return false
       }
 

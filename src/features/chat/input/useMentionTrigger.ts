@@ -88,7 +88,7 @@ export function useMentionTrigger({ text, setText, textareaRef }: UseMentionTrig
       })
       return newText
     },
-    [query.length, open, setText, startIndex, text, textareaRef, updateQuery],
+    [query.length, setText, startIndex, text, textareaRef, updateQuery],
   )
 
   const close = useCallback(() => {

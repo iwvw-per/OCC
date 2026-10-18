@@ -4,6 +4,7 @@
 // ============================================
 
 import { buildHeaders } from './sdk'
+import { logger } from '../utils/logger'
 import { nativePrompt, nativeListMessages } from './v2NativeMessage'
 import { adaptMessagePage } from './v2/message'
 import { sanitizeMessageWithParts } from './sanitize'
@@ -45,7 +46,7 @@ async function getWithTruncationRetry<T>(fn: () => Promise<T>, retries = 3, dela
     } catch (error) {
       lastError = error
       if (!isTruncatedJsonError(error)) throw error
-      if (import.meta.env.DEV) console.warn(`[Message] Truncated response, retry ${attempt + 1}/${retries}`)
+      if (import.meta.env.DEV) logger.warn(`[Message] Truncated response, retry ${attempt + 1}/${retries}`)
       if (attempt < retries - 1) await new Promise(resolve => setTimeout(resolve, delay * (attempt + 1)))
     }
   }
@@ -615,7 +616,7 @@ function buildPromptParams(params: SendMessageParams, _serverId?: string): Promp
     } else {
       const fileUrl = toFileUrl(attachment.url || '')
       if (!fileUrl) {
-        console.warn('Skipping attachment with empty URL:', attachment)
+        logger.warn('Skipping attachment with empty URL:', attachment)
         continue
       }
 

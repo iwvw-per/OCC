@@ -12,6 +12,7 @@
 // 配置项存 localStorage，自定义音频 Blob 存 IndexedDB
 
 import { useSyncExternalStore } from 'react'
+import { logger } from '../utils/logger'
 import type { NotificationType } from './notificationStore'
 import { DEFAULT_SOUNDS } from '../utils/soundPlayer'
 
@@ -340,7 +341,7 @@ class SoundStore {
       return { success: true }
     } catch (err) {
       if (import.meta.env.DEV) {
-        console.warn('[SoundStore] Upload failed:', err)
+        logger.warn('[SoundStore] Upload failed:', err)
       }
       return { success: false, error: 'saveFailed' }
     }

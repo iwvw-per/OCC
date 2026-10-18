@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, memo } from 'react'
+import { logger } from '../../utils/logger'
 import { useTranslation } from 'react-i18next'
 import { CloseIcon, ChevronDownIcon, CopyIcon, CheckIcon, DownloadIcon, ExpandIcon } from '../../components/Icons'
 import { cn } from '../../utils/cn'
@@ -325,7 +326,7 @@ function ActionBar({ attachment, hasContent, hasDownloadable, onOpenDetail, show
         fetch(attachment.url)
           .then(res => res.arrayBuffer())
           .then(buf => saveData(new Uint8Array(buf), fileName, attachment.mime || 'image/png'))
-          .catch(err => console.warn('[AttachmentItem] save image failed:', err))
+          .catch(err => logger.warn('[AttachmentItem] save image failed:', err))
       } else if (attachment.content) {
         saveData(new TextEncoder().encode(attachment.content), fileName, 'text/plain;charset=utf-8')
       }

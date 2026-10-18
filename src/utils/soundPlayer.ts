@@ -11,6 +11,7 @@
 // 音量语义：0 = 静音，50 = 正常基准，100 = 安全最大
 
 import type { NotificationType } from '../store/notificationStore'
+import { logger } from './logger'
 
 // ============================================
 // 内置音效 ID
@@ -380,7 +381,7 @@ export function playSound(options: PlaySoundOptions): void {
   if (soundId === 'custom' && customAudioData) {
     playCustomSound(customAudioData, volume).catch(err => {
       if (import.meta.env.DEV) {
-        console.warn('[SoundPlayer] Failed to play custom sound:', err)
+        logger.warn('[SoundPlayer] Failed to play custom sound:', err)
       }
     })
   } else if (soundId.startsWith('builtin:')) {

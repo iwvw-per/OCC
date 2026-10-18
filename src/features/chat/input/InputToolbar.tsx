@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { logger } from '../../../utils/logger'
 import { useTranslation } from 'react-i18next'
 import { ChevronDownIcon, PaperclipIcon, AgentIcon, ThinkingIcon } from '../../../components/Icons'
 import { DropdownMenu, MenuItem, IconButton, AnimatedPresence } from '../../../components/ui'
@@ -251,7 +252,7 @@ export function InputToolbar({
         onFilesSelected(files)
       }
     } catch (err) {
-      console.warn('[InputToolbar] File picker error:', err)
+      logger.warn('[InputToolbar] File picker error:', err)
     }
   }, [onFilesSelected, tauriFilters, useBrowserFileInput])
 

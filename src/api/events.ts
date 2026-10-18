@@ -13,6 +13,7 @@ import { getV2Client } from './sdkV2'
 import { v2EventToGlobalEvent } from './v2/events'
 import { toolResultMetadata } from './v2/adapt'
 import { isTauri } from '../utils/tauri'
+import { logger } from '../utils/logger'
 import { serverStore } from '../store/serverStore'
 import type {
   ApiMessage,
@@ -145,7 +146,7 @@ function broadcastReconnected(conn: ServerConnection, reason: 'network' | 'serve
   const now = Date.now()
   if (reason !== 'server-switch' && now - conn.lastReconnectedBroadcast < RECONNECTED_COOLDOWN) {
     if (import.meta.env.DEV) {
-      console.log('[SSE] onReconnected skipped (cooldown)')
+      logger.log('[SSE] onReconnected skipped (cooldown)')
     }
     return
   }
@@ -194,7 +195,7 @@ function resetHeartbeat(conn: ServerConnection) {
   const timeout = isInBackground ? BACKGROUND_HEARTBEAT_TIMEOUT : HEARTBEAT_TIMEOUT
 
   conn.heartbeatTimer = setTimeout(() => {
-    console.warn(`[SSE] No events received for ${timeout / 1000}s, reconnecting...`)
+    logger.warn(`[SSE] No events received for ${timeout / 1000}s, reconnecting...`)
     updateConnectionState(conn.serverId, { state: 'disconnected', error: 'Heartbeat timeout' })
     scheduleReconnect(conn)
   }, timeout)
@@ -210,7 +211,7 @@ function scheduleReconnect(conn: ServerConnection) {
   const delay = delays[Math.min(attempt, delays.length - 1)]
 
   if (import.meta.env.DEV) {
-    console.log(
+    logger.log(
       `[SSE] Reconnecting ${conn.serverId} in ${delay}ms (attempt ${attempt + 1}, background: ${isInBackground})...`,
     )
   }
@@ -233,7 +234,7 @@ function connectServer(serverId: string) {
     if (timeSinceLastEvent > staleTimeout) {
       // 太久没收到事件，连接可能已死，强制断开再重连
       if (import.meta.env.DEV) {
-        console.log(
+        logger.log(
           `[SSE] connectServer: ${serverId} state=connected but stale (${Math.round(timeSinceLastEvent / 1000)}s), forcing disconnect`,
         )
       }
@@ -254,7 +255,7 @@ function connectServer(serverId: string) {
 
   updateConnectionState(serverId, { state: 'connecting' })
   if (import.meta.env.DEV) {
-    console.log(`[SSE] Connecting ${serverId}...`)
+    logger.log(`[SSE] Connecting ${serverId}...`)
   }
 
   // 注册生命周期监听器（首次连接时）
@@ -283,7 +284,7 @@ function connectViaV2(conn: ServerConnection) {
       finalizeConnectionAttempt(conn, myGeneration)
       updateConnectionState(serverId, { state: 'connected', reconnectAttempt: 0, error: undefined })
       resetHeartbeat(conn)
-      if (import.meta.env.DEV) console.log(`[SSE/v2] ${serverId} connected`)
+      if (import.meta.env.DEV) logger.log(`[SSE/v2] ${serverId} connected`)
 
       const reason = serverSwitchFlags.get(serverId) ? ('server-switch' as const) : ('network' as const)
       serverSwitchFlags.delete(serverId)
@@ -305,7 +306,7 @@ function connectViaV2(conn: ServerConnection) {
       if (!finalizeConnectionAttempt(conn, myGeneration)) return
       if (error instanceof Error && error.name === 'AbortError') return
       const errorMsg = error instanceof Error ? error.message : String(error)
-      if (import.meta.env.DEV) console.warn(`[SSE/v2] ${serverId} error:`, errorMsg)
+      if (import.meta.env.DEV) logger.warn(`[SSE/v2] ${serverId} error:`, errorMsg)
       updateConnectionState(serverId, { state: 'error', error: errorMsg })
       conn.subscribers.forEach(cb => cb.onError?.(error instanceof Error ? error : new Error(errorMsg)))
       scheduleReconnect(conn)
@@ -348,14 +349,14 @@ function startBackgroundKeepalive() {
       const serverId = conn.serverId
 
       if (import.meta.env.DEV) {
-        console.log(
+        logger.log(
           `[SSE] Background keepalive check ${serverId}: last event ${Math.round(timeSinceLastEvent / 1000)}s ago, state=${conn.info.state}`,
         )
       }
 
       if (conn.info.state === 'connected' && timeSinceLastEvent > BACKGROUND_HEARTBEAT_TIMEOUT) {
         // 连接声称是 connected，但已经太久没收到事件了 — 连接可能已经静默断开
-        console.warn(`[SSE] Background keepalive: ${serverId} appears dead, forcing reconnect`)
+        logger.warn(`[SSE] Background keepalive: ${serverId} appears dead, forcing reconnect`)
 
         // 断开旧连接
         conn.generation++
@@ -366,7 +367,7 @@ function startBackgroundKeepalive() {
       } else if ((conn.info.state === 'disconnected' || conn.info.state === 'error') && conn.subscribers.size > 0) {
         // 已知断连状态，但可能 reconnectTimer 被后台冻结了 — 主动触发重连
         if (!conn.reconnectTimer && !conn.isConnecting) {
-          console.warn(`[SSE] Background keepalive: ${serverId} stale disconnect, forcing reconnect`)
+          logger.warn(`[SSE] Background keepalive: ${serverId} stale disconnect, forcing reconnect`)
           updateConnectionState(serverId, { reconnectAttempt: 0 })
           connectServer(serverId)
         }
@@ -421,7 +422,7 @@ function handleVisibilityChange() {
       if (conn.info.state !== 'connected') {
         // 明确断连，立即重连
         if (import.meta.env.DEV) {
-          console.log(`[SSE] Page visible: ${conn.serverId} not connected, forcing reconnect...`)
+          logger.log(`[SSE] Page visible: ${conn.serverId} not connected, forcing reconnect...`)
         }
         forceReconnectNow(conn)
       } else {
@@ -430,7 +431,7 @@ function handleVisibilityChange() {
         const timeSinceLastEvent = Date.now() - conn.info.lastEventTime
         if (timeSinceLastEvent > HEARTBEAT_TIMEOUT) {
           // 太久没收到事件了，连接大概率已死
-          console.warn(
+          logger.warn(
             `[SSE] Page visible: ${conn.serverId} may be stale (last event ${Math.round(timeSinceLastEvent / 1000)}s ago), forcing reconnect`,
           )
           forceReconnectNow(conn)
@@ -445,7 +446,7 @@ function handleVisibilityChange() {
     isInBackground = true
 
     if (import.meta.env.DEV) {
-      console.log('[SSE] Page entering background, switching to background mode')
+      logger.log('[SSE] Page entering background, switching to background mode')
     }
 
     // 保持心跳运行，但切换为后台模式（更长超时）
@@ -477,7 +478,7 @@ function forceReconnectNow(conn: ServerConnection) {
 
 function handleOnline() {
   if (import.meta.env.DEV) {
-    console.log('[SSE] Network online, forcing reconnect...')
+    logger.log('[SSE] Network online, forcing reconnect...')
   }
   for (const conn of connections.values()) {
     if (conn.info.state !== 'connected' && conn.subscribers.size > 0) {
@@ -488,7 +489,7 @@ function handleOnline() {
 
 function handleOffline() {
   if (import.meta.env.DEV) {
-    console.log('[SSE] Network offline')
+    logger.log('[SSE] Network offline')
   }
   // 标记为断连，但不尝试重连（没网重连也没用）
   for (const conn of connections.values()) {
@@ -751,7 +752,7 @@ export function reconnectServerSSE(serverId: string) {
   if (!conn || conn.subscribers.size === 0) return // 没有订阅者不需要重连
 
   if (import.meta.env.DEV) {
-    console.log(`[SSE] reconnectServerSSE(${serverId}) called, forcing reconnect...`)
+    logger.log(`[SSE] reconnectServerSSE(${serverId}) called, forcing reconnect...`)
   }
 
   // 断开现有连接

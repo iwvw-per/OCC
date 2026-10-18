@@ -53,7 +53,7 @@ export function useLargePaste({ behavior, attach, insertInline, ask }: UseLargeP
       else ask(value)
       return true
     },
-    [ask, attach, behavior, insertInline, isLargePaste],
+    [ask, attach, behavior, insertInline],
   )
 
   return { isLargePaste, handlePastedText }
