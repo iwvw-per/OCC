@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { DESKTOP_TITLEBAR_HEIGHT } from '../../../constants/desktopWindow'
 import { FolderRecentList, type FolderRecentProject } from './FolderRecentList'
 import { HostQuickSwitcher } from './HostQuickSwitcher'
 import { SessionSortMenu } from './SessionSortMenu'
@@ -68,6 +69,13 @@ interface SidePanelProps {
   onOpenSettings?: () => void
   /** 桌面端标题栏已承载 logo 与开关：隐藏顶部 header 行 */
   hideHeader?: boolean
+  /**
+   * 顶栏自定义内容：传入时用它整行替换默认 header（折叠按钮 + Logo）。
+   *
+   * 用于让网页端与桌面端共用同一排导航控件（DesktopNavControls）——
+   * 两端各写一套按钮必然在尺寸/间距/hover 上逐渐分叉。
+   */
+  headerContent?: ReactNode
 }
 
 export function SidePanel({
@@ -82,6 +90,7 @@ export function SidePanel({
   contextLimit = 200000,
   onOpenSettings,
   hideHeader = false,
+  headerContent,
 }: SidePanelProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { currentDirectory, setCurrentDirectory, removeDirectory, reorderDirectories } = useDirectory()
@@ -459,7 +468,11 @@ export function SidePanel({
   return (
     <div data-sidebar className="flex flex-col h-full overflow-hidden">
       {/* ===== Header ===== */}
-      {hideHeader ? null : (
+      {hideHeader ? null : headerContent ? (
+        <div className="shrink-0 flex items-center pl-2 pr-2 gap-1" style={{ height: DESKTOP_TITLEBAR_HEIGHT }}>
+          {headerContent}
+        </div>
+      ) : (
         <div
           className={`shrink-0 flex items-center border-b border-border-200/60 px-2 gap-1 ${
             isMobile ? 'chat-topbar' : 'h-11'
