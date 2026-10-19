@@ -181,9 +181,13 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     case 'session.deleted':
       return globalEvent(directory, EventTypes.SESSION_DELETED, { sessionID })
     case 'session.idle':
-      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID })
+      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID, timestamp: eventCreated })
     case 'session.status':
-      return globalEvent(directory, EventTypes.SESSION_STATUS, { sessionID, status: data.status })
+      return globalEvent(directory, EventTypes.SESSION_STATUS, {
+        sessionID,
+        status: data.status,
+        timestamp: eventCreated,
+      })
     case 'session.execution.failed': {
       const messageError = toMessageError(rec(data.error))
       return globalEvent(directory, EventTypes.SESSION_ERROR, {
@@ -198,7 +202,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     // 上层 handleSessionIdle 会定稿流式消息、落定悬空 tool、移除 Working 状态。
     case 'session.execution.succeeded':
     case 'session.execution.interrupted':
-      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID })
+      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID, timestamp: eventCreated })
     // v2 运行态：execution.started 表示开始，映射为 busy 以便侧栏显示动态图标
     // （v2 不发 session.status，若只靠 /session/active 轮询则侧栏不实时）。
     case 'session.execution.started':
@@ -314,6 +318,33 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
           synthetic: false,
           time: { start: 0, end: num(e.created) ?? 0 },
         },
+      })
+    }
+
+    /**
+     * 压缩 part（v2 的实时压缩信号）。
+     *
+     * `session.compaction.*` 事件在 schema 里存在，但实测**不一定发**；压缩过程
+     * 还会走 `message.part.updated` + `part.type === "compaction"`：
+     *   - 开始时只有 {id, sessionID, messageID, type, auto}；
+     *   - 结束时多出 `tail_start_id`，指向压缩后保留内容的起点（schema 已确认）。
+     *
+     * 这条路径比只等压缩事件可靠：压缩完成的瞬间就能让前端重拉，
+     * 且给出了压缩边界。没有 tail_start_id 时视为仍在进行中，只通知开始。
+     */
+    case 'message.part.updated': {
+      const part = rec(data.part)
+      if (str(part.type) !== 'compaction') return null
+      const messageID = str(part.messageID) ?? str(data.messageID) ?? ''
+      const columnID = str(part.id) ?? ''
+      if (!messageID || !columnID) return null
+      const tailStartID = str(part.tail_start_id) ?? str(part.tailStartID) ?? ''
+      return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
+        sessionID,
+        status: tailStartID ? 'completed' : 'started',
+        reason: part.auto === true ? 'auto' : 'manual',
+        // 压缩边界：压缩后保留内容的第一条消息 id（v2 用 id 而非时间戳）
+        ...(tailStartID ? { tailStartID } : {}),
       })
     }
 
@@ -486,9 +517,10 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     // 精简后的历史。失败（如 "Nothing to compact yet"）同样要提示，否则用户点了
     // /compact 后界面毫无反应，误以为功能失效。
     //
-    // 关键是 tokens/cost：压缩后上下文占用会骤降，这份用量是服务端对新上下文
-    // 的权威测量；以前在这里丢掉，前端只能按消息文本估算，用户看到的圆环与
-    // 占用数字在压缩完成后几乎不动 ——「压缩完了还是那么满」的根因。
+    // ⚠️ 这里**不能**用 data.tokens 当作压缩后的上下文用量：实测 gzip 前后都显示
+    // 它是「压缩前」的用量（input 342383 / cache.read 577024），而压缩后实际约
+    // 24k。真实构成是 text（摘要）+ recent（保留的近期消息），用它们推算才正确。
+    // 旧实现用 tokens，结果圆环在压缩后反而显得更满 —— 用户报的正是这个。
     case 'session.compaction.ended':
       return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
         sessionID,
@@ -496,6 +528,8 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         reason: str(data.reason),
         ...(adaptTokenUsage(data.tokens) ? { tokens: adaptTokenUsage(data.tokens) } : {}),
         ...(num(data.cost) != null ? { cost: num(data.cost) } : {}),
+        summaryChars: (str(data.text) ?? '').length,
+        recentChars: (str(data.recent) ?? '').length,
         time: eventCreated ?? Date.now(),
       })
     case 'session.compaction.failed':

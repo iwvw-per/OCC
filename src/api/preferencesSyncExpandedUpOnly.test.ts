@@ -88,8 +88,8 @@ describe('expanded projects: up-only sync', () => {
   it('does not upload a local collapse', async () => {
     const account = await seedAccount()
     // 基线里两个都展开，本地只剩一个 → 用户刚收起了 komidash
-    seedBaseline(['OCC', 'komidash'])
-    localStorage.setItem(KEY, JSON.stringify(['OCC']))
+    seedBaseline(['local::OCC', 'local::komidash'])
+    localStorage.setItem(KEY, JSON.stringify(['local::OCC']))
 
     let pushed: Record<string, unknown> | undefined
     stubServer(null, values => {
@@ -100,13 +100,13 @@ describe('expanded projects: up-only sync', () => {
     await pushPreferences(account)
 
     // 收起不是删除意图：上传值仍包含基线里的项
-    expect(pushed?.[KEY]).toEqual(['OCC', 'komidash'])
+    expect(pushed?.[KEY]).toEqual(['local::OCC', 'local::komidash'])
   })
 
   it('does not create a tombstone for a local collapse', async () => {
     const account = await seedAccount()
-    seedBaseline(['OCC', 'komidash'])
-    localStorage.setItem(KEY, JSON.stringify(['OCC']))
+    seedBaseline(['local::OCC', 'local::komidash'])
+    localStorage.setItem(KEY, JSON.stringify(['local::OCC']))
 
     stubServer(null)
 
@@ -114,14 +114,14 @@ describe('expanded projects: up-only sync', () => {
     await pushPreferences(account)
 
     const tombstones = JSON.parse(localStorage.getItem(TOMBSTONES_KEY) || '{}')
-    expect(tombstones[KEY]?.komidash).toBeUndefined()
+    expect(tombstones[KEY]?.['local::komidash']).toBeUndefined()
   })
 
   it('still uploads a newly expanded project', async () => {
     const account = await seedAccount()
-    seedBaseline(['OCC'])
+    seedBaseline(['local::OCC'])
     // 本地新展开一个：这属于「向上」，必须上传
-    localStorage.setItem(KEY, JSON.stringify(['OCC', 'komidash']))
+    localStorage.setItem(KEY, JSON.stringify(['local::OCC', 'local::komidash']))
 
     let pushed: Record<string, unknown> | undefined
     stubServer(null, values => {
@@ -131,7 +131,24 @@ describe('expanded projects: up-only sync', () => {
     const { pushPreferences } = await import('./preferencesSync')
     await pushPreferences(account)
 
-    expect(pushed?.[KEY]).toEqual(['OCC', 'komidash'])
+    expect(pushed?.[KEY]).toEqual(['local::OCC', 'local::komidash'])
+  })
+
+  it('does not upload legacy bare names from the baseline', async () => {
+    const account = await seedAccount()
+    // 升级前的基线只有裸名；推送时不能把它们继续广播出去（无法判断属于哪台主机）
+    seedBaseline(['OCC'])
+    localStorage.setItem(KEY, JSON.stringify(['local::OCC']))
+
+    let pushed: Record<string, unknown> | undefined
+    stubServer(null, values => {
+      pushed = values
+    })
+
+    const { pushPreferences } = await import('./preferencesSync')
+    await pushPreferences(account)
+
+    expect(pushed?.[KEY]).toEqual(['local::OCC'])
   })
 
   it('keeps a local collapse local during pull (other device still expanded)', async () => {
@@ -140,48 +157,50 @@ describe('expanded projects: up-only sync', () => {
 
     // 基线：两个都展开（先清空收起记录，避免受其它用例影响）
     localStorage.removeItem('opencode-sidebar-collapsed-projects')
-    seedBaseline(['OCC', 'komidash'])
-    layoutStore.setSidebarExpandedProjects(['OCC', 'komidash'])
+    seedBaseline(['local::OCC', 'local::komidash'])
+    layoutStore.setSidebarExpandedProjects(['local::OCC', 'local::komidash'])
     // 用户主动收起 komidash（经由 store，会记录收起意图）
-    layoutStore.setSidebarExpandedProjects(['OCC'])
-    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC'])
-    expect(JSON.parse(localStorage.getItem('opencode-sidebar-collapsed-projects') || '[]')).toContain('komidash')
+    layoutStore.setSidebarExpandedProjects(['local::OCC'])
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['local::OCC'])
+    expect(JSON.parse(localStorage.getItem('opencode-sidebar-collapsed-projects') || '[]')).toContain(
+      'local::komidash',
+    )
 
     // 服务端仍是两个都展开（另一端的视角）
-    stubServer(['OCC', 'komidash'])
+    stubServer(['local::OCC', 'local::komidash'])
 
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
 
     // 本地为准：刚收起的那项不能被服务端残留并回来
-    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC'])
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['local::OCC'])
   })
 
   it('still accepts a project expanded on the other device during pull', async () => {
     const account = await seedAccount()
     const { layoutStore } = await import('../store/layoutStore')
 
-    seedBaseline(['OCC'])
-    layoutStore.setSidebarExpandedProjects(['OCC'])
+    seedBaseline(['local::OCC'])
+    layoutStore.setSidebarExpandedProjects(['local::OCC'])
     // 另一端新展开了一个：属于「向上」，应当同步过来
-    stubServer(['OCC', 'komidash'])
+    stubServer(['local::OCC', 'local::komidash'])
 
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
 
-    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC', 'komidash'])
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['local::OCC', 'local::komidash'])
   })
 
   it('does not record a tombstone on pull after a local collapse', async () => {
     const account = await seedAccount()
-    seedBaseline(['OCC', 'komidash'])
-    localStorage.setItem(KEY, JSON.stringify(['OCC']))
-    stubServer(['OCC', 'komidash'])
+    seedBaseline(['local::OCC', 'local::komidash'])
+    localStorage.setItem(KEY, JSON.stringify(['local::OCC']))
+    stubServer(['local::OCC', 'local::komidash'])
 
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
 
     const tombstones = JSON.parse(localStorage.getItem(TOMBSTONES_KEY) || '{}')
-    expect(tombstones[KEY]?.komidash).toBeUndefined()
+    expect(tombstones[KEY]?.['local::komidash']).toBeUndefined()
   })
 })

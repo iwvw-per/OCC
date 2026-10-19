@@ -67,6 +67,14 @@ export interface SessionState {
    * 用于让圆环在压缩后立刻掉到正确水位。缺失时按消息文本估算。
    */
   compactionUsage?: { tokens: TokenUsage; cost?: number; at: number }
+  /**
+   * 来自 `message.list` 的压缩标记（事件可能不发，消息列表才是权威来源）。
+   *
+   * 该条目的 tokens 是**压缩前**用量，不能直接用；这里保留摘要与近期消息的
+   * 字符规模，用于推算压缩后的上下文：旧轮次已被摘要取代，把它们再算进上下文
+   * 会让圆环停在压缩前的高水位 —— 这正是「压缩完占用没变」的原因。
+   */
+  compactionMarker?: { at: number; summaryChars: number; recentChars: number }
 }
 
 export interface SendRollbackSnapshot {

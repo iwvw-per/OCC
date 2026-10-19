@@ -15,7 +15,7 @@ import {
   hiddenProjectsStore,
   unhideProject as persistUnhideProject,
 } from '../../../storage/appData'
-import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
+import { getDirectoryName, isSameDirectory, makeProjectExpandKey, normalizeToForwardSlash } from '../../../utils'
 import { getProjectGroupIdentity, sortProjects, mergeProjectLastUsed } from './projectGrouping'
 import { mergeExpandedProjectNames } from './expandedProjects'
 import { useProjectLastUsedAt } from '../../../hooks/useProjectLastUsedAt'
@@ -36,13 +36,18 @@ export interface ProjectItem {
 }
 
 /**
- * 项目展开状态在存储里的 key。
+ * 项目展开状态在存储里的 key：`{serverId}::{项目名}`。
  *
- * 用项目名而非 id：id 通常是 worktree 绝对路径（含盘符），跨设备不可比，
- * 用名字才能让「哪几个项目展开」在多端对齐。名字缺失时退回 worktree。
+ * 为什么用项目名而不是 id：id 通常是 worktree 绝对路径（含盘符），同一主机
+ * 在不同设备上路径一致，但不同主机之间不可比。用名字 + serverId，既能区分
+ * 两台主机上的同名项目，又能让同一主机的多端对齐。
+ *
+ * serverId 是必需的：项目列表按服务器分桶，而展开状态是全局单键。只存名字时
+ * 两台主机上的同名项目会共用一份状态 —— 在 A 上展开，B 上的同名项目跟着展开。
+ * aiagent 实例的 id 由面板下发、各端一致，因此加上它之后各主机互不影响。
  */
-export function projectExpandKey(project: ProjectItem): string {
-  return project.name || project.worktree || project.id
+export function projectExpandKey(project: ProjectItem, serverId: string): string {
+  return makeProjectExpandKey(serverId, project.name || project.worktree || project.id)
 }
 
 /**
@@ -280,12 +285,12 @@ export function useProjectGroups({
   }, [])
 
   // ---- 展开状态 ----
-  // 状态存在 layoutStore 里，键是「项目名」而非 id：id 通常是 worktree 绝对路径
-  // （含盘符），跨设备不可比；项目名两端一致，才能让展开状态在多端对齐。
+  // 状态存在 layoutStore 里，键是「主机 + 项目名」（见 projectExpandKey）。
+  // 只按项目名会串主机：两台主机上同名的项目会共用一份展开状态。
   const expandedProjectNames = useLayoutStore().sidebarExpandedProjects
   const expandedProjectIds = useMemo(
-    () => folderProjects.filter(p => expandedProjectNames.includes(projectExpandKey(p))).map(p => p.id),
-    [folderProjects, expandedProjectNames],
+    () => folderProjects.filter(p => expandedProjectNames.includes(projectExpandKey(p, activeServerId))).map(p => p.id),
+    [folderProjects, expandedProjectNames, activeServerId],
   )
   /**
    * 「全部展开/收起」的作用范围：与 allProjectsCollapsed 的判定范围一致。
@@ -302,7 +307,9 @@ export function useProjectGroups({
 
   const setExpandedProjectIds = useCallback(
     (updater: string[] | ((prev: string[]) => string[])) => {
-      const currentIds = folderProjects.filter(p => expandedProjectNames.includes(projectExpandKey(p))).map(p => p.id)
+      const currentIds = folderProjects
+        .filter(p => expandedProjectNames.includes(projectExpandKey(p, activeServerId)))
+        .map(p => p.id)
       const nextIds = typeof updater === 'function' ? updater(currentIds) : updater
       // 项目列表尚未加载时一律不写回：此刻映射必然为空，会把存储里真实的展开状态
       // 清空；随后同步拉取又用服务端值覆盖，用户看到的展开状态就随机变化。
@@ -310,14 +317,14 @@ export function useProjectGroups({
       const nextNames = nextIds
         .map(id => folderProjects.find(p => p.id === id))
         .filter((p): p is ProjectItem => !!p)
-        .map(projectExpandKey)
+        .map(project => projectExpandKey(project, activeServerId))
       // 只替换「属于当前服务器」的那部分名字，保留其它服务器的展开项。
       // 存储是全局单键、项目列表按服务器分区：整体覆盖会清掉别的服务器的展开
       // 状态，切回去就变成「全部收起」。
-      const currentNames = folderProjects.map(projectExpandKey)
+      const currentNames = folderProjects.map(project => projectExpandKey(project, activeServerId))
       layoutStore.setSidebarExpandedProjects(mergeExpandedProjectNames(expandedProjectNames, currentNames, nextNames))
     },
-    [folderProjects, expandedProjectNames],
+    [folderProjects, expandedProjectNames, activeServerId],
   )
 
   // 新添加/新保存的项目自动展开。

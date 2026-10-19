@@ -440,7 +440,18 @@ class ServerStore {
   }
 
   getActiveCalibratedNow(): number | undefined {
-    const calibration = this.clockCalibrationMap.get(this.getActiveServerId())
+    return this.getCalibratedNow(this.getActiveServerId())
+  }
+
+  /**
+   * 指定服务器的校准时钟。
+   *
+   * 只提供「活动服务器」的版本会让跨主机的比较错位：同一会话的通知在 A 端用
+   * A 的时钟打戳、B 端用 B 的时钟打戳，而两台机器的时钟并不相同。已读水位要
+   * 跨端比较，就必须统一到「会话所属主机」的时钟上。
+   */
+  getCalibratedNow(serverId: string): number | undefined {
+    const calibration = this.clockCalibrationMap.get(serverId)
     if (!calibration) return undefined
     return calibration.serverTimestamp + (performance.now() - calibration.calibratedAtMonotonic)
   }

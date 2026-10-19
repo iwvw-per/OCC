@@ -111,14 +111,40 @@ describe('v2 event → GlobalEvent', () => {
     expect(p?.properties).toEqual({ sessionID: 'ses_1', assistantMessageID: 'msg_old' })
   })
 
-  it('maps execution.succeeded to SESSION_IDLE (v2 has no session.idle)', () => {
+  it('maps execution.succeeded to SESSION_IDLE with the server event time', () => {
     const p = payloadOf({
       type: 'session.execution.succeeded',
+      created: 1_700_000_123_456,
       data: { sessionID: 's' },
       location: { directory: '/w' },
     })
     expect(p?.type).toBe(EventTypes.SESSION_IDLE)
     expect(p?.properties.sessionID).toBe('s')
+    // 完成时间必须取服务端事件时间：两端处理事件的本地时刻不同，
+    // 用它做通知时间戳才能让「已读水位」跨端比较一致。
+    expect(p?.properties.timestamp).toBe(1_700_000_123_456)
+  })
+
+  it('maps session.idle to SESSION_IDLE with the server event time', () => {
+    const p = payloadOf({
+      type: 'session.idle',
+      created: 1_700_000_222_000,
+      data: { sessionID: 's' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_IDLE)
+    expect(p?.properties.timestamp).toBe(1_700_000_222_000)
+  })
+
+  it('carries the server event time on session.status idle', () => {
+    const p = payloadOf({
+      type: 'session.status',
+      created: 1_700_000_333_000,
+      data: { sessionID: 's', status: { type: 'idle' } },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_STATUS)
+    expect(p?.properties.timestamp).toBe(1_700_000_333_000)
   })
 
   it('maps execution.started to SESSION_STATUS busy (drives sidebar activity)', () => {
@@ -129,6 +155,66 @@ describe('v2 event → GlobalEvent', () => {
     })
     expect(p?.type).toBe(EventTypes.SESSION_STATUS)
     expect((p?.properties.status as { type: string }).type).toBe('busy')
+  })
+
+  it('carries the compaction sizes so the context ring can drop', () => {
+    const p = payloadOf({
+      type: 'session.compaction.ended',
+      created: 1_700_000_000_000,
+      data: {
+        sessionID: 's',
+        reason: 'manual',
+        text: 's'.repeat(5442),
+        recent: 'r'.repeat(92_322),
+        // 压缩前用量：绝不能当作压缩后的上下文
+        tokens: { input: 342_383, output: 2443, reasoning: 0, cache: { read: 577_024, write: 0 } },
+        cost: 0,
+      },
+      location: { directory: '/w' },
+    })
+
+    expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
+    expect(p?.properties.summaryChars).toBe(5442)
+    expect(p?.properties.recentChars).toBe(92_322)
+  })
+
+  it('maps a compaction part to SESSION_COMPACTED with its boundary', () => {
+    // v2 的实时压缩信号走 message.part.updated + part.type === "compaction"
+    const started = payloadOf({
+      type: 'message.part.updated',
+      created: 1,
+      data: { part: { id: 'prt_1', sessionID: 's', messageID: 'msg_1', type: 'compaction', auto: false } },
+      location: { directory: '/w' },
+    })
+    expect(started?.type).toBe(EventTypes.SESSION_COMPACTED)
+    expect(started?.properties.status).toBe('started')
+
+    const ended = payloadOf({
+      type: 'message.part.updated',
+      created: 2,
+      data: {
+        part: {
+          id: 'prt_1',
+          sessionID: 's',
+          messageID: 'msg_1',
+          type: 'compaction',
+          auto: false,
+          tail_start_id: 'msg_tail',
+        },
+      },
+      location: { directory: '/w' },
+    })
+    expect(ended?.properties.status).toBe('completed')
+    expect(ended?.properties.tailStartID).toBe('msg_tail')
+  })
+
+  it('ignores non-compaction parts on message.part.updated', () => {
+    const p = payloadOf({
+      type: 'message.part.updated',
+      data: { part: { id: 'prt_1', sessionID: 's', messageID: 'msg_1', type: 'text' } },
+      location: { directory: '/w' },
+    })
+    expect(p).toBeNull()
   })
 
   it('maps text.started to MESSAGE_PART_UPDATED text part', () => {

@@ -226,4 +226,84 @@ describe('computeSessionStatsCached', () => {
     expect(b).not.toBe(a)
     expect(b.inputTokens).toBe(20)
   })
+
+  it('recomputes when only the v2 compaction marker changes', () => {
+    // v2 只更新 marker（不发压缩事件）；缓存键不含 marker 就会一直返回旧值，
+    // 表现为「压缩完了圆环不动」。
+    const messages: Parameters<typeof computeSessionStats>[0] = []
+    const before = computeSessionStatsCached(messages, 200000)
+    const after = computeSessionStatsCached(messages, 200000, undefined, undefined, {
+      at: BASE,
+      summaryChars: 8000,
+      recentChars: 4000,
+    })
+    expect(after).not.toBe(before)
+    expect(after.contextUsed).toBe(3000)
+  })
+})
+
+describe('v2 compaction marker → context usage', () => {
+  /**
+   * v2 的压缩记录只在 `message.list` 里（`type: "compaction"`），没有压缩事件。
+   * 该条目的 tokens 是**压缩前**用量，不能直接用；压缩后上下文 ≈ 摘要 + 近期消息。
+   * 旧轮次若仍被算进上下文，圆环永远停在压缩前的高水位 —— 用户报的正是这个。
+   */
+  it('drops the context estimate after compaction', () => {
+    const messages = [
+      userMessage('u1', 'x'.repeat(200_000), 0),
+      assistantMessage('a1', 1000, { input: 90_000, output: 1000, reasoning: 0, cache: { read: 0, write: 0 } }),
+    ]
+
+    const before = computeSessionStats(messages, 200000)
+    expect(before.contextUsed).toBeGreaterThan(50_000)
+
+    // 压缩完成后：摘要 5.4KB + 近期 92KB ≈ 24.4k tokens（实测参考值）
+    const after = computeSessionStats(messages, 200000, undefined, undefined, {
+      at: BASE + 2000,
+      summaryChars: 5442,
+      recentChars: 92_322,
+    })
+
+    expect(after.contextUsed).toBeLessThan(before.contextUsed)
+    expect(after.contextUsed).toBe(Math.ceil((5442 + 92_322) / 4))
+    // 压缩标记是服务端记录的规模，但字符→token 是换算，仍如实标注为估算
+    expect(after.contextEstimated).toBe(true)
+  })
+
+  it('lets a newer assistant turn take over from the marker', () => {
+    const messages = [
+      assistantMessage('a1', 1000, { input: 5000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }),
+    ]
+
+    // 压缩在 a1 之后才发生 → 本轮之后的新用量不存在，用 marker
+    const withMarker = computeSessionStats(messages, 200000, undefined, undefined, {
+      at: BASE + 2000,
+      summaryChars: 4000,
+      recentChars: 0,
+    })
+    expect(withMarker.contextUsed).toBe(1000)
+
+    // marker 早于 a1：说明压缩之后又跑了新一轮，真实用量优先
+    const withNewerTurn = computeSessionStats(messages, 200000, undefined, undefined, {
+      at: BASE - 5000,
+      summaryChars: 4000,
+      recentChars: 0,
+    })
+    expect(withNewerTurn.contextUsed).toBe(5100)
+  })
+
+  it('ignores a marker without any size information', () => {
+    const messages = [
+      assistantMessage('a1', 1000, { input: 5000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }),
+    ]
+
+    const stats = computeSessionStats(messages, 200000, undefined, undefined, {
+      at: BASE + 2000,
+      summaryChars: 0,
+      recentChars: 0,
+    })
+
+    // 规模未知时不能把上下文显示成 0
+    expect(stats.contextUsed).toBe(5100)
+  })
 })

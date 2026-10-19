@@ -107,6 +107,7 @@
 
 import { accountRequest, accountRequestWithMeta, readAccount, type AiAgentAccount } from './aiagent'
 import { notifyPerServerStorageChanged } from '../utils/perServerStorage'
+import { isScopedProjectExpandKey } from '../utils/projectExpandKeys'
 import {
   hiddenProjectsStore as hiddenProjectsDataStore,
   recentProjectsStore as recentProjectsDataStore,
@@ -490,6 +491,15 @@ type MergeRule =
        * 到别的端，但本端收起只是「我现在不想看」，不该把另一端的展开也收掉。
        */
       upOnly?: boolean
+      /**
+       * 只保留合法 id。
+       *
+       * 用于「键格式升级」：旧的裸项目名无法判断属于哪台主机，若让它们进入
+       * 本地，就会随「当前活动主机」漂移 —— 用户切换主机后展开状态自己变。
+       * 本地在读取时已完成迁移（见 layoutStore.restoreFromStorage），因此同步
+       * 链路里出现的裸名一律视为过期数据丢弃。
+       */
+      keepId?: (id: string) => boolean
     }
   /**
    * 纯字符串数组（如隐藏的模型键、置顶模型键）。与 'array' 的区别只在元素形态：
@@ -536,6 +546,10 @@ const MERGE_RULES: Record<string, MergeRule> = {
   // 侧栏项目行的展开/收起：只向上合并（并集），本地收起不上传。
   //   - 本端展开 → 同步给其它端（用户要的）
   //   - 本端收起 → 只影响本端，不把另一端的展开收掉
+  //
+  // id 是 `serverId::项目名`（见 utils/projectExpandKeys）。旧的裸项目名会被
+  // keepId 挡掉：它们无法判断属于哪台主机，让它们进来就会让两台主机的同名项目
+  // 再次共用状态（即本次修复的 bug）。
   'opencode-sidebar-expanded-projects': {
     kind: 'array',
     id: entry =>
@@ -545,6 +559,7 @@ const MERGE_RULES: Record<string, MergeRule> = {
           ? entry.value
           : null,
     upOnly: true,
+    keepId: isScopedProjectExpandKey,
   },
   'model-pinned': {
     kind: 'string-array',
@@ -616,6 +631,7 @@ function mergeUpOnly(
     if (!record) return
     const id = rule.id(record)
     if (!id || seen.has(id)) return
+    if (rule.keepId && !rule.keepId(id)) return
     seen.add(id)
     // 保留原始元素（纯字符串仍是字符串），回写时不改变存储形态
     merged.push(item)
@@ -662,6 +678,9 @@ function mergeUpOnlyFromServer(
     if (!record) return
     const id = rule.id(record)
     if (!id || seen.has(id) || collapsed.has(id)) return
+    // 键格式升级后，服务端可能还留着旧的裸项目名：无法判断属于哪台主机，
+    // 并进来就会随「当前活动主机」漂移（表现为展开状态自己变）。
+    if (rule.keepId && !rule.keepId(id)) return
     seen.add(id)
     merged.push(item)
   }

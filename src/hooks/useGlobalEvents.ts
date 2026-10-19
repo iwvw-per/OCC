@@ -19,7 +19,7 @@ import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
-import { subscribeToServerEvents, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
+import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
 import { invalidateSessionListCache } from '../api/sessionListCache'
 import { sessionListIndexStore } from '../store/sessionListIndexStore'
 import type { EventCallbacks } from '../types/api/event'
@@ -233,49 +233,83 @@ function removePendingByRequestId<T extends { id: string }>(
 
 async function fetchActiveScopeData(directories: string[] | undefined, serverId: string) {
   const scopes = directories && directories.length > 0 ? directories : [undefined]
-  const results = await Promise.all(
-    scopes.map(async directory => {
-      const [statusMap, permissions, questions] = await Promise.all([
-        getSessionStatus(directory, serverId).catch(() => ({}) as SessionStatusMap),
-        getPendingPermissions(undefined, directory, serverId).catch(() => []),
-        getPendingQuestions(undefined, directory, serverId).catch(() => []),
-      ])
 
-      return { directory, statusMap, permissions, questions }
-    }),
-  )
+  /**
+   * 运行态与权限在 v2 都是**全局**接口：
+   *   - GET /api/session/active 不接受 directory；
+   *   - permission.request.list 也不接受 directory。
+   *
+   * 之前按目录循环调用它们，把同一份全局结果请求了 N 次，并且把返回的**每个**
+   * 会话都归到「当前这个目录」。同一会话会被依次塞进 N 个目录的 meta，最后一次
+   * 写入者获胜 —— 于是「KomiDash 里正在跑的会话」被记成了别的项目的目录，项目行
+   * 按目录汇总状态时，那个项目就一直转圈，展开却找不到在跑的会话。
+   *
+   * 现在只取一次，目录由会话自身的 meta 决定（见下方 resolveDirectory）。
+   */
+  const [statusMap, permissions, questionResults] = await Promise.all([
+    getSessionStatus(undefined, serverId).catch(() => ({}) as SessionStatusMap),
+    getPendingPermissions(undefined, undefined, serverId).catch(() => []),
+    Promise.all(scopes.map(directory => getPendingQuestions(undefined, directory, serverId).catch(() => []))),
+  ])
 
   const mergedStatusMap: SessionStatusMap = {}
   const permissionMap = new Map<string, ApiPermissionRequest>()
   const questionMap = new Map<string, ApiQuestionRequest>()
   const sessionMetaEntries: Array<{ sessionId: string; directory?: string }> = []
 
-  results.forEach(({ directory, statusMap, permissions, questions }) => {
-    // statusMap 的 key 复合化（事件/store 内部统一用 serverId::sessionId）
-    for (const [sid, status] of Object.entries(statusMap)) {
-      mergedStatusMap[makeSessionKey(serverId, sid)] = status
+  // 全局接口不返回目录：已知的从 store 的 session meta 取；未知的（应用启动前
+  // 就在跑、本次还没收到 session.updated）单独查一次会话详情。只查真正在跑的，
+  // 数量很少，且 getSession 自带短 TTL 缓存。
+  const unknownDirectoryIds = new Set<string>()
+  const knownDirectory = (sessionId: string): string | undefined => {
+    const directory = activeSessionStore.getSessionMeta(sessionId)?.directory
+    if (directory) return directory
+    unknownDirectoryIds.add(sessionId)
+    return undefined
+  }
+
+  for (const [sid, status] of Object.entries(statusMap)) {
+    const scopedId = makeSessionKey(serverId, sid)
+    mergedStatusMap[scopedId] = status
+    if (status.type === 'idle') continue
+    const directory = knownDirectory(scopedId)
+    if (directory) sessionMetaEntries.push({ sessionId: scopedId, directory })
+  }
+
+  for (const permission of permissions) {
+    const scopedId = makeSessionKey(serverId, permission.sessionID)
+    permissionMap.set(permission.id, { ...permission, sessionID: scopedId })
+    const directory = knownDirectory(scopedId)
+    if (directory) sessionMetaEntries.push({ sessionId: scopedId, directory })
+  }
+
+  questionResults.forEach((questions, index) => {
+    // form.list 接受 location，因此这里的目录是**查询时指定的那个**，可信。
+    const directory = scopes[index]
+    for (const question of questions) {
+      const scopedId = makeSessionKey(serverId, question.sessionID)
+      questionMap.set(question.id, { ...question, sessionID: scopedId })
+      if (directory) sessionMetaEntries.push({ sessionId: scopedId, directory })
     }
-
-    if (directory) {
-      Object.keys(statusMap).forEach(sid => {
-        sessionMetaEntries.push({ sessionId: makeSessionKey(serverId, sid), directory })
-      })
-    }
-
-    permissions.forEach(permission => {
-      if (directory) {
-        sessionMetaEntries.push({ sessionId: makeSessionKey(serverId, permission.sessionID), directory })
-      }
-      permissionMap.set(permission.id, { ...permission, sessionID: makeSessionKey(serverId, permission.sessionID) })
-    })
-
-    questions.forEach(question => {
-      if (directory) {
-        sessionMetaEntries.push({ sessionId: makeSessionKey(serverId, question.sessionID), directory })
-      }
-      questionMap.set(question.id, { ...question, sessionID: makeSessionKey(serverId, question.sessionID) })
-    })
   })
+
+  if (unknownDirectoryIds.size > 0) {
+    const resolved = await Promise.all(
+      [...unknownDirectoryIds].map(async scopedId => {
+        const sid = scopedId.slice(scopedId.indexOf('::') + 2)
+        try {
+          const session = await getSession(sid, undefined, serverId)
+          return { sessionId: scopedId, directory: session.directory || undefined }
+        } catch {
+          // 会话可能刚被删除；拿不到目录就不写 meta，状态自然不会挂到任何项目行
+          return null
+        }
+      }),
+    )
+    for (const entry of resolved) {
+      if (entry?.directory) sessionMetaEntries.push(entry)
+    }
+  }
 
   return {
     statusMap: mergedStatusMap,
@@ -644,7 +678,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
        * 只有第一个到达者会看到 wasBusy=true 并弹提示，后到者因已是 idle 自动跳过，
        * 从而既保证数量下降、又不会重复提示。
        */
-      const settleSessionIdle = (scopedId: string, rawSessionId: string) => {
+      const settleSessionIdle = (scopedId: string, rawSessionId: string, completedAt?: number) => {
         const prevStatus = activeSessionStore.getSnapshot().statusMap[scopedId]
         const wasBusy = prevStatus && (prevStatus.type === 'busy' || prevStatus.type === 'retry')
         // updateStatus 返回 true 表示会话真正被清除；仍有未回复 pending 时返回
@@ -672,6 +706,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             i18n.t('chat:notification.sessionCompleted'),
             scopedId,
             meta?.directory,
+            completedAt,
           )
         }
       }
@@ -783,7 +818,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // session.idle 是会话完成的权威信号。activeSessionStore 此前只由
           // session.status 驱动，服务端不保证每次都补推 status——只收到 idle 时
           // 会残留 busy 条目，导致 Working 列表与实况通知数量不下降。
-          settleSessionIdle(scopedId, data.sessionID)
+          settleSessionIdle(scopedId, data.sessionID, data.timestamp)
           // 子 agent 运行结束：自动关闭其分屏 pane
           paneLayoutStore.closeSubtaskSession(scopedId)
           dispatchToConsumers(scopedId, cb => cb.onSessionIdle?.(scopedId))
@@ -808,14 +843,19 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             return
           }
 
-          // 成功：先把服务端回报的压缩后上下文用量落进 store，再失效消息缓存。
+          // 成功：先把压缩后的上下文规模落进 store，再失效消息缓存。
           //
-          // 顺序很重要：压缩事件的 tokens 是「压缩后新上下文」的权威测量，
-          // 必须在重拉之前写进去 —— 否则等待重拉的那几百毫秒里圆环仍停在
-          // 压缩前的水位，用户看到的就是「压缩完了占用没变」。
+          // ⚠️ 不能用 data.tokens：v2 实测那是**压缩前**用量（input 342383 /
+          // cache.read 577024），压缩后实际约 24k。用它会让圆环在压缩后显得更满 ——
+          // 正是「压缩完上下文没更新」的根因。真实构成是摘要 + 保留的近期消息，
+          // 由 summaryChars / recentChars 表达。
+          //
+          // compaction part 这条路径（message.part.updated）不带摘要规模：
+          // 此时只推进 compactedAt（分隔条），规模等重拉消息后由 message.list
+          // 的 compaction 条目补上。写 0 会把圆环误算成 0。
+          const hasSize = data.summaryChars !== undefined || data.recentChars !== undefined
           messageStore.recordCompactionResult(scopedId, {
-            tokens: data.tokens,
-            cost: data.cost,
+            ...(hasSize ? { summaryChars: data.summaryChars, recentChars: data.recentChars } : {}),
             at: data.time,
           })
           if (data.reason !== 'auto') {
@@ -1097,7 +1137,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
 
           // idle 与 session.idle 走同一落定逻辑，避免重复提示、保证数量下降
           if (data.status.type === 'idle') {
-            settleSessionIdle(scopedId, data.sessionID)
+            settleSessionIdle(scopedId, data.sessionID, data.timestamp)
             childSessionStore.markIdle(scopedId)
             return
           }
@@ -1180,6 +1220,24 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       activeSessionStore.expireStaleOptimisticEntries()
     }, 30000)
 
+    /**
+     * 周期性以服务端为准对齐运行态。
+     *
+     * 只在「重连」和「切回前台」对齐不够：桌面端可以整天开着、SSE 心跳也一直
+     * 正常，但某个 execution.succeeded / interrupted 事件丢失（隧道抖动、
+     * 服务端重启、浏览器丢事件）后，没有第二次机会把它清掉。这条 busy 会永久
+     * 留着 —— 表现为折叠的项目行一直转圈，而那个会话其实早就结束了。
+     *
+     * 频率取 60s：/api/session/active 只返回正在跑的会话，开销很小；且该接口
+     * 走 microCache，与其它路径的调用会合并。页面隐藏时不拉，省流量。
+     */
+    const activeStatusReconcileTimer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      for (const serverId of activeServerIdsRef.current) {
+        reconcileServerStatus(serverId)
+      }
+    }, 60000)
+
     // 回前台时重新对齐 session 状态：应用在后台被冻结期间 SSE 事件可能未被处理，
     // 而连接靠心跳仍显示存活、不会触发 onReconnected。此时主动拉一次全量状态，
     // 清掉残留的 busy 条目，让 Working 列表与实况通知数量回到真实值。
@@ -1196,6 +1254,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       refreshRef.current = null
       window.clearInterval(healthPollTimer)
       window.clearInterval(optimisticBusySweepTimer)
+      window.clearInterval(activeStatusReconcileTimer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
       unsubscribes.forEach(unsubscribe => unsubscribe())
       unsubscribeAutoApprove()

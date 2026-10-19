@@ -48,9 +48,15 @@ function load(): Watermarks {
 /**
  * 当前基准时间：优先校准钟，不可用退回本地钟。
  * 与 notificationStore.push 使用同一函数，保证比较口径一致。
+ *
+ * 指定 serverId 时用**该会话所属主机**的校准钟，而不是当前活动主机：
+ * 同一会话的通知在两端必须能比较，而不同主机的时钟并不相同。用活动主机的钟
+ * 给别的主机的通知打戳，跨主机切换后时间戳就会错位（表现为未读点了清不掉、
+ * 或已读了又变未读）。
  */
-export function watermarkNow(): number {
-  return serverStore.getActiveCalibratedNow() ?? Date.now()
+export function watermarkNow(serverId?: string): number {
+  const scoped = serverId ? serverStore.getCalibratedNow(serverId) : undefined
+  return scoped ?? serverStore.getActiveCalibratedNow() ?? Date.now()
 }
 
 type Subscriber = () => void

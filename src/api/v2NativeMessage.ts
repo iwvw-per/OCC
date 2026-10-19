@@ -6,7 +6,7 @@
 
 import { getV2Client } from './sdkV2'
 import type { ApiMessageWithParts } from './types'
-import { adaptMessagePageAsync } from './v2/message'
+import { adaptMessagePageAsync, type CompactionMarker } from './v2/message'
 
 export interface V2PromptInput {
   sessionID: string
@@ -69,7 +69,13 @@ export async function nativePrompt(serverId: string | undefined, input: V2Prompt
 export async function nativeListMessages(
   serverId: string | undefined,
   input: { sessionID: string; limit?: number; cursor?: string; order?: 'desc'; headers?: Record<string, string> },
-): Promise<{ messages: ApiMessageWithParts[]; nextCursor?: string; prevCursor?: string; compactedAt?: number }> {
+): Promise<{
+  messages: ApiMessageWithParts[]
+  nextCursor?: string
+  prevCursor?: string
+  compactedAt?: number
+  compaction?: CompactionMarker
+}> {
   const client = getV2Client(serverId)
   const res = await client.message.list(
     {

@@ -244,6 +244,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
                     hasMoreHistory: pageResult.page.hasMore,
                     historyCursor: pageResult.page.nextCursor,
                     compactedAt: pageResult.page.compactedAt,
+                    compactionMarker: pageResult.page.compaction,
                   }
                 : {}),
               directory: sessionInfo?.directory ?? dir ?? '',
@@ -298,6 +299,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
                     nextCursor: undefined as string | undefined,
                     hasMore: r.hasMore,
                     compactedAt: r.compactedAt,
+                    compaction: r.compaction,
                   }))
                 : getSessionTurnPage(sid, INITIAL_TURN_LIMIT, undefined, dir, serverId, {
                     signal: abortController.signal,
@@ -331,6 +333,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
             loadState: 'loaded',
             shareUrl: sessionInfo?.share?.url,
             compactedAt: page.compactedAt,
+            compactionMarker: page.compaction,
           })
           onLoadComplete?.()
           return
@@ -346,6 +349,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           revertState: sessionInfo?.revert ?? null,
           shareUrl: sessionInfo?.share?.url,
           compactedAt: page.compactedAt,
+          compactionMarker: page.compaction,
         })
         // 首屏只覆盖最近 INITIAL_TURN_LIMIT 轮，无需压缩；保留调用以应对
         // SSE 已把更早轮次推入内存的情况。

@@ -663,6 +663,7 @@ class MessageStore {
       shareUrl?: string
       loadError?: MessageError
       compactedAt?: number
+      compactionMarker?: { at: number; summaryChars: number; recentChars: number }
     },
   ) {
     sessionId = this.resolveKey(sessionId)
@@ -678,6 +679,7 @@ class MessageStore {
     if (options.loadError !== undefined) state.loadError = options.loadError
     if (options.shareUrl !== undefined) state.shareUrl = options.shareUrl
     if (options.compactedAt !== undefined) state.compactedAt = options.compactedAt
+    if (options.compactionMarker !== undefined) state.compactionMarker = options.compactionMarker
 
     this.notify([sessionId])
   }
@@ -743,20 +745,28 @@ class MessageStore {
   }
 
   /**
-   * 记录压缩完成后的上下文用量。
+   * 记录压缩完成后的上下文规模。
    *
-   * 这是圆环在压缩后能立刻掉下来的关键：压缩事件的 tokens 是服务端对新上下文
-   * 的权威测量，比按消息文本估算准确。同时把 compactedAt 前移，消息流末尾的
-   * 压缩分隔条才有依据。
+   * 圆环能在压缩后立刻掉下来的关键。v2 的压缩事件里 `tokens` 是**压缩前**用量，
+   * 不能直接显示；真实构成是「摘要 + 保留的近期消息」，由 summaryChars /
+   * recentChars 表达。同时把 compactedAt 前移，消息流末尾的压缩分隔条才有依据。
    */
   recordCompactionResult(
     sessionId: string,
-    options: { tokens?: TokenUsage; cost?: number; at?: number },
+    options: { summaryChars?: number; recentChars?: number; tokens?: TokenUsage; cost?: number; at?: number },
   ) {
     sessionId = this.resolveKey(sessionId)
     const state = this.sessions.get(sessionId)
     if (!state) return
     const at = options.at ?? Date.now()
+    if (options.summaryChars !== undefined || options.recentChars !== undefined) {
+      state.compactionMarker = {
+        at,
+        summaryChars: options.summaryChars ?? 0,
+        recentChars: options.recentChars ?? 0,
+      }
+    }
+    // 兼容旧调用方（只有 tokens 的场景，如 v1 风格事件）
     if (options.tokens) {
       state.compactionUsage = { tokens: options.tokens, cost: options.cost, at }
     }
@@ -772,6 +782,11 @@ class MessageStore {
   getCompactionUsage(sessionId: string | null): SessionState['compactionUsage'] {
     if (!sessionId) return undefined
     return this.sessions.get(this.resolveKey(sessionId))?.compactionUsage
+  }
+
+  getCompactionMarker(sessionId: string | null): SessionState['compactionMarker'] {
+    if (!sessionId) return undefined
+    return this.sessions.get(this.resolveKey(sessionId))?.compactionMarker
   }
 
   markAllSessionsStale() {
@@ -831,6 +846,7 @@ class MessageStore {
       revertState?: ApiSession['revert'] | null
       shareUrl?: string
       compactedAt?: number
+      compactionMarker?: { at: number; summaryChars: number; recentChars: number }
     },
   ) {
     sessionId = this.resolveKey(sessionId, true)
@@ -857,6 +873,7 @@ class MessageStore {
     if (options?.title !== undefined) state.title = options.title
     state.shareUrl = options?.shareUrl
     state.compactedAt = options?.compactedAt
+    if (options?.compactionMarker !== undefined) state.compactionMarker = options.compactionMarker
     state.isStale = false
 
     // D5：HTTP 快照是权威全量，此前因乱序暂存的 delta 已被快照覆盖，丢弃以免重复回放

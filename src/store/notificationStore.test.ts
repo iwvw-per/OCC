@@ -322,3 +322,58 @@ describe('notificationStore 按目录批量已读', () => {
     expect(notificationStore.getSnapshot().notifications.filter(n => !n.read)).toHaveLength(1)
   })
 })
+
+describe('notificationStore 已读水位跨端比较', () => {
+  beforeEach(() => {
+    notificationStore.clearAll()
+    localStorage.removeItem('opencode-read-watermarks')
+    readWatermarkStore.reload()
+  })
+
+  it('两端用同一个服务端时间戳打戳，已读水位才能对齐', () => {
+    // 同一轮完成的权威时间由服务端给出（v2 事件的 created），两端拿到的是同一个值。
+    // 旧实现用「各自处理事件的本地时刻」，两端必然差几秒，于是一端读了、另一端仍亮。
+    const serverCompletedAt = 1_700_000_000_000
+
+    // 设备 A：收到通知，标记已读
+    notificationStore.push('completed', 'Done', 'completed', 'local::ses_shared', '/repo', serverCompletedAt)
+    expect(notificationStore.getSnapshot().notifications[0].timestamp).toBe(serverCompletedAt)
+    notificationStore.markSessionNotificationsRead('local::ses_shared', 'completed')
+
+    // 设备 B：同一事件、同一个时间戳 → 依据同步来的水位即判定已读
+    expect(readWatermarkStore.isRead('ses_shared', serverCompletedAt)).toBe(true)
+  })
+
+  it('没有服务端时间时退回本机时钟', () => {
+    const before = Date.now()
+    notificationStore.push('permission', 'Perm', 'needs approval', 'local::ses_perm', '/repo')
+    const [entry] = notificationStore.getSnapshot().notifications
+
+    // permission 不参与跨端已读，用本机时钟即可；关键是不能是 undefined/NaN
+    expect(Number.isFinite(entry.timestamp)).toBe(true)
+    expect(entry.timestamp).toBeGreaterThanOrEqual(before)
+  })
+
+  it('markAllRead 把每个会话抬到不低于自身通知时间戳', () => {
+    const at = 1_700_000_500_000
+    notificationStore.push('completed', 'A', 'done', 'agent-a::ses_a', '/repo', at)
+    notificationStore.push('completed', 'B', 'done', 'agent-b::ses_b', '/repo', at)
+
+    notificationStore.markAllRead()
+
+    expect(readWatermarkStore.get('ses_a')).toBeGreaterThanOrEqual(at)
+    expect(readWatermarkStore.get('ses_b')).toBeGreaterThanOrEqual(at)
+    expect(notificationStore.getSnapshot().notifications.every(n => n.read)).toBe(true)
+  })
+
+  it('按会话主机取时钟：另一主机的通知不会被活动主机时钟带偏', () => {
+    // 水位必须不低于该通知时间戳，且标记后本端立即已读。
+    notificationStore.push('completed', 'Done', 'completed', 'agent-b::ses_clock', '/repo', 1_700_000_900_000)
+    const [entry] = notificationStore.getSnapshot().notifications
+
+    notificationStore.markRead(entry.id)
+
+    expect(readWatermarkStore.get('ses_clock')).toBeGreaterThanOrEqual(entry.timestamp)
+    expect(unreadIds().has('agent-b::ses_clock')).toBe(false)
+  })
+})

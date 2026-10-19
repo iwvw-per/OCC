@@ -1,5 +1,6 @@
 import type { AssistantMessageInfo, Content, Message, TokenUsage } from '../types/message'
 import type { SessionStats } from './sessionStatsTypes'
+import type { CompactionMarker } from '../api/v2/message'
 
 const COMPACTED_TOOL_PLACEHOLDER = '[Old tool result content cleared]'
 
@@ -119,11 +120,36 @@ function contextFromCompaction(
   return total > 0 ? total : null
 }
 
+/**
+ * 从「压缩标记」推算压缩后的上下文用量。
+ *
+ * 压缩记录来自 `message.list` 的 `type: "compaction"` 条目（事件可能不发，见
+ * api/v2/message.ts）。那条的 `tokens` 是**压缩前**用量，不能用；压缩后的上下文
+ * 由「摘要 + 保留的近期消息」构成，这里按字符数估算（与 estimateCurrentContext
+ * 同一换算口径）。
+ *
+ * 只在「压缩后还没有新的带 tokens 消息」时使用；一旦新一轮跑过，真实用量
+ * 来自那条消息，估算必须让位。
+ */
+function contextFromCompactionMarker(
+  marker: CompactionMarker | undefined,
+  lastAssistantWithTokens: AssistantMessageInfo | null,
+): number | null {
+  if (!marker) return null
+  if (!Number.isFinite(marker.at)) return null
+  const lastCreated = lastAssistantWithTokens?.time?.created
+  if (typeof lastCreated === 'number' && lastCreated > marker.at) return null
+  const chars = marker.summaryChars + marker.recentChars
+  if (chars <= 0) return null
+  return estimateTokens(chars)
+}
+
 export function computeSessionStats(
   messages: Message[],
   contextLimit: number = 200000,
   compactionUsage?: CompactionUsageHint,
   sessionUsage?: { tokens: TokenUsage; cost: number },
+  compactionMarker?: CompactionMarker,
 ): SessionStats {
   // v2 的 assistant 消息在流式/出错时 tokens 可能缺省（undefined）；防御性读取，
   // 否则 tokenTotal → tokens.input 抛出 "Cannot read properties of undefined"。
@@ -181,7 +207,15 @@ export function computeSessionStats(
 
   const totalTokens = inputTokens + outputTokens + reasoningTokens + cacheRead + cacheWrite
   const estimatedContextUsed = estimateCurrentContext(messages)
-  const compactionContext = contextFromCompaction(compactionUsage, lastAssistantWithTokens)
+  // 优先级：服务端实测快照 > 压缩标记推算 > 消息估算。
+  // 第二条是让 v2「压缩后真的掉下来」的关键（v2 的压缩事件不一定发，
+  // 且其 tokens 是压缩前用量）。
+  const measuredCompaction = contextFromCompaction(compactionUsage, lastAssistantWithTokens)
+  const markerCompaction =
+    measuredCompaction === null
+      ? contextFromCompactionMarker(compactionMarker, lastAssistantWithTokens)
+      : null
+  const compactionContext = measuredCompaction ?? markerCompaction
   const contextEstimated = shouldUseEstimatedContext(
     messages,
     lastAssistantWithTokensIndex,
@@ -208,8 +242,8 @@ export function computeSessionStats(
     contextUsed,
     contextLimit,
     contextPercent,
-    // 压缩快照是服务端实测值，不是估算
-    contextEstimated: compactionContext !== null ? false : contextEstimated,
+    // 服务端实测快照 → 非估算；marker 推算（字符数换算）仍是估算，如实标注。
+    contextEstimated: measuredCompaction !== null ? false : markerCompaction !== null ? true : contextEstimated,
   }
 }
 
@@ -243,6 +277,7 @@ const sessionStatsMemo = new WeakMap<
   {
     contextLimit: number
     compactionAt?: number
+    markerAt?: number
     usageKey?: string
     stats: SessionStats
   }
@@ -253,6 +288,7 @@ export function computeSessionStatsCached(
   contextLimit: number = 200000,
   compactionUsage?: CompactionUsageHint,
   sessionUsage?: { tokens: TokenUsage; cost: number },
+  compactionMarker?: CompactionMarker,
 ): SessionStats {
   const usageKey = sessionUsage
     ? `${sessionUsage.tokens.input}:${sessionUsage.tokens.output}:${sessionUsage.tokens.reasoning}:${sessionUsage.tokens.cache?.read ?? 0}:${sessionUsage.tokens.cache?.write ?? 0}:${sessionUsage.cost}`
@@ -262,11 +298,20 @@ export function computeSessionStatsCached(
     cached &&
     cached.contextLimit === contextLimit &&
     cached.compactionAt === compactionUsage?.at &&
+    // 压缩标记的 `at` 单独参与缓存键：v2 的压缩只更新标记（不发事件），
+    // 若只比 compactionUsage.at，marker 变化永远不会让缓存失效。
+    cached.markerAt === compactionMarker?.at &&
     cached.usageKey === usageKey
   ) {
     return cached.stats
   }
-  const stats = computeSessionStats(messages, contextLimit, compactionUsage, sessionUsage)
-  sessionStatsMemo.set(messages, { contextLimit, compactionAt: compactionUsage?.at, usageKey, stats })
+  const stats = computeSessionStats(messages, contextLimit, compactionUsage, sessionUsage, compactionMarker)
+  sessionStatsMemo.set(messages, {
+    contextLimit,
+    compactionAt: compactionUsage?.at,
+    markerAt: compactionMarker?.at,
+    usageKey,
+    stats,
+  })
   return stats
 }

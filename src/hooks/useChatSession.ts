@@ -475,9 +475,13 @@ export function useChatSession({
         }
         // 应用内 toast 已在 useGlobalEvents 中统一处理
       },
-      onSessionCompacted: (_data: import('../types/api/event').SessionCompactedPayload) => {
+      onSessionCompacted: (data: import('../types/api/event').SessionCompactedPayload) => {
         // 压缩改写了历史（摘要 + 裁剪旧轮次），强制重拉当前会话，
         // 否则界面仍显示压缩前的完整历史，看不到「历史已压缩」分隔。
+        //
+        // 只在 completed 时重拉：started 也会走这个回调（压缩 part 开始时没有
+        // tail_start_id），压缩进行中反复重拉既浪费又会打断滚动位置。
+        if (data.status !== 'completed') return
         if (routeSessionId) void loadSession(routeSessionId, { force: true })
       },
       onSessionError: (sessionID: string) => {

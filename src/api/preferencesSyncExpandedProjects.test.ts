@@ -86,37 +86,67 @@ describe('expanded projects sync', () => {
 
   it('merges expanded projects from both devices (union)', async () => {
     const account = await seedAccount()
-    localStorage.setItem(KEY, JSON.stringify(['OCC']))
-    seedBaseline(['OCC'])
-    stubServer(['OCC', 'komidash'])
+    localStorage.setItem(KEY, JSON.stringify(['local::OCC']))
+    seedBaseline(['local::OCC'])
+    stubServer(['local::OCC', 'local::komidash'])
 
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
 
-    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC', 'komidash'])
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['local::OCC', 'local::komidash'])
+  })
+
+  it('keeps the same project name on another host independent', async () => {
+    const account = await seedAccount()
+    // 本机笔电主机展开了 OCC；服务端还有工作机上的同名 OCC —— 两者是不同的项，
+    // 旧实现按裸项目名存储时会互相串台。
+    localStorage.setItem(KEY, JSON.stringify(['aiagent:inst_laptop::OCC']))
+    seedBaseline(['aiagent:inst_laptop::OCC'])
+    stubServer(['aiagent:inst_laptop::OCC', 'aiagent:inst_work::OCC'])
+
+    const { pullPreferences } = await import('./preferencesSync')
+    await pullPreferences(account)
+
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual([
+      'aiagent:inst_laptop::OCC',
+      'aiagent:inst_work::OCC',
+    ])
+  })
+
+  it('drops legacy bare names coming from the server', async () => {
+    const account = await seedAccount()
+    // 旧版本写下的裸名无法判断属于哪台主机：若并进本地会随当前活动主机漂移
+    localStorage.setItem(KEY, JSON.stringify(['local::OCC']))
+    seedBaseline(['local::OCC'])
+    stubServer(['local::OCC', 'komidash'])
+
+    const { pullPreferences } = await import('./preferencesSync')
+    await pullPreferences(account)
+
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['local::OCC'])
   })
 
   it('does not resurrect a project the user just collapsed (via the store)', async () => {
     const account = await seedAccount()
     const { layoutStore } = await import('../store/layoutStore')
     // 基线里两个都展开
-    seedBaseline(['OCC', 'komidash'])
-    layoutStore.setSidebarExpandedProjects(['OCC', 'komidash'])
+    seedBaseline(['local::OCC', 'local::komidash'])
+    layoutStore.setSidebarExpandedProjects(['local::OCC', 'local::komidash'])
     // 用户主动收起 komidash（记录收起意图）
-    layoutStore.setSidebarExpandedProjects(['OCC'])
+    layoutStore.setSidebarExpandedProjects(['local::OCC'])
     // 服务端还没收到本地收起
-    stubServer(['OCC', 'komidash'])
+    stubServer(['local::OCC', 'local::komidash'])
 
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
 
     // 收起只影响本机：服务端残留不会把它并回来
-    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC'])
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['local::OCC'])
   })
 
   it('pushes the expanded list so the other device can pick it up', async () => {
     const account = await seedAccount()
-    localStorage.setItem(KEY, JSON.stringify(['OCC']))
+    localStorage.setItem(KEY, JSON.stringify(['local::OCC']))
     localStorage.setItem(SYNC_STAMPS_KEY, JSON.stringify({ stamps: {}, known: {} }))
 
     let pushed: Record<string, unknown> | undefined
@@ -127,6 +157,6 @@ describe('expanded projects sync', () => {
     const { pushPreferences } = await import('./preferencesSync')
     await pushPreferences(account)
 
-    expect(pushed?.[KEY]).toEqual(['OCC'])
+    expect(pushed?.[KEY]).toEqual(['local::OCC'])
   })
 })

@@ -223,15 +223,19 @@ export function adaptMessagePage(raw: unknown): {
   prevCursor?: string
   /** 本页内最近一次「已完成」压缩的时间戳；用于在消息流末尾展示压缩分隔条 */
   compactedAt?: number
+  /** 压缩标记（摘要/近期消息规模） */
+  compaction?: CompactionMarker
 } {
   const r = rec(raw)
   const cursor = rec(r.cursor)
   const data = list(r.data)
+  const compaction = findCompactionMarker(data)
   return {
     messages: data.map(adaptMessage).filter((m): m is MessageWithParts => m != null),
     nextCursor: str(cursor.next) ?? undefined,
     prevCursor: str(cursor.previous) ?? undefined,
-    compactedAt: findCompactedAt(data),
+    compactedAt: compaction?.at,
+    compaction,
   }
 }
 
@@ -247,27 +251,59 @@ export async function adaptMessagePageAsync(raw: unknown): Promise<{
   nextCursor?: string
   prevCursor?: string
   compactedAt?: number
+  compaction?: CompactionMarker
 }> {
   const r = rec(raw)
   const cursor = rec(r.cursor)
   const data = list(r.data)
   const messages = await mapInSlices(data, adaptMessage)
+  const compaction = findCompactionMarker(data)
   return {
     messages: messages.filter((m): m is MessageWithParts => m != null),
     nextCursor: str(cursor.next) ?? undefined,
     prevCursor: str(cursor.previous) ?? undefined,
-    compactedAt: findCompactedAt(data),
+    compactedAt: compaction?.at,
+    compaction,
   }
 }
 
-/** 本页内最近一次「已完成」压缩的时间戳。 */
-function findCompactedAt(data: unknown[]): number | undefined {
-  let compactedAt: number | undefined
+/**
+ * 压缩标记：`message.list` 里 `type: "compaction"` 的那条系统消息。
+ *
+ * 为什么不能只靠事件：`session.compaction.ended` 在 schema 里存在（带 text/recent），
+ * 但实测它**不一定发**——本机 39,446 条事件里没有任何 `session.compaction.*`，
+ * 而同一次压缩在消息列表里有完整的 `type: "compaction"` 记录。压缩是历史事实，
+ * 消息列表才是权威来源，事件只当加速通道。
+ *
+ * 另有一个关键坑：该记录的 `tokens` 是**压缩前**用量（实测 input 342383 /
+ * cache.read 577024），不能用它显示压缩后的占用；压缩后的上下文 ≈ 摘要 + 保留的
+ * 近期消息，即下面两个字符数。
+ */
+export interface CompactionMarker {
+  /** 压缩完成时间（消息的 time.created） */
+  at: number
+  /** 压缩摘要字符数 */
+  summaryChars: number
+  /** 保留的近期消息字符数 */
+  recentChars: number
+}
+
+/** 从一页消息里找出最近一次「已完成」的压缩标记（含摘要规模）。 */
+export function findCompactionMarker(data: unknown[]): CompactionMarker | undefined {
+  let marker: CompactionMarker | undefined
   for (const item of data) {
     const m = rec(item)
     if (str(m.type) !== 'compaction' || str(m.status) !== 'completed') continue
     const created = num(rec(m.time).created)
-    if (created != null && (compactedAt == null || created > compactedAt)) compactedAt = created
+    if (created == null) continue
+    if (marker && created <= marker.at) continue
+    marker = {
+      at: created,
+      summaryChars: (str(m.summary) ?? '').length,
+      // `recent` 是压缩后原样保留的近期消息；没有该字段时按 0 计，
+      // 让上界只包含摘要（宁可低估也不虚高）。
+      recentChars: (str(m.recent) ?? '').length,
+    }
   }
-  return compactedAt
+  return marker
 }

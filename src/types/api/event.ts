@@ -26,7 +26,16 @@ import type { Project } from './project'
 // Event Payload Types
 // ============================================
 
-export type SessionIdlePayload = SDKEventSessionIdle['properties']
+export type SessionIdlePayload = SDKEventSessionIdle['properties'] & {
+  /**
+   * 服务端完成事件的时间（v2 事件的 created）。
+   *
+   * 通知时间戳必须用它，而不是各端处理事件的本地时刻：两端处理同一轮完成
+   * 的时刻必然不同，而「已读水位」要跨端比较，基准不一致就会出现「一端读了、
+   * 另一端还亮着」。
+   */
+  timestamp?: number
+}
 
 export interface SessionErrorPayload {
   sessionID: string
@@ -34,7 +43,10 @@ export interface SessionErrorPayload {
   data: unknown
 }
 
-export type SessionStatusPayload = SDKEventSessionStatus['properties']
+export type SessionStatusPayload = SDKEventSessionStatus['properties'] & {
+  /** 服务端事件时间；用于完成通知的跨端一致时间戳，同 SessionIdlePayload */
+  timestamp?: number
+}
 
 /**
  * 会话压缩结果（v2 `session.compaction.ended` / `session.compaction.failed`）。
@@ -59,11 +71,28 @@ export interface SessionCompactedPayload {
   status: 'started' | 'completed' | 'failed'
   reason?: 'auto' | 'manual'
   error?: string
-  /** 压缩后这次摘要请求的上下文用量（completed 才可能有） */
+  /**
+   * 压缩摘要字符数与保留的近期消息字符数（`session.compaction.ended` 的
+   * text / recent，或 compaction part 的等价信息）。
+   *
+   * 这两个字段是**压缩后上下文**的真实构成：旧轮次已被摘要取代。压缩事件里的
+   * `tokens` 实测是**压缩前**用量（input 342383 / cache.read 577024），拿它显示
+   * 「压缩后的占用」会让圆环停在压缩前的高水位 —— 正是用户报的现象。
+   */
+  summaryChars?: number
+  recentChars?: number
+  /**
+   * 压缩后这次摘要请求的上下文用量（completed 才可能有）。
+   *
+   * ⚠️ v2 实测该值是**压缩前**的用量，不能直接当作压缩后的上下文大小；
+   * 优先用 summaryChars + recentChars 推算。
+   */
   tokens?: CompactionTokenUsage
   cost?: number
   /** 压缩完成时间（服务端事件时间，缺失时由前端补） */
   time?: number
+  /** 压缩边界：压缩后保留内容的第一条消息 id（v2 compaction part 的 tail_start_id） */
+  tailStartID?: string
 }
 
 /**

@@ -23,6 +23,7 @@ export function useSessionStatsFor(sessionId: string | null, contextLimit: numbe
       contextLimit,
       messageStore.getCompactionUsage(sessionId),
       messageStore.getSessionUsage(sessionId),
+      messageStore.getCompactionMarker(sessionId),
     )
     const prev = cacheRef.current
     if (prev && isSameSessionStats(prev, next)) return prev

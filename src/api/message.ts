@@ -6,7 +6,7 @@
 import { buildHeaders } from './sdk'
 import { logger } from '../utils/logger'
 import { nativePrompt, nativeListMessages } from './v2NativeMessage'
-import { adaptMessagePage } from './v2/message'
+import { adaptMessagePage, type CompactionMarker } from './v2/message'
 import { sanitizeMessageWithParts } from './sanitize'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { directoryCacheKey } from '../utils/directoryUtils'
@@ -73,6 +73,8 @@ export interface SessionMessagePage {
   nextCursor?: string
   /** 本页内最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
   compactedAt?: number
+  /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
+  compaction?: CompactionMarker
 }
 
 /**
@@ -129,7 +131,12 @@ export async function getSessionMessagePage(
         })
         // nativeListMessages 已把 v2 的 desc 结果反转为时间升序。
         const messages = project ? projectPageMessages(page.messages) : page.messages
-        return { messages, nextCursor: page.nextCursor, compactedAt: page.compactedAt }
+        return {
+          messages,
+          nextCursor: page.nextCursor,
+          compactedAt: page.compactedAt,
+          compaction: page.compaction,
+        }
       }),
     options?.signal,
   )
@@ -242,7 +249,12 @@ async function fetchV2LightweightMessages(
   const body: unknown = await res.json()
   const page = adaptMessagePage(body)
   // Agent 按 desc（最新在前）累积返回，这里反转为时间升序，与前端渲染顺序一致。
-  return { messages: [...page.messages].reverse(), hasMore: false, compactedAt: page.compactedAt }
+  return {
+    messages: [...page.messages].reverse(),
+    hasMore: false,
+    compactedAt: page.compactedAt,
+    compaction: page.compaction,
+  }
 }
 
 /**
@@ -308,6 +320,8 @@ export interface LightweightMessages {
   hasMore: boolean
   /** 最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
   compactedAt?: number
+  /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
+  compaction?: CompactionMarker
 }
 
 /**
@@ -378,6 +392,8 @@ export interface SessionTurnPage {
   hasMore: boolean
   /** 本批内最近一次已完成压缩的时间戳 */
   compactedAt?: number
+  /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
+  compaction?: CompactionMarker
 }
 
 /** 一条消息是否为用户消息（轮次分隔点） */
@@ -506,6 +522,7 @@ export async function getSessionTurnPage(
   let pagesFetched = 0
   let reachedEnd = false
   let compactedAt: number | undefined
+  let compaction: CompactionMarker | undefined
 
   while (true) {
     const page = await getSessionMessagePage(sessionId, TURN_FETCH_MESSAGE_LIMIT, cursor, directory, serverId, options)
@@ -514,6 +531,9 @@ export async function getSessionTurnPage(
     cursor = page.nextCursor
     if (page.compactedAt != null && (compactedAt == null || page.compactedAt > compactedAt)) {
       compactedAt = page.compactedAt
+    }
+    if (page.compaction && (!compaction || page.compaction.at >= compaction.at)) {
+      compaction = page.compaction
     }
 
     // 无游标或空页（残留游标）都算到最早。
@@ -532,7 +552,7 @@ export async function getSessionTurnPage(
   const hasMore = !reachedEnd && cursor != null
 
   // 已到最早时清掉游标，避免 loadMoreHistory 因残留游标继续触发空拉。
-  return { messages: collected, nextCursor: reachedEnd ? undefined : cursor, hasMore, compactedAt }
+  return { messages: collected, nextCursor: reachedEnd ? undefined : cursor, hasMore, compactedAt, compaction }
 }
 
 // ============================================

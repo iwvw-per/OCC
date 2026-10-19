@@ -5,6 +5,8 @@
 // 直接引文件而非 '../utils' barrel：barrel 会连带 settingsBackup → store，形成循环依赖
 import { DEFAULT_PROJECT_SORT_FIELD, DEFAULT_PROJECT_SORT_DESC, isSessionSortField, type SessionSortField } from '../utils/sessionSort'
 import { notifyPerServerStorageChanged } from '../utils/perServerStorage'
+import { migrateProjectExpandKeys } from '../utils/projectExpandKeys'
+import { serverStore } from './serverStore'
 import i18n from '../i18n'
 
 // 面板位置
@@ -546,13 +548,20 @@ export class LayoutStore {
         // ignore malformed preference
       }
 
-      // 展开的项目名列表（跨端对齐用项目名，见 sidebarExpandedProjects 注释）
+      // 展开的项目键（`主机::项目名`，见 utils/projectExpandKeys）。
+      // 旧版本只存裸项目名，升级时归给当前活动主机：跨主机同名项目共用状态的
+      // 问题正是裸名导致的，不迁移会让已有展开状态全部失效（看起来像"状态丢了"）。
       try {
         const rawExpanded = localStorage.getItem(STORAGE_KEY_SIDEBAR_EXPANDED_PROJECTS)
         if (rawExpanded !== null) {
           const parsed = JSON.parse(rawExpanded) as unknown
           if (Array.isArray(parsed)) {
-            this.state.sidebarExpandedProjects = parsed.filter((item): item is string => typeof item === 'string')
+            const raw = parsed.filter((item): item is string => typeof item === 'string')
+            const migrated = migrateProjectExpandKeys(raw, serverStore.getActiveServerId())
+            this.state.sidebarExpandedProjects = migrated.values
+            if (migrated.changed) {
+              localStorage.setItem(STORAGE_KEY_SIDEBAR_EXPANDED_PROJECTS, JSON.stringify(migrated.values))
+            }
           }
         }
       } catch {
