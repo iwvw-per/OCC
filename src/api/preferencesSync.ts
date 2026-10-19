@@ -100,6 +100,11 @@
 
 import { accountRequest, accountRequestWithMeta, readAccount, type AiAgentAccount } from './aiagent'
 import { notifyPerServerStorageChanged } from '../utils/perServerStorage'
+import {
+  hiddenProjectsStore as hiddenProjectsDataStore,
+  recentProjectsStore as recentProjectsDataStore,
+  savedDirectoriesStore as savedDirectoriesDataStore,
+} from '../storage/appData'
 import { layoutStore } from '../store/layoutStore'
 import { serverStore } from '../store/serverStore'
 import { readWatermarkStore } from '../store/readWatermarkStore'
@@ -1061,6 +1066,12 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
   // 订阅者重新读取，否则 UI 停在初始化快照上。
   if (written > 0) {
     notifyPerServerStorageChanged()
+    // 项目列表 / 最近使用 / 隐藏项目都是 createStore 实例，它们的快照只在自身
+    // commit 时更新，收不到上面这个版本通知。必须显式重读，否则数据已落盘但
+    // 侧栏不变 ——「必须手动刷新才能看到同步结果」正是缺了这一步。
+    savedDirectoriesDataStore.reload()
+    recentProjectsDataStore.reload()
+    hiddenProjectsDataStore.reload()
     // layoutStore 管着一批只读一次的偏好（侧栏排序、开关等），它们不走
     // per-server 存储，需要单独触发重读，否则表现为「另一台改了排序，这边要
     // 切换主机才生效」。

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { createStore } from '../storage/createStore'
+import { subscribePerServerStorageVersion } from '../utils/perServerStorage'
 import { isAbsoluteDirectory, normalizeToForwardSlash } from '../utils'
 import { serverStore } from '../store/serverStore'
 import type { SavedDirectory } from '../contexts/DirectoryContext.shared'
@@ -87,6 +88,22 @@ function ensureBound() {
   hiddenStore.rebind(serverId)
 }
 
+/**
+ * 让三个 store 跟随「外部写入」重读。
+ *
+ * 偏好同步引擎为了保留原始字符串，绕过 serverStorage 直接写 localStorage，
+ * 只发一个版本通知（notifyPerServerStorageChanged）。createStore 只认自己的
+ * commit 和跨标签页 storage 事件，收不到这个通知 —— 数据已经落盘、快照却还是
+ * 启动时那份，于是「同步成功了但项目列表不变，必须刷新页面」。
+ *
+ * 另外直接绑一次，覆盖「本模块加载前就已发生过外部写入」的情况。
+ */
+subscribePerServerStorageVersion(() => {
+  savedStore.reload()
+  recentStore.reload()
+  hiddenStore.reload()
+})
+
 /** 仅测试用：丢弃内存快照，强制下次访问重新读存储 */
 export function resetAppDataBindingForTests(): void {
   bound = null
@@ -113,6 +130,11 @@ export const savedDirectoriesStore = {
     ensureBound()
     return savedStore.getStorageKey()
   },
+  /** 外部（同步引擎）写入后重读，见 createStore.reload */
+  reload() {
+    ensureBound()
+    savedStore.reload()
+  },
 }
 
 /** 最近使用记录 store */
@@ -129,6 +151,10 @@ export const recentProjectsStore = {
     ensureBound()
     return recentStore.subscribe(listener)
   },
+  reload() {
+    ensureBound()
+    recentStore.reload()
+  },
 }
 
 /** 被用户隐藏的项目目录 store */
@@ -144,6 +170,10 @@ export const hiddenProjectsStore = {
   subscribe(listener: () => void) {
     ensureBound()
     return hiddenStore.subscribe(listener)
+  },
+  reload() {
+    ensureBound()
+    hiddenStore.reload()
   },
 }
 

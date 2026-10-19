@@ -48,6 +48,16 @@ export interface PersistentStore<T> {
   getStorageKey(): string
   /** 服务器切换：改绑到新 serverId 并重读（global scope 为空操作） */
   rebind(serverId: string): void
+  /**
+   * 从存储重读当前键的值并通知订阅者。
+   *
+   * 用于「外部绕过了本 store 直接写 localStorage」的场景（偏好同步引擎为了
+   * 保留原始字符串直接操作 localStorage）。没有它，数据已经落盘、但界面
+   * 仍停在初始化快照上，表现为「同步了但必须手动刷新才看到」。
+   *
+   * 值没变时不通知，避免轮询期间产生无谓重渲染。
+   */
+  reload(): void
   /** 立即落盘（写入合并模式下才有实际意义） */
   flush(): void
   reset(): void
@@ -139,6 +149,20 @@ export function createStore<T>({
       currentScope = { kind: 'server', serverId }
       storageKey = storageKeyFor(currentScope, key)
       snapshot = read(storageKey, schema, defaultValue)
+      notify()
+    },
+
+    /**
+     * 外部写入后的重读。
+     *
+     * 同步引擎（preferencesSync）直接写 localStorage 以保留原始字符串，绕过了
+     * 本 store；若这里不重读，数据虽然已落盘，但快照仍是启动时那份，UI 看起来
+     * 「同步没生效」，必须刷新页面才出现 —— 项目列表跨端不同步的根因就在此。
+     */
+    reload() {
+      const next = read(storageKey, schema, defaultValue)
+      if (JSON.stringify(next) === JSON.stringify(snapshot)) return
+      snapshot = next
       notify()
     },
 
