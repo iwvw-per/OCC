@@ -479,7 +479,18 @@ function resolveStamps(
 // ============================================
 
 type MergeRule =
-  | { kind: 'array'; id: (entry: Record<string, unknown>) => string | null; order?: 'newest' }
+  | {
+      kind: 'array'
+      id: (entry: Record<string, unknown>) => string | null
+      order?: 'newest'
+      /**
+       * 只向上合并：本地「删除」不上传、也不生成墓碑。
+       *
+       * 用于「收起」这类不该广播的动作 —— 例如项目行展开状态：本端展开要同步
+       * 到别的端，但本端收起只是「我现在不想看」，不该把另一端的展开也收掉。
+       */
+      upOnly?: boolean
+    }
   /**
    * 纯字符串数组（如隐藏的模型键、置顶模型键）。与 'array' 的区别只在元素形态：
    * 这里没有 `id` 提取函数，元素本身就是 id，因此不能走 asRecord。
@@ -522,9 +533,18 @@ const MERGE_RULES: Record<string, MergeRule> = {
   'hidden-model-keys': {
     kind: 'string-array',
   },
-  // 侧栏项目行的展开/收起：同样是字符串数组（元素是项目名）。
+  // 侧栏项目行的展开/收起：只向上合并（并集），本地收起不上传。
+  //   - 本端展开 → 同步给其它端（用户要的）
+  //   - 本端收起 → 只影响本端，不把另一端的展开收掉
   'opencode-sidebar-expanded-projects': {
-    kind: 'string-array',
+    kind: 'array',
+    id: entry =>
+      typeof entry === 'string'
+        ? entry
+        : typeof entry.value === 'string'
+          ? entry.value
+          : null,
+    upOnly: true,
   },
   'model-pinned': {
     kind: 'string-array',
@@ -559,6 +579,54 @@ function keySuffix(key: string): string {
 
 function mergeRuleFor(key: string): MergeRule | undefined {
   return MERGE_RULES[keySuffix(key)]
+}
+
+/**
+ * 只向上合并的键：把本地值与基线取并集，保序，本地「删除」不生效。
+ *
+ * 语义：这类键表达的是「我展开了什么」，不是「我收起了什么」。因此
+ *   - 本地新增 → 上传，另一端能收到；
+ *   - 本地删除 → 不上传、不生成墓碑，另一端的展开不受影响。
+ *
+ * 为什么必须在上传前就地合并而不是只在拉取时处理：上传链路（pickChangedEntries
+ * + recordTombstones）都基于「本地相对基线少了什么 = 删除意图」。只要本地列表
+ * 变短，就会记墓碑并整键上传，另一端 pull 时按墓碑排除 —— 用户看到的就是
+ * 「刚展开又被自动收起」。把它收敛在「值」这一层，下游全部自然正确。
+ */
+function mergeUpOnly(
+  rule: MergeRule,
+  baseRaw: string | null | undefined,
+  localRaw: string | null | undefined,
+): string | null {
+  if (rule.kind !== 'array' || !rule.upOnly) return null
+  if (localRaw == null) return null // 本地整个键消失：不当作删除
+
+  const parse = (raw: string | null | undefined): unknown[] => {
+    if (typeof raw !== 'string') return []
+    const value = parseJson(raw)
+    return Array.isArray(value) ? value : []
+  }
+
+  const baseList = parse(baseRaw)
+  const localList = parse(localRaw)
+  const seen = new Set<string>()
+  const merged: unknown[] = []
+  const push = (item: unknown) => {
+    const record = typeof item === 'string' ? { value: item } : asRecord(item)
+    if (!record) return
+    const id = rule.id(record)
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    // 保留原始元素（纯字符串仍是字符串），回写时不改变存储形态
+    merged.push(item)
+  }
+
+  // 顺序：先本地（用户当前看到的顺序），再补基线里本地缺失的项。
+  localList.forEach(push)
+  baseList.forEach(push)
+
+  if (JSON.stringify(merged) === JSON.stringify(localList)) return localRaw
+  return JSON.stringify(merged)
 }
 
 function parseJson(raw: string): unknown {
@@ -677,7 +745,9 @@ function entryIds(value: unknown, rule: MergeRule): Set<string> {
   if (rule.kind === 'array') {
     if (!Array.isArray(value)) return ids
     for (const item of value) {
-      const record = asRecord(item)
+      // 数组元素可能是纯字符串（如展开状态存的是项目名），
+      // asRecord 会直接丢掉它们，这里包装成 { value } 交给 id 提取。
+      const record = typeof item === 'string' ? { value: item } : asRecord(item)
       if (!record) continue
       const id = rule.id(record)
       if (id) ids.add(id)
@@ -846,16 +916,23 @@ function mergeSyncValue(
 
     const keep = threeWayMergeIds(entryIds(baseList, rule), entryIds(localList, rule), entryIds(serverList, rule), dead)
 
+    // 元素可能是纯字符串（如展开状态存项目名）。统一包装成 { value } 提取 id，
+    // 输出时再还原成原始元素，保持存储形态不变。
+    const toRecord = (item: unknown): Record<string, unknown> | null =>
+      typeof item === 'string' ? { value: item } : asRecord(item)
+    const fromRecord = (record: Record<string, unknown>): unknown =>
+      typeof record.value === 'string' && Object.keys(record).length === 1 ? record.value : record
+
     const localById = new Map<string, Record<string, unknown>>()
     for (const item of localList) {
-      const record = asRecord(item)
+      const record = toRecord(item)
       if (!record) continue
       const id = rule.id(record)
       if (id) localById.set(id, record)
     }
     const serverById = new Map<string, Record<string, unknown>>()
     for (const item of serverList) {
-      const record = asRecord(item)
+      const record = toRecord(item)
       if (!record) continue
       const id = rule.id(record)
       if (id) serverById.set(id, record)
@@ -864,20 +941,20 @@ function mergeSyncValue(
     // order: 'newest' 时，排列顺序跟随较新的一侧；否则沿用「本地顺序 + 服务端新增」。
     // 重复 id 的内容仍优先取本地那条（不让服务端的旧副本覆盖本地名称等字段）。
     const orderSource = rule.order === 'newest' && serverNewer ? serverList : localList
-    const merged: Record<string, unknown>[] = []
+    const merged: unknown[] = []
     const seen = new Set<string>()
     const push = (record: Record<string, unknown>) => {
       const id = rule.id(record)
       if (!id || seen.has(id) || !keep.has(id)) return
       seen.add(id)
-      merged.push(localById.get(id) ?? record)
+      merged.push(fromRecord(localById.get(id) ?? record))
     }
     for (const item of orderSource) {
-      const record = asRecord(item)
+      const record = toRecord(item)
       if (record) push(record)
     }
     for (const item of [...localList, ...serverList]) {
-      const record = asRecord(item)
+      const record = toRecord(item)
       if (record) push(record)
     }
     return { value: merged, changed: true }
@@ -1129,12 +1206,31 @@ export async function pushPreferences(account?: AiAgentAccount | null, force = f
   // 一次主题切换从「推全部键」降到「推 1 个键」。
   const baselineKnown = readStampState().known
   const pendingDeletions = Object.keys(readTombstones())
-  const entries = pickChangedEntries(allEntries, baselineKnown, pendingDeletions)
+
+  // 只向上合并的键：先把本地值与基线取并集，使「本地删除」不被下游
+  // （pickChangedEntries 的差分 / recordTombstones 的墓碑）识别成删除意图。
+  // 否则本端一收起，就会记墓碑并整键上传，另一端 pull 时按墓碑排除，
+  // 表现为「刚展开又被自动收起」。
+  const upOnlyMerged: Record<string, string> = { ...allEntries }
+  const baselineSnapshot = asRecord(
+    typeof baselineKnown[SNAPSHOT_KEY] === 'string' ? parseJson(baselineKnown[SNAPSHOT_KEY]) : undefined,
+  )
+  for (const [key, value] of Object.entries(allEntries)) {
+    const rule = mergeRuleFor(key)
+    if (!rule) continue
+    // 基线值取自 __snapshot__，不是 known[key]（后者只在推送时写入增量值）
+    const baseRaw = typeof baselineSnapshot?.[key] === 'string' ? (baselineSnapshot[key] as string) : null
+    const merged = mergeUpOnly(rule, baseRaw, value)
+    if (merged !== null) upOnlyMerged[key] = merged
+  }
+
+  const entries = pickChangedEntries(upOnlyMerged, baselineKnown, pendingDeletions)
 
   const stampState = readStampState()
   // 墓碑必须基于「全量本地状态」计算：增量 entries 里不含未变化的键，
   // 拿它做差分会把「没上传」误判成「已删除」，从而生成假墓碑。
-  const tombstones = recordTombstones(allEntries, readTombstones())
+  // 用 upOnlyMerged 而非 allEntries：只向上合并的键里，本地删除不算删除意图。
+  const tombstones = recordTombstones(upOnlyMerged, readTombstones())
   const mergedEntries = { ...entries }
   for (const key of mergeRuleKeysFromSnapshot()) {
     const raw = entries[key]
@@ -1148,7 +1244,9 @@ export async function pushPreferences(account?: AiAgentAccount | null, force = f
       if (!Array.isArray(value)) continue
       mergedEntries[key] = JSON.stringify(
         value.filter(entry => {
-          const record = asRecord(entry)
+          // 元素可能是纯字符串（展开状态存项目名）：asRecord 会把它判成
+          // 非法并整项丢弃，导致整键被错误写成 []。这里兼容两种形态。
+          const record = typeof entry === 'string' ? { value: entry } : asRecord(entry)
           if (!record) return false
           const id = rule.id(record)
           return !id || !dead.has(id)
