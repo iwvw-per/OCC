@@ -86,6 +86,9 @@ export const ToolPartView = memo(function ToolPartView({
   const { t } = useTranslation('message')
   const { state, tool: toolName } = part
   const { currentSessionId } = useSessionNavigation()
+  // v2 的 part.tool 是工具类型（execute/bash…）；具体工具名在 input 里。
+  // 只有类型名可用时才回退，避免所有工具都显示成「Execute」。
+  const toolDisplayName = getToolDisplayName(part) ?? toolName
   const title = state.title || getInputDescription(part) || ''
 
   const isActive = state.status === 'running' || state.status === 'pending'
@@ -442,7 +445,7 @@ export const ToolPartView = memo(function ToolPartView({
               {taskTitle ?? (
                 <>
                   <span className="shrink-0 font-medium text-[length:var(--fs-md)] leading-tight">
-                    {formatToolName(toolName)}
+                    {formatToolName(toolDisplayName)}
                   </span>
 
                   {title && <ToolParamChip text={title} error={isError} />}
@@ -509,7 +512,7 @@ export const ToolPartView = memo(function ToolPartView({
                 {taskTitle ?? (
                   <>
                     <span className="font-medium text-[length:var(--fs-md)] leading-tight transition-colors duration-300 shrink-0">
-                      {formatToolName(toolName)}
+                      {formatToolName(toolDisplayName)}
                     </span>
                     {title && <ToolParamChip text={title} error={isError} />}
                   </>
@@ -590,7 +593,7 @@ export const ToolPartView = memo(function ToolPartView({
               {taskTitle ?? (
                 <>
                   <span className="font-medium text-[length:var(--fs-md)] leading-tight transition-colors duration-300 shrink-0">
-                    {formatToolName(toolName)}
+                    {formatToolName(toolDisplayName)}
                   </span>
 
                   {title && <ToolParamChip text={title} error={isError} />}
@@ -730,6 +733,24 @@ function getTaskChildSessionId(part: ToolPart): string | undefined {
 }
 
 /** Extract description from tool input as title fallback (available while running) */
+/**
+ * 工具显示名的兜底来源。
+ *
+ * v2 面板的 `part.name` 是**工具类型**（execute / bash / read …），具体是哪个
+ * 工具放在 input 里。直接回退到 `formatToolName(part.tool)` 会让所有同类工具
+ * 都显示成「Execute」，用户分不清调了什么。这里按优先级取真实名称。
+ */
+export function getToolDisplayName(part: ToolPart): string | undefined {
+  const input = part.state.input as Record<string, unknown> | undefined
+  if (!input) return undefined
+  const candidates = ['tool', 'name', 'toolName', 'command']
+  for (const key of candidates) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
 function getInputDescription(part: ToolPart): string | undefined {
   const input = part.state.input as Record<string, unknown> | undefined
   return (input?.description as string) || undefined

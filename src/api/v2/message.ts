@@ -9,18 +9,22 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
   const metadata = rec(state.metadata)
   const time = rec(state.time)
   const start = num(time.start) ?? num(time.created) ?? 0
+  // title 与状态无关：v2 在 running 阶段也会给出标题（如命令摘要），
+  // 只有 completed 分支读它会让运行中的工具退化成类型名（全都显示 "Execute"）。
+  const title = str(state.title) ?? ''
   switch (status) {
     case 'pending':
     case 'streaming':
-      return { status: 'pending', input, raw: str(state.input) ?? '' } as ToolPart['state']
+      return { status: 'pending', input, raw: str(state.input) ?? '', title } as ToolPart['state']
     case 'running':
-      return { status: 'running', input, metadata, time: { start } } as ToolPart['state']
+      return { status: 'running', input, metadata, title, time: { start } } as ToolPart['state']
     case 'error':
       return {
         status: 'error',
         input,
         error: str(rec(state.error).message) ?? str(state.error) ?? 'tool error',
         metadata,
+        title,
         time: { start, end: num(time.end) ?? start },
       } as ToolPart['state']
     case 'completed':
@@ -36,7 +40,7 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
         status: 'completed',
         input,
         output,
-        title: str(state.title) ?? '',
+        title,
         metadata,
         time: { start, end: num(time.end) ?? start },
       } as ToolPart['state']

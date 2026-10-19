@@ -629,6 +629,82 @@ function mergeUpOnly(
   return JSON.stringify(merged)
 }
 
+/**
+ * 只向上合并的键在拉取时的合并：本地为准，只追加服务端独有、且本机未主动收起的项。
+ *
+ * 关键难点：数组本身无法区分「服务端独有（另一端新展开，应当同步进来）」与
+ * 「本端刚收起、服务端还留着」。只看数组只能二选一，两种做法都会错。
+ *
+ * 因此用 localCollapsed 显式记录「本机主动收起的项」：
+ *   - 本地列表 → 全部保留
+ *   - 服务端列表 → 只追加既不在本地、也不在 localCollapsed 里的项
+ * 这样收起只影响本机，另一端的展开仍能同步过来。
+ */
+function mergeUpOnlyFromServer(
+  rule: MergeRule,
+  localRaw: string | null,
+  serverValue: unknown,
+  localCollapsed: string[],
+): { value: unknown; changed: boolean } {
+  if (rule.kind !== 'array') return { value: undefined, changed: false }
+  const localList = Array.isArray(parseJson(localRaw ?? '')) ? (parseJson(localRaw ?? '') as unknown[]) : []
+  const serverList = Array.isArray(serverValue) ? serverValue : null
+  if (serverList === null) return { value: undefined, changed: false }
+
+  const toRecord = (item: unknown): Record<string, unknown> | null =>
+    typeof item === 'string' ? { value: item } : asRecord(item)
+
+  const collapsed = new Set(localCollapsed)
+  const seen = new Set<string>()
+  const merged: unknown[] = []
+  const push = (item: unknown) => {
+    const record = toRecord(item)
+    if (!record) return
+    const id = rule.id(record)
+    if (!id || seen.has(id) || collapsed.has(id)) return
+    seen.add(id)
+    merged.push(item)
+  }
+
+  localList.forEach(push)
+  serverList.forEach(push)
+
+  // changed 表示「合并结果与本地不同」，而不是「服务端新增了项」：
+  // 本地列表可能因为过滤掉已收起项而与原始值不同（例如服务端残留被丢弃）。
+  const changed = JSON.stringify(merged) !== JSON.stringify(localList)
+  return { value: merged, changed }
+}
+
+/**
+ * 本机主动收起的项目名。
+ *
+ * 与 layoutStore 的 STORAGE_KEY_SIDEBAR_COLLAPSED_PROJECTS 必须是同一个键：
+ * 写入侧在用户展开/收起时维护它，这里读它来决定「服务端独有的项要不要并回本地」。
+ * 不属于同步数据 —— 它正是用来阻止「收起」被传播的本地记录。
+ */
+const LOCAL_COLLAPSED_KEY = 'opencode-sidebar-collapsed-projects'
+
+function readLocalCollapsed(_key?: string): string[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_COLLAPSED_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is string => typeof item === 'string')
+  } catch {
+    return []
+  }
+}
+
+function writeLocalCollapsed(_key: string, ids: string[]): void {
+  try {
+    if (ids.length === 0) localStorage.removeItem(LOCAL_COLLAPSED_KEY)
+    else localStorage.setItem(LOCAL_COLLAPSED_KEY, JSON.stringify(ids))
+  } catch {
+    /* 存储不可用时放弃这次记录，不影响主流程 */
+  }
+}
+
 function parseJson(raw: string): unknown {
   try {
     return JSON.parse(raw)
@@ -1075,11 +1151,16 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
       const baseRaw = typeof snapshotRaw === 'string' ? snapshotRaw : null
 
       // 本地相对基线消失的条目 → 记墓碑，防止它从服务端被再次带回来。
+      // 只向上合并的键例外：本地收起不是删除意图，不能生成墓碑，
+      // 否则下一次 pull 会按墓碑把该项排除（表现为「收起后展开不回来/状态乱跳」）。
       const bucket = tombstones[key] ?? {}
       const baseIds = entryIds(parseJson(baseRaw ?? ''), rule)
       const localIds = entryIds(parseJson(localRaw ?? ''), rule)
-      for (const id of baseIds) {
-        if (!localIds.has(id) && id) bucket[id] = now
+      const upOnly = rule.kind === 'array' && rule.upOnly === true
+      if (!upOnly) {
+        for (const id of baseIds) {
+          if (!localIds.has(id) && id) bucket[id] = now
+        }
       }
       // 只有「本地条目比墓碑更新」才说明用户是删除后又重新添加，此时清除墓碑。
       //
@@ -1109,7 +1190,45 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
       const serverNewer =
         !localChanged && Number.isFinite(serverAt) && Number.isFinite(localStamp) && serverAt > localStamp
       const dead = new Set(Object.keys(bucket))
-      const merged = mergeSyncValue(rule, baseRaw, localRaw, item.value, dead, serverNewer)
+      /**
+       * 只向上合并的键：合并结果必须以**本地**为准。
+       *
+       * mergeSyncValue 是「集合并集」，会把服务端仍保留的项并回本地 —— 用户刚
+       * 收起的那一项随即被重新展开。这里改为：本地已有的项保持原样，只把服务端
+       * 独有的项追加进来（这样另一端新展开的仍能同步过来）。
+       */
+      const merged = upOnly
+        ? mergeUpOnlyFromServer(rule, localRaw, item.value, readLocalCollapsed(key))
+        : mergeSyncValue(rule, baseRaw, localRaw, item.value, dead, serverNewer)
+      if (upOnly) {
+        // 只有当服务端**确实**把某项并进本地时，才让那条「已收起」记录失效，
+        // 否则它会永久挡住该项目之后再被展开。
+        // 注意判定依据是「本地原本没有、合并后有了」，而不是「合并结果包含它」——
+        // 后者对本地原本就展开的项恒成立，会把收起记录无条件清空。
+        const localIds = new Set(
+          (Array.isArray(parseJson(localRaw ?? '')) ? (parseJson(localRaw ?? '') as unknown[]) : []).flatMap(
+            entry => {
+              const record = typeof entry === 'string' ? { value: entry } : asRecord(entry)
+              const id = record ? rule.id(record) : null
+              return id ? [id] : []
+            },
+          ),
+        )
+        const mergedIds = new Set(
+          (Array.isArray(merged.value) ? merged.value : []).flatMap(entry => {
+            const record = typeof entry === 'string' ? { value: entry } : asRecord(entry)
+            const id = record ? rule.id(record) : null
+            return id ? [id] : []
+          }),
+        )
+        const revived = new Set([...mergedIds].filter(id => !localIds.has(id)))
+        if (revived.size > 0) {
+          writeLocalCollapsed(
+            key,
+            readLocalCollapsed(key).filter(id => !revived.has(id)),
+          )
+        }
+      }
       if (merged.changed) {
         const raw = JSON.stringify(merged.value)
         try {
@@ -1126,8 +1245,11 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
         } catch {
           // 单项写入失败不影响其余键
         }
-        continue
       }
+      // 只向上合并的键到此为止：哪怕合并结果与本地相同（changed=false），
+      // 也不能落进下面的「服务端值覆盖本地」分支 —— 那会把刚收起的项写回来。
+      if (upOnly) continue
+      if (merged.changed) continue
     }
 
     const value = typeof item.value === 'string' ? item.value : JSON.stringify(item.value)

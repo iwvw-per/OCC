@@ -136,16 +136,52 @@ describe('expanded projects: up-only sync', () => {
 
   it('keeps a local collapse local during pull (other device still expanded)', async () => {
     const account = await seedAccount()
+    const { layoutStore } = await import('../store/layoutStore')
+
+    // 基线：两个都展开（先清空收起记录，避免受其它用例影响）
+    localStorage.removeItem('opencode-sidebar-collapsed-projects')
     seedBaseline(['OCC', 'komidash'])
-    localStorage.setItem(KEY, JSON.stringify(['OCC']))
+    layoutStore.setSidebarExpandedProjects(['OCC', 'komidash'])
+    // 用户主动收起 komidash（经由 store，会记录收起意图）
+    layoutStore.setSidebarExpandedProjects(['OCC'])
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC'])
+    expect(JSON.parse(localStorage.getItem('opencode-sidebar-collapsed-projects') || '[]')).toContain('komidash')
+
     // 服务端仍是两个都展开（另一端的视角）
     stubServer(['OCC', 'komidash'])
 
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
 
-    // 两端并集：本端收起不影响对端，拉取后本地也不会被强制展开
-    const local = JSON.parse(localStorage.getItem(KEY) || '[]') as string[]
-    expect(local).toContain('OCC')
+    // 本地为准：刚收起的那项不能被服务端残留并回来
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC'])
+  })
+
+  it('still accepts a project expanded on the other device during pull', async () => {
+    const account = await seedAccount()
+    const { layoutStore } = await import('../store/layoutStore')
+
+    seedBaseline(['OCC'])
+    layoutStore.setSidebarExpandedProjects(['OCC'])
+    // 另一端新展开了一个：属于「向上」，应当同步过来
+    stubServer(['OCC', 'komidash'])
+
+    const { pullPreferences } = await import('./preferencesSync')
+    await pullPreferences(account)
+
+    expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC', 'komidash'])
+  })
+
+  it('does not record a tombstone on pull after a local collapse', async () => {
+    const account = await seedAccount()
+    seedBaseline(['OCC', 'komidash'])
+    localStorage.setItem(KEY, JSON.stringify(['OCC']))
+    stubServer(['OCC', 'komidash'])
+
+    const { pullPreferences } = await import('./preferencesSync')
+    await pullPreferences(account)
+
+    const tombstones = JSON.parse(localStorage.getItem(TOMBSTONES_KEY) || '{}')
+    expect(tombstones[KEY]?.komidash).toBeUndefined()
   })
 })

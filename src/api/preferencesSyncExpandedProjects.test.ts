@@ -96,17 +96,21 @@ describe('expanded projects sync', () => {
     expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC', 'komidash'])
   })
 
-  it('does not resurrect a project the user just collapsed on this device', async () => {
+  it('does not resurrect a project the user just collapsed (via the store)', async () => {
     const account = await seedAccount()
-    // 基线里两个都展开，本地只剩一个 → 用户刚收起 komidash
-    localStorage.setItem(KEY, JSON.stringify(['OCC']))
+    const { layoutStore } = await import('../store/layoutStore')
+    // 基线里两个都展开
     seedBaseline(['OCC', 'komidash'])
+    layoutStore.setSidebarExpandedProjects(['OCC', 'komidash'])
+    // 用户主动收起 komidash（记录收起意图）
+    layoutStore.setSidebarExpandedProjects(['OCC'])
     // 服务端还没收到本地收起
     stubServer(['OCC', 'komidash'])
 
     const { pullPreferences } = await import('./preferencesSync')
     await pullPreferences(account)
 
+    // 收起只影响本机：服务端残留不会把它并回来
     expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual(['OCC'])
   })
 
