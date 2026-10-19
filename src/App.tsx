@@ -42,7 +42,7 @@ import { initNotificationSound } from './utils/notificationSoundBridge'
 import { initLiveUpdateSync } from './utils/liveUpdateSync'
 import { createPtySession } from './api/pty'
 import type { TerminalTab } from './store/layoutStore'
-import { getDesktopPlatform, isTauri, isTauriMobile, usesCustomDesktopTitlebar } from './utils/tauri'
+import { isTauri, isTauriMobile, usesCustomDesktopTitlebar } from './utils/tauri'
 import { DESKTOP_SIDEBAR_MIN_WIDTH, DESKTOP_SIDEBAR_RAIL_WIDTH } from './constants'
 import { InternalDragLayer } from './components/InternalDragLayer'
 
@@ -86,10 +86,10 @@ function App() {
     sidebarExpanded,
     rightPanelOpen,
     requestedRightPanelWidth: rightPanelWidth,
-    // Windows 全高侧栏：收起最小宽度 = 顶部工具栏按钮行宽度（rail 只保留开关按钮）
-    sidebarRailWidth: getDesktopPlatform() === 'windows' ? DESKTOP_SIDEBAR_RAIL_WIDTH : undefined,
-    // Windows 全高侧栏：拖拽调节宽度的下限 = 顶部 6 个按钮合计宽度（不被挤压）
-    sidebarHardMinWidth: getDesktopPlatform() === 'windows' ? DESKTOP_SIDEBAR_MIN_WIDTH : undefined,
+    // 网页端与 Windows 全高侧栏共用同一排导航控件，因此 rail 与拖拽下限
+    // 必须一致 —— 否则同样的按钮在一端放得下、另一端被挤压。
+    sidebarRailWidth: DESKTOP_SIDEBAR_RAIL_WIDTH,
+    sidebarHardMinWidth: DESKTOP_SIDEBAR_MIN_WIDTH,
   })
   const splitPaneEnabled = canUseSplitPane(chatViewport)
   const paneLayout = usePaneLayout()

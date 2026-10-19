@@ -55,8 +55,20 @@ export const DesktopNavControls = memo(function DesktopNavControls({
     window.dispatchEvent(new CustomEvent('titlebar:open-settings'))
   }, [])
 
+  /**
+   * 同位置按钮的两端语义：
+   *   - 桌面端（Tauri）→ 新建一个独立窗口（原生窗口，跨项目并行工作）
+   *   - 网页端 → 新建浏览器标签页，`noopener` 避免新页面反向操纵本窗口
+   *
+   * 网页端此前点它什么都不发生（函数内直接 return），看起来像坏按钮。
+   * 保留同一个带 `#/` 的地址：新标签页落地就是「新对话」首页。
+   */
+  const opensNewTab = !isTauri()
   const handleNewWindow = useCallback(() => {
-    if (!isTauri()) return
+    if (!isTauri()) {
+      window.open(`${window.location.origin}${window.location.pathname}#/`, '_blank', 'noopener')
+      return
+    }
     void import('@tauri-apps/api/core').then(({ invoke }) => {
       invoke('open_new_window', { directory: null }).catch(() => {
         // 静默
@@ -119,8 +131,8 @@ export const DesktopNavControls = memo(function DesktopNavControls({
           </IconButton>
 
           <IconButton
-            aria-label={t('desktopTitlebar.newWindow')}
-            title={t('desktopTitlebar.newWindow')}
+            aria-label={t(opensNewTab ? 'desktopTitlebar.newTab' : 'desktopTitlebar.newWindow')}
+            title={t(opensNewTab ? 'desktopTitlebar.newTab' : 'desktopTitlebar.newWindow')}
             onClick={handleNewWindow}
             className={btnClass}
           >

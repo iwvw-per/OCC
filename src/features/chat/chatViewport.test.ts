@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { CHAT_SURFACE_MIN_WIDTH, useChatViewportController } from './chatViewport'
+import { DESKTOP_SIDEBAR_MIN_WIDTH } from '../../constants/desktopWindow'
 
 /**
  * 侧栏宽度必须是「常量」，不随视口 / 设备类型变化。
@@ -36,6 +37,9 @@ function renderAt(width: number, options: { touch?: boolean } = {}) {
       sidebarExpanded: true,
       rightPanelOpen: false,
       requestedRightPanelWidth: 450,
+      // App 现在对网页端与桌面端传同一组常量
+      sidebarRailWidth: 48,
+      sidebarHardMinWidth: DESKTOP_SIDEBAR_MIN_WIDTH,
     }),
   )
 }
@@ -70,6 +74,14 @@ describe('sidebar maximum width', () => {
     // 以前窄屏上限是 viewportWidth × 40%（960 → 384），现在恒为 480
     expect(renderAt(960).result.current.value.layout.sidebar.maxWidth).toBe(SIDEBAR_MAX)
     expect(renderAt(2560).result.current.value.layout.sidebar.maxWidth).toBe(SIDEBAR_MAX)
+  })
+
+  it('uses the same lower bound as the desktop toolbar needs', () => {
+    // 两端顶栏是同一排 6 个按钮：下限必须容纳它们，否则网页端能拖到 160
+    // 而桌面端是 228，同样的按钮在一端被挤压。
+    const { result } = renderAt(1440)
+    expect(result.current.value.layout.sidebar.hardMinWidth).toBe(DESKTOP_SIDEBAR_MIN_WIDTH)
+    expect(result.current.value.layout.sidebar.hardMinWidth).toBe(228)
   })
 })
 

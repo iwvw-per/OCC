@@ -469,7 +469,10 @@ export function SidePanel({
     <div data-sidebar className="flex flex-col h-full overflow-hidden">
       {/* ===== Header ===== */}
       {hideHeader ? null : headerContent ? (
-        <div className="shrink-0 flex items-center pl-2 pr-2 gap-1" style={{ height: DESKTOP_TITLEBAR_HEIGHT }}>
+        <div
+          className="shrink-0 flex items-center border-b border-border-200/50 pl-2 pr-2 gap-1"
+          style={{ height: DESKTOP_TITLEBAR_HEIGHT }}
+        >
           {headerContent}
         </div>
       ) : (

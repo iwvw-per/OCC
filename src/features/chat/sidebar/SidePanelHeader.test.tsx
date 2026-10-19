@@ -119,4 +119,18 @@ describe('SidePanel header', () => {
     // 默认 header 含 Logo 链接（href="#/"）；自定义 header 用导航控件替换后它不该存在
     expect(container.querySelector('a[href="#/"]')).not.toBeNull()
   })
+
+  it('draws a divider under the custom header', () => {
+    // 顶栏与下方内容之间必须有分割线：用户反馈换成导航控件后分割线消失
+    const { container } = render(
+      <SidePanel
+        {...baseProps}
+        isMobile={false}
+        isExpanded
+        headerContent={<span>nav</span>}
+      />,
+    )
+    const header = container.querySelector('[data-sidebar] > div')
+    expect(header?.className).toContain('border-b')
+  })
 })
