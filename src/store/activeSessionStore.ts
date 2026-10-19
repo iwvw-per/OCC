@@ -580,14 +580,17 @@ class ActiveSessionStore {
 
   /**
    * 会话产生了真实活动（消息/part/工具事件）：证明它确实在跑。
-   * 有佐证后停止乐观超时；对纯本地条目续期，避免长轮次中途被回收。
+   *
+   * 这里必须同时 markEvidence：只刷新乐观计时是不够的 —— 条目会一直停在
+   * source='local'，超过 OPTIMISTIC_BUSY_TTL_MS 就被回收。表现为「会话正在跑，
+   * 项目行却不转圈；跑完之后反而冒出状态点」。发送消息时我们只做本地乐观置忙，
+   * 服务端不一定每次都补 session.status，因此消息/工具事件才是更常见的佐证。
    */
   touchSession(sessionId: string) {
     if (this.serverBusySessions.has(sessionId)) return
     if (!this.state.statusMap[sessionId]) return
-    if (this.optimisticBusyAt.has(sessionId)) {
-      this.optimisticBusyAt.set(sessionId, Date.now())
-    }
+    this.markEvidence(sessionId)
+    this.notify()
   }
 
   removeSession(sessionId: string) {

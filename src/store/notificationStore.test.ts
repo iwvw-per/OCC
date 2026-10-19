@@ -17,9 +17,18 @@ function unreadIds(): Set<string> {
   )
 }
 
+/** 清空已读水位（store 没有 reset()，直接清存储后 reload）。 */
+function clearWatermarks(): void {
+  localStorage.removeItem('opencode-read-watermarks')
+  readWatermarkStore.reload()
+}
+
 describe('notificationStore 未读 completed 标记', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   it('push 后该 session 出现在未读集合中', () => {
@@ -69,17 +78,38 @@ describe('notificationStore 未读 completed 标记', () => {
   })
 
   it('useUnreadCompletedSessionIds 的过滤口径与之一致', () => {
+    // 前面的用例可能已抬高该会话水位（markRead 会写水位），这里重置，
+    // 否则新通知按新语义一入队就会被判为已读。
+    clearWatermarks()
     notificationStore.push('completed', 'Done', 'completed', SESSION, '/repo')
     // 该 hook 只是同一份数据的 selector 包装，这里直接验证底层过滤条件
     const ids = unreadIds()
     expect(ids.size).toBe(1)
     expect(typeof useUnreadCompletedSessionIds).toBe('function')
   })
+
+  it('pushes a completed notification as already-read when the watermark is ahead', () => {
+    // 跨端场景：另一台设备已展开该会话 → 水位抬高 → 本端后到的通知
+    // 不应再亮未读点（那里对应的消息用户早已看过）。
+    clearWatermarks()
+    readWatermarkStore.raise('ses_1', Date.now() + 60_000)
+
+    notificationStore.push('completed', 'Done', 'completed', SESSION, '/repo')
+
+    const entry = notificationStore.getSnapshot().notifications.find(n => n.sessionId === SESSION)
+    expect(entry?.read).toBe(true)
+    expect(unreadIds().has(SESSION)).toBe(false)
+
+    clearWatermarks()
+  })
 })
 
 describe('notificationStore 会话删除时清理通知', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   it('按复合 key 精确删除', () => {
@@ -121,6 +151,9 @@ describe('notificationStore 会话删除时清理通知', () => {
 describe('notificationStore 跨前缀匹配（同一会话多条 SSE）', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   // 场景来源：两台已连接服务器指向同一后端时，同一个 session 会被两条 SSE
@@ -167,6 +200,9 @@ describe('notificationStore 跨前缀匹配（同一会话多条 SSE）', () => 
 describe('notificationStore serverId 归属', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   it('push 时从复合 key 记录 serverId', () => {
@@ -235,6 +271,9 @@ describe('notificationStore 已读水位跨端同步', () => {
 describe('notificationStore 按目录批量已读', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   it('清掉指定服务器 + 目录下的未读 completed', () => {
