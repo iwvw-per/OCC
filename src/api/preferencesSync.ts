@@ -15,6 +15,9 @@
 //   2. opencode-pinned-sessions / opencode-pinned-messages —— 置顶
 //   3. opencode-read-watermarks / opencode-project-last-used —— 单调计数
 //   4. theme-preset / theme-mode —— 主题
+//   5. srv:aiagent:{id}:hidden-model-keys / model-pinned —— 模型可见性与置顶
+//   6. srv:aiagent:{id}:opencode-hidden-projects —— 被隐藏的派生项目
+//   7. opencode-sidebar-expanded-projects —— 项目行展开/收起
 //
 // **个性化设置不同步**：外观、布局、字号、音效、通知开关等一律不参与。
 // 它们对跨端一致性的要求低，却需要额外的时间戳仲裁与冲突处理；去掉之后
@@ -55,10 +58,13 @@
 //
 // 排除清单：
 //   - opencode-sidebar-expanded：侧栏开合
-//   - opencode-sidebar-expanded-projects：项目行展开/收起
 //   - opencode-panel-layout：右侧/底部面板开合与面板 tab
 //   - opencode-work-status-enabled / opencode-work-status-expanded：
 //     工作状态面板开关与板块展开
+//
+// 例外：opencode-sidebar-expanded-projects（项目行的展开/收起）**参与同步**。
+// 它不是一屏的临时状态——用户往往固定只展开当前在做的项目，换设备看到另一套
+// 展开结果会被当成「状态丢了」。
 //
 // 注意「项目列表本身」（srv:aiagent:inst_X:opencode-saved-directories）不在此
 // 列：那是用户显式保存的项目，属于偏好，仍跨端同步。
@@ -74,6 +80,7 @@
 //   - opencode-pinned-messages：数组，按 sessionId 去重并集
 //   - hidden-model-keys / model-pinned：字符串数组，元素本身即 id
 //   - opencode-hidden-projects：字符串数组（被隐藏的项目目录）
+//   - opencode-sidebar-expanded-projects：字符串数组（展开的项目名）
 //
 // 合并范围仅限「同一个键」：saved-directories 按实例分桶
 // （srv:aiagent:inst_X:opencode-saved-directories），各实例互不干扰。
@@ -203,6 +210,15 @@ const SYNCABLE_PATTERNS: RegExp[] = [
   // 模型可见性 / 置顶模型：per-server 分桶的字符串数组
   /^srv:aiagent:[^:]+:hidden-model-keys$/,
   /^srv:aiagent:[^:]+:model-pinned$/,
+  /**
+   * 侧栏项目行的展开/收起（存的是项目名，不是路径）。
+   *
+   * 以前被排除在同步之外，理由是「界面开合属浏览状态」。但项目行展开不是
+   * 一屏的临时状态：用户往往固定只展开当前在做的项目，换台设备（或在网页端
+   * 和桌面端之间切换）看到另一套展开结果，会被当成「状态丢了」。
+   * 它与 opencode-sidebar-expanded（整个侧栏开合）不同——后者才是瞬时的。
+   */
+  /^opencode-sidebar-expanded-projects$/,
   // 用户主动隐藏的派生项目目录（与 saved-directories 对称）
   /^srv:aiagent:[^:]+:opencode-hidden-projects$/,
   // 已读水位、项目最后活跃时间（均为 map<id, 时间戳>，逐键取 max）
@@ -504,6 +520,10 @@ const MERGE_RULES: Record<string, MergeRule> = {
   // 模型可见性（被用户隐藏的模型键）与置顶模型：集合语义的字符串数组，
   // 多端一致才符合直觉——一端隐藏了模型，另一端还列在候选里会被当成 bug。
   'hidden-model-keys': {
+    kind: 'string-array',
+  },
+  // 侧栏项目行的展开/收起：同样是字符串数组（元素是项目名）。
+  'opencode-sidebar-expanded-projects': {
     kind: 'string-array',
   },
   'model-pinned': {

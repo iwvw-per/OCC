@@ -169,19 +169,26 @@ describe('preferences sync', () => {
     }
   })
 
-  it('rejects UI open/collapse state so panels do not fight across devices', async () => {
+  it('rejects transient panel open/collapse state so panels do not fight across devices', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
 
     // 侧栏、面板、工作状态板块的开合是当前这一屏的浏览状态，不是偏好：
     // 同步会让一端展开后另一端被同步折叠，反复拉锯。
     expect(isSyncableKey('opencode-sidebar-expanded')).toBe(false)
-    expect(isSyncableKey('opencode-sidebar-expanded-projects')).toBe(false)
     expect(isSyncableKey('opencode-panel-layout')).toBe(false)
     expect(isSyncableKey('opencode-work-status-enabled')).toBe(false)
     expect(isSyncableKey('opencode-work-status-expanded')).toBe(false)
 
     // 项目列表本身仍是偏好，继续同步
     expect(isSyncableKey('srv:aiagent:inst_1:opencode-saved-directories')).toBe(true)
+  })
+
+  it('syncs which project rows are expanded', async () => {
+    const { isSyncableKey } = await import('./preferencesSync')
+
+    // 项目行的展开不是「这一屏的临时状态」：用户往往固定只展开当前在做的项目，
+    // 换设备看到另一套结果会被当成「状态丢了」。
+    expect(isSyncableKey('opencode-sidebar-expanded-projects')).toBe(true)
   })
 
   it('rejects per-server settings other than the project list', async () => {

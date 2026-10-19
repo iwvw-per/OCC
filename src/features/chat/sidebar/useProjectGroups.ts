@@ -94,6 +94,8 @@ export interface UseProjectGroupsResult {
   currentProject: ProjectItem
   expandedProjectIds: string[]
   setExpandedProjectIds: (updater: string[] | ((prev: string[]) => string[])) => void
+  /** 展开状态可作用的项目 id（与 allProjectsCollapsed 判定同源） */
+  expandableProjectIds: string[]
   allProjectsCollapsed: boolean
   workspaceDirectoriesByProjectId: Map<string, string[]>
   projectLastUsedAt: Record<string, number>
@@ -285,10 +287,17 @@ export function useProjectGroups({
     () => folderProjects.filter(p => expandedProjectNames.includes(projectExpandKey(p))).map(p => p.id),
     [folderProjects, expandedProjectNames],
   )
-  const allProjectIds = useMemo(() => folderProjects.filter(p => !p.isDerived).map(p => p.id), [folderProjects])
+  /**
+   * 「全部展开/收起」的作用范围：与 allProjectsCollapsed 的判定范围一致。
+   *
+   * 之前判定只看非派生项目、操作却用 folderProjects（含派生项目），
+   * 点「全部收起」后派生项目仍是展开的，按钮图标与列表状态对不上。
+   */
+  const expandableProjectIds = useMemo(() => folderProjects.map(p => p.id), [folderProjects])
   const allProjectsCollapsed = useMemo(
-    () => allProjectIds.length > 0 && allProjectIds.every(id => !expandedProjectIds.includes(id)),
-    [allProjectIds, expandedProjectIds],
+    () =>
+      expandableProjectIds.length > 0 && expandableProjectIds.every(id => !expandedProjectIds.includes(id)),
+    [expandableProjectIds, expandedProjectIds],
   )
 
   const setExpandedProjectIds = useCallback(
@@ -389,6 +398,7 @@ export function useProjectGroups({
     currentProject,
     expandedProjectIds,
     setExpandedProjectIds,
+    expandableProjectIds,
     allProjectsCollapsed,
     workspaceDirectoriesByProjectId,
     projectLastUsedAt,

@@ -277,6 +277,7 @@ export function SidePanel({
     projectLastUsedAt,
     savedDirectoryPaths,
     hideProjectDirectory,
+    expandableProjectIds,
   } = projects
 
   // 需求 3：点击项目目录/名称不跳转（只展开/收起），只有点击会话才导航。
@@ -723,13 +724,16 @@ export function SidePanel({
                 >
                   {activeServer?.name}
                 </span>
-                {/* 收起优先：默认先收起全部；全部收起后点击才展开全部 */}
+                {/* 收起优先：默认先收起全部；全部收起后点击才展开全部。
+                    判定与作用必须用同一批项目：此前判定只看非派生项目，展开却
+                    用 folderProjects（含派生项目），于是「全部收起」后仍有一个
+                    派生项目是展开的，按钮图标与实际状态对不上。 */}
                 <div className="ml-auto shrink-0 flex items-center gap-1.5 md:gap-0.5">
                   <IconButton
                     size="sm"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      setExpandedRecentProjectIds(allProjectsCollapsed ? folderProjects.map(p => p.id) : [])
+                      setExpandedRecentProjectIds(allProjectsCollapsed ? expandableProjectIds : [])
                     }}
                     aria-label={
                       allProjectsCollapsed ? t('sidebar.expandAllProjects') : t('sidebar.collapseAllProjects')
