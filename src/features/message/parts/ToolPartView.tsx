@@ -28,6 +28,7 @@ import { InlinePermission } from '../../chat/InlinePermission'
 import { InlineQuestion } from '../../chat/InlineQuestion'
 import {
   getToolIcon,
+  extractToolCallsFromCode,
   getToolColorClass,
   extractToolData,
   getToolConfig,
@@ -40,6 +41,7 @@ import {
 import { MSG_SPACING } from '../messageSpacing'
 import { MessageExpandPanel } from '../messageExpand'
 import { useMessageExpandRender } from '../messageExpandShared'
+import { getToolDisplayName } from './toolDisplayName'
 
 // ============================================
 // ToolPartView - 单个工具调用
@@ -86,10 +88,22 @@ export const ToolPartView = memo(function ToolPartView({
   const { t } = useTranslation('message')
   const { state, tool: toolName } = part
   const { currentSessionId } = useSessionNavigation()
-  // v2 的 part.tool 是工具类型（execute/bash…）；具体工具名在 input 里。
-  // 只有类型名可用时才回退，避免所有工具都显示成「Execute」。
+  // part.tool 就是真实工具名（已由数据库实测确认）。个别 MCP 代理工具会显式
+  // 提供 displayName，仅在存在时才覆盖。
   const toolDisplayName = getToolDisplayName(part) ?? toolName
   const title = state.title || getInputDescription(part) || ''
+
+  /**
+   * execute（Code Mode）在 input.code 里通过 tools.xxx() 调用其它工具。
+   * 只显示「Execute」等于什么都没说 —— 摘要里补上实际调用，例如
+   * 「Execute · get_system_status, find_api」，一眼能看出做了什么。
+   */
+  const executeCallSummary = useMemo(() => {
+    if (part.tool !== 'execute') return ''
+    const code = (state.input as Record<string, unknown> | undefined)?.code
+    if (typeof code !== 'string') return ''
+    return extractToolCallsFromCode(code).slice(0, 3).join(', ')
+  }, [part.tool, state.input])
 
   const isActive = state.status === 'running' || state.status === 'pending'
   const isError = state.status === 'error'
@@ -449,6 +463,7 @@ export const ToolPartView = memo(function ToolPartView({
                   </span>
 
                   {title && <ToolParamChip text={title} error={isError} />}
+                  {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                 </>
               )}
 
@@ -515,6 +530,7 @@ export const ToolPartView = memo(function ToolPartView({
                       {formatToolName(toolDisplayName)}
                     </span>
                     {title && <ToolParamChip text={title} error={isError} />}
+                    {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                   </>
                 )}
               </span>
@@ -597,6 +613,7 @@ export const ToolPartView = memo(function ToolPartView({
                   </span>
 
                   {title && <ToolParamChip text={title} error={isError} />}
+                  {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                 </>
               )}
             </span>
@@ -733,24 +750,6 @@ function getTaskChildSessionId(part: ToolPart): string | undefined {
 }
 
 /** Extract description from tool input as title fallback (available while running) */
-/**
- * 工具显示名的兜底来源。
- *
- * v2 面板的 `part.name` 是**工具类型**（execute / bash / read …），具体是哪个
- * 工具放在 input 里。直接回退到 `formatToolName(part.tool)` 会让所有同类工具
- * 都显示成「Execute」，用户分不清调了什么。这里按优先级取真实名称。
- */
-export function getToolDisplayName(part: ToolPart): string | undefined {
-  const input = part.state.input as Record<string, unknown> | undefined
-  if (!input) return undefined
-  const candidates = ['tool', 'name', 'toolName', 'command']
-  for (const key of candidates) {
-    const value = input[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
-  }
-  return undefined
-}
-
 function getInputDescription(part: ToolPart): string | undefined {
   const input = part.state.input as Record<string, unknown> | undefined
   return (input?.description as string) || undefined

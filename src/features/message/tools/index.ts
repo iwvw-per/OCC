@@ -2,7 +2,15 @@
 export type { ToolConfig, ToolRegistry, ExtractedToolData, ToolRendererProps, FileDiff } from './types'
 
 // Registry
-export { toolRegistry, getToolConfig, getToolIcon, getToolColorClass, extractToolData, defaultExtractData } from './registry'
+export {
+  toolRegistry,
+  getToolConfig,
+  getToolIcon,
+  getToolColorClass,
+  extractToolData,
+  defaultExtractData,
+  extractToolCallsFromCode,
+} from './registry'
 
 // Icons
 export * from './icons'

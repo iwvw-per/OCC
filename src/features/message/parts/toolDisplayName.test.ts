@@ -1,38 +1,38 @@
 import { describe, expect, it } from 'vitest'
-import { getToolDisplayName } from './ToolPartView'
+import { getToolDisplayName } from './toolDisplayName'
 import type { ToolPart } from '../../../types/message'
 
 /**
- * v2 的 part.name 是工具类型（execute/bash…），具体工具名在 input 里。
- * 直接展示 name 会让同类工具全显示成「Execute」。这里锁定提取优先级。
+ * 工具名显示。
+ *
+ * 已用数据库实测确认：v2 的 `part.name` 就是**真实工具名**
+ * （shell / edit / read / grep / execute / write / subagent / websearch），
+ * 不存在「这里放的是泛型类型、具体名在 input 里」的情况。
+ *
+ * 因此只允许显式 displayName 覆盖 part.tool，其它 input 字段一律不参与 ——
+ * 曾据此把 execute 显示成 input 里的代码片段，比不显示更糟。
  */
 
-function toolPart(input: Record<string, unknown>): ToolPart {
+function toolPart(tool: string, input: Record<string, unknown>): ToolPart {
   return {
     id: 't1',
     sessionID: 's1',
     messageID: 'm1',
     type: 'tool',
     callID: 'c1',
-    tool: 'execute',
+    tool,
     state: { status: 'running', input, time: { start: 1 } },
   } as unknown as ToolPart
 }
 
 describe('getToolDisplayName', () => {
-  it('prefers input.tool', () => {
-    expect(getToolDisplayName(toolPart({ tool: 'web_search', command: 'x' }))).toBe('web_search')
+  it('does not override the real tool name with input fields', () => {
+    // execute 的 input 只有 code；绝不能把 code 当成工具名
+    expect(getToolDisplayName(toolPart('execute', { code: 'return tools.foo()' }))).toBeUndefined()
+    expect(getToolDisplayName(toolPart('shell', { command: 'ls -la' }))).toBeUndefined()
   })
 
-  it('falls back to input.name', () => {
-    expect(getToolDisplayName(toolPart({ name: 'grep_files' }))).toBe('grep_files')
-  })
-
-  it('ignores blank candidates', () => {
-    expect(getToolDisplayName(toolPart({ tool: '   ', name: 'read_file' }))).toBe('read_file')
-  })
-
-  it('returns undefined so the caller can fall back to the type name', () => {
-    expect(getToolDisplayName(toolPart({}))).toBeUndefined()
+  it('honors an explicit displayName', () => {
+    expect(getToolDisplayName(toolPart('execute', { displayName: 'find_api' }))).toBe('find_api')
   })
 })
