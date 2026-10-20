@@ -61,6 +61,7 @@ import {
   getSessionMessagePage,
   getSessionMessages,
   getSessionTurnPage,
+  getSessionFirstScreen,
   encodeMessageCursor,
   decodeMessageCursor,
   encodeV2MessageCursor,
@@ -302,6 +303,56 @@ describe('encodeBeforeCursor', () => {
   })
 })
 
+describe('getSessionFirstScreen', () => {
+  /**
+   * 首屏必须「先出内容」：用小页拿到第一批就返回，剩余轮次由 rest() 后台补齐。
+   * 大会话一次取 200 条要 536KB，而 3 轮通常只需几十条 —— 这是首屏慢的主因。
+   */
+  it('returns a small first page and exposes rest() when turns are not enough', async () => {
+    // 第一页只有 1 轮（尾部），未达 2 轮目标
+    nativeListMessagesMock
+      .mockResolvedValueOnce({ messages: [userMsg(3), assistantMsg(3)], nextCursor: 'cursor-1' })
+      .mockResolvedValueOnce({ messages: [userMsg(1), assistantMsg(1), userMsg(2), assistantMsg(2)], nextCursor: 'cursor-2' })
+
+    const first = await getSessionFirstScreen('ses-1', 2)
+
+    // 第一段只发一次请求，且用的是小页上限
+    expect(nativeListMessagesMock).toHaveBeenCalledTimes(1)
+    expect(nativeListMessagesMock).toHaveBeenNthCalledWith(
+      1,
+      'srv',
+      expect.objectContaining({ sessionID: 'ses-1', cursor: undefined }),
+    )
+    expect(first.complete).toBe(false)
+    expect(first.messages).toHaveLength(2)
+    expect(typeof first.rest).toBe('function')
+
+    const rest = await first.rest!()
+    // 补齐后按时间升序拼接，且游标以更早那段为准
+    expect(rest.messages.map(m => m.info.id)).toEqual([
+      'user-1',
+      'asst-1',
+      'user-2',
+      'asst-2',
+      'user-3',
+      'asst-3',
+    ])
+    expect(rest.nextCursor).toBe('cursor-2')
+  })
+
+  it('marks the first page complete when the target turns are already covered', async () => {
+    nativeListMessagesMock.mockResolvedValueOnce({
+      messages: [userMsg(1), assistantMsg(1), userMsg(2), assistantMsg(2)],
+      nextCursor: 'cursor-1',
+    })
+
+    const first = await getSessionFirstScreen('ses-1', 2)
+    expect(first.complete).toBe(true)
+    expect(first.rest).toBeUndefined()
+    expect(nativeListMessagesMock).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('getSessionTurnPage', () => {
   beforeEach(() => {
     nativeListMessagesMock.mockReset()
@@ -321,12 +372,12 @@ describe('getSessionTurnPage', () => {
     expect(nativeListMessagesMock).toHaveBeenNthCalledWith(
       1,
       'srv',
-      expect.objectContaining({ sessionID: 'ses-1', limit: 30, cursor: undefined }),
+      expect.objectContaining({ sessionID: 'ses-1', limit: 200, cursor: undefined }),
     )
     expect(nativeListMessagesMock).toHaveBeenNthCalledWith(
       2,
       'srv',
-      expect.objectContaining({ sessionID: 'ses-1', limit: 30, cursor: 'cursor-1' }),
+      expect.objectContaining({ sessionID: 'ses-1', limit: 200, cursor: 'cursor-1' }),
     )
     // 按时间升序拼接：page2 在 page1 之前
     expect(result.messages.map(m => m.info.id)).toEqual(['user-1', 'asst-2', 'asst-3', 'asst-1', 'asst-2', 'user-3'])

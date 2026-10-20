@@ -116,7 +116,16 @@ function adaptUserParts(raw: Record<string, unknown>): Part[] {
     const f = rec(rawFile)
     const mime = str(f.mime) ?? 'text/plain'
     const source = rec(f.source)
-    const uri = source.type === 'uri' ? str(source.uri) : ''
+    // v2 的 file 有两种来源：
+    //   - source.type === 'uri'   ：引用一个地址（file:// / https://）
+    //   - source.type === 'inline'：正文以 base64 放在 f.data 里
+    //
+    // 此前只处理了 uri，inline 的 data 被**直接丢弃** —— 于是用户发的图片既显示
+    // 不出来，又白白把 base64 下载了下来。实测一条带截图的会话里，60 条消息中
+    // 有 1358KB 是 inline 图片数据（占 92%），首屏 18 秒基本都花在它上面。
+    const inlineData = str(f.data)
+    const uri = source.type === 'uri' ? (str(source.uri) ?? '') : ''
+    const url = uri || (inlineData ? `data:${mime};base64,${inlineData}` : '')
     parts.push({
       id: `${id}-file-${ordinal++}`,
       sessionID,
@@ -124,11 +133,11 @@ function adaptUserParts(raw: Record<string, unknown>): Part[] {
       type: 'file',
       mime,
       filename: str(f.name),
-      url: uri,
-      source: uri
+      url,
+      source: url
         ? {
             type: 'file',
-            path: uri,
+            path: uri || str(f.name) || '',
             text: { value: '', start: 0, end: 0 },
           }
         : undefined,

@@ -61,8 +61,15 @@ if (document.readyState === 'loading') {
 
 // 注册 active server 入口变化 → 重建目标服务器的 SDK + 刷新 per-server 配置 + 重连 SSE
 serverStore.onServerChange((serverId, reason) => {
-  // 端点变化：取消在途请求（旧 client 的请求不再有意义），并预热 Tauri fetch。
-  abortInFlightApiRequests('Server endpoint changed')
+  // 只有「端点地址真的变了」才需要取消在途请求。
+  //
+  // server-switch 只是切换当前查看的主机：多主机模式下每台服务器各有独立 client
+  // （getV2Client 显式按 serverId 构造 baseUrl），切换不会让任何在途请求失效。
+  // 以前这里对 server-switch 也无条件取消，导致「刚点发送就切主机」时，那条
+  // 正在飞往旧主机的 prompt 被 abort —— 用户看到的就是「旧主机没发出去」。
+  if (reason === 'local-runtime-url') {
+    abortInFlightApiRequests('Server endpoint changed')
+  }
   if (isTauriEnv()) {
     void getTauriFetch().catch(err => apiErrorHandler('reinitialize sdk client after server endpoint change', err))
   }

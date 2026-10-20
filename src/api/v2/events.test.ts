@@ -405,6 +405,70 @@ describe('v2 event → GlobalEvent', () => {
     expect(v2EventToGlobalEvent({ type: 'session.inbox.updated', data: {}, location: { directory: '/w' } })).toBeNull()
   })
 
+  /**
+   * v2 的实时流里没有 message.updated，用户消息唯一信号是 session.inbox.enqueued。
+   * 不映射它 = 其他端看不到这条消息（用户报的「多端同时用会吞消息」）。
+   */
+  it('maps session.inbox.enqueued (user item) to SESSION_INBOX_ENQUEUED', () => {
+    const p = payloadOf({
+      id: 'evt_1',
+      created: 1_700_000_000_000,
+      type: 'session.inbox.enqueued',
+      data: {
+        inboxID: 'msg_abc',
+        sessionID: 'ses_1',
+        item: { type: 'user', payload: { text: 'hello' }, delivery: 'steer' },
+      },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_INBOX_ENQUEUED)
+    expect(p?.properties).toMatchObject({
+      sessionID: 'ses_1',
+      inboxID: 'msg_abc',
+      created: 1_700_000_000_000,
+      text: 'hello',
+    })
+  })
+
+  // compaction / synthetic / move 等系统投递项不是用户消息，不能伪造成用户气泡
+  it('ignores non-user inbox items', () => {
+    const p = payloadOf({
+      type: 'session.inbox.enqueued',
+      data: { inboxID: 'msg_c', sessionID: 's', item: { type: 'compaction', payload: {} } },
+      location: { directory: '/w' },
+    })
+    expect(p).toBeNull()
+  })
+
+  it('maps session.inbox.cancelled to MESSAGE_REMOVED', () => {
+    const p = payloadOf({
+      type: 'session.inbox.cancelled',
+      data: { inboxID: 'msg_c', sessionID: 's' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.MESSAGE_REMOVED)
+    expect(p?.properties).toMatchObject({ sessionID: 's', messageID: 'msg_c' })
+  })
+
+  /**
+   * reasoning.ended 缺失时：推理块永远算「进行中」，且 handlePartDelta 靠
+   * time.end 丢弃迟到增量 —— 点了停止推理还会继续往里流。
+   */
+  it('maps session.reasoning.ended to a finalized reasoning part', () => {
+    const p = payloadOf({
+      created: 1_700_000_000_500,
+      type: 'session.reasoning.ended',
+      data: { sessionID: 's', assistantMessageID: 'm', ordinal: 1, text: 'done' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.MESSAGE_PART_UPDATED)
+    const part = p?.properties.part as { id: string; type: string; text: string; time?: { end?: number } }
+    expect(part.id).toBe('m-reasoning-1')
+    expect(part.type).toBe('reasoning')
+    expect(part.text).toBe('done')
+    expect(part.time?.end).toBe(1_700_000_000_500)
+  })
+
   it('maps session.compaction.failed to SESSION_COMPACTED with error message', () => {
     const p = payloadOf({
       type: 'session.compaction.failed',

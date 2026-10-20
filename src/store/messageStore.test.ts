@@ -124,8 +124,35 @@ describe('messageStore', () => {
     expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-1', text: 'hello world' })
   })
 
-  it('replays a delta that arrives before its message is created (D5)', () => {
+  /**
+   * 停止后不应继续追加迟到增量。
+   *
+   * handlePartDelta 已经靠 part.time.end 丢弃已定稿 part 的 delta，但**回放路径**
+   * （part 先于 delta 不存在时暂存、part 建立后回放）原先没有这条检查，于是
+   * 「text.ended 已定稿 → 仍有在途 delta 进缓冲 → 回放时补到完整文本后面」，
+   * 表现为用户按下停止后内容还在往里流。
+   */
+  it('does not replay buffered deltas into an already finalized part', () => {
     messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    // delta 先到，此时 part 还不存在 → 进缓冲
+    messageStore.handlePartDelta({
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      partID: 'part-1',
+      field: 'text',
+      delta: 'late',
+    })
+    // 服务端随后发来已定稿的完整文本（带 time.end）
+    messageStore.handlePartUpdated({
+      ...createTextPart('part-1', 'message-1', 'final'),
+      time: { start: 1, end: 2 },
+    } as ApiPart & { sessionID: string; messageID: string })
+
+    const state = messageStore.getSessionState('session-1')
+    expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-1', text: 'final' })
+  })
+
+  it('replays a delta that arrives before its message is created (D5)', () => {    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
     messageStore.handlePartUpdated(createTextPart('part-1', 'message-1', 'base'))
 
     // 消息已存在但 part 未建立时暂存的 delta，应在 part 建立后回放
@@ -963,5 +990,63 @@ describe('optimistic user message reconciliation by id', () => {
     const textParts = row.content.filter(p => p.type === 'text')
     expect(textParts).toHaveLength(1)
     expect(textParts[0].id).toBe('prt_0001')
+  })
+})
+
+/**
+ * v2 的实时事件流没有 message.updated，用户消息的唯一信号是
+ * `session.inbox.enqueued`。它必须落成一条**带正文**的用户消息：
+ * 只建骨架不建 part 会渲染成空白气泡，完全不建则其他端看不到（吞消息）。
+ */
+describe('upsertRemoteUserMessage (v2 session.inbox.enqueued)', () => {
+  beforeEach(() => {
+    messageStore.clearAll()
+  })
+
+  const KEY = 'local::ses_inbox'
+  const MSG_ID = 'msg_inbox1'
+
+  it('creates a user message with a text part so other clients see it immediately', () => {
+    messageStore.upsertRemoteUserMessage(KEY, { messageId: MSG_ID, text: 'from another device', createdAt: 200 })
+
+    const state = messageStore.getSessionState(KEY)!
+    const row = state.messages.find(m => m.info.id === MSG_ID)!
+    expect(row.info.role).toBe('user')
+    expect(row.info.time?.created).toBe(200)
+    const textParts = row.content.filter(p => p.type === 'text')
+    expect(textParts).toHaveLength(1)
+    expect((textParts[0] as { text: string }).text).toBe('from another device')
+    // 复合 key：part/info 上都用权威 bucket，UI 与 store 内部一致
+    expect(row.info.sessionID).toBe(KEY)
+  })
+
+  it('replaces the local optimistic row instead of duplicating it', () => {
+    messageStore.upsertLocalMessage({
+      info: {
+        id: MSG_ID,
+        sessionID: 'ses_inbox',
+        role: 'user',
+        time: { created: 200 },
+        agent: 'build',
+        model: { providerID: 'p', modelID: 'm' },
+      },
+      content: [
+        { id: `${MSG_ID}:text`, sessionID: 'ses_inbox', messageID: MSG_ID, type: 'text', text: 'from another device' },
+      ],
+      isStreaming: false,
+    } as import('../types/message').Message)
+
+    messageStore.upsertRemoteUserMessage(KEY, { messageId: MSG_ID, text: 'from another device', createdAt: 200 })
+
+    const userRows = messageStore.getSessionState(KEY)!.messages.filter(m => m.info.role === 'user')
+    expect(userRows).toHaveLength(1)
+    // 保留下来的 model/agent 不被清空（服务端事件不带这些字段）
+    expect((userRows[0].info as { agent?: string }).agent).toBe('build')
+  })
+
+  it('does not resurrect a removed inbox message', () => {
+    messageStore.upsertRemoteUserMessage(KEY, { messageId: MSG_ID, text: 'x', createdAt: 200 })
+    messageStore.removeMessage(KEY, MSG_ID)
+    expect(messageStore.getSessionState(KEY)!.messages.find(m => m.info.id === MSG_ID)).toBeUndefined()
   })
 })

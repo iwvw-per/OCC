@@ -64,6 +64,18 @@ export interface SendMessageParams {
    * 使乐观消息与服务端 canonical 消息共用同一 id，从而靠 id 精确替换，避免出现重复的两条用户消息。
    */
   messageID?: string
+  /**
+   * 投递方式（v2 prompt 的 delivery）。
+   *
+   * - `steer`（缺省）：插到当前轮次里，尽快被 agent 读走；
+   * - `queue`：排到当前轮次之后。
+   *
+   * `queue` 必须发给服务端，而不是只存在本机队列：本机队列的 id 是 `queued_*`，
+   * 服务端完全不知道它存在，刷新页面就丢，其它设备也永远看不到 —— 这是「吞消息」
+   * 的一种。发给服务端后它立刻成为真实消息（有服务端认可的 messageID），并广播
+   * `session.inbox.enqueued`，所有端同时可见。
+   */
+  delivery?: 'steer' | 'queue'
 }
 
 export interface SendMessageResponse {

@@ -707,8 +707,88 @@ class MessageStore {
     this.notify([sessionKey])
   }
 
-  removeMessage(sessionId: string, messageId: string) {
-    sessionId = this.resolveKey(sessionId)
+  /**
+   * 写入一条来自其它端（或本端回环）的用户消息。
+   *
+   * v2 的实时事件流没有 message.updated，用户消息的唯一信号是
+   * `session.inbox.enqueued`（带 inboxID = 客户端生成的 messageID 与文本）。
+   * 这里把它落成与历史拉取同构的用户消息（`${id}-text` part），使：
+   *   - 其它端在 agent 处理前就能看到这条消息（此前完全看不到 → 像被吞掉）；
+   *   - 本端乐观占位按同一 id 被原地替换，不产生重复；
+   *   - 后续 agent 回复按 id 关联 parentID 时顺序正确。
+   *
+   * 与 upsertLocalMessage 的区别：这里不把 id 记入 optimisticMessageIds ——
+   * 它来自服务端事件，是权威消息而不是待替换的占位。
+   */
+  upsertRemoteUserMessage(
+    sessionId: string,
+    input: { messageId: string; text: string; createdAt: number; directory?: string },
+  ) {
+    const sessionKey = this.resolveKey(sessionId, true)
+    const state = this.ensureSession(sessionKey)
+    // 复合 key 的权威 bucket 与 API 里的原始 sessionID 不同：消息 info/part 上都应
+    // 用复合 key，UI 与 store 内部一致（历史拉取走 toUIMessage 时也由 store 统一）。
+    const rawSessionID = sessionKey
+    const existingIndex = state.messages.findIndex(item => item.info.id === input.messageId)
+    const existing = existingIndex >= 0 ? state.messages[existingIndex] : undefined
+
+    // 正文来源优先级：服务端已建好的 canonical part > 事件里的文本。
+    // inbox.enqueued 可能晚于 message.part.updated 到达（重连补发），此时已有
+    // `prt_` 开头的权威 part，不能被这里的本地形式 `${id}-text` 覆盖。
+    const hasCanonicalText =
+      !!existing && existing.content.some(part => part.type === 'text' && isServerPartId(part.id))
+    const content: Content[] =
+      existing && hasCanonicalText
+        ? existing.content
+        : [
+            {
+              id: `${input.messageId}-text`,
+              type: 'text',
+              text: input.text,
+              synthetic: false,
+              sessionID: rawSessionID,
+              messageID: input.messageId,
+            } as TextContent,
+          ]
+    const message: Message = existing
+      ? {
+          ...existing,
+          content,
+          // 时间以服务端事件时间为准：跨端排序必须同基准。本地乐观消息的
+          // `Date.now()` 只是本机时钟，两端差几秒就会让同一轮消息顺序不一致。
+          info: { ...existing.info, time: { ...existing.info.time, created: input.createdAt } },
+        }
+      : {
+          info: {
+            id: input.messageId,
+            sessionID: rawSessionID,
+            role: 'user',
+            time: { created: input.createdAt },
+            agent: '',
+            model: { providerID: '', modelID: '' },
+          } as Message['info'],
+          content,
+          isStreaming: false,
+        }
+
+    if (existingIndex >= 0) {
+      state.messages = [...state.messages.slice(0, existingIndex), message, ...state.messages.slice(existingIndex + 1)]
+    } else {
+      state.messages = [...state.messages, message].sort((a, b) => {
+        const aCreated = a.info.time?.created ?? 0
+        const bCreated = b.info.time?.created ?? 0
+        return aCreated - bCreated
+      })
+      this.capSessionMessages(state)
+    }
+
+    // 这条消息的 id 不再是「待替换的乐观占位」：服务端已确认它入队。
+    this.optimisticMessageIds.delete(input.messageId)
+    this.recordUserMessageAnchor(sessionKey, message.info, input.directory)
+    this.notify([sessionKey])
+  }
+
+  removeMessage(sessionId: string, messageId: string) {    sessionId = this.resolveKey(sessionId)
     const state = this.sessions.get(sessionId)
     if (!state) return
     const nextMessages = state.messages.filter(message => message.info.id !== messageId)
@@ -1335,6 +1415,11 @@ class MessageStore {
       }
       const part = msg.content[partIndex]
       if (!('text' in part)) continue
+      // 与 handlePartDelta 同一条规则：已定稿（带 time.end）的 part 不再追加迟到增量。
+      // 回放路径原先缺这一检查，于是「text.ended 到达后仍有在途 delta」时，
+      // 这些增量会在回放阶段被补到完整文本后面 —— 表现为停止后内容还在往里流。
+      const partTime = (part as { time?: { end?: number } }).time
+      if (partTime && typeof partTime.end === 'number') continue
       ;(part as { text: string }).text += delta
       let dirtyPartsByMessage = this.dirtyPartsBySession.get(sessionKey)
       if (!dirtyPartsByMessage) {

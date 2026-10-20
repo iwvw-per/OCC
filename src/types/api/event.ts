@@ -125,6 +125,21 @@ export interface PartRemovedPayload {
   partID: string
 }
 
+/**
+ * v2 用户消息入队（`session.inbox.enqueued`）。
+ *
+ * 实测 v2 的实时事件流里没有 `message.updated`，用户消息唯一的实时信号就是它。
+ * `inboxID` 由客户端生成（= prompt 的 messageID），因此各端看到的 id 与服务端
+ * 落库后的消息 id 一致，可以按 id 精确替换本端乐观占位。
+ */
+export interface InboxEnqueuedPayload {
+  sessionID: string
+  inboxID: string
+  /** 服务端事件时间 */
+  created: number
+  text: string
+}
+
 export type PermissionRepliedPayload = SDKEventPermissionReplied['properties']
 
 export type QuestionRepliedPayload = SDKEventQuestionReplied['properties']
@@ -189,6 +204,8 @@ export const EventTypes = {
   SESSION_STATUS: 'session.status',
   SESSION_DIFF: 'session.diff',
   SESSION_COMPACTED: 'session.compacted',
+  /** v2 用户消息入队（session.inbox.enqueued）：让所有端实时看到这条用户消息 */
+  SESSION_INBOX_ENQUEUED: 'session.inbox.enqueued',
   /** v2 会话累计用量（tokens / cost），不随消息裁剪变化 */
   SESSION_USAGE_UPDATED: 'session.usage.updated',
   /**
@@ -270,6 +287,7 @@ export const EventTypes = {
   | 'session.renamed'
   | 'session.retry.scheduled'
   | 'session.usage.updated'
+  | 'session.inbox.enqueued'
 >
 
 export type EventType = SDKGlobalEvent['payload']['type']
@@ -282,7 +300,11 @@ export interface EventCallbacks {
   onMessageUpdated?: (message: Message) => void
   onPartUpdated?: (part: Part) => void
   onPartDelta?: (data: PartDeltaPayload) => void
+  /** v2 用户消息入队（session.inbox.enqueued）：让所有端实时看到这条用户消息 */
+  onInboxEnqueued?: (data: InboxEnqueuedPayload) => void
   onPartRemoved?: (data: PartRemovedPayload) => void
+  /** 整条消息被移除（v2 session.inbox.cancelled：入队后被撤销的用户消息） */
+  onMessageRemoved?: (data: { sessionID: string; messageID: string }) => void
   onServerConnected?: (data: ServerConnectedPayload) => void
   onSessionCreated?: (session: Session) => void
   onSessionUpdated?: (session: Session) => void

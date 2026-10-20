@@ -758,6 +758,34 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           messageStore.handlePartRemoved({ ...data, sessionID: scope(data.sessionID) })
         },
 
+        // 用户消息入队后被撤销（v2 session.inbox.cancelled）：移除本地占位，
+        // 否则会留下一条永远不会被处理的用户消息。
+        onMessageRemoved: data => {
+          messageStore.removeMessage(scope(data.sessionID), data.messageID)
+          scheduleScroll(scope(data.sessionID))
+        },
+
+        /**
+         * 用户消息入队（v2 session.inbox.enqueued）→ 建立可见的用户消息。
+         *
+         * 这是 v2 唯一的实时用户消息信号（流里没有 message.updated）。不处理它，
+         * 其他端在 agent 开始处理前完全看不到这条消息；连发多条时中间那些会被
+         * 彻底跳过 —— 用户说的「多端同时用会吞消息」。
+         *
+         * 同一端自己发送时，本地已有乐观占位（id 相同，因为客户端传的 messageID
+         * 就是 inboxID）。这里按 id 写入会替换掉占位而不是新增一条，所以不会重复。
+         */
+        onInboxEnqueued: data => {
+          const scopedId = scope(data.sessionID)
+          activeSessionStore.touchSession(scopedId)
+          messageStore.upsertRemoteUserMessage(scopedId, {
+            messageId: data.inboxID,
+            text: data.text,
+            createdAt: data.created,
+          })
+          scheduleScroll(scopedId)
+        },
+
         // session.next.* 事件流兜底：后端若只发 next 工具事件、不补 message.part.updated，
         // 也把悬空的 running/pending part 落定，避免永久转圈。
         onNextToolSettled: data => {

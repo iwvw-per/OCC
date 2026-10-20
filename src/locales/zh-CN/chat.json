@@ -141,6 +141,8 @@
     "replyToAgent": "回复 Agent（输入 @ 提及，/ 执行命令）",
     "fileTooLarge": "文件过大",
     "fileTooLargeBody": "{{name}} 超过 {{size}} 附件上限，未添加",
+    "fileTypeUnsupported": "不支持该文件类型",
+    "fileTypeUnsupportedBody": "当前模型不支持 {{name}}，未添加。请切换到支持该类型的模型。",
     "largePasteTitle": "粘贴大段文本",
     "largePasteBody": "粘贴的内容有 {{count}} 个字符，选择处理方式：",
     "largePasteAsAttachment": "作为附件",

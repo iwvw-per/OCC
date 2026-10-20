@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getCurrentProject, listWorktrees, probeDirectory, type ApiProject } from '../api'
+import { getCurrentProject, getProjects, listWorktrees, probeDirectory, type ApiProject } from '../api'
 import { subscribeToEvents } from '../api/events'
 import { serverStore } from '../store/serverStore'
 import { normalizeToForwardSlash } from '../utils'
@@ -81,12 +81,65 @@ export function useGitWorkspaceCatalog(directories: string[], serverId?: string)
     const previousCatalog = catalogRef.current
 
     try {
-      const projectResults = await Promise.allSettled(
-        normalizedDirectories.map(async directory => ({
-          directory,
-          project: await getCurrentProjectCached(directory, serverId),
-        })),
-      )
+      /**
+       * 第一步：确认每个目录属于哪个 git 根。
+       *
+       * 原实现是 `normalizedDirectories.map(d => getCurrentProjectCached(d))` ——
+       * 每个目录一个请求。生产日志显示网关单次往返平均 274ms，15 个项目就是
+       * 15 个请求，即使并行也要占满浏览器同源连接额度，把更关键的会话消息请求
+       * 挤到队列后面。
+       *
+       * 改为优先一次拉全量项目列表（`getProjects`，1 个请求），在本地按
+       * directory 建索引；只有全量失败或某目录查不到时才回退到逐个查。
+       */
+      const projectByDirectory = new Map<string, ApiProject>()
+      let bulkLoaded = false
+      try {
+        const projects = await getProjects(undefined, serverId)
+        for (const project of projects) {
+          const dir = normalizeToForwardSlash(project.worktree ?? '')
+          if (dir) projectByDirectory.set(dir, project)
+        }
+        bulkLoaded = projects.length > 0
+      } catch {
+        bulkLoaded = false
+      }
+
+      if (!mountedRef.current || version !== versionRef.current) return
+
+      // 全量里缺失的目录才逐个补查（通常是尚未初始化/不在项目表里的目录）
+      const missingDirectories = bulkLoaded
+        ? normalizedDirectories.filter(directory => !projectByDirectory.has(directory))
+        : normalizedDirectories
+
+      const projectResults: Array<PromiseSettledResult<{ directory: string; project: ApiProject }>> =
+        missingDirectories.length > 0
+          ? await Promise.allSettled(
+              missingDirectories.map(async directory => ({
+                directory,
+                project: await getCurrentProjectCached(directory, serverId),
+              })),
+            )
+          : []
+
+      // 把「全量命中」与「逐个补查」合并成统一的目录顺序结果
+      const resolvedByDirectory = new Map<string, ApiProject>()
+      for (const [dir, project] of projectByDirectory) resolvedByDirectory.set(dir, project)
+      projectResults.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          resolvedByDirectory.set(missingDirectories[index], result.value.project)
+        }
+      })
+      const mergedResults: Array<PromiseSettledResult<{ directory: string; project: ApiProject }>> =
+        normalizedDirectories.map(directory => {
+          const project = resolvedByDirectory.get(directory)
+          return project
+            ? ({ status: 'fulfilled', value: { directory, project } } as PromiseFulfilledResult<{
+                directory: string
+                project: ApiProject
+              }>)
+            : ({ status: 'rejected', reason: new Error('project not found') } as PromiseRejectedResult)
+        })
 
       if (!mountedRef.current || version !== versionRef.current) return
 
@@ -105,8 +158,8 @@ export function useGitWorkspaceCatalog(directories: string[], serverId?: string)
         }
       }
 
-      for (let index = 0; index < projectResults.length; index++) {
-        const result = projectResults[index]
+      for (let index = 0; index < mergedResults.length; index++) {
+        const result = mergedResults[index]
         const directory = normalizedDirectories[index]
 
         if (result.status !== 'fulfilled') {
@@ -136,13 +189,25 @@ export function useGitWorkspaceCatalog(directories: string[], serverId?: string)
       // 根目录存在性：git 仓库整体搬家后，服务端仍返回旧 worktree，
       // 旧路径在磁盘上已不存在。这里并发探一次，供侧栏判断能否继续聚合到旧根。
       // 只有「确认不存在」才标记 rootExists=false：探测失败（unknown）不能用来拆组。
+      //
+      // 存在性探测与 worktree 列表**互不依赖**，必须并行：原实现先等完
+      // rootExistsResults 全部落地，才开始拉 workspaceResults —— 两轮串行，
+      // 在网关隧道下（单次往返 274ms）等于白白多付一整轮。
       const rootDirectoryList = Array.from(rootDirectories)
-      const rootExistsResults = await Promise.allSettled(
-        rootDirectoryList.map(async rootDirectory => ({
-          rootDirectory,
-          probe: await probeDirectory(rootDirectory, serverId),
-        })),
-      )
+      const [rootExistsResults, workspaceResults] = await Promise.all([
+        Promise.allSettled(
+          rootDirectoryList.map(async rootDirectory => ({
+            rootDirectory,
+            probe: await probeDirectory(rootDirectory, serverId),
+          })),
+        ),
+        Promise.allSettled(
+          rootDirectoryList.map(async rootDirectory => ({
+            rootDirectory,
+            worktrees: await listWorktreesCached(rootDirectory, serverId),
+          })),
+        ),
+      ])
       const rootExistsMap = new Map<string, boolean>()
       for (let index = 0; index < rootExistsResults.length; index++) {
         const result = rootExistsResults[index]
@@ -153,13 +218,6 @@ export function useGitWorkspaceCatalog(directories: string[], serverId?: string)
           rootExistsMap.set(rootDirectoryList[index], true)
         }
       }
-
-      const workspaceResults = await Promise.allSettled(
-        rootDirectoryList.map(async rootDirectory => ({
-          rootDirectory,
-          worktrees: await listWorktreesCached(rootDirectory, serverId),
-        })),
-      )
 
       if (!mountedRef.current || version !== versionRef.current) return
 

@@ -773,11 +773,42 @@ const UserMessageView = memo(function UserMessageView({
 // ============================================
 // User Attachment Chip (read-only)
 // ============================================
+/**
+ * 已发送消息里的附件。
+ *
+ * 图片必须显示缩略图，不能只显示文件名：纯图片消息没有正文，若只渲染一个
+ * 文件 chip，整条消息看起来几乎是空的，用户会以为图片没发出去。
+ * 缩略图同时充当「这张图确实带上了」的确认。
+ */
 const UserAttachmentChip = memo(function UserAttachmentChip({
   attachment,
 }: {
   attachment: import('../../features/attachment/types').Attachment
 }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const isImage = attachment.mime?.startsWith('image/') === true && !!attachment.url && !imageFailed
+
+  if (isImage) {
+    return (
+      <a
+        data-user-attachment
+        href={attachment.url}
+        target="_blank"
+        rel="noreferrer"
+        title={attachment.displayName}
+        className="block max-w-[240px] overflow-hidden rounded-lg border border-border-200 bg-bg-100"
+      >
+        <img
+          src={attachment.url}
+          alt={attachment.displayName}
+          loading="lazy"
+          onError={() => setImageFailed(true)}
+          className="max-h-48 w-full object-contain"
+        />
+      </a>
+    )
+  }
+
   return (
     <span
       data-user-attachment

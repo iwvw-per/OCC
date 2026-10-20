@@ -209,6 +209,50 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       return globalEvent(directory, EventTypes.SESSION_STATUS, { sessionID, status: { type: 'busy' } })
 
     // ============================================================
+    // 用户投递队列（v2 的多端输入通道）→ v1 user 消息
+    //
+    // 实测 v2 的 SSE 流里**没有** message.updated（本机 39,446 条 durable 事件
+    // 里只有 message.*，而实时流只发 session.*）。用户消息唯一的实时信号就是
+    // `session.inbox.enqueued`：它在 prompt 被受理的瞬间广播，带 inboxID（=
+    // 客户端传的 messageID）与 item.payload.text/files/agents。
+    //
+    // 不映射它的后果是确定性的：A 端发的消息，B 端在它被 agent 读取之前
+    // 完全看不到；若 A 端连发两条，B 端只在轮次结束后靠重拉才补齐，中间的
+    // 那条就是用户说的「吞消息」。这里把它转成 MESSAGE_UPDATED + PART_UPDATED，
+    // 让所有端在同一时刻看到同一条用户消息。
+    //
+    // 注意：enqueued 只是「进入队列」，还没被 agent 消费；cancelled 表示这条
+    // 被撤销（前端要移除占位，否则会显示一条永远不会被处理的用户消息）。
+    // ============================================================
+    case 'session.inbox.enqueued': {
+      const inboxID = str(data.inboxID) ?? ''
+      if (!inboxID) return null
+      const item = rec(data.item)
+      const itemType = str(item.type)
+      // 只有用户文本消息对应 UI 里的一条消息；compaction/synthetic/move 等
+      // 系统投递项由各自的入口处理，不能在这里伪造用户消息。
+      if (itemType !== 'user') return null
+      const payload = rec(item.payload)
+      const created = eventCreated ?? Date.now()
+      // 两条事件：先建消息骨架，再补文本 part。
+      // 只发骨架的话，UI 里会出现一条空白用户消息（text 在 part 上，不在 info 上）。
+      // 用 TEXT_STARTED 语义等价的形式（MESSAGE_PART_UPDATED + text）让 store
+      // 走与历史拉取一致的路径（part id `${id}-text` 与 adaptUserParts 对齐）。
+      return globalEvent(directory, EventTypes.SESSION_INBOX_ENQUEUED, {
+        sessionID,
+        inboxID,
+        created,
+        text: str(payload.text) ?? '',
+      })
+    }
+
+    case 'session.inbox.cancelled': {
+      const inboxID = str(data.inboxID) ?? ''
+      if (!inboxID) return null
+      return globalEvent(directory, EventTypes.MESSAGE_REMOVED, { sessionID, messageID: inboxID })
+    }
+
+    // ============================================================
     // v2 消息流事件 → v1 Message 事件
     //
     // v2 没有 message.updated / message.part.updated / message.part.delta，
@@ -316,6 +360,32 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
           type: 'text',
           text: str(data.text) ?? '',
           synthetic: false,
+          time: { start: 0, end: num(e.created) ?? 0 },
+        },
+      })
+    }
+
+    /**
+     * 推理结束：定稿 reasoning part。
+     *
+     * 缺这条映射会有两个可观测后果：
+     *   1. reasoning part 的 `time.end` 永远是 undefined，UI 上推理块一直算
+     *      「进行中」，折叠/耗时统计都不准；
+     *   2. `handlePartDelta` 依靠 `time.end` 丢弃已定稿 part 的迟到增量。
+     *      没有 end，用户按下停止后服务端仍在途的 reasoning.delta 会继续被
+     *      追加到推理块里 —— 表现就是「点了停止，内容还在往里流」。
+     */
+    case 'session.reasoning.ended': {
+      const messageID = str(data.assistantMessageID) ?? ''
+      const ordinal = num(data.ordinal) ?? 0
+      if (!messageID) return null
+      return globalEvent(directory, EventTypes.MESSAGE_PART_UPDATED, {
+        part: {
+          id: `${messageID}-reasoning-${ordinal}`,
+          sessionID,
+          messageID,
+          type: 'reasoning',
+          text: str(data.text) ?? '',
           time: { start: 0, end: num(e.created) ?? 0 },
         },
       })

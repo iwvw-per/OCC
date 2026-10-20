@@ -22,6 +22,11 @@ const cache = new Map<string, { at: number; updated?: number }>()
  * 并发上限：项目多时逐个目录 getSessions 会同时打满浏览器同源连接额度
  * （约 6 条），把正在切换的会话消息请求挤到队列后面。限制为 3 条并发，
  * 让出连接给更关键的会话加载；每目录有 60s 缓存，慢一点不影响体验。
+ *
+ * ⚠️ 但「按目录逐个查」本身是个大坑：实测生产日志里每次网关请求平均 274ms，
+ * 15 个目录 ÷ 3 并发 = 5 轮 × 274ms ≈ 1.4 秒，全部串在首屏关键路径上。
+ * 因此改为**优先一次取全量**（见 fetchAllDirectoryLastUsed），只有全量失败
+ * 时才退回按目录查。这条路径在项目多时能省掉绝大部分往返。
  */
 const MAX_CONCURRENT_FETCHES = 3
 
@@ -39,6 +44,49 @@ async function runWithConcurrency<T>(
     }
   })
   await Promise.all(runners)
+}
+
+/** 一次取全量会话、在本地按目录分组求最大时间 */
+const ALL_SESSIONS_CACHE_TTL_MS = 60_000
+const allSessionsCache = new Map<string, { at: number; sessions: Map<string, number> }>()
+
+async function fetchAllDirectoryLastUsed(
+  serverId: string,
+  worktrees: string[],
+): Promise<Map<string, LastUsedResult> | null> {
+  const cacheKey = `${serverId}\x00all`
+  const cached = allSessionsCache.get(cacheKey)
+  let byDirectory: Map<string, number>
+
+  if (cached && Date.now() - cached.at < ALL_SESSIONS_CACHE_TTL_MS) {
+    byDirectory = cached.sessions
+  } else {
+    try {
+      // 不传 directory：服务端返回该实例下所有目录的会话（一次往返）。
+      // limit 取一个足够覆盖近期活动的值——这里只需要「每个目录的最大更新时间」，
+      // 不需要全量历史。
+      const sessions = await getSessions({ roots: true, limit: 200 }, serverId)
+      byDirectory = new Map()
+      for (const session of sessions) {
+        const dir = normalizeToForwardSlash(session.directory ?? '')
+        if (!dir) continue
+        const time = session.time?.updated
+        if (!time) continue
+        if (time > (byDirectory.get(dir) ?? 0)) byDirectory.set(dir, time)
+      }
+      allSessionsCache.set(cacheKey, { at: Date.now(), sessions: byDirectory })
+    } catch {
+      return null
+    }
+  }
+
+  const out = new Map<string, LastUsedResult>()
+  for (const worktree of worktrees) {
+    const dir = normalizeToForwardSlash(worktree)
+    const updated = byDirectory.get(dir)
+    out.set(worktree, { ok: true, updated })
+  }
+  return out
 }
 
 function cacheKey(serverId: string, worktree: string): string {
@@ -103,11 +151,21 @@ export function useProjectLastUsedAt(
 
     const load = async () => {
       const results: Array<readonly [string, LastUsedResult]> = []
-      await runWithConcurrency(directories, MAX_CONCURRENT_FETCHES, async worktree => {
-        const result = await fetchDirectoryLastUsed(serverId, worktree)
-        results.push([worktree, result] as const)
-      })
+
+      // 优先：一次全量请求（1 个往返代替 N 个）。
+      const bulk = await fetchAllDirectoryLastUsed(serverId, directories)
       if (cancelled) return
+
+      if (bulk) {
+        for (const [worktree, result] of bulk) results.push([worktree, result] as const)
+      } else {
+        // 全量失败才退回按目录查（并发 3）
+        await runWithConcurrency(directories, MAX_CONCURRENT_FETCHES, async worktree => {
+          const result = await fetchDirectoryLastUsed(serverId, worktree)
+          results.push([worktree, result] as const)
+        })
+        if (cancelled) return
+      }
 
       // 与已有值合并，而不是整表替换：某目录本次查询失败（弱网/网关抖动）时，
       // 保留上次已知的时间戳，避免项目行时间戳突然消失、排序跳变。

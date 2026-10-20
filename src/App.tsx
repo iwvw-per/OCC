@@ -40,6 +40,7 @@ import { hostWorkspaceStore } from './store/hostWorkspaceStore'
 import { serverStore } from './store/serverStore'
 import { initNotificationSound } from './utils/notificationSoundBridge'
 import { initLiveUpdateSync } from './utils/liveUpdateSync'
+import { scheduleTunnelWarmup } from './utils/tunnelWarmup'
 import { createPtySession } from './api/pty'
 import type { TerminalTab } from './store/layoutStore'
 import { isTauri, isTauriMobile, usesCustomDesktopTitlebar } from './utils/tauri'
@@ -113,6 +114,20 @@ function App() {
 
   // Android 实况通知（ColorOS 流体云）：会话进行中时发布/更新，结束时取消。
   useEffect(() => initLiveUpdateSync(), [])
+
+  /**
+   * 预热主机隧道池。
+   *
+   * 网关到主机的数据通道每次新建要 700-900ms 反向握手（面板源码
+   * aiagent_runtime.go 的实现注释）。池子是「用到才建」，所以用户点开会话的
+   * 那一刻池子还是空的，首屏几个关键请求各自要等一次握手。
+   *
+   * 这里在空闲时提前并发建好几条隧道放进池子，用户点会话时直接命中。
+   * 失败静默，不影响任何功能。
+   */
+  useEffect(() => {
+    scheduleTunnelWarmup()
+  }, [])
 
   useEffect(() => {
     if (!isTauri() || isTauriMobile()) return

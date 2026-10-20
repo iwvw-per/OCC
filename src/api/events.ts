@@ -25,7 +25,7 @@ import type {
   SessionCompactedPayload,
   TodoUpdatedPayload,
 } from './types'
-import type { PartDeltaPayload, PartRemovedPayload, SessionUsagePayload } from '../types/api/event'
+import type { PartDeltaPayload, PartRemovedPayload, SessionUsagePayload, InboxEnqueuedPayload } from '../types/api/event'
 import { EventTypes } from '../types/api/event'
 
 // ============================================
@@ -558,6 +558,13 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     }
     return
   }
+  if ((payload.type as string) === EventTypes.SESSION_INBOX_ENQUEUED) {
+    const props = (payload as { properties?: InboxEnqueuedPayload }).properties
+    if (props && typeof props.sessionID === 'string' && typeof props.inboxID === 'string') {
+      callbacks.onInboxEnqueued?.(props)
+    }
+    return
+  }
   switch (payload.type) {
     case EventTypes.MESSAGE_UPDATED: {
       const message = getMessageInfo(payload.properties)
@@ -575,6 +582,17 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     case EventTypes.MESSAGE_PART_REMOVED:
       callbacks.onPartRemoved?.(payload.properties as unknown as PartRemovedPayload)
       break
+    case EventTypes.MESSAGE_REMOVED: {
+      // v2 用它撤销一条已入队但未处理的用户消息（session.inbox.cancelled）。
+      // 不处理会留下一条永远不会被 agent 处理的用户消息，且刷新后消失，
+      // 表现为「这条消息发出去了但一直没回应」。
+      const props = payload.properties as { sessionID?: unknown; messageID?: unknown; messageId?: unknown }
+      const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
+      const messageID =
+        typeof props?.messageID === 'string' ? props.messageID : typeof props?.messageId === 'string' ? props.messageId : ''
+      if (sessionID && messageID) callbacks.onMessageRemoved?.({ sessionID, messageID })
+      break
+    }
     case EventTypes.SESSION_UPDATED: {
       callbacks.onSessionUpdated?.(payload.properties.info)
       break

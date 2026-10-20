@@ -222,17 +222,36 @@ export async function restoreSession(sessionId: string, directory?: string, serv
  * 元数据补齐、getLastTurnDiff 会先后各取一次同一会话，singleFlight 只能合并
  * 同时在途的请求，串行调用仍会各发一次。TTL 内命中缓存直接返回，避免串行重复
  * 拉取；create/update/delete/revert 等写操作后按前缀失效，保证不长期陈旧。
+ *
+ * ⚠️ 缓存键**不含 directory**：
+ * 会话由 sessionID 全局唯一标识，同一个会话无论从哪个目录上下文查询，返回的
+ * 都是同一份元数据。此前把 directory 拼进键，导致同一会话在不同调用点
+ * （有的传目录、有的传 undefined、有的目录斜杠不一致）各算一次缓存未命中，
+ * 于是同一个 GET /api/session/{id} 在一次打开里被打了 3 次 —— 生产日志实测
+ * 可见（777ms / 905ms / 310ms 三次相同请求）。在网关隧道下单次 274ms，
+ * 这直接浪费了近 1 秒。
  */
 const SESSION_META_TTL_MS = 15_000
 const SESSION_META_CACHE_PREFIX = 'session-meta:'
 
-function sessionMetaCacheKey(serverId: string, sessionId: string, directory?: string): string {
-  return `${SESSION_META_CACHE_PREFIX}${serverId}:${sessionId}:${directoryCacheKey(directory)}`
+function sessionMetaCacheKey(serverId: string, sessionId: string, _directory?: string): string {
+  return `${SESSION_META_CACHE_PREFIX}${serverId}:${sessionId}`
 }
 
 /** 写操作后失效某会话的元数据缓存（含各目录键，简单起见按 server:session 前缀） */
 function invalidateSessionMetaCache(serverId: string, sessionId: string): void {
   ttlCacheInvalidate(`${SESSION_META_CACHE_PREFIX}${serverId}:${sessionId}:`)
+}
+
+/**
+ * 只读缓存：命中就返回，未命中返回 undefined，**绝不发请求**。
+ *
+ * 给延迟敏感的路径用（如发送前判断「是否还需要 switchAgent/switchModel」）。
+ * 这类调用方宁可拿不到答案走保守分支，也不能在发送链路上多串一次往返。
+ */
+export function peekSessionCache(sessionId: string, directory?: string, serverId?: string): ApiSession | undefined {
+  const target = resolveSessionTarget(sessionId, serverId)
+  return ttlCacheGet<ApiSession>(sessionMetaCacheKey(target.serverId, target.sessionId, directory), SESSION_META_TTL_MS)
 }
 
 export async function getSession(sessionId: string, directory?: string, serverId?: string): Promise<ApiSession> {
@@ -242,14 +261,10 @@ export async function getSession(sessionId: string, directory?: string, serverId
   if (cached) return cached
 
   // 首屏时 loadSession、SidePanel、元数据补齐会各取一次同一会话，
-  // 合并同 key 在途请求。key 用与传输格式无关的目录键，
-  // 避免 pathMode 在 auto 检测期间切换导致 key 失配。
-  const session = await singleFlight(
-    `session:${target.serverId}:${target.sessionId}:${directoryCacheKey(directory)}`,
-    async () => {
-      return nativeGetSession(target.serverId, target.sessionId)
-    },
-  )
+  // 合并同 key 在途请求。key 与缓存键一致：不含 directory（见上方说明）。
+  const session = await singleFlight(`session:${target.serverId}:${target.sessionId}`, async () => {
+    return nativeGetSession(target.serverId, target.sessionId)
+  })
   ttlCacheSet(cacheKey, session, SESSION_META_TTL_MS)
   return session
 }

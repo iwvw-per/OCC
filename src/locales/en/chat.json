@@ -141,6 +141,8 @@
     "replyToAgent": "Reply to Agent (type @ to mention, / for commands)",
     "fileTooLarge": "File too large",
     "fileTooLargeBody": "\"{{name}}\" exceeds the {{size}} attachment limit and was not added",
+    "fileTypeUnsupported": "Unsupported file type",
+    "fileTypeUnsupportedBody": "\"{{name}}\" is not supported by the current model and was not added. Switch to a model that accepts this type.",
     "largePasteTitle": "Paste large text",
     "largePasteBody": "The pasted content has {{count}} characters. Choose how to handle it:",
     "largePasteAsAttachment": "As attachment",

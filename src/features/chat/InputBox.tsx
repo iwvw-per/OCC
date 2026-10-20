@@ -240,11 +240,19 @@ function InputBoxComponent({
 }: InputBoxProps) {
   const { t } = useTranslation('chat')
   const { sendOnEnter } = useLayoutStore()
-  // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages
+  // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages。
+  //
+  // ⚠️ 能力「未知」不等于「不支持」。模型列表尚未加载完（或加载失败）时
+  // fileCapabilities 为 undefined，若这里退化成全 false，supportsAnyFile 就是 false，
+  // handleFilesSelected 会在第一行直接 return —— 用户粘贴/选择图片后毫无反应，
+  // 也没有任何提示。这正是「仅图片发送没有反应」的一个来源。
+  //
+  // 因此未知时按「允许选择」处理，把最终裁决交给服务端：多带一个附件远好于
+  // 静默丢掉用户的图片。真正不被支持时，下面的 handleFilesSelected 会给出提示。
   const fileCaps: FileCapabilities = useMemo(
     () =>
       fileCapabilitiesProp ?? {
-        image: supportsImages,
+        image: supportsImages ?? true,
         pdf: false,
         audio: false,
         video: false,
@@ -556,12 +564,34 @@ function InputBoxComponent({
   const setSlashOpen = slash.setOpen
 
   const runSubmit = useCallback(
-    async (submit: () => Promise<boolean | void> | boolean | void, onSuccess?: () => void, onFailure?: () => void) => {
+    async (
+      submit: () => Promise<boolean | void> | boolean | void,
+      onSuccess?: () => void,
+      onFailure?: () => void,
+      options?: {
+        /**
+         * 提交后立即释放 isSubmitting（不等 submit 返回）。
+         *
+         * 用于普通发消息：消息一上屏、草稿一清空，输入区就该恢复可用。若等到整条
+         * 发送链路（远程主机下 create/switch/prompt 串行可达数秒）结束才释放，
+         * 用户会盯着变灰的发送按钮，以为没发出去而重复点。
+         */
+        releaseImmediately?: boolean
+      },
+    ) => {
       if (isSubmitting) return false
 
       setIsSubmitting(true)
+      let released = false
+      const release = () => {
+        if (released) return
+        released = true
+        setIsSubmitting(false)
+      }
       try {
-        const result = await submit()
+        const pending = submit()
+        if (options?.releaseImmediately) release()
+        const result = await pending
         if (result === false) {
           onFailure?.()
           return false
@@ -574,7 +604,7 @@ function InputBoxComponent({
         onFailure?.()
         return false
       } finally {
-        setIsSubmitting(false)
+        release()
       }
     },
     [isSubmitting],
@@ -623,6 +653,8 @@ function InputBoxComponent({
           restoreDraft(draftSnapshot)
         }
       },
+      // 普通发消息：输入区立即恢复可用（详见 runSubmit 的 releaseImmediately）
+      { releaseImmediately: true },
     )
   }, [
     attachments,
@@ -926,6 +958,18 @@ function InputBoxComponent({
             'error',
             t('inputBox.fileTooLarge'),
             t('inputBox.fileTooLargeBody', { name: tooLarge[0].name, size: MAX_DROPPED_FILE_SIZE_LABEL }),
+            sessionId ?? '',
+          )
+        }
+        // 类型不被当前模型支持：必须明确告知。
+        // 此前这条分支只处理「文件太大」，类型不支持时完全静默 —— 用户粘贴/选择图片
+        // 后什么都没发生（没有附件、没有报错），看起来就是「发图片没反应」。
+        const unsupported = rejected.filter(item => item.type === 'type')
+        if (unsupported.length > 0) {
+          notificationStore.push(
+            'error',
+            t('inputBox.fileTypeUnsupported'),
+            t('inputBox.fileTypeUnsupportedBody', { name: unsupported[0].name }),
             sessionId ?? '',
           )
         }

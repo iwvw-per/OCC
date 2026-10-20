@@ -33,9 +33,17 @@ const {
 vi.mock('../api', () => ({
   getSession: (...args: unknown[]) => getSessionMock(...args),
   getSessionTurnPage: (...args: unknown[]) => getSessionTurnPageMock(...args),
+  // 首屏两段式：测试里等价于「一次就取够」，不额外发第二段请求。
+  // 需要验证分段行为时单独 mock getSessionFirstScreenMock。
+  getSessionFirstScreen: async (...args: unknown[]) => {
+    const page = await getSessionTurnPageMock(...args)
+    return { ...page, complete: true }
+  },
   getSessionMessagePage: (...args: unknown[]) => getSessionTurnPageMock(...args),
   getSessionLightweightMessages: vi.fn(),
   probeLightweightSupport: vi.fn(async () => false),
+  // 首屏只读缓存判断轻量能力；测试默认「未知」→ 走分页路径
+  peekLightweightSupport: vi.fn(() => undefined),
   revertMessage: (...args: unknown[]) => revertMessageMock(...args),
   unrevertSession: vi.fn(),
   encodeBeforeCursor: (message: unknown) => `cursor:${(message as { info?: { id?: string } }).info?.id ?? ''}`,
@@ -505,8 +513,8 @@ describe('useSessionManager', () => {
         await loadPromise
       })
 
-      // 1 次初始 + 3 次重试
-      expect(getSessionTurnPageMock).toHaveBeenCalledTimes(4)
+      // 1 次初始 + 2 次重试（退避已缩短为 [300, 800]，最多 3 次尝试）
+      expect(getSessionTurnPageMock).toHaveBeenCalledTimes(3)
       expect(messageStoreMock.setLoadError).toHaveBeenCalledWith('session-1', expect.objectContaining({ name: 'APIError' }))
     } finally {
       vi.useRealTimers()

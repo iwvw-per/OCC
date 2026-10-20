@@ -14,9 +14,11 @@ import { messageStore, type RevertState, type SessionState } from '../store'
 import { sessionKeyToServerId } from '../utils/sessionKey'
 import {
   getSessionTurnPage,
+  getSessionFirstScreen,
   getSessionMessagePage,
   getSessionLightweightMessages,
   probeLightweightSupport,
+  peekLightweightSupport,
   encodeBeforeCursor,
   getSession,
   revertMessage,
@@ -73,18 +75,28 @@ function isRetryableLoadError(error: unknown): boolean {
   )
 }
 
-/** 有限次退避重试；仅在 isRetryableLoadError 判定为可重试且未失效时重试 */
+/**
+ * 有限次退避重试；仅在 isRetryableLoadError 判定为可重试且未失效时重试。
+ *
+ * ⚠️ 退避必须短：这是**首屏阻塞路径**，用户在盯着加载动画。
+ * 原先是 [500, 1500, 3000]，最坏情况单是等待就 5 秒；再叠加 4 次请求本身的耗时
+ * （隧道下每次约 1s），一次失败的首屏能拖到十几秒甚至几十秒 —— 正是「加载好慢」。
+ *
+ * 现在改为 [300, 800]（最多 3 次尝试，总退避 1.1s）。瞬态抖动通常第一次重试就恢复；
+ * 真连不上时，尽快把错误交给用户（显示重试按钮）比让他干等更有用。
+ */
+const LOAD_RETRY_DELAYS = [300, 800]
+
 async function withLoadRetry<T>(fn: () => Promise<T>, isStale: () => boolean): Promise<T> {
-  const delays = [500, 1500, 3000]
   let lastError: unknown
-  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+  for (let attempt = 0; attempt <= LOAD_RETRY_DELAYS.length; attempt += 1) {
     try {
       return await fn()
     } catch (error) {
       lastError = error
-      if (isStale() || !isRetryableLoadError(error) || attempt === delays.length) throw error
+      if (isStale() || !isRetryableLoadError(error) || attempt === LOAD_RETRY_DELAYS.length) throw error
       sessionErrorHandler('load session retry', error)
-      await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+      await new Promise(resolve => setTimeout(resolve, LOAD_RETRY_DELAYS[attempt]))
     }
   }
   throw lastError
@@ -286,27 +298,65 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         // 路径」，不依赖元数据。此前三者串行 —— 探测约 1.2s 往返，元数据约 1.2s，
         // 白白叠加成 ~2.4s。现在探测与 getSession 同时起飞，只有消息请求必须等
         // 探测结论（因为路径不同），总体从「探测+元数据+消息」压到「探测+消息」。
-        const probePromise = probeLightweightSupport(sid, dir, serverId)
+        /**
+         * 轻量投影**只走缓存判断，绝不阻塞首屏**。
+         *
+         * 探测本身要一个完整往返，而它只决定「走轻量单请求还是轮次分页」。
+         * 实测本机服务端并不支持轻量投影（不返回 X-Lightweight 头），也就是说
+         * 这个往返对首屏毫无收益，却让内容晚到一个 RTT —— 经隧道就是 1 秒以上。
+         *
+         * 因此：
+         *   - 已知结果（进程内或持久化缓存）→ 走对应路径，零额外开销；
+         *   - 未知 → 立即按分页路径开始拉消息，同时在后台探测并把结果写入缓存，
+         *     后续会话即可享受轻量路径。
+         */
         const sessionInfoPromise = getSession(sid, dir, serverId).catch(() => null)
-        const supportsLightweight = await probePromise
-        const [sessionInfo, page] = await withLoadRetry(
-          () =>
-            Promise.all([
-              sessionInfoPromise,
-              supportsLightweight
-                ? getSessionLightweightMessages(sid, dir, serverId, { signal: abortController.signal }).then(r => ({
-                    messages: r.messages,
-                    nextCursor: undefined as string | undefined,
-                    hasMore: r.hasMore,
-                    compactedAt: r.compactedAt,
-                    compaction: r.compaction,
-                  }))
-                : getSessionTurnPage(sid, INITIAL_TURN_LIMIT, undefined, dir, serverId, {
-                    signal: abortController.signal,
-                  }),
-            ]),
-          isStale,
-        )
+        const knownLightweight = peekLightweightSupport(serverId)
+        if (knownLightweight === undefined) {
+          // 后台探测：不 await，失败静默；结果会缓存给后续会话用。
+          void probeLightweightSupport(sid, dir, serverId).catch(() => {})
+        }
+
+        /**
+         * 首屏两段式：小页先出内容，剩余轮次在后台补齐。
+         *
+         * 大会话里「一次取够 N 轮」会让首屏等一个大响应（实测 200 条 536KB），
+         * 而用户真正需要先看到的是最近几轮。因此这里先取一小页（约 60 条），
+         * 拿到就立刻上屏；若轮次不够，再异步补足并原地替换。
+         *
+         * 已知支持轻量投影的服务器走单请求（一次拿全，无需分段）。
+         */
+        const lightweightMessages =
+          knownLightweight === true
+            ? await getSessionLightweightMessages(sid, dir, serverId, { signal: abortController.signal }).catch(
+                () => null,
+              )
+            : null
+
+        const firstScreen: Awaited<ReturnType<typeof getSessionFirstScreen>> | null = lightweightMessages
+          ? null
+          : await withLoadRetry(
+              () => getSessionFirstScreen(sid, INITIAL_TURN_LIMIT, dir, serverId, { signal: abortController.signal }),
+              isStale,
+            )
+
+        const page = lightweightMessages
+          ? {
+              messages: lightweightMessages.messages,
+              nextCursor: undefined as string | undefined,
+              hasMore: lightweightMessages.hasMore,
+              compactedAt: lightweightMessages.compactedAt,
+              compaction: lightweightMessages.compaction,
+            }
+          : {
+              messages: firstScreen!.messages,
+              nextCursor: firstScreen!.nextCursor,
+              hasMore: firstScreen!.hasMore,
+              compactedAt: firstScreen!.compactedAt,
+              compaction: firstScreen!.compaction,
+            }
+
+        const sessionInfo = await sessionInfoPromise
         const apiMessages = page.messages
 
         if (isStale()) return
@@ -358,6 +408,39 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         // force 模式（如 SSE 重连）只静默刷新数据，不触发滚动
         if (!force) {
           onLoadComplete?.()
+        }
+
+        /**
+         * 首屏已上屏：在后台把剩余轮次补齐，然后原地替换。
+         *
+         * 关键约束（不破坏体验）：
+         *   - 不回到 loading 态：ChatArea 已挂载，用户看到的是可读内容；
+         *   - 不跳滚动位置：setMessages 会保留同 id 消息的引用，滚动锚点不变；
+         *   - 失败静默：已显示的内容仍然可用，缺口由用户上滑时按需加载。
+         */
+        if (firstScreen && !firstScreen.complete && firstScreen.rest) {
+          const restPromise = firstScreen.rest
+          void restPromise()
+            .then(rest => {
+              if (isStale()) return
+              // 期间用户可能已切走/重新加载，只在仍是同一请求时替换
+              const latest = messageStore.getSessionState(sid)
+              if (!latest) return
+              const merged = mergeWithLocalStreamingMessages(rest.messages, latest)
+              messageStore.setMessages(sid, merged, {
+                directory: latest.directory || dir || '',
+                title: latest.title,
+                hasMoreHistory: rest.hasMore,
+                historyCursor: rest.nextCursor,
+                shareUrl: latest.shareUrl,
+                compactedAt: rest.compactedAt,
+                compactionMarker: rest.compaction,
+              })
+              messageStore.compressHistoricalTurns(sid, RECENT_FULL_TURNS)
+            })
+            .catch(() => {
+              // 补齐失败：保留首段内容，用户上滑时会再触发按需加载
+            })
         }
 
         // 首屏若因内存预算裁掉了最旧的一段，自动把缺口补回来。
