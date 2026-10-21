@@ -172,11 +172,14 @@ export async function getSessions(
   if (cached) return cached.filter(session => !isEphemeralSession(session.id))
 
   return dedupeSessionListRequest(cacheServerId, cacheQuery, async () => {
+    // rootsOnly 交给服务端在分页前过滤（`parentID=null`），见 nativeListSessions 的注释：
+    // 客户端过滤会让子会话白占一页名额，导致「展开更多」实际增量小于 limit。
     const sessions = (
       await nativeListSessions(cacheServerId, {
         directory: formatPathForApi(directory, cacheServerId),
         search,
         limit,
+        rootsOnly: rootsFlag !== false,
       })
     ).sessions
     const filtered = archivedOnly
@@ -184,9 +187,8 @@ export async function getSessions(
       : includeArchived
         ? sessions
         : sessions.filter(session => !session.time?.archived)
-    // 子代理会话（有 parentID）不属于列表：列表按 roots 展示，子会话归 childSessionStore。
-    // v2 session.list 不保证按 roots 过滤（且历史响应可能带子会话），这里客户端兜底剔除，
-    // 否则子对话会泄漏进侧栏/搜索列表。显式 roots===false 时（归档全量）保留。
+    // 服务端已按 parentID=null 过滤；这里仍兜底剔除一次 —— 历史响应可能带子会话，
+    // 且 roots===false（归档全量）时服务端不过滤，必须保留原行为。
     const rootsFiltered = rootsFlag === false ? filtered : filtered.filter(session => !session.parentID)
     // 内部临时会话（如 AI 重命名用的临时会话）不进入任何用户可见列表。
     // 列表读侧与 SSE 增量读侧共用同一登记，见 utils/ephemeralSessions。

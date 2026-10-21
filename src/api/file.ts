@@ -4,6 +4,7 @@
 // ============================================
 
 import { nativeListDirectory, nativeReadFile, nativeFindFiles } from './v2NativeFile'
+import { nativeGetVcsStatus } from './v2NativeAgent'
 import { directoryCacheKey } from '../utils/directoryUtils'
 import type { FileNode, FileContent, FileStatusItem, TextSearchMatch } from './types'
 import { serverStore } from '../store/serverStore'
@@ -135,11 +136,23 @@ export async function getFileContent(path: string, directory?: string, serverId?
 }
 
 /**
- * 获取文件 git 状态
+ * 获取文件 git 状态（v2 `vcs.status`）。
+ *
+ * 早先这里直接 `return []`，注释理由是「v2 没有全仓库文件状态端点」——这个判断
+ * 是错的：`GET /api/vcs/status` 实测可用，返回 `[{file, additions, deletions, status}]`。
+ * 文件树因此一直没有 git 状态标记（新增/修改/删除的着色）。
+ *
+ * 注意字段名与 `FileStatusItem`（`{path, added, removed, status}`）不同，需要映射。
  */
-export async function getFileStatus(_directory?: string, _serverId?: string): Promise<FileStatusItem[]> {
-  // v2 没有「全仓库文件状态」端点：状态由 vcs.status / session.diff 提供。
-  return []
+export async function getFileStatus(directory?: string, serverId?: string): Promise<FileStatusItem[]> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  const raw = await nativeGetVcsStatus(sid, { directory })
+  return raw.map(item => ({
+    path: item.file,
+    added: item.additions,
+    removed: item.deletions,
+    status: item.status,
+  }))
 }
 
 /**

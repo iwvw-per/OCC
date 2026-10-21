@@ -20,6 +20,7 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
 import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
+import { reportSessionViewed } from '../api/sessionView'
 import { invalidateSessionListCache } from '../api/sessionListCache'
 import { sessionListIndexStore } from '../store/sessionListIndexStore'
 import type { EventCallbacks } from '../types/api/event'
@@ -470,7 +471,15 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       // 通知；等状态稳定后已无人再触发标记已读，小点就永久残留。
       // 这里在焦点真正落到该会话时补一次，覆盖所有打开路径（点击、键盘、分屏、URL）。
       const focused = paneLayoutStore.getFocusedSessionId()
-      if (focused) notificationStore.markSessionNotificationsRead(focused, 'completed')
+      if (focused) {
+        notificationStore.markSessionNotificationsRead(focused, 'completed')
+        // 同步把已读水位推给服务端（v2 session.view），让其它端也看到已读。
+        // 焦点变化时手上没有 idle 水位，向服务端要一次（getSession 有短 TTL 缓存，
+        // 且这个分支只在切换会话时触发，频率很低）。失败静默，绝不阻塞打开流程。
+        void getSession(focused)
+          .then(session => reportSessionViewed(focused, session?.time?.idle))
+          .catch(() => {})
+      }
     })
     // 服务器列表变化（新增/删除/改名）也要重算：现在连接集合 = 所有已配置服务器
     const unsubscribeServers = serverStore.subscribe(() => {
@@ -692,6 +701,9 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 刚好完成，会被误判为「不在看」而推一条通知，之后没人再触发标记，
           // 小点就永久留在项目行上。这里在状态落定时兜底清一次。
           notificationStore.markSessionNotificationsRead(scopedId, 'completed')
+          // 把已读水位推给服务端（v2 session.view），让其它端也看到已读。
+          // completedAt 就是这一轮的 idle 时间，正是 session.view 要的水位。
+          void reportSessionViewed(scopedId, completedAt)
           if (isSessionDirectlyOpen(scopedId) && soundStore.getSnapshot().currentSessionEnabled) {
             playNotificationSoundDeduped('completed')
           }
