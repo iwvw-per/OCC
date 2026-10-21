@@ -300,6 +300,13 @@ export function isAbortedMessage(info: MessageInfo): boolean {
 }
 
 export function hasRenderableContent(message: Message): boolean {
+  // 纯图片/纯附件消息：content[] 里只有一个空 text（正文为空），
+  // 但 attachments 里有内容。只判 content 会把这类消息整条过滤掉，
+  // 用户看到的就是「我发了图片，但消息不见了」。
+  if (message.info.role === 'user') {
+    const attachments = (message.info as UserMessageInfo).attachments
+    if (attachments && attachments.length > 0) return true
+  }
   return message.content.some(isRenderableContent)
 }
 
