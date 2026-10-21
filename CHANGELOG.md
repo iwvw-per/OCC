@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.0.16] - 2026-10-21
+
+- fix: 消除 contextBackfill 的 unhandled rejection (7dab1ec5)
+- feat: 配置可写、上下文兜底、队列恢复、统计与后台工具 (dc8aa997)
+- feat: 补齐 v2 API 能力，修复配置读取缺陷 (7f79db44)
+
 ## [v2.0.15] - 2026-10-21
 
 - fix: 纯图片消息（正文为空）整条不显示 (a9af297a)
