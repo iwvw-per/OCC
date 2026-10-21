@@ -17,6 +17,7 @@ import { useResponsiveMaxHeight } from '../../../../hooks/useResponsiveMaxHeight
 import { parseAnsi, type AnsiSegment } from '../../../../utils/ansiUtils'
 import { copyTextToClipboard, clipboardErrorHandler } from '../../../../utils'
 import type { ToolRendererProps } from '../types'
+import { useShellLiveOutput } from '../../../../hooks/useShellLiveOutput'
 
 // ============================================
 // Main
@@ -44,13 +45,34 @@ export function BashRenderer({ part, data, onFullscreenChange }: ToolRendererPro
     }
   }, [fullscreenOpen, onFullscreenChange])
 
-  // 解析 ANSI
-  const outputSegments = useMemo(() => {
-    if (!output) return null
-    return parseAnsi(output)
-  }, [output])
+  /**
+   * 实时输出：命令执行期间按 shellID 增量读取。
+   *
+   * `session.tool.progress` 会带回 `metadata.shellID`（存在 `state.metadata`）。
+   * 只有 bash 工具有这个字段，其它工具拿不到就不轮询。
+   *
+   * 最终结果仍以 `tool.success` 的 output 为准：这里只补「过程中」的显示。
+   */
+  const shellId = (() => {
+    const meta = state.metadata
+    return meta && typeof meta.shellID === 'string' ? meta.shellID : undefined
+  })()
+  const live = useShellLiveOutput({
+    shellId,
+    isRunning: isActive,
+    directory: data.cwd,
+    // part.serverID 是会话 key（可能形如 `aiagent:xxx::ses_yyy`），
+    // shell 请求需要真实的服务器 id，由 serverStore 解析活动主机更稳妥。
+    serverId: undefined,
+  })
+  // 实时输出与工具最终输出合并：最终输出到达后优先用最终输出（权威）。
+  const mergedOutput = output || live.output
+  const mergedSegments = useMemo(() => {
+    if (!mergedOutput) return null
+    return parseAnsi(mergedOutput)
+  }, [mergedOutput])
 
-  const hasOutput = !!(outputSegments && outputSegments.length > 0)
+  const hasOutput = !!(mergedSegments && mergedSegments.length > 0)
   const isDone = !isActive
 
   const handleCloseFullscreen = useCallback(() => {
@@ -63,14 +85,14 @@ export function BashRenderer({ part, data, onFullscreenChange }: ToolRendererPro
         <TerminalSurface
           command={command}
           cwd={cwd}
-          outputSegments={outputSegments}
+          outputSegments={mergedSegments}
           isActive={isActive}
           hasOutput={hasOutput}
           hasError={hasError}
           error={data.error}
           isDone={isDone}
           exitCode={exitCode}
-          outputKey={output ?? ''}
+          outputKey={mergedOutput ?? ''}
           fullHeight
           isFullscreen
           onToggleFullscreen={handleCloseFullscreen}
@@ -88,8 +110,8 @@ export function BashRenderer({ part, data, onFullscreenChange }: ToolRendererPro
       hasOutput,
       isActive,
       isDone,
-      output,
-      outputSegments,
+      mergedOutput,
+      mergedSegments,
       t,
     ],
   )
@@ -112,14 +134,14 @@ export function BashRenderer({ part, data, onFullscreenChange }: ToolRendererPro
     <TerminalSurface
       command={command}
       cwd={cwd}
-      outputSegments={outputSegments}
+      outputSegments={mergedSegments}
       isActive={isActive}
       hasOutput={hasOutput}
       hasError={hasError}
       error={data.error}
       isDone={isDone}
       exitCode={exitCode}
-      outputKey={output ?? ''}
+      outputKey={mergedOutput ?? ''}
       maxHeight={isFullscreen ? undefined : maxHeight}
       fullHeight={isFullscreen}
       isFullscreen={isFullscreen}

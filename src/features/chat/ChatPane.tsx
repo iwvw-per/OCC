@@ -17,7 +17,14 @@ import { PaneHeader } from './PaneHeader'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from './PaneDropOverlay'
 import { useFolderProjectDrop } from './useFolderProjectDrop'
 import { FolderProjectDropOverlay } from './FolderProjectDropOverlay'
-import { useChatSession, useModels, useModelSelection, useTurnOutlineEntries, useMergeTurnOutline } from '../../hooks'
+import {
+  useChatSession,
+  useModels,
+  useModelSelection,
+  useTurnOutlineEntries,
+  useMergeTurnOutline,
+  useBackfillTurnOutline,
+} from '../../hooks'
 import { useServerStore } from '../../hooks/useServerStore'
 import { useHostSlideState } from './sidebar/hostSwitchDirection'
 import { useCancelHint } from '../../hooks/useCancelHint'
@@ -464,14 +471,35 @@ export const ChatPane = memo(function ChatPane({
   // 并用 store 的完整大纲渲染侧边轴，历史未加载完也能显示全部轮次。
   const routeRawSessionId = routeSessionId ? sessionKeyToSessionId(routeSessionId) : null
   useMergeTurnOutline(paneServerId, routeRawSessionId, renderedMessages)
+  /**
+   * 后台补全完整轮次大纲（侧边轴据此显示**全部**轮次，而不只是已加载的）。
+   *
+   * 只在会话已加载完成后再触发：这条请求可能十几 MB（见 useTurnOutline 说明），
+   * 必须等首屏渲染完、应用空闲时再做，绝不能和首屏抢带宽。
+   */
+  useBackfillTurnOutline(paneServerId, routeRawSessionId, loadState === 'loaded')
   const turnOutlineEntries = useTurnOutlineEntries(paneServerId, routeRawSessionId)
   const outlineSourceEntries = useMemo(() => {
+    /**
+     * 已加载轮次的标记。
+     *
+     * 侧边轴现在包含**全部**轮次（含尚未加载进内存的），所以必须让用户能看出
+     * 哪些点一下就到、哪些需要先补拉。判定依据就是 messageStore 里当前有哪些
+     * 消息 id —— 这与「点击时走 scroll 还是 loadUntilMessage」用的是同一判据
+     * （见 handleOutlineScrollToMessage），不会出现「看起来已加载、点下去却在转圈」。
+     */
+    const loadedIds = new Set(renderedMessages.map(message => message.info.id))
+    const withLoaded = (entry: { messageId: string; title: string }) => ({
+      messageId: entry.messageId,
+      title: entry.title,
+      loaded: loadedIds.has(entry.messageId),
+    })
     // store 有数据时以它为准（含未加载轮次）；否则退回消息派生的条目
     if (turnOutlineEntries.length >= chatPageViewModel.outlineSourceEntries.length && turnOutlineEntries.length > 0) {
-      return turnOutlineEntries.map(entry => ({ messageId: entry.messageId, title: entry.title }))
+      return turnOutlineEntries.map(withLoaded)
     }
-    return chatPageViewModel.outlineSourceEntries
-  }, [turnOutlineEntries, chatPageViewModel.outlineSourceEntries])
+    return chatPageViewModel.outlineSourceEntries.map(withLoaded)
+  }, [turnOutlineEntries, chatPageViewModel.outlineSourceEntries, renderedMessages])
 
   // 切 session remount 时默认视为贴底，避免回底按钮闪一下
   useEffect(() => {
@@ -620,7 +648,16 @@ export const ChatPane = memo(function ChatPane({
     }
   }, [inputRestoreContent, visibleModels, restoreFromMessage])
 
-  // session 切换：只在 routeSessionId 变化时，从最后一条 user 消息恢复模型
+  // session 切换：只在 routeSessionId 变化时，从消息里恢复模型
+  //
+  // ⚠️ v2 的 user 消息**没有 model 字段**（实测只有 time/text），
+  // 模型记在 assistant 消息的 `model: { id, providerID, variant }` 上。
+  // 原实现只找 user 消息的 model，必然拿到 undefined，于是「新开无痕页面/
+  // 换一台设备打开同一会话」时显示的是全局默认（models[0]），
+  // 看起来就是「会话没有绑定模型」。
+  //
+  // 现在优先取最近一条**带 model 的 assistant 消息**；user 消息仍作兜底
+  // （v1 形状或未来版本可能回填）。
   const restoredSessionRef = useRef<string | null>(null)
   useEffect(() => {
     // 没有 session、或者这个 session 已经恢复过了 → 跳过
@@ -630,13 +667,30 @@ export const ChatPane = memo(function ChatPane({
 
     restoredSessionRef.current = routeSessionId
 
+    type ModelCarrier = { model?: { providerID: string; modelID: string; variant?: string }; variant?: string }
+
+    // 1) 最近的 assistant 消息（v2 唯一可靠的模型来源）
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.info.role !== 'assistant') continue
+      const info = message.info as ModelCarrier & { modelID?: string; providerID?: string }
+      // v2 适配层把 model 摊平到 modelID/providerID；也兼容仍有 model 对象的形状
+      const model = info.model ?? (info.modelID && info.providerID
+        ? { providerID: info.providerID, modelID: info.modelID }
+        : undefined)
+      if (model?.providerID && model?.modelID) {
+        restoreFromMessage(model, info.variant ?? model.variant ?? null)
+        return
+      }
+    }
+
+    // 2) 兜底：user 消息（v1 形状 / 未来版本可能回填）
     const lastUserMsg = [...messages].reverse().find(m => m.info.role === 'user')
     if (lastUserMsg && 'model' in lastUserMsg.info) {
-      const userInfo = lastUserMsg.info as {
-        model?: { providerID: string; modelID: string; variant?: string }
-        variant?: string
+      const userInfo = lastUserMsg.info as ModelCarrier
+      if (userInfo.model?.providerID && userInfo.model?.modelID) {
+        restoreFromMessage(userInfo.model, userInfo.variant ?? userInfo.model.variant)
       }
-      restoreFromMessage(userInfo.model, userInfo.variant ?? userInfo.model?.variant)
     }
     // 依赖 routeSessionId 和 messages.length（等加载完），不依赖 messages 引用
     // eslint-disable-next-line react-hooks/exhaustive-deps

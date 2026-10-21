@@ -83,6 +83,8 @@ const EMPTY_SESSION_STATE = {
   directory: '',
   title: null,
   compactedAt: undefined as number | undefined,
+  model: undefined as { providerID: string; modelID: string; variant?: string } | undefined,
+  agent: undefined as string | undefined,
 } as const
 
 interface UseChatSessionOptions {
@@ -839,6 +841,21 @@ export function useChatSession({
             variant: input.options?.variant,
             directory: input.directory,
             messageID: optimisticMessageId,
+            // 显式声明投递语义，不依赖服务端默认值。
+            //
+            // 实测（opencode v2.0.32，源码 packages/core/src/session/prompt.ts:50）：
+            //   `delivery: request.input.delivery ?? "steer"`
+            // 也就是**默认就是 steer**。steer 的语义是：
+            //   - session 空闲时：立即开始执行（实测 3s 内出结果）；
+            //   - session 忙碌时：入队，在**下一个 step 边界**注入上下文，
+            //     不会打断当前正在跑的工具/模型请求（实测 12s 的 sleep 跑完后
+            //     才处理新消息）。
+            //
+            // 我们在忙碌时已经先 abort 了（用户要的是「新消息取代旧轮次」），
+            // 所以这里必然走「空闲 → 立即执行」。显式写出来是为了：
+            //   1. 服务端未来改默认值时行为不漂移；
+            //   2. 读代码的人不必去翻服务端实现才知道语义。
+            delivery: 'steer',
           },
           paneServerId,
         )
@@ -1289,6 +1306,10 @@ export function useChatSession({
     /** 消息级流式（不含 session.status）；一般 UI 用 isStreaming 即可 */
     messageIsStreaming: isStreaming,
     sessionDirectory,
+    /** 会话在服务端绑定的模型（无痕/新设备靠它恢复，而不是全局默认） */
+    sessionModel: perSessionState.model,
+    /** 会话绑定的 agent（服务端权威） */
+    sessionAgent: perSessionState.agent,
     canUndo,
     canRedo,
     redoSteps,

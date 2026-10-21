@@ -797,6 +797,16 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           })
         },
 
+        /**
+         * 工具执行中的进度：把 metadata 合到已有 part 上，状态保持 running。
+         *
+         * 只在 part 当前确实是 running/pending 时才更新 —— progress 是 ephemeral、
+         * 可能与 success 乱序到达；无脑覆盖会把已完成的工具改回「运行中」。
+         */
+        onNextToolProgress: data => {
+          messageStore.applyToolProgress(scope(data.sessionID), data.callID, data.metadata)
+        },
+
         // ============================================
         // Session Events → childSessionStore
         // ============================================

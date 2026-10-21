@@ -200,9 +200,26 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     // 主动停止发 execution.interrupted（+ step.failed aborted），同样不发 idle。
     // 两者都归一为 IDLE：若不映射，流式消息永不收尾、会话永久停在 Working。
     // 上层 handleSessionIdle 会定稿流式消息、落定悬空 tool、移除 Working 状态。
-    case 'session.execution.succeeded':
-    case 'session.execution.interrupted':
-      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID, timestamp: eventCreated })
+    //
+    // interrupted 带 reason（user | shutdown | superseded | inactivity）：
+    // 用户主动停止和「服务端重启打断」在界面上是两回事，带上它才能区分。
+    case 'session.execution.succeeded': {
+      const outcome = str(data.outcome)
+      return globalEvent(directory, EventTypes.SESSION_IDLE, {
+        sessionID,
+        timestamp: eventCreated,
+        ...(outcome === 'failed' ? { outcome: 'failed' as const } : {}),
+      })
+    }
+    case 'session.execution.interrupted': {
+      const reason = str(data.reason)
+      return globalEvent(directory, EventTypes.SESSION_IDLE, {
+        sessionID,
+        timestamp: eventCreated,
+        outcome: 'interrupted' as const,
+        ...(reason ? { interruptReason: reason } : {}),
+      })
+    }
     // v2 运行态：execution.started 表示开始，映射为 busy 以便侧栏显示动态图标
     // （v2 不发 session.status，若只靠 /session/active 轮询则侧栏不实时）。
     case 'session.execution.started':
@@ -507,6 +524,33 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         // task 工具的子会话 id 在结果 metadata 里（metadata.sessionId），透传供子代理识别。
         metadata: toolResultMetadata(data),
       })
+
+    /**
+     * 工具执行中的实时进度。
+     *
+     * 实测载荷（bash 工具）：
+     *   data: { sessionID, assistantMessageID, id: "call_xxx",
+     *           metadata: { shellID: "sh_xxx" } }
+     *
+     * 它是 ephemeral（不落库），只在执行期间间歇发送。不同工具填的 metadata
+     * 不一样（bash 给 shellID，别的工具可能给阶段/百分比）。这里统一透传，
+     * 让渲染层按 `state.metadata` 自行取用 —— 关键是**状态必须是 running**，
+     * 否则会覆盖掉已经 completed 的 part（乱序到达时）。
+     *
+     * 不映射它的后果：一个跑 30 秒的命令，界面上只有「已调用」和「已完成」
+     * 两个状态，中间 30 秒完全静止，用户以为卡死了。
+     */
+    case 'session.tool.progress': {
+      const messageID = str(data.assistantMessageID) ?? ''
+      const callID = str(data.id) ?? ''
+      if (!messageID || !callID) return null
+      const metadata = rec(data.metadata)
+      return globalEvent(directory, EventTypes.SESSION_NEXT_TOOL_PROGRESS, {
+        sessionID,
+        callID,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+      })
+    }
     case 'session.tool.failed':
       return globalEvent(directory, EventTypes.SESSION_NEXT_TOOL_FAILED, {
         sessionID,

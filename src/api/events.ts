@@ -20,6 +20,7 @@ import type {
   EventCallbacks,
   GlobalEvent,
   NextToolSettledPayload,
+  NextToolProgressPayload,
   ServerConnectedPayload,
   SessionErrorPayload,
   SessionCompactedPayload,
@@ -655,6 +656,19 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     case EventTypes.SERVER_CONNECTED:
       callbacks.onServerConnected?.(normalizeServerConnected(payload.properties))
       break
+    case EventTypes.SESSION_NEXT_TOOL_PROGRESS: {
+      const props = payload.properties as Partial<NextToolProgressPayload> | undefined
+      const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
+      const callID = typeof props?.callID === 'string' ? props.callID : ''
+      if (sessionID && callID) {
+        callbacks.onNextToolProgress?.({
+          sessionID,
+          callID,
+          ...(props?.metadata && typeof props.metadata === 'object' ? { metadata: props.metadata } : {}),
+        })
+      }
+      break
+    }
     case EventTypes.SESSION_NEXT_TOOL_SUCCESS: {
       const settled = normalizeNextToolSettled(payload.properties, 'completed')
       if (settled) callbacks.onNextToolSettled?.(settled)

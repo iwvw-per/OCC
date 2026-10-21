@@ -32,6 +32,8 @@ interface OutlineEntry {
   fullTitle: string
   railLabel: string
   overlayLabel: string
+  /** 该轮次的消息是否已在内存中（false 时点击需先补拉） */
+  loaded: boolean
 }
 
 interface OutlineIndexProps {
@@ -196,6 +198,9 @@ function formatEntries(entries: OutlineSourceEntry[], visual: VisualConfig): Out
     fullTitle: entry.title,
     railLabel: truncateOutlineLabel(entry.title, visual.railLabelMax),
     overlayLabel: truncateOutlineLabel(entry.title, visual.overlayLabelMax),
+    // 未标注视为已加载：老调用方（消息派生条目）不带这个字段，
+    // 而那些条目本来就来自内存里的消息。
+    loaded: entry.loaded !== false,
   }))
 }
 
@@ -324,24 +329,49 @@ function TickRail({ entries, visual }: TickRailProps) {
   const labelStyle = buildLabelStyle(visual.fisheye)
   return (
     <>
-      {entries.map((entry, index) => (
-        <div
-          key={entry.messageId}
-          data-oi-item
-          className="relative flex items-center justify-end cursor-pointer"
-          style={{ ...itemStyle, '--oi-index': String(index) } as CSSProperties}
-          title={entry.fullTitle}
-        >
+      {entries.map((entry, index) => {
+        /**
+         * 未加载轮次的视觉区分。
+         *
+         * 轴上现在含**全部**轮次（含尚未拉进内存的），点已加载的直接跳，
+         * 点未加载的会先补拉再跳（多一次往返，经网关约 1 秒）。
+         * 用户需要提前知道这一点，所以要能一眼看出差别。
+         *
+         * 用「缩窄 + 降透明」而不是改高度：轨道的鱼眼几何（--oi-step、
+         * 相邻间隔）是按 tickHeight 固定推导的，改高度会让整条轴的间距错位。
+         * scaleX 已在 tick 上用掉，所以这里改用 opacity 与 boxShadow 组合，
+         * 前者不参与布局、后者只影响绘制。
+         */
+        const isLoaded = entry.loaded !== false
+        return (
           <div
-            data-oi-label
-            className={`absolute right-full mr-2.5 whitespace-nowrap pointer-events-none ${visual.labelClassName}`}
-            style={labelStyle}
+            key={entry.messageId}
+            data-oi-item
+            data-oi-loaded={isLoaded ? '1' : '0'}
+            className="relative flex items-center justify-end cursor-pointer"
+            style={{ ...itemStyle, '--oi-index': String(index) } as CSSProperties}
+            title={entry.fullTitle}
           >
-            {entry.railLabel}
+            <div
+              data-oi-label
+              className={`absolute right-full mr-2.5 whitespace-nowrap pointer-events-none ${visual.labelClassName}`}
+              style={labelStyle}
+            >
+              {entry.railLabel}
+            </div>
+            <div
+              data-oi-tick
+              data-oi-loaded={isLoaded ? '1' : '0'}
+              className="rounded-full shrink-0"
+              style={{
+                ...tickStyle,
+                // 未加载：降透明。已加载保持原样（颜色由重着色逻辑接管）。
+                opacity: isLoaded ? 1 : 0.38,
+              }}
+            />
           </div>
-          <div data-oi-tick className="rounded-full shrink-0" style={tickStyle} />
-        </div>
-      ))}
+        )
+      })}
     </>
   )
 }

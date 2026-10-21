@@ -495,6 +495,21 @@ describe('probeLightweightSupport', () => {
     expect(storageMock.setJSONFor).not.toHaveBeenCalled()
     vi.unstubAllGlobals()
   })
+
+  it('cancels the response body so the probe never downloads the whole session', async () => {
+    // 主机 Agent 实现轻量投影时**忽略 limit**：任何带 X-Lightweight 的消息
+    // 请求都返回整个会话（实测 4810 条消息 = 25MB）。我们只要一个响应头，
+    // 所以必须立刻 cancel 掉 body，否则「探测支持与否」本身就要下载 25MB。
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    const response = new Response('[]', { status: 200, headers: { 'X-Lightweight': '1' } })
+    Object.defineProperty(response, 'body', { value: { cancel }, configurable: true })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+
+    const supported = await probeLightweightSupport('ses-1', '/dir', 'srv-cancel')
+    expect(supported).toBe(true)
+    expect(cancel).toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
 })
 
 describe('getSessionLightweightMessages in-flight dedup (StrictMode)', () => {

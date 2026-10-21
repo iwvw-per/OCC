@@ -179,6 +179,14 @@ export interface NextToolSettledPayload {
   metadata?: Record<string, unknown>
 }
 
+/** 工具执行中的进度更新（v2 `session.tool.progress`） */
+export interface NextToolProgressPayload {
+  sessionID: string
+  callID: string
+  /** 工具自定义的进度信息（bash 给 `{ shellID }`，其它工具各异） */
+  metadata?: Record<string, unknown>
+}
+
 // ============================================
 // Global Event Type
 // ============================================
@@ -330,6 +338,13 @@ export interface EventCallbacks {
    * 用于对账：若后端未补发 message.part.updated，仍能把 running/pending 的 part 收尾。
    */
   onNextToolSettled?: (data: NextToolSettledPayload) => void
+  /**
+   * 工具执行中的实时进度（v2 `session.tool.progress`，ephemeral）。
+   *
+   * 带 `metadata`（bash 是 `{ shellID }`，其它工具各异）。用于让长时间运行的
+   * 工具在界面上有「还在动」的反馈，而不是从「已调用」直接静止到「已完成」。
+   */
+  onNextToolProgress?: (data: NextToolProgressPayload) => void
   onProjectUpdated?: (project: Project) => void
   onWorktreeReady?: (data: WorktreeReadyPayload) => void
   onWorktreeFailed?: (data: WorktreeFailedPayload) => void

@@ -54,6 +54,7 @@ import {
 import { useTheme } from '../../hooks/useTheme'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
+import { computePrependRestoreScrollTop } from './chatPageModel'
 import { estimateTimelineItemSize, processReasoningCount, processStepCount, sessionCacheKey } from './chatAreaTimeline'
 import { chatContentMaxWidthStyle, getContentPaddingClass } from './contentWidth'
 import { getChatWidthDragging, subscribeChatWidthDrag } from './chatWidthDrag'
@@ -586,6 +587,28 @@ export const ChatArea = memo(
       /** 流式热行 pin：ref 更新，不碰贴底/SSE 路径 */
       const hotPinnedRef = useRef<number[]>([])
       hotPinnedRef.current = getStreamingHotIndexes(timeline.length, isStreaming)
+      /**
+       * 历史加载期间的锚点行 pin。
+       *
+       * 向上加载时，如果 scrollTop 在 prepend 的过渡态里被钳到 0，虚拟列表的
+       * 渲染窗口会跑到最顶部，**用户原来正在看的那一行立刻被卸载** ——
+       * 之后按 key 再也查不到它，行内锚点补偿就永久失效（实测 el 恒为 false）。
+       *
+       * 把它钉在渲染范围里，那一行就始终存在于 DOM，可以持续按
+       * 「行顶 - 视口顶」精确对齐，不依赖任何高度推算。
+       */
+      const prependPinnedRef = useRef<number[]>([])
+      const prependPinnedKeyRef = useRef<string | undefined>(undefined)
+      // pin 的 key 是 ref，设置它不会触发重渲染；而 rangeExtractor 只在渲染时
+      // 被调用。没有这个 tick，pin 就只是写了个变量、实际不会生效
+      // （这正是之前 anchor 行一直 `el === false` 的原因）。
+      const [, bumpPrependPin] = useState(0)
+      if (prependPinnedKeyRef.current) {
+        const pinnedIndex = timeline.findIndex(item => item.key === prependPinnedKeyRef.current)
+        prependPinnedRef.current = pinnedIndex >= 0 ? [pinnedIndex] : []
+      } else {
+        prependPinnedRef.current = []
+      }
 
       // 冷启动估在底部：有 cache 用 cache 总高，否则 estimate*count + paddingEnd。
       // 不用 MAX_SAFE_INTEGER（单列 range 不会向前扩，只会渲染最后一项）。
@@ -626,7 +649,12 @@ export const ChatArea = memo(
         directDomUpdatesMode: 'transform',
         rangeExtractor: range => {
           const indexes = defaultRangeExtractor({ ...range, overscan: effectiveOverscan })
-          return mergeVirtualRangeIndexes(indexes, resizePinnedRef.current, hotPinnedRef.current)
+          return mergeVirtualRangeIndexes(
+            indexes,
+            resizePinnedRef.current,
+            hotPinnedRef.current,
+            prependPinnedRef.current,
+          )
         },
       })
 
@@ -703,7 +731,29 @@ export const ChatArea = memo(
       }
 
       // ── 历史加载（prepend 锚点） ──
-      const prependAnchor = useRef<{ key: string; offset: number } | undefined>(undefined)
+      //
+      // 目标：向上加载更早的历史时，**用户正在看的内容必须留在原位**，
+      // 新加载的内容出现在它上方（视口外），而不是把视口顶到最上面。
+      //
+      // 这里同时记录两个参照，缺一不可：
+      //
+      //   1. `key/offset`：可见行的 key 与它距视口顶部的偏移。精确，
+      //      但**依赖那一行仍被渲染**。
+      //   2. `distanceFromBottom`：`scrollHeight - scrollTop`。不依赖任何 DOM 行。
+      //
+      // 为什么必须有第 2 个：虚拟列表只渲染视口附近的行。prepend 之后如果
+      // scrollTop 被设成 0，渲染窗口就跑到最顶部，原来那一行立刻被卸载 ——
+      // `querySelector` 再也找不到它，锚点永久失效，于是视口就停在最上面
+      // （实测：scrollTop 从 444 直接掉到 0，scrollHeight 从 7961 涨到 24210）。
+      //
+      // 而「距底部距离」在顶部前插时是**严格守恒**的：
+      //   prepend 高度 ΔH → H' = H + ΔH，S' = S + ΔH
+      //   → D' = H' - S' = H - S = D
+      // 所以只要把它恢复回去，视口就精确回到原来的内容上。它只需要
+      // scrollHeight/scrollTop 两个数字，与虚拟列表渲染了哪些行无关。
+      const prependAnchor = useRef<
+        { key: string; offset: number; distanceFromBottom: number } | undefined
+      >(undefined)
       const prependFrame = useRef<number | undefined>(undefined)
       // 异步加载在途。期间不允许新的加载，且不接受用户手势取消
       // （否则锚点会在内容到达前被丢掉，视口跳一下）。
@@ -717,6 +767,19 @@ export const ChatArea = memo(
       // 是否处于「历史加载流程」中（取景 / 在途 / 恢复）。
       // onScroll 靠它避免在恢复期间重复触发加载。
       const prependLoading = useRef(false)
+      /**
+       * 一轮「向上浏览」的事务基线。
+       *
+       * 一次快速上滑常常触发**多批**加载（先到阈值批一次，用户继续滑再批一次）。
+       * 若每批各自以当前 scrollTop 为基线补偿，误差会逐批累积，最终把视口
+       * 推到很远的地方（实测一次上滑里 sh 涨了 6557，而 st 只补了 2363）。
+       *
+       * 因此把基线固定在「这一轮第一次触发加载时」的位置，后续批次沿用，
+       * 直到用户明确向下滚动（离开顶部区域）才重置。
+       */
+      const scrollSessionBaseline = useRef<number | null>(null)
+      /** 同一轮向上浏览的「起始内容高度」，用于跨批累计新增高度 */
+      const scrollSessionHeight = useRef<number | null>(null)
 
       const stopPinFrame = useCallback(() => {
         prependPinning.current = false
@@ -734,16 +797,38 @@ export const ChatArea = memo(
         stopPinFrame()
       }, [stopPinFrame])
 
-      const updatePrependAnchor = useCallback(() => {
+      /**
+       * 重新取锚点。
+       *
+       * @param keepDistance 保留已记录的「距底部距离」。
+       *
+       * 加载在途时**不能**重新取距离：内容到达的那一刻 scrollTop 会被清零
+       * （实测 444 → 0），此时算出来的距离是错的（`scrollHeight - 0`），
+       * 用它恢复就会把视口停在半空中而不是原位。
+       *
+       * 所以「在途期间因用户滚动而重取锚点」只刷新行定位（key/offset，
+       * 用于精确对齐），距离仍用加载开始那一刻的值。
+       */
+      const updatePrependAnchor = useCallback((keepDistance = false) => {
         const root = scrollRef.current
         if (!root) return
+        const preservedDistance = keepDistance ? prependAnchor.current?.distanceFromBottom : undefined
+        // 距底部距离：prepend 时严格守恒（见上方说明），是不依赖渲染的兜底参照
+        const distanceFromBottom = preservedDistance ?? root.scrollHeight - root.scrollTop
         const view = root.getBoundingClientRect()
         const anchor = [...root.querySelectorAll<HTMLElement>('[data-timeline-key]')]
           .map(el => ({ el, rect: el.getBoundingClientRect() }))
           .filter(x => x.rect.bottom > view.top && x.rect.top < view.bottom)
           .sort((a, b) => a.rect.top - b.rect.top)[0]
         if (anchor?.el.dataset.timelineKey) {
-          prependAnchor.current = { key: anchor.el.dataset.timelineKey, offset: anchor.rect.top - view.top }
+          prependAnchor.current = {
+            key: anchor.el.dataset.timelineKey,
+            offset: anchor.rect.top - view.top,
+            distanceFromBottom,
+          }
+        } else {
+          // 没有可见行（极端情况：整屏都是 spacer）：只保留距离参照
+          prependAnchor.current = { key: '', offset: 0, distanceFromBottom }
         }
       }, [])
 
@@ -753,7 +838,8 @@ export const ChatArea = memo(
       const releasePrependPin = useCallback(() => {
         if (!prependLoading.current) return
         if (prependFetching.current) {
-          updatePrependAnchor()
+          // 在途期间重取：保留加载开始时的距离（见 updatePrependAnchor 说明）
+          updatePrependAnchor(true)
           return
         }
         clearPrepend()
@@ -765,7 +851,31 @@ export const ChatArea = memo(
           prependPinning.current = false
           prependLoading.current = false
           prependAnchor.current = undefined
+          prependPinnedKeyRef.current = undefined
           prependSettled.current?.()
+        }
+
+        /**
+         * 收尾看门狗。
+         *
+         * rAF 循环判定稳定后仍可能有迟到的内容（图片解码完成、字体替换、
+         * 补齐页晚到）把高度再撑高一段。那部分增量如果不补，视口就会相对
+         * 内容上移 —— 用户看到的就是「刚加载的内容顶到上面去了」。
+         *
+         * 这里在收尾后的两个时间点再核对一次「目标位置 = 基线 + 新增高度」，
+         * 需要就补上。只补不下移，且不改变任何状态标记。
+         */
+        const watchdog = (delayMs: number) => {
+          setTimeout(() => {
+            if (prependLoading.current) return
+            const root2 = scrollRef.current
+            if (!root2) return
+            // 迟到的内容会把高度再撑高一段：按「基线 + 总新增高度」重新对齐。
+            const target = computePrependRestoreScrollTop(baselineScrollTop, startHeight, root2.scrollHeight)
+            if (target <= baselineScrollTop) return
+            // 只在明显偏上时补，避免把用户主动滚动拉回去
+            if (target - root2.scrollTop > 4) root2.scrollTop = target
+          }, delayMs)
         }
         if (!root || !prependAnchor.current) {
           finish()
@@ -773,8 +883,53 @@ export const ChatArea = memo(
         }
         if (prependFrame.current !== undefined) cancelAnimationFrame(prependFrame.current)
         prependPinning.current = true
+        // 基准值：必须在 null 检查之后取，且要早于 watchdog 的闭包引用
+        const startHeight = root.scrollHeight
+        const baselineScrollTop = scrollSessionBaseline.current ?? root.scrollTop
         let frames = 0,
           stable = 0
+        let lastHeight = root.scrollHeight
+        let lastHeightFrame = 0
+        /**
+         * 目标：加载完成后，**之前贴在视口顶部的那些内容仍然贴在顶部**，
+         * 新加载的更早内容出现在它们上方（视口之外）。
+         *
+         * 实现要点（踩过的坑都写在这里）：
+         *
+         * 1. prepend 的过渡态会让容器高度**先塌缩再回升**（实测 13181 → 5483
+         *    → 13904），塌缩期间算出来的目标位置全是错的。所以用「相对上一帧
+         *    的高度增量」做累计补偿，天然跳过塌缩阶段。
+         *
+         * 2. 触发加载的位置不是 0（阈值 200px，实测常见 100~260），必须用
+         *    触发时的真实 scrollTop 作基线，否则会整体上移一截。
+         *
+         * 3. 补偿要停在「新内容的底部」：若只按高度增量下移，滚动后视口顶部
+         *    正好是新插入内容的第一行 —— 用户看到的就是「跳到刚加载的内容」。
+         *    正确目标是 `基线 + 新增高度`，此时原顶部内容仍在原处。
+         */
+
+        /**
+         * 补偿策略（最终版，前面几种都试错并被实测否定）：
+         *
+         * 1. ❌「距底部距离」—— prepend 过渡态容器高度会先塌缩再回升
+         *    （实测 13181 → 5483 → 13904），过渡期该值完全失真。
+         * 2. ❌「按元素 getBoundingClientRect 对齐」—— 虚拟列表用 transform
+         *    定位，锚点行一旦被移出渲染范围就取不到（实测 el 恒为 false）。
+         * 3. ✅「scrollHeight 的**单调增量**」—— 只累计高度相对上一帧的
+         *    **正向**增量，塌缩阶段自然被忽略；内容分几批到位就补几批。
+         *
+         * 关键细节：目标是「原滚动位置 + 累计新增高度」。
+         * 只补增量（`scrollTop += grown`）是不够的 —— 过渡态已经把 scrollTop
+         * 压到 0，那样补完会停在「新内容的顶部」，用户看到的正是「跳到刚加载
+         * 的内容」。而「基线 + 总增量」让视口停在新增内容**之后**，原内容仍在
+         * 视口原位。
+         */
+        /**
+         * 跨批累计：以「这一轮向上浏览的起始高度」为基准，
+         * 而不是每批重置，否则多批加载的增量会丢失（实测 sh 涨 6225 而 st 只补 1992）。
+         */
+        const sessionStartHeight = scrollSessionHeight.current ?? startHeight
+
         const apply = () => {
           prependFrame.current = undefined
           const a = prependAnchor.current
@@ -782,15 +937,25 @@ export const ChatArea = memo(
             finish()
             return
           }
-          const el = root.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(a.key)}"]`)
-          const delta = el ? el.getBoundingClientRect().top - root.getBoundingClientRect().top - a.offset : undefined
-          if (delta !== undefined && Math.abs(delta) > 0.5) {
-            root.scrollTop += delta
+          const heightNow = root.scrollHeight
+          const target = computePrependRestoreScrollTop(baselineScrollTop, sessionStartHeight, heightNow)
+          const delta = target - root.scrollTop
+
+          if (Math.abs(delta) > 0.5) {
+            root.scrollTop = target
             stable = 0
           } else stable++
-          // stable 阈值保持小：虚拟行测量在 prepend 后一两帧内就稳定了，
-          // 原先 30 帧（约 0.5s）会把视口多钉半秒，上滚被抵消。
-          if (++frames >= 180 || stable >= 3) {
+
+          if (heightNow !== lastHeight) {
+            lastHeight = heightNow
+            lastHeightFrame = frames
+          }
+          // 高度需连续 10 帧（约 160ms）不再变化才算稳定：内容常分批到位
+          //（图片解码、补齐页、压缩后重算高度），窗口太短会在中途收尾。
+          const heightStable = frames - lastHeightFrame >= 10
+          if (++frames >= 180 || (stable >= 3 && heightStable)) {
+            watchdog(260)
+            watchdog(900)
             finish()
             return
           }
@@ -802,7 +967,15 @@ export const ChatArea = memo(
       const capturePrepend = useCallback(() => {
         prependLoading.current = true
         prependFetching.current = true
+        if (scrollSessionBaseline.current === null) {
+          scrollSessionBaseline.current = scrollRef.current?.scrollTop ?? 0
+          scrollSessionHeight.current = scrollRef.current?.scrollHeight ?? 0
+        }
         updatePrependAnchor()
+        // 钉住锚点行，防止它在 prepend 过渡态里被虚拟列表卸载（见 prependPinnedRef）
+        prependPinnedKeyRef.current = prependAnchor.current?.key || undefined
+        // 关键：必须触发一次重渲染，rangeExtractor 才会把这一行并入渲染范围
+        if (prependPinnedKeyRef.current) bumpPrependPin(n => n + 1)
       }, [updatePrependAnchor])
 
       const loadMore = useCallback(() => {
@@ -821,13 +994,25 @@ export const ChatArea = memo(
 
       // 锚点恢复稳定后：若用户仍在顶部、还有历史，继续加载下一段。
       // 这样连续上滚可以「一段接一段」，不必先下滚再上滚。
+      //
+      // ⚠️ 必须等本轮恢复**彻底结束**再发起下一轮：
+      // `finish()` 是在 apply 的帧回调里执行的，若在同一个回调里同步调 loadMore，
+      // 新的一轮会立刻覆盖 prependAnchor，而上一轮的 rAF 循环此时还没退出 ——
+      // 两个循环争抢同一个锚点，视口就会在恢复过程中被拽到别处
+      // （实测连续上滑 4 轮里有 1 轮跳走）。放到下一个宏任务里启动就没这个问题。
       useEffect(() => {
         prependSettled.current = () => {
-          if (loadingMoreRef.current || !canLoadMoreRef.current) return
-          const el = scrollRef.current
-          if (!el) return
-          if (el.scrollTop > LOAD_MORE_TOP_THRESHOLD) return
-          loadMore()
+          /**
+           * 不再自动级联加载。
+           *
+           * 旧行为：一次上滑加载完，只要还在顶部就立刻再加载一批，如此往复。
+           * 结果是用户滚到顶后被**连续拽好几次**，而且每次补偿的误差会累积，
+           * 越拽越偏 —— 用户感受到的就是「自动跳转到刚加载的内容」。
+           *
+           * 现在：一次上滑只补一批，把控制权交回用户。要更早的内容就再滚一次。
+           * 这既消除了累积漂移，也让「加载多少」由用户决定。
+           */
+          return
         }
         return () => {
           prependSettled.current = undefined
@@ -884,6 +1069,11 @@ export const ChatArea = memo(
       // ── 事件处理 ──
       const onScroll = useCallback(() => {
         computeScrollState()
+        // 离开顶部区域即视为「这一轮上滑浏览结束」，重置事务基线
+        if (!prependLoading.current && (scrollRef.current?.scrollTop ?? 0) > LOAD_MORE_TOP_THRESHOLD) {
+          scrollSessionBaseline.current = null
+          scrollSessionHeight.current = null
+        }
         if (
           userScrolledRef.current &&
           !prependLoading.current &&

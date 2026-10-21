@@ -1050,3 +1050,172 @@ describe('upsertRemoteUserMessage (v2 session.inbox.enqueued)', () => {
     expect(messageStore.getSessionState(KEY)!.messages.find(m => m.info.id === MSG_ID)).toBeUndefined()
   })
 })
+
+/**
+ * 轮次结论的权威来源：消息列表里的 `type: "idle"` 记录。
+ *
+ * 事件流（session.execution.succeeded）负责「及时」，但它**是易失的** ——
+ * 服务端对 /api/event 的契约写明「慢消费者会溢出并断开、断线期间的事件会丢失」。
+ * 一旦收尾事件丢了（隧道抖动、主机重启、浏览器后台被冻结），界面就会永远
+ * 显示「生成中」：停止按钮不消失、项目行一直转圈、消息永远半透明。
+ *
+ * idle 记录写在消息列表里，刷新即可恢复，所以用它做校正。
+ */
+describe('settleByAuthoritativeIdle', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  function seedStreamingAssistant(id: string, created: number) {
+    messageStore.handleMessageUpdated(createAssistantMessage(id))
+    messageStore.setStreaming('session-1', true)
+    // 标记这条 assistant 仍在流式中（渲染层据此显示光标）
+    const state = messageStore.getSessionState('session-1')!
+    state.messages = state.messages.map(m => ({ ...m, isStreaming: true }))
+    const msg = state.messages.find(m => m.info.id === id)!
+    msg.info.time = { created } as never
+  }
+
+  it('settles a stuck streaming state when an idle record covers it', () => {
+    seedStreamingAssistant('message-1', 1000)
+    messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+
+    expect(messageStore.getIsStreaming('session-1')).toBe(true)
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(true)
+    expect(messageStore.getIsStreaming('session-1')).toBe(false)
+    // 消息上的流式标记也要落定，否则光标还在闪
+    expect(messageStore.getSessionState('session-1')!.messages[0].isStreaming).toBe(false)
+  })
+
+  it('does not settle when the idle record predates the last assistant message', () => {
+    // 上一轮的 idle 还留在页里，而新一轮已经产生了更晚的 assistant 消息：
+    // 此时绝不能据此落定，否则会把正在跑的轮次误判成已结束。
+    seedStreamingAssistant('message-1', 5000)
+    messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(false)
+    expect(messageStore.getIsStreaming('session-1')).toBe(true)
+  })
+
+  it('is a no-op when there is no idle record', () => {
+    seedStreamingAssistant('message-1', 1000)
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(false)
+    expect(messageStore.getIsStreaming('session-1')).toBe(true)
+  })
+
+  it('is a no-op when the session is not streaming', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.setStreaming('session-1', false)
+    messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(false)
+  })
+
+  it('records interrupted/failed outcomes so the UI can distinguish them', () => {
+    seedStreamingAssistant('message-1', 1000)
+    messageStore.updateSessionMetadata('session-1', {
+      lastTurn: { at: 2000, outcome: 'interrupted', error: 'shutdown' },
+    })
+    messageStore.settleByAuthoritativeIdle('session-1')
+    expect(messageStore.getSessionState('session-1')!.lastTurn).toEqual({
+      at: 2000,
+      outcome: 'interrupted',
+      error: 'shutdown',
+    })
+  })
+})
+
+/**
+ * 工具执行中的进度（v2 `session.tool.progress`，ephemeral）。
+ *
+ * 实测载荷（bash）：{ sessionID, assistantMessageID, id: "call_x",
+ *                     metadata: { shellID: "sh_x" } }
+ *
+ * 它是 ephemeral、不落库，且可能与 tool.success 乱序到达。
+ */
+describe('applyToolProgress', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  it('merges metadata into a running tool part', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+
+    messageStore.applyToolProgress('session-1', 'call-1', { shellID: 'sh_abc' })
+
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0] as {
+      state: { status: string; metadata?: Record<string, unknown> }
+    }
+    expect(part.state.metadata).toEqual({ shellID: 'sh_abc' })
+    // 状态必须保持 running：progress 不能把工具落定
+    expect(part.state.status).toBe('running')
+  })
+
+  it('never downgrades a completed tool back to running', () => {
+    // 乱序场景：success 先到，迟到的 progress 不能把它改回运行中
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+    messageStore.settleToolByCallID('session-1', 'call-1', { status: 'completed', output: 'done' })
+
+    messageStore.applyToolProgress('session-1', 'call-1', { shellID: 'sh_late' })
+
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0] as {
+      state: { status: string; metadata?: Record<string, unknown> }
+    }
+    expect(part.state.status).toBe('completed')
+    expect(part.state.metadata).toBeUndefined()
+  })
+
+  it('merges progressively instead of replacing previous progress', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+
+    messageStore.applyToolProgress('session-1', 'call-1', { shellID: 'sh_abc' })
+    messageStore.applyToolProgress('session-1', 'call-1', { stage: 'downloading' })
+
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0] as {
+      state: { metadata?: Record<string, unknown> }
+    }
+    expect(part.state.metadata).toEqual({ shellID: 'sh_abc', stage: 'downloading' })
+  })
+
+  it('ignores progress for an unknown callID', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+    messageStore.applyToolProgress('session-1', 'other-call', { shellID: 'sh_x' })
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0] as {
+      state: { metadata?: Record<string, unknown> }
+    }
+    expect(part.state.metadata).toBeUndefined()
+  })
+})
+
+describe('applyToolProgress performance contract', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  it('keeps untouched messages by reference so React can skip them', () => {
+    // progress 事件在长命令期间每秒来多条。若每次全量 map 重建 messages，
+    // React 会认为整条会话都变了、每秒全量重渲染 —— 长会话里就是「卡」。
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+    messageStore.handleMessageUpdated(createAssistantMessage('message-2'))
+    messageStore.handlePartUpdated(createTextPart('part-2', 'message-2', 'other content'))
+
+    const before = messageStore.getSessionState('session-1')!.messages
+    const untouchedBefore = before.find(m => m.info.id === 'message-2')!
+
+    messageStore.applyToolProgress('session-1', 'call-1', { shellID: 'sh_1' })
+
+    const after = messageStore.getSessionState('session-1')!.messages
+    const untouchedAfter = after.find(m => m.info.id === 'message-2')!
+    // 同一对象引用：虚拟列表与 memo 化的行可以直接跳过重渲染
+    expect(untouchedAfter).toBe(untouchedBefore)
+    // 命中的那条必须是新对象（否则 React 看不到变化）
+    expect(after.find(m => m.info.id === 'message-1')).not.toBe(before.find(m => m.info.id === 'message-1'))
+  })
+})

@@ -56,6 +56,36 @@ export function computeAnchorRestoreScrollDelta(previousTopOffset: number, nextT
   return nextTopOffset - previousTopOffset
 }
 
+/**
+ * 向上加载历史后，视口应该回到哪个 scrollTop。
+ *
+ * 语义：**原本贴在视口顶部的内容，加载完成后仍然贴在顶部**；更早的内容
+ * 出现在它上方（视口之外）。用户视觉上就是「往上翻出了更多内容」。
+ *
+ * @param sessionBaselineScrollTop 这一轮向上浏览**首次**触发加载时的 scrollTop
+ * @param sessionStartHeight       同一时刻的内容总高度
+ * @param currentHeight            当前内容总高度
+ *
+ * 为什么用「首次」而不是每批重置：一次快速上滑常常触发多批加载
+ * （到阈值批一次，继续滑再批一次）。若每批各自以当时的 scrollTop 为基线，
+ * 误差会逐批累积 —— 实测一次上滑里内容高度涨了 6557px，而视口只被补了
+ * 2363px，用户就被甩到了新内容的顶部。
+ *
+ * 为什么用高度差而不是「距底部距离」：prepend 的过渡态容器高度会**先塌缩
+ * 再回升**（实测 13181 → 5483 → 13904），过渡期距底部距离完全失真。
+ * 高度差只用「起始值 → 当前值」，单调且与塌缩无关。
+ */
+export function computePrependRestoreScrollTop(
+  sessionBaselineScrollTop: number,
+  sessionStartHeight: number,
+  currentHeight: number,
+): number {
+  const grown = currentHeight - sessionStartHeight
+  // 高度还没回升（塌缩阶段）时不补偿，避免把视口往回拖
+  if (grown <= 0) return sessionBaselineScrollTop
+  return sessionBaselineScrollTop + grown
+}
+
 const TEXT_RENDER_FEATURE_PATTERN = /\n|^[ \t]*```([^\r\n]*)|!\[[^\]]*\]\([^)]*\)/gm
 
 function estimateTextRenderWeight(text: string): number {

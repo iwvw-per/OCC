@@ -664,6 +664,12 @@ class MessageStore {
       loadError?: MessageError
       compactedAt?: number
       compactionMarker?: { at: number; summaryChars: number; recentChars: number }
+      /** 会话绑定的模型（服务端权威） */
+      model?: { providerID: string; modelID: string; variant?: string }
+      /** 会话绑定的 agent（服务端权威） */
+      agent?: string
+      /** 最近一次轮次结论（消息列表的 idle 记录） */
+      lastTurn?: SessionState['lastTurn']
     },
   ) {
     sessionId = this.resolveKey(sessionId)
@@ -680,6 +686,9 @@ class MessageStore {
     if (options.shareUrl !== undefined) state.shareUrl = options.shareUrl
     if (options.compactedAt !== undefined) state.compactedAt = options.compactedAt
     if (options.compactionMarker !== undefined) state.compactionMarker = options.compactionMarker
+    if (options.model !== undefined) state.model = options.model
+    if (options.agent !== undefined) state.agent = options.agent
+    if (options.lastTurn !== undefined) state.lastTurn = options.lastTurn
 
     this.notify([sessionId])
   }
@@ -1015,7 +1024,13 @@ class MessageStore {
    * 刚拉回来就裁掉会让上滑「拉不动」。单会话条数上限只在 append/SSE 增长路径
    * 作为内存兜底，历史加载路径的规模由用户滚动行为决定。
    */
-  prependMessages(sessionId: string, apiMessages: ApiMessageWithParts[], hasMore: boolean, historyCursor?: string) {
+  prependMessages(
+    sessionId: string,
+    apiMessages: ApiMessageWithParts[],
+    hasMore: boolean,
+    historyCursor?: string,
+    options?: { compactedAt?: number; compaction?: SessionState['compactionMarker'] },
+  ) {
     sessionId = this.resolveKey(sessionId)
     const state = this.sessions.get(sessionId)
     if (!state) return
@@ -1037,6 +1052,8 @@ class MessageStore {
     }
     state.hasMoreHistory = hasMore
     state.historyCursor = historyCursor
+    if (options?.compactedAt !== undefined) state.compactedAt = options.compactedAt
+    if (options?.compaction !== undefined) state.compactionMarker = options.compaction
 
     this.notify([sessionId])
   }
@@ -1535,6 +1552,65 @@ class MessageStore {
     }
   }
 
+  /**
+   * 把工具执行中的进度 metadata 合到对应 part 上。
+   *
+   * 只在 part 当前是 running/pending 时更新：`session.tool.progress` 是
+   * ephemeral 事件，可能与 `tool.success` 乱序到达；无条件覆盖会把已完成的
+   * 工具改回「运行中」，表现为「跑完了又转回去」。
+   *
+   * metadata 是合并而非替换（{...old, ...new}）：不同进度事件可能各带一部分
+   * 信息（先给 shellID，后给阶段/百分比）。
+   */
+  applyToolProgress(sessionId: string, callID: string, metadata?: Record<string, unknown>): void {
+    if (!metadata || Object.keys(metadata).length === 0) return
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+
+    /**
+     * 只替换命中的那一条消息，其余保留引用。
+     *
+     * progress 事件在长命令期间每秒可能来多条，而会话可能有几千条消息。
+     * 若每次都 `state.messages.map(...)` 全量重建，React 会认为整条会话都变了，
+     * 每秒触发一次全量重渲染 —— 正是「一边跑命令一边滚动就卡」的成因。
+     * 这里改成「定位命中消息 → 只换那一条」，未命中的消息对象引用不变，
+     * 虚拟列表与 memo 化的消息行都能直接跳过。
+     */
+    for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+      const message = state.messages[i]
+      let hitIndex = -1
+      for (let j = 0; j < message.content.length; j += 1) {
+        const part = message.content[j]
+        if (part.type !== 'tool') continue
+        const toolPart = part as Extract<typeof part, { type: 'tool' }>
+        if ((toolPart as { callID?: string }).callID !== callID) continue
+        const status = (toolPart.state as { status?: string })?.status
+        if (status !== 'running' && status !== 'pending') continue
+        hitIndex = j
+        break
+      }
+      if (hitIndex === -1) continue
+
+      const hitPart = message.content[hitIndex] as Extract<typeof message.content[number], { type: 'tool' }>
+      const prevState = hitPart.state as unknown as Record<string, unknown>
+      const nextContent = message.content.slice()
+      nextContent[hitIndex] = {
+        ...hitPart,
+        state: {
+          ...prevState,
+          metadata: { ...((prevState.metadata as Record<string, unknown> | undefined) ?? {}), ...metadata },
+        },
+      } as (typeof message.content)[number]
+
+      const nextMessages = state.messages.slice()
+      nextMessages[i] = { ...message, content: nextContent }
+      state.messages = nextMessages
+      this.notify([sessionId])
+      return
+    }
+  }
+
   // ============================================
   // Undo/Redo
   // ============================================
@@ -1650,6 +1726,46 @@ class MessageStore {
   /** D7：读取会话的结束世代（发送前记录，await 后比对） */
   getIdleGeneration(sessionId: string): number {
     return this.idleGeneration.get(this.resolveKey(sessionId)) ?? 0
+  }
+
+  /**
+   * 按**权威轮次记录**（消息列表里的 `type: "idle"`）落定流式态。
+   *
+   * 事件流负责「及时」：`session.execution.succeeded` 一到就收尾。但事件是
+   * **易失**的 —— 断线重连期间的事件直接丢失（见服务端 `/api/event` 的描述：
+   * "Volatile by contract: a slow consumer overflows and fails the stream, and
+   * events during disconnection are missed"），隧道抖动、进程重启同理。
+   *
+   * 一旦收尾事件丢了，界面就会永远显示「生成中」：发送按钮变停止键、项目行
+   * 一直转圈、消息永远半透明。而 idle 记录写在消息列表里，刷新即可恢复。
+   *
+   * 所以这里提供「按记录校正」的入口：只要有一条 idle 记录不早于最后一条
+   * assistant 消息，就说明那一轮在服务端已经结束。
+   *
+   * @returns 是否真的改变了状态（供调用方决定是否要额外通知）
+   */
+  settleByAuthoritativeIdle(sessionId: string): boolean {
+    sessionId = this.resolveKey(sessionId, true)
+    const state = this.sessions.get(sessionId)
+    if (!state) return false
+    const turn = state.lastTurn
+    if (!turn) return false
+    if (!state.isStreaming) return false
+
+    const lastAssistant = state.messages.filter(m => m.info.role === 'assistant').at(-1)
+    const lastAssistantAt = lastAssistant?.info.time?.created ?? 0
+    // idle 必须不早于最后一条 assistant：否则那是「上一轮」的结论，
+    // 新一轮可能刚开始，不能据此落定。
+    if (turn.at < lastAssistantAt) return false
+
+    state.isStreaming = false
+    // 最后一条 assistant 若还挂着 isStreaming，一并落定（否则渲染层仍显示光标）。
+    const last = state.messages.at(-1)
+    if (last?.isStreaming) {
+      state.messages = state.messages.map(m => (m.isStreaming ? { ...m, isStreaming: false } : m))
+    }
+    this.notify([sessionId])
+    return true
   }
 
   // ============================================

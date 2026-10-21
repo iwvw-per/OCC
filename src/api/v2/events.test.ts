@@ -365,6 +365,20 @@ describe('v2 event → GlobalEvent', () => {
     expect(p?.properties.sessionID).toBe('s')
   })
 
+  it('keeps the interrupt reason so the UI can tell "user stopped" from "server restarted"', () => {
+    // v2 的 reason 取值：user | shutdown | superseded | inactivity
+    // 用户主动点停止，和服务端重启把轮次打断，是两件不同的事。
+    for (const reason of ['user', 'shutdown', 'superseded', 'inactivity']) {
+      const p = payloadOf({
+        type: 'session.execution.interrupted',
+        data: { sessionID: 's', reason },
+        location: { directory: '/w' },
+      })
+      expect(p?.properties.outcome).toBe('interrupted')
+      expect(p?.properties.interruptReason).toBe(reason)
+    }
+  })
+
   it('maps provider.quota error type to APIError (not generic UnknownError)', () => {
     const p = payloadOf({
       type: 'session.execution.failed',
@@ -549,3 +563,50 @@ describe('v2 event → GlobalEvent', () => {
       expect(p).toBeNull()
     })
   })
+
+/**
+ * 工具执行中的进度。
+ *
+ * 实测载荷（opencode v2.0.32，真实 bash 调用）：
+ *   { type: "session.tool.progress",
+ *     data: { sessionID, assistantMessageID, id: "call_x", metadata: { shellID: "sh_x" } } }
+ *
+ * 它是 ephemeral（不落库）、只在执行期间间歇发送。不映射它的后果很具体：
+ * 一个跑 30 秒的命令，界面上只有「已调用」和「已完成」两个状态，中间 30 秒
+ * 完全静止，用户会以为卡死。
+ */
+describe('session.tool.progress', () => {
+  it('maps progress to a dedicated event carrying callID and metadata', () => {
+    const p = payloadOf({
+      type: 'session.tool.progress',
+      data: {
+        sessionID: 's',
+        assistantMessageID: 'msg_1',
+        id: 'call_1',
+        metadata: { shellID: 'sh_1' },
+      },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_NEXT_TOOL_PROGRESS)
+    expect(p?.properties).toEqual({ sessionID: 's', callID: 'call_1', metadata: { shellID: 'sh_1' } })
+  })
+
+  it('omits metadata when the tool reports none', () => {
+    const p = payloadOf({
+      type: 'session.tool.progress',
+      data: { sessionID: 's', assistantMessageID: 'msg_1', id: 'call_1', metadata: {} },
+      location: { directory: '/w' },
+    })
+    expect(p?.properties.metadata).toBeUndefined()
+  })
+
+  it('drops progress without a call id', () => {
+    expect(
+      payloadOf({
+        type: 'session.tool.progress',
+        data: { sessionID: 's', assistantMessageID: 'msg_1' },
+        location: { directory: '/w' },
+      }),
+    ).toBeNull()
+  })
+})

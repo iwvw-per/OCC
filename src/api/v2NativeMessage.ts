@@ -6,7 +6,7 @@
 
 import { getV2Client } from './sdkV2'
 import type { ApiMessageWithParts } from './types'
-import { adaptMessagePageAsync, type CompactionMarker } from './v2/message'
+import { adaptMessagePageAsync, type CompactionMarker, type IdleMarker, type SessionConfigMarkers } from './v2/message'
 
 export interface V2PromptInput {
   sessionID: string
@@ -107,6 +107,8 @@ export async function nativeListMessages(
   prevCursor?: string
   compactedAt?: number
   compaction?: CompactionMarker
+  idle?: IdleMarker
+  config: SessionConfigMarkers
 }> {
   const client = getV2Client(serverId)
   const res = await client.message.list(

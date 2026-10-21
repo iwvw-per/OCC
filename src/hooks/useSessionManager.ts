@@ -16,19 +16,18 @@ import {
   getSessionTurnPage,
   getSessionFirstScreen,
   getSessionMessagePage,
-  getSessionLightweightMessages,
-  probeLightweightSupport,
-  peekLightweightSupport,
   encodeBeforeCursor,
   getSession,
   revertMessage,
   unrevertSession,
   extractUserMessageContent,
   type ApiMessageWithParts,
+  type ApiSession,
 } from '../api'
 import { sessionErrorHandler } from '../utils'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_TURN_LIMIT, HISTORY_TURN_BATCH_SIZE, RECENT_FULL_TURNS } from '../constants'
+import { estimateHistoryPageSize } from '../constants/pagination'
 import i18n from '../i18n'
 import type { MessageError } from '../types/message'
 
@@ -117,9 +116,34 @@ function preferCompatiblePartText(local: string, incoming: string): string {
   return incoming
 }
 
+/**
+ * 历史分页的页大小按「本会话实际的每轮消息数」自适应。
+ *
+ * 服务端的 limit 是**消息条数**，而我们想要的是**轮次**。固定一个页大小，
+ * 普通会话会为 3 轮下载 200 条（实测 947KB），工具密集会话则要翻好几页才凑够
+ * 轮次（往返次数翻倍）。自适应后每次上滑基本是「一次往返取够需要的量」。
+ */
+
 function messageTimeIncomplete(time?: { completed?: number } | { created: number }) {
   if (!time) return true
   return !('completed' in time) || time.completed == null
+}
+
+/**
+ * 从 `GET /api/session/{id}` 的返回值里取「会话绑定的模型」。
+ *
+ * v2 的形状是 `model: { id, providerID, variant }`（注意字段是 `id` 而不是
+ * `modelID`），少数路径可能已经归一成 `{ providerID, modelID }`。两种都接受。
+ * 缺 providerID 或 modelID 时返回 undefined —— 宁可不恢复，也不要用半条信息
+ * 去覆盖用户的正确选择。
+ */
+function toSessionModelRef(session: ApiSession | null | undefined): { providerID: string; modelID: string } | undefined {
+  if (!session) return undefined
+  const raw = (session as { model?: { id?: string; modelID?: string; providerID?: string; variant?: string } }).model
+  const providerID = raw?.providerID
+  const modelID = raw?.modelID ?? raw?.id
+  if (!providerID || !modelID) return undefined
+  return { providerID, modelID }
 }
 
 function mergePartsForReload(
@@ -291,70 +315,41 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         // 瞬态网络失败（本地 serve 短暂未就绪、传输层抖动）自动重试，避免
         // 首屏或重连时一次 Failed to fetch 就把用户卡在错误页。
         const serverId = sessionKeyToServerId(sid)
-        // 主机 Agent 支持轻量投影时：一次拉全整个会话（只含对话），首屏即完整、
-        // 无需上滑补历史。不支持则退回按轮次分页的既有路径。
-        //
-        // 探测（limit=1）与 session 元数据并行发出：探测结果只决定「消息走哪条
-        // 路径」，不依赖元数据。此前三者串行 —— 探测约 1.2s 往返，元数据约 1.2s，
-        // 白白叠加成 ~2.4s。现在探测与 getSession 同时起飞，只有消息请求必须等
-        // 探测结论（因为路径不同），总体从「探测+元数据+消息」压到「探测+消息」。
         /**
-         * 轻量投影**只走缓存判断，绝不阻塞首屏**。
+         * 首屏一律走**按量分页**，不再使用主机 Agent 的「轻量投影」。
          *
-         * 探测本身要一个完整往返，而它只决定「走轻量单请求还是轮次分页」。
-         * 实测本机服务端并不支持轻量投影（不返回 X-Lightweight 头），也就是说
-         * 这个往返对首屏毫无收益，却让内容晚到一个 RTT —— 经隧道就是 1 秒以上。
+         * ⚠️ 这是实测踩到的坑（经网关访问时尤其致命）：
+         * 轻量投影由主机 Agent（agent-rust）实现，它**忽略 limit 参数**，
+         * 任何带 `X-Lightweight: 1` 的消息请求都会返回**整个会话**。
+         * 实测同一个 4810 条消息的会话：
+         *   - 普通分页 limit=30  →  138 KB
+         *   - 带 X-Lightweight    →  25.1 MB（limit=1 也一样）
+         * 于是：
+         *   - 「探测是否支持轻量」这个请求本身就是 25MB 下载；
+         *   - 探测成功后缓存「支持」，之后每次打开会话都走 25MB 的整段拉取。
+         * 这正是「前端各种操作都卡」的根因：浏览器一边做别的事，一边在后台
+         * 拖着一个几十 MB 的响应。
          *
-         * 因此：
-         *   - 已知结果（进程内或持久化缓存）→ 走对应路径，零额外开销；
-         *   - 未知 → 立即按分页路径开始拉消息，同时在后台探测并把结果写入缓存，
-         *     后续会话即可享受轻量路径。
+         * 轻量投影「一条消息更小」的优势（1.8KB vs 4.9KB）抵不过「无视 limit
+         * 返回全量」的代价 —— 大会话里差两个数量级。
+         *
+         * 因此首屏只发「刚好够看」的小页（FIRST_SCREEN_PAGE_LIMIT），其余按需分页。
          */
         const sessionInfoPromise = getSession(sid, dir, serverId).catch(() => null)
-        const knownLightweight = peekLightweightSupport(serverId)
-        if (knownLightweight === undefined) {
-          // 后台探测：不 await，失败静默；结果会缓存给后续会话用。
-          void probeLightweightSupport(sid, dir, serverId).catch(() => {})
-        }
 
         /**
          * 首屏两段式：小页先出内容，剩余轮次在后台补齐。
          *
-         * 大会话里「一次取够 N 轮」会让首屏等一个大响应（实测 200 条 536KB），
-         * 而用户真正需要先看到的是最近几轮。因此这里先取一小页（约 60 条），
+         * 大会话里「一次取够 N 轮」会让首屏等一个大响应（实测 200 条 947KB），
+         * 而用户真正需要先看到的是最近几轮。因此这里先取一小页（12 条，约 79KB），
          * 拿到就立刻上屏；若轮次不够，再异步补足并原地替换。
-         *
-         * 已知支持轻量投影的服务器走单请求（一次拿全，无需分段）。
          */
-        const lightweightMessages =
-          knownLightweight === true
-            ? await getSessionLightweightMessages(sid, dir, serverId, { signal: abortController.signal }).catch(
-                () => null,
-              )
-            : null
+        const firstScreen = await withLoadRetry(
+          () => getSessionFirstScreen(sid, INITIAL_TURN_LIMIT, dir, serverId, { signal: abortController.signal }),
+          isStale,
+        )
 
-        const firstScreen: Awaited<ReturnType<typeof getSessionFirstScreen>> | null = lightweightMessages
-          ? null
-          : await withLoadRetry(
-              () => getSessionFirstScreen(sid, INITIAL_TURN_LIMIT, dir, serverId, { signal: abortController.signal }),
-              isStale,
-            )
-
-        const page = lightweightMessages
-          ? {
-              messages: lightweightMessages.messages,
-              nextCursor: undefined as string | undefined,
-              hasMore: lightweightMessages.hasMore,
-              compactedAt: lightweightMessages.compactedAt,
-              compaction: lightweightMessages.compaction,
-            }
-          : {
-              messages: firstScreen!.messages,
-              nextCursor: firstScreen!.nextCursor,
-              hasMore: firstScreen!.hasMore,
-              compactedAt: firstScreen!.compactedAt,
-              compaction: firstScreen!.compaction,
-            }
+        const page = firstScreen
 
         const sessionInfo = await sessionInfoPromise
         const apiMessages = page.messages
@@ -373,6 +368,29 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
         const paging = { hasMoreHistory: page.hasMore, historyCursor: page.nextCursor }
 
+        /**
+         * 会话级权威状态，三个来源，优先级从高到低：
+         *
+         * 1. 消息列表里的 `model-switched` / `agent-switched` / `idle` 记录
+         *    （`page.config` / `page.idle`）——最精确，记录了「什么时候切成了什么」；
+         * 2. `GET /api/session/{id}` 的 `model` / `agent` 字段——当前生效值；
+         * 3. 本地缓存（不在服务端返回值里的情况下兜底）。
+         *
+         * v2 的 user 消息**没有** model 字段（实测只有 time/text/files），
+         * 所以「无痕窗口/新设备打开同一会话显示成默认模型」只能靠前两者还原。
+         */
+        const sessionModel = toSessionModelRef(sessionInfo)
+        const sessionAgent = sessionInfo?.agent || undefined
+        const configModel = page.config?.model
+        const configAgent = page.config?.agent
+        const resolvedModel = configModel
+          ? { providerID: configModel.providerID, modelID: configModel.modelID }
+          : sessionModel
+        const resolvedAgent = configAgent?.agent ?? sessionAgent
+        const lastTurn = page.idle
+          ? { at: page.idle.at, outcome: page.idle.outcome, ...(page.idle.error ? { error: page.idle.error } : {}) }
+          : undefined
+
         if (shouldKeepStreamingOnly) {
           // SSE 推送的消息比 API 返回的多，说明有新消息，跳过覆盖
           // 但仍需更新元数据，否则 hasMoreHistory 等状态可能停留在默认值
@@ -384,6 +402,9 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
             shareUrl: sessionInfo?.share?.url,
             compactedAt: page.compactedAt,
             compactionMarker: page.compaction,
+            ...(resolvedModel ? { model: resolvedModel } : {}),
+            ...(resolvedAgent ? { agent: resolvedAgent } : {}),
+            ...(lastTurn ? { lastTurn } : {}),
           })
           onLoadComplete?.()
           return
@@ -401,9 +422,30 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           compactedAt: page.compactedAt,
           compactionMarker: page.compaction,
         })
+        // 会话绑定的模型/agent 与轮次结论单独写一次（setMessages 的入参不含这些，
+        // 它们不属于「消息页」的语义，而是会话级元数据）。
+        if (resolvedModel || resolvedAgent || lastTurn) {
+          messageStore.updateSessionMetadata(sid, {
+            ...(resolvedModel ? { model: resolvedModel } : {}),
+            ...(resolvedAgent ? { agent: resolvedAgent } : {}),
+            ...(lastTurn ? { lastTurn } : {}),
+          })
+        }
         // 首屏只覆盖最近 INITIAL_TURN_LIMIT 轮，无需压缩；保留调用以应对
         // SSE 已把更早轮次推入内存的情况。
         messageStore.compressHistoricalTurns(sid, RECENT_FULL_TURNS)
+
+        /**
+         * 用消息列表里的 `idle` 记录校正「残留的流式态」。
+         *
+         * 事件负责**及时**（`session.execution.succeeded` 到了就立刻收尾），
+         * 而 idle 记录负责**正确**：只要存在一条不早于最后一条 assistant 消息的
+         * idle 记录，就说明那一轮在服务端已经结束 —— 此时界面还显示「生成中」
+         * 纯粹是事件丢失（断线重连、隧道抖动、进程重启）造成的假象。
+         *
+         * 这一步在下面 `settleByAuthoritativeIdle` 里做了严格的时序校验。
+         */
+        if (lastTurn) messageStore.settleByAuthoritativeIdle(sid)
 
         // force 模式（如 SSE 重连）只静默刷新数据，不触发滚动
         if (!force) {
@@ -411,14 +453,20 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         }
 
         /**
-         * 首屏已上屏：在后台把剩余轮次补齐，然后原地替换。
+         * 首屏已上屏：在后台把剩余轮次补齐，然后**增量前插**。
          *
          * 关键约束（不破坏体验）：
          *   - 不回到 loading 态：ChatArea 已挂载，用户看到的是可读内容；
-         *   - 不跳滚动位置：setMessages 会保留同 id 消息的引用，滚动锚点不变；
+         *   - 不跳滚动位置：前插保留既有消息对象引用，滚动锚点不变；
          *   - 失败静默：已显示的内容仍然可用，缺口由用户上滑时按需加载。
+         *
+         * ⚠️ 这里必须用「前插」而不是 setMessages 整表替换：
+         * setMessages 会把每条消息都重新构造成新对象（toUIMessage），
+         * 于是 React 认为「所有消息都变了」，整条会话被全量重渲染 ——
+         * 用户在补齐期间正好开始操作/滚动，就会被这轮重渲染卡住。
+         * 前插只新增更早的消息，已渲染的消息对象引用不变，React 直接跳过。
          */
-        if (firstScreen && !firstScreen.complete && firstScreen.rest) {
+        if (!firstScreen.complete && firstScreen.rest) {
           const restPromise = firstScreen.rest
           void restPromise()
             .then(rest => {
@@ -426,15 +474,20 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
               // 期间用户可能已切走/重新加载，只在仍是同一请求时替换
               const latest = messageStore.getSessionState(sid)
               if (!latest) return
-              const merged = mergeWithLocalStreamingMessages(rest.messages, latest)
-              messageStore.setMessages(sid, merged, {
-                directory: latest.directory || dir || '',
-                title: latest.title,
-                hasMoreHistory: rest.hasMore,
-                historyCursor: rest.nextCursor,
-                shareUrl: latest.shareUrl,
+              // 只取「本次新拿到的更早消息」：首屏那些已经在内存里了。
+              const existingIds = new Set(latest.messages.map(m => m.info.id))
+              const older = rest.messages.filter(m => !existingIds.has(m.info.id))
+              if (older.length === 0) {
+                // 没有新内容：只更新分页游标，避免停在旧游标上反复空拉。
+                messageStore.prependMessages(sid, [], rest.hasMore, rest.nextCursor, {
+                  compactedAt: rest.compactedAt,
+                  compaction: rest.compaction,
+                })
+                return
+              }
+              messageStore.prependMessages(sid, older, rest.hasMore, rest.nextCursor, {
                 compactedAt: rest.compactedAt,
-                compactionMarker: rest.compaction,
+                compaction: rest.compaction,
               })
               messageStore.compressHistoricalTurns(sid, RECENT_FULL_TURNS)
             })
@@ -500,6 +553,25 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       isLoadingMoreRef.current.set(sid, true)
       try {
         const serverId = sessionKeyToServerId(sid)
+        /**
+         * 页大小按「本会话实际的每轮消息数」自适应。
+         *
+         * 服务端的 limit 是**消息条数**，而我们想要的是**轮次**。两者比例差别极大：
+         * 普通聊天一轮 2~4 条消息；工具密集的会话一轮可达 30+ 条（实测某会话
+         * 4810 条消息只有 135 个用户轮次 ≈ 35 条/轮）。
+         *
+         * 固定一个大的 limit（比如 200）时，普通会话会为了 3 轮去下载 200 条
+         * （实测 947KB）；固定一个小的 limit 时，工具密集会话要翻好几页才能凑够
+         * 轮次，字节数一样但往返次数翻倍。
+         *
+         * 所以按已加载部分的密度反推需要多少条，一次取够，**一轮往返搞定**，
+         * 且不超出实际需要的量。
+         */
+        const userCount = state.messages.reduce((count, m) => count + (m.info.role === 'user' ? 1 : 0), 0)
+        // 样本不足 2 个用户轮次时密度不可信（首屏那十几条常常一条用户消息都没有），
+        // 交给 estimateHistoryPageSize 用默认值。
+        const messagesPerTurn = userCount >= 2 ? state.messages.length / userCount : 0
+        const pageLimit = estimateHistoryPageSize(messagesPerTurn, HISTORY_TURN_BATCH_SIZE)
         // 按完整轮次向前加载：
         // - 有游标：以游标为界向前取一批。
         // - 无游标但有内存缺口：按「当前条数 + 缺口」重拉最新一页，把被裁掉的
@@ -509,7 +581,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         const targetTurns = HISTORY_TURN_BATCH_SIZE
         let page: Awaited<ReturnType<typeof getSessionTurnPage>>
         if (before) {
-          page = await getSessionTurnPage(sid, targetTurns, before, dir, serverId)
+          page = await getSessionTurnPage(sid, targetTurns, before, dir, serverId, { pageLimit })
         } else if (trimmed > 0) {
           // 有内存缺口（窗口超字节上限被从最旧端裁掉）：必须从「内存里最旧一条」
           // 向前翻页补回。此前用 before=undefined 重拉的是**最新**一页，与内存窗口
@@ -519,12 +591,16 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           const gapCursor = oldest
             ? encodeBeforeCursor({ info: oldest.info, parts: [] } as ApiMessageWithParts, serverId)
             : undefined
-          page = await getSessionTurnPage(sid, targetTurns, gapCursor, dir, serverId)
+          page = await getSessionTurnPage(sid, targetTurns, gapCursor, dir, serverId, { pageLimit })
         } else {
           // 无游标也无缺口：服务端说还有更早（旧版 serve 不给游标），从最新端
           // 按增大条数重拉，避免 limit 递增的 O(N²) 重拉。
           const wanted = Math.max(targetTurns, Math.ceil(state.messages.length / 2))
-          page = await getSessionTurnPage(sid, wanted, undefined, dir, serverId)
+          page = await getSessionTurnPage(sid, wanted, undefined, dir, serverId, {
+            // 这里要的是「更多」而不是「更早」，页大小跟着 wanted 走，
+            // 但同样受自适应上限约束，避免一次性拖回几百 KB。
+            pageLimit: Math.min(pageLimit, estimateHistoryPageSize(messagesPerTurn, wanted)),
+          })
         }
 
         // 期间发生了新的加载（loadSession 或再次 loadMore），丢弃本次结果

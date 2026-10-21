@@ -225,6 +225,92 @@ function adaptLightweight(raw: unknown): { reasoningCount?: number; stepCount?: 
   return { reasoningCount, stepCount }
 }
 
+/** 轮次结论（来自 `type: "idle"` 消息）。 */
+export interface IdleMarker {
+  /** 轮次结束时间（消息 time.created） */
+  at: number
+  /** succeeded | failed | interrupted */
+  outcome: 'succeeded' | 'failed' | 'interrupted'
+  /** 失败/中断时的错误说明 */
+  error?: string
+}
+
+/** 会话配置切换记录（来自 `model-switched` / `agent-switched` 消息）。 */
+export interface SessionConfigMarkers {
+  model?: { providerID: string; modelID: string; at: number }
+  agent?: { agent: string; at: number }
+}
+
+/**
+ * 从一页消息里收集「轮次结论 + 会话配置切换」这类**非对话**的系统记录。
+ *
+ * v2 的 `SessionMessage.Info` 有 11 种类型，其中只有 user/assistant 是对话内容：
+ *
+ *   user  assistant  idle  compaction  system  synthetic  skill  shell
+ *   agent-switched  model-switched  location-switched
+ *
+ * 我们的对话渲染只处理 user/assistant（其余若塞进消息流会让用户/助手位置错乱，
+ * 所以继续丢弃）。但丢弃**不等于**信息无用 —— 其中两类是权威状态：
+ *
+ *   - `idle`：带 `outcome: succeeded | failed | interrupted` 和 `error`。
+ *     这是「这一轮到底结束了吗、是成功还是失败」的**权威来源**。事件流里的
+ *     `session.execution.succeeded` 一旦丢失/重连漏收，界面就会永远转圈；
+ *     而 idle 在消息列表里，刷新即可恢复。
+ *   - `model-switched` / `agent-switched`：带 `model` / `agent`。
+ *     这是「这个会话绑定什么模型/agent」的权威历史。v2 的 user 消息**没有**
+ *     model 字段（实测只有 time/text/files），所以「无痕窗口/新设备打开会话
+ *     显示成默认模型」这类问题只能靠这里（或 session 元数据）还原。
+ *
+ * 这里只做**提取**，不改消息数组形状，避免污染对话流。
+ */
+export function collectSessionMarkers(data: unknown[]): {
+  idle?: IdleMarker
+  config: SessionConfigMarkers
+} {
+  let idle: IdleMarker | undefined
+  const config: SessionConfigMarkers = {}
+
+  for (const item of data) {
+    const m = rec(item)
+    const type = str(m.type)
+    if (!type) continue
+    const created = num(rec(m.time).created) ?? 0
+
+    if (type === 'idle') {
+      // 取最近一次（消息按 asc 或 desc 都可能，用时间比较而不是位置）
+      if (idle && created <= idle.at) continue
+      const rawOutcome = str(m.outcome)
+      const outcome: IdleMarker['outcome'] =
+        rawOutcome === 'failed' || rawOutcome === 'interrupted' ? rawOutcome : 'succeeded'
+      const err = rec(m.error)
+      const errMessage = str(err.message)
+      const errData = rec(err.data)
+      const errMsg = errMessage ?? str(errData.message) ?? undefined
+      idle = { at: created, outcome, ...(errMsg ? { error: errMsg } : {}) }
+      continue
+    }
+
+    if (type === 'model-switched') {
+      const model = rec(m.model)
+      const providerID = str(model.providerID)
+      const modelID = str(model.id) ?? str(model.modelID)
+      if (!providerID || !modelID) continue
+      if (config.model && created <= config.model.at) continue
+      config.model = { providerID, modelID, at: created }
+      continue
+    }
+
+    if (type === 'agent-switched') {
+      const agent = str(m.agent)
+      if (!agent) continue
+      if (config.agent && created <= config.agent.at) continue
+      config.agent = { agent, at: created }
+    }
+  }
+
+  return { ...(idle ? { idle } : {}), config }
+}
+
 /** v2 message.list 响应 → 内部 messages + 双向游标 */
 export function adaptMessagePage(raw: unknown): {
   messages: MessageWithParts[]
@@ -234,17 +320,24 @@ export function adaptMessagePage(raw: unknown): {
   compactedAt?: number
   /** 压缩标记（摘要/近期消息规模） */
   compaction?: CompactionMarker
+  /** 本页内最近一次轮次结论（idle 消息） */
+  idle?: IdleMarker
+  /** 本页内的会话配置切换记录 */
+  config: SessionConfigMarkers
 } {
   const r = rec(raw)
   const cursor = rec(r.cursor)
   const data = list(r.data)
   const compaction = findCompactionMarker(data)
+  const markers = collectSessionMarkers(data)
   return {
     messages: data.map(adaptMessage).filter((m): m is MessageWithParts => m != null),
     nextCursor: str(cursor.next) ?? undefined,
     prevCursor: str(cursor.previous) ?? undefined,
     compactedAt: compaction?.at,
     compaction,
+    idle: markers.idle,
+    config: markers.config,
   }
 }
 
@@ -261,18 +354,23 @@ export async function adaptMessagePageAsync(raw: unknown): Promise<{
   prevCursor?: string
   compactedAt?: number
   compaction?: CompactionMarker
+  idle?: IdleMarker
+  config: SessionConfigMarkers
 }> {
   const r = rec(raw)
   const cursor = rec(r.cursor)
   const data = list(r.data)
   const messages = await mapInSlices(data, adaptMessage)
   const compaction = findCompactionMarker(data)
+  const markers = collectSessionMarkers(data)
   return {
     messages: messages.filter((m): m is MessageWithParts => m != null),
     nextCursor: str(cursor.next) ?? undefined,
     prevCursor: str(cursor.previous) ?? undefined,
     compactedAt: compaction?.at,
     compaction,
+    idle: markers.idle,
+    config: markers.config,
   }
 }
 

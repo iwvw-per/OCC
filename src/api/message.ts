@@ -6,7 +6,7 @@
 import { buildHeaders } from './sdk'
 import { logger } from '../utils/logger'
 import { nativePrompt, nativeListMessages } from './v2NativeMessage'
-import { adaptMessagePage, type CompactionMarker } from './v2/message'
+import { adaptMessagePage, type CompactionMarker, type IdleMarker, type SessionConfigMarkers } from './v2/message'
 import { sanitizeMessageWithParts } from './sanitize'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { peekSessionCache } from './session'
@@ -14,7 +14,8 @@ import { directoryCacheKey } from '../utils/directoryUtils'
 import { sharedInflightRequest } from '../utils/singleFlight'
 import { serverStorage } from '../utils/perServerStorage'
 import { serverStore } from '../store/serverStore'
-import { TURN_FETCH_MAX_PAGES, TURN_FETCH_MESSAGE_LIMIT, FIRST_SCREEN_PAGE_LIMIT } from '../constants/pagination'
+import { TURN_FETCH_MAX_PAGES, TURN_FETCH_MESSAGE_LIMIT, FIRST_SCREEN_PAGE_LIMIT, HISTORY_PAGE_LIMIT_MAX } from '../constants/pagination'
+import { estimateHistoryPageSize } from '../constants/pagination'
 import type {
   ApiMessageWithParts,
   AgentPartInput,
@@ -77,6 +78,10 @@ export interface SessionMessagePage {
   compactedAt?: number
   /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
   compaction?: CompactionMarker
+  /** 本页内最近一次轮次结论（`type: "idle"` 消息） */
+  idle?: IdleMarker
+  /** 本页内的会话配置切换记录（model-switched / agent-switched） */
+  config: SessionConfigMarkers
 }
 
 /**
@@ -138,6 +143,8 @@ export async function getSessionMessagePage(
           nextCursor: page.nextCursor,
           compactedAt: page.compactedAt,
           compaction: page.compaction,
+          idle: page.idle,
+          config: page.config,
         }
       }),
     options?.signal,
@@ -249,7 +256,15 @@ async function fetchV2MessageRaw(
 async function probeV2LightweightSupport(serverId: string, sessionId: string): Promise<boolean> {
   const res = await fetchV2MessageRaw(serverId, v2MessageUrl(serverId, sessionId, { limit: '1' }))
   if (!res.ok) return false
-  return (res.headers.get(LIGHTWEIGHT_HEADER) ?? '') === '1'
+  const supported = (res.headers.get(LIGHTWEIGHT_HEADER) ?? '') === '1'
+  // ⚠️ 必须掐断响应体。
+  //
+  // 主机 Agent 实现轻量投影时会**忽略 limit**，任何带 X-Lightweight 的消息
+  // 请求都返回**整个会话**（实测 4810 条消息 = 25MB）。我们只要一个响应头，
+  // 若把 body 读完/放着不管，等于每次探测都白下载几十 MB。
+  // cancel 掉流，传输立刻停止（HTTP/2 下服务端随即收到 RST_STREAM）。
+  void res.body?.cancel().catch(() => {})
+  return supported
 }
 
 /**
@@ -438,6 +453,10 @@ export interface SessionTurnPage {
   compactedAt?: number
   /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
   compaction?: CompactionMarker
+  /** 本批内最近一次轮次结论（`type: "idle"` 消息） */
+  idle?: IdleMarker
+  /** 本批内的会话配置切换记录（model-switched / agent-switched） */
+  config: SessionConfigMarkers
 }
 
 /** 一条消息是否为用户消息（轮次分隔点） */
@@ -573,6 +592,24 @@ export async function getSessionTurnPage(
   let reachedEnd = false
   let compactedAt: number | undefined
   let compaction: CompactionMarker | undefined
+  let idle: IdleMarker | undefined
+  const config: SessionConfigMarkers = { model: undefined, agent: undefined }
+
+  /** 合并一页里带来的 markers（取「时间更晚」的那个） */
+  const mergeMarkers = (page: {
+    idle?: IdleMarker
+    config?: SessionConfigMarkers
+  }) => {
+    if (page.idle && (!idle || page.idle.at >= idle.at)) idle = page.idle
+    const m = page.config?.model
+    if (m && (!config.model || m.at >= config.model.at)) {
+      config.model = { providerID: m.providerID, modelID: m.modelID, at: m.at }
+    }
+    const a = page.config?.agent
+    if (a && (!config.agent || a.at >= config.agent.at)) {
+      config.agent = { agent: a.agent, at: a.at }
+    }
+  }
 
   while (true) {
     const page = await getSessionMessagePage(sessionId, pageLimit, cursor, directory, serverId, options)
@@ -585,6 +622,7 @@ export async function getSessionTurnPage(
     if (page.compaction && (!compaction || page.compaction.at >= compaction.at)) {
       compaction = page.compaction
     }
+    mergeMarkers(page)
 
     // 无游标或空页（残留游标）都算到最早。
     if (!cursor || page.messages.length === 0) {
@@ -602,7 +640,15 @@ export async function getSessionTurnPage(
   const hasMore = !reachedEnd && cursor != null
 
   // 已到最早时清掉游标，避免 loadMoreHistory 因残留游标继续触发空拉。
-  return { messages: collected, nextCursor: reachedEnd ? undefined : cursor, hasMore, compactedAt, compaction }
+  return {
+    messages: collected,
+    nextCursor: reachedEnd ? undefined : cursor,
+    hasMore,
+    compactedAt,
+    compaction,
+    ...(idle ? { idle } : {}),
+    config,
+  }
 }
 
 /**
@@ -662,23 +708,66 @@ export async function getSessionFirstScreen(
       let turns = first.messages.reduce((count, m) => count + (isUserApiMessage(m) ? 1 : 0), 0)
       let compactedAt = first.compactedAt
       let compaction = first.compaction
+      let idle = first.idle
+      const config: SessionConfigMarkers = { ...(first.config ?? {}) }
       let pages = 0
 
-      while (turns < targetTurnCount && cursor && pages < 4) {
+      /**
+       * 补齐页的大小按密度自适应，并受**总条数预算**约束。
+       *
+       * 首屏那 12 条能看出「这个会话一轮有多少条消息」：普通聊天 2~4 条，
+       * 工具密集的 30+ 条。
+       *
+       * 但有一种情况密度**根本测不出来**：首屏那 12 条全是助手消息/工具调用，
+       * 一条用户消息都没有 —— 说明当前正处在一个超长轮次里。此时与其用默认
+       * 密度一次取 22 条、连翻 4 页（4 次串行往返），不如按上限一次多取，
+       * 把「补齐 3 轮」一次做完。
+       *
+       * 预算是总条数（不是页数）：不管密度怎么估，补齐最多再拉这么多条，
+       * 避免在病态会话里持续占带宽。
+       */
+      const REST_BUDGET_MESSAGES = 240
+      let restBudget = REST_BUDGET_MESSAGES
+
+      const pickRestPageLimit = (): number => {
+        const collectedUserCount = collected.reduce((count, m) => count + (isUserApiMessage(m) ? 1 : 0), 0)
+        if (collectedUserCount < 2) {
+          // 还看不到用户轮次 → 大概率在超长轮次里，按上限取
+          return Math.min(HISTORY_PAGE_LIMIT_MAX, restBudget)
+        }
+        const density = collected.length / collectedUserCount
+        return Math.min(estimateHistoryPageSize(density, Math.max(1, targetTurnCount - turns)), restBudget)
+      }
+
+      let restPageLimit = pickRestPageLimit()
+
+      while (turns < targetTurnCount && cursor && pages < 4 && restBudget > 0) {
         const more = await getSessionTurnPage(sessionId, targetTurnCount - turns, cursor, directory, serverId, {
           ...options,
-          pageLimit: FIRST_SCREEN_PAGE_LIMIT,
+          pageLimit: restPageLimit,
           maxPages: 1,
         })
         pages += 1
         collected.unshift(...more.messages)
         turns += more.messages.reduce((count, m) => count + (isUserApiMessage(m) ? 1 : 0), 0)
         cursor = more.nextCursor
+        restBudget -= more.messages.length
+        // 样本变多了，重新估一次密度与页大小。
+        restPageLimit = pickRestPageLimit()
         if (more.compactedAt != null && (compactedAt == null || more.compactedAt > compactedAt)) {
           compactedAt = more.compactedAt
         }
         if (more.compaction && (!compaction || more.compaction.at >= compaction.at)) {
           compaction = more.compaction
+        }
+        if (more.idle && (!idle || more.idle.at >= idle.at)) idle = more.idle
+        const mModel = more.config?.model
+        if (mModel && (!config.model || mModel.at >= config.model.at)) {
+          config.model = { providerID: mModel.providerID, modelID: mModel.modelID, at: mModel.at }
+        }
+        const mAgent = more.config?.agent
+        if (mAgent && (!config.agent || mAgent.at >= config.agent.at)) {
+          config.agent = { agent: mAgent.agent, at: mAgent.at }
         }
         if (more.messages.length === 0) break
       }
@@ -689,6 +778,8 @@ export async function getSessionFirstScreen(
         hasMore: cursor != null,
         compactedAt,
         compaction,
+        ...(idle ? { idle } : {}),
+        config,
       }
     },
   }

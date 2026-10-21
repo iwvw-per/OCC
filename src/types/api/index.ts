@@ -97,6 +97,7 @@ export type {
   TodoItem,
   TodoUpdatedPayload,
   NextToolSettledPayload,
+  NextToolProgressPayload,
   WorktreeReadyPayload,
   WorktreeFailedPayload,
   VcsBranchUpdatedPayload,
