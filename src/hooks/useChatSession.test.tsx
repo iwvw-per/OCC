@@ -172,6 +172,7 @@ vi.mock('../utils', () => ({
   clipboardErrorHandler: vi.fn(),
   copyTextToClipboard: vi.fn(),
   createErrorHandler: vi.fn(() => errorHandlerMock),
+  logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }))
 
 const healthStore = vi.hoisted(() => {

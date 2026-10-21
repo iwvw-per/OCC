@@ -61,8 +61,17 @@ vi.mock('../store', () => ({
   messageStore: messageStoreMock,
 }))
 
+// 上下文用量兜底会真的打网络（session.context），测试里必须隔离。
+// 它由 loadSession 通过 `void` 调用，若让真实实现跑起来，失败路径会变成
+// unhandled rejection —— 表现为「断言全过但退出码非 0」。
+vi.mock('../api/contextBackfill', () => ({
+  backfillSessionUsage: vi.fn(async () => {}),
+  resetContextBackfill: vi.fn(),
+}))
+
 vi.mock('../utils', () => ({
   sessionErrorHandler: (...args: unknown[]) => sessionErrorHandlerMock(...args),
+  logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }))
 
 describe('useSessionManager', () => {

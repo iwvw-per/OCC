@@ -88,7 +88,16 @@ export async function backfillSessionUsage(sessionKey: string): Promise<void> {
     )
   } catch (error) {
     // 补数据失败不影响任何主流程；下次重新打开会话会再试（backfilled 已置位，
-    // 因此同一会话本次不再重试，避免失败抖动放大请求）
-    logger.warn('[contextBackfill] failed to backfill session usage', { sessionKey, error })
+    // 因此同一会话本次不再重试，避免失败抖动放大请求）。
+    //
+    // 这里再包一层 try：本函数是从 loadSession 的 .then 里 `void` 调用的，
+    // 一旦 catch 内部抛错（例如日志实现异常、mock 缺失导出），就会变成
+    // unhandled rejection —— 测试里表现为「0 个断言失败但退出码非 0」，
+    // 线上则可能污染错误上报。兜底逻辑自身绝不能成为新的故障源。
+    try {
+      logger.warn('[contextBackfill] failed to backfill session usage', { sessionKey, error })
+    } catch {
+      // 日志本身失败：静默
+    }
   }
 }
