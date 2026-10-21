@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { getVcsInfo } from '../api/vcs'
 import { serverStore } from '../store/serverStore'
 import i18n from '../i18n'
-import type { VcsInfo } from '../types/api/vcs'
+import type { VcsInfo } from '../types/domain/vcs'
 
 const POLL_INTERVAL = 15000 // 15s 轮询
 

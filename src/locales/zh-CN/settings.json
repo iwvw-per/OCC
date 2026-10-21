@@ -97,8 +97,6 @@
     "clearFrontendRulesConfirm": "切换到“后端始终”会删除全部前端临时放行规则，是否继续？",
     "approvePendingOnFullAuto": "追补已等待权限",
     "approvePendingOnFullAutoDesc": "开启后，底部自动放行切到本次会话或全部会话时，会把已经等待的权限也用 once 放行",
-    "queueFollowupMessages": "后续消息排队",
-    "queueFollowupMessagesDesc": "当前会话还在忙时，把新消息先放进队列，等这一轮结束后自动发送",
     "questionAutoSelect": "提问超时自动选择",
     "questionAutoSelectDesc": "AI 提问超过设定时间仍未回答时，自动选择推荐项并提交；没有推荐标记时取第一个选项",
     "questionAutoSelectOff": "关闭",

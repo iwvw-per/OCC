@@ -3,7 +3,8 @@
 // 前端自动批准规则存储，只存内存，刷新即清空
 // ============================================
 
-import { serverStorage } from '../utils/perServerStorage'
+import { autoApproveSettingsStore } from './autoApproveSettings'
+import { serverStore } from './serverStore'
 
 // Full Auto 模式：off / session / global
 export type FullAutoMode = 'off' | 'session' | 'global'
@@ -40,12 +41,6 @@ function wildcardMatch(pattern: string, text: string): boolean {
   return regex.test(text)
 }
 
-function parseQuestionAutoSelectTimeout(raw: string | null): QuestionAutoSelectTimeout {
-  if (raw === '60') return 60
-  if (raw === '120') return 120
-  return 0
-}
-
 /**
  * Auto-Approve Store
  * 按 sessionId 存储自动批准规则
@@ -54,14 +49,7 @@ class AutoApproveStore {
   // 规则存储：sessionId -> rules[]
   private rulesMap = new Map<string, AutoApproveRule[]>()
 
-  // 功能开关（存 localStorage，持久化）
-  // true = 前端临时记住规则；false = 交给后端始终允许
-  private _enabled: boolean = true
-  private readonly STORAGE_KEY = 'opencode-auto-approve-enabled'
-
-  // Full Auto 开启时是否追补已经等待中的权限（危险操作，默认关闭）
-  private _approvePendingOnFullAuto: boolean = false
-  private readonly STORAGE_KEY_APPROVE_PENDING_ON_FULL_AUTO = 'opencode-approve-pending-on-full-auto'
+  // 持久化开关统一由 autoApproveSettingsStore 管理（单写入口 + schema 校验）
 
   // Full Auto 模式（纯内存，不持久化，刷新即关）
   // off: 不自动放行
@@ -74,25 +62,9 @@ class AutoApproveStore {
   private _paneFullAutoModes = new Map<string, FullAutoMode>()
   private _autoReplyRequestIds = new Set<string>()
 
-  // 提问超时自动选推荐项（秒，0 = 关闭），按服务器隔离持久化
-  private _questionAutoSelectTimeout: QuestionAutoSelectTimeout = 0
-  private readonly STORAGE_KEY_QUESTION_AUTO_SELECT_TIMEOUT = 'opencode-question-auto-select-timeout'
-
   constructor() {
-    // 从 localStorage 读取开关状态
-    try {
-      const stored = serverStorage.get(this.STORAGE_KEY)
-      this._enabled = stored === null ? true : stored === 'true'
-      const approvePendingStored = serverStorage.get(this.STORAGE_KEY_APPROVE_PENDING_ON_FULL_AUTO)
-      this._approvePendingOnFullAuto = approvePendingStored === 'true'
-      this._questionAutoSelectTimeout = parseQuestionAutoSelectTimeout(
-        serverStorage.get(this.STORAGE_KEY_QUESTION_AUTO_SELECT_TIMEOUT),
-      )
-    } catch {
-      this._enabled = true
-      this._approvePendingOnFullAuto = false
-      this._questionAutoSelectTimeout = 0
-    }
+    // 开关状态由 store 持有；存储变更（含跨标签页）后同步通知本 store 的订阅者
+    autoApproveSettingsStore.subscribe(() => this.notify())
   }
 
   private notify(): void {
@@ -103,19 +75,7 @@ class AutoApproveStore {
    * 重新从 storage 加载开关状态（服务器切换时调用）
    */
   reloadFromStorage(): void {
-    try {
-      const stored = serverStorage.get(this.STORAGE_KEY)
-      this._enabled = stored === null ? true : stored === 'true'
-      const approvePendingStored = serverStorage.get(this.STORAGE_KEY_APPROVE_PENDING_ON_FULL_AUTO)
-      this._approvePendingOnFullAuto = approvePendingStored === 'true'
-      this._questionAutoSelectTimeout = parseQuestionAutoSelectTimeout(
-        serverStorage.get(this.STORAGE_KEY_QUESTION_AUTO_SELECT_TIMEOUT),
-      )
-    } catch {
-      this._enabled = true
-      this._approvePendingOnFullAuto = false
-      this._questionAutoSelectTimeout = 0
-    }
+    autoApproveSettingsStore.rebind(serverStore.getActiveServerId())
     // 切换服务器时清空规则并关闭 Full Auto
     this.rulesMap.clear()
     this._paneFullAutoModes.clear()
@@ -131,24 +91,18 @@ class AutoApproveStore {
    * 获取功能开关状态
    */
   get enabled(): boolean {
-    return this._enabled
+    return autoApproveSettingsStore.get().enabled
   }
 
   /**
    * 设置功能开关
    */
   setEnabled(value: boolean): void {
-    this._enabled = value
-    try {
-      serverStorage.set(this.STORAGE_KEY, String(value))
-    } catch {
-      // ignore
-    }
-    this.notify()
+    autoApproveSettingsStore.commit(settings => ({ ...settings, enabled: value }))
   }
 
   get alwaysAllowMode(): AlwaysAllowMode {
-    return this._enabled ? 'frontend' : 'backend'
+    return this.enabled ? 'frontend' : 'backend'
   }
 
   setAlwaysAllowMode(mode: AlwaysAllowMode): void {
@@ -156,17 +110,11 @@ class AutoApproveStore {
   }
 
   get approvePendingOnFullAuto(): boolean {
-    return this._approvePendingOnFullAuto
+    return autoApproveSettingsStore.get().approvePendingOnFullAuto
   }
 
   setApprovePendingOnFullAuto(value: boolean): void {
-    this._approvePendingOnFullAuto = value
-    try {
-      serverStorage.set(this.STORAGE_KEY_APPROVE_PENDING_ON_FULL_AUTO, String(value))
-    } catch {
-      // ignore
-    }
-    this.notify()
+    autoApproveSettingsStore.commit(settings => ({ ...settings, approvePendingOnFullAuto: value }))
   }
 
   subscribe = (listener: StoreListener): (() => void) => {
@@ -179,18 +127,13 @@ class AutoApproveStore {
   // ---- 提问超时自动选择 ----
 
   get questionAutoSelectTimeout(): QuestionAutoSelectTimeout {
-    return this._questionAutoSelectTimeout
+    return autoApproveSettingsStore.get().questionAutoSelectTimeout
   }
 
   setQuestionAutoSelectTimeout(seconds: QuestionAutoSelectTimeout): void {
-    if (this._questionAutoSelectTimeout === seconds) return
-    this._questionAutoSelectTimeout = seconds
-    try {
-      serverStorage.set(this.STORAGE_KEY_QUESTION_AUTO_SELECT_TIMEOUT, String(seconds))
-    } catch {
-      // ignore
-    }
-    this.notify()
+    autoApproveSettingsStore.commit(settings =>
+      settings.questionAutoSelectTimeout === seconds ? settings : { ...settings, questionAutoSelectTimeout: seconds },
+    )
   }
 
   // ---- Full Auto 模式 ----
@@ -298,7 +241,7 @@ class AutoApproveStore {
    * @param patterns 要添加的 pattern 列表
    */
   addRules(sessionId: string, permission: string, patterns: string[]): void {
-    if (!this._enabled) return
+    if (!this.enabled) return
 
     const existing = this.rulesMap.get(sessionId) || []
     const newRules: AutoApproveRule[] = patterns.map(pattern => ({
@@ -347,9 +290,7 @@ class AutoApproveStore {
    */
   reset(): void {
     this.rulesMap.clear()
-    this._enabled = true
-    this._approvePendingOnFullAuto = false
-    this._questionAutoSelectTimeout = 0
+    autoApproveSettingsStore.reset()
     this._fullAutoMode = 'off'
     this._paneFullAutoModes.clear()
     this._autoReplyRequestIds.clear()
@@ -365,7 +306,7 @@ class AutoApproveStore {
    * @returns true 如果所有 patterns 都被规则匹配
    */
   shouldAutoApprove(sessionId: string, permission: string, requestPatterns: string[]): boolean {
-    if (!this._enabled) return false
+    if (!this.enabled) return false
     if (!requestPatterns || requestPatterns.length === 0) return false
 
     const rules = this.getRules(sessionId)
@@ -390,7 +331,7 @@ class AutoApproveStore {
    */
   getDebugInfo(): { enabled: boolean; sessions: { id: string; rules: AutoApproveRule[] }[] } {
     return {
-      enabled: this._enabled,
+      enabled: this.enabled,
       sessions: Array.from(this.rulesMap.entries()).map(([id, rules]) => ({
         id,
         rules,

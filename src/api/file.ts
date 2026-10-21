@@ -3,9 +3,9 @@
 // 基于 @opencode-ai/sdk: /file, /find/file, /find/symbol 相关接口
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
 import { nativeListDirectory, nativeReadFile, nativeFindFiles } from './v2NativeFile'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { nativeGetVcsStatus } from './v2NativeAgent'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import type { FileNode, FileContent, FileStatusItem, TextSearchMatch } from './types'
 import { serverStore } from '../store/serverStore'
 
@@ -26,17 +26,7 @@ function getRootDirectoryCacheKey(directory?: string, serverId?: string): string
 
 async function fetchDirectory(path: string, directory?: string, serverId?: string): Promise<FileNode[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeListDirectory(sid, { directory, path })
-  }
-  const sdk = getSDKClient(serverId)
-  const isAbsolute = /^[a-zA-Z]:/.test(path) || path.startsWith('/')
-
-  if (isAbsolute && !directory) {
-    return unwrap(await sdk.file.list({ directory: formatPathForApi(path, serverId), path: '' }))
-  }
-
-  return unwrap(await sdk.file.list({ path, directory: formatPathForApi(directory, serverId) }))
+  return nativeListDirectory(sid, { directory, path })
 }
 
 /**
@@ -97,18 +87,7 @@ export async function searchFiles(
   } = {},
 ): Promise<string[]> {
   const sid = options.serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeFindFiles(sid, { directory: options.directory, query, type: options.type, limit: options.limit })
-  }
-  const sdk = getSDKClient(options.serverId)
-  return unwrap(
-    await sdk.find.files({
-      query,
-      directory: formatPathForApi(options.directory, options.serverId),
-      type: options.type,
-      limit: options.limit,
-    }),
-  ) as string[]
+  return nativeFindFiles(sid, { directory: options.directory, query, type: options.type, limit: options.limit })
 }
 
 /**
@@ -153,25 +132,34 @@ export async function prefetchRootDirectory(directory?: string, serverId?: strin
  */
 export async function getFileContent(path: string, directory?: string, serverId?: string): Promise<FileContent> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeReadFile(sid, { directory, path }) as unknown as FileContent
-  }
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.file.read({ path, directory: formatPathForApi(directory, serverId) }))
+  return nativeReadFile(sid, { directory, path }) as unknown as FileContent
 }
 
 /**
- * 获取文件 git 状态
+ * 获取文件 git 状态（v2 `vcs.status`）。
+ *
+ * 早先这里直接 `return []`，注释理由是「v2 没有全仓库文件状态端点」——这个判断
+ * 是错的：`GET /api/vcs/status` 实测可用，返回 `[{file, additions, deletions, status}]`。
+ * 文件树因此一直没有 git 状态标记（新增/修改/删除的着色）。
+ *
+ * 注意字段名与 `FileStatusItem`（`{path, added, removed, status}`）不同，需要映射。
  */
 export async function getFileStatus(directory?: string, serverId?: string): Promise<FileStatusItem[]> {
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.file.status({ directory: formatPathForApi(directory, serverId) }))
+  const sid = serverId ?? serverStore.getActiveServerId()
+  const raw = await nativeGetVcsStatus(sid, { directory })
+  return raw.map(item => ({
+    path: item.file,
+    added: item.additions,
+    removed: item.deletions,
+    status: item.status,
+  }))
 }
 
 /**
  * 搜索文件正文内容
+ *
+ * v2 无全文搜索端点（file.find 只搜文件名），返回空结果。
  */
-export async function searchText(pattern: string, directory?: string, serverId?: string): Promise<TextSearchMatch[]> {
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.find.text({ pattern, directory: formatPathForApi(directory, serverId) }))
+export async function searchText(_pattern: string, _directory?: string, _serverId?: string): Promise<TextSearchMatch[]> {
+  return []
 }

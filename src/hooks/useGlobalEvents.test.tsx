@@ -21,6 +21,7 @@ const {
   getSessionStatusMock,
   getPendingPermissionsMock,
   getPendingQuestionsMock,
+  getSessionMock,
   replyPermissionMock,
   childBelongsToSessionMock,
   getSessionInfoMock,
@@ -50,6 +51,7 @@ const {
     Promise.resolve([] as Array<{ id: string; sessionID: string; permission: string; patterns?: string[] }>),
   ),
   getPendingQuestionsMock: vi.fn(() => Promise.resolve([])),
+  getSessionMock: vi.fn((_sessionId: string) => Promise.resolve({ id: _sessionId, directory: '' })),
   replyPermissionMock: vi.fn(() => Promise.resolve()),
   childBelongsToSessionMock: vi.fn<(sessionId: string, rootSessionId: string) => boolean>(() => false),
   getSessionInfoMock: vi.fn<(sessionId: string) => unknown>(() => undefined),
@@ -79,7 +81,10 @@ const {
     mergePendingRequests: vi.fn(),
     setSessionMetaBulk: vi.fn(),
     setSessionMeta: vi.fn(),
-    getSessionMeta: vi.fn((sessionId?: string) => ({ title: sessionId || 'Child Session', directory: '/workspace' })),
+    getSessionMeta: vi.fn((sessionId?: string) => ({
+      title: sessionId || 'Child Session',
+      directory: '/workspace' as string | undefined,
+    })),
     addPendingRequest: vi.fn(),
     resolvePendingRequest: vi.fn(),
     updateStatus: vi.fn(() => true),
@@ -100,6 +105,7 @@ const {
 vi.mock('../api', () => ({
   subscribeToEvents: subscribeToEventsMock,
   subscribeToServerEvents: (_serverId: string, cb: unknown) => subscribeToEventsMock(cb),
+  getSession: getSessionMock,
   getSessionStatus: getSessionStatusMock,
   getPendingPermissions: getPendingPermissionsMock,
   getPendingQuestions: getPendingQuestionsMock,
@@ -118,6 +124,8 @@ vi.mock('../store', () => ({
     handleSessionIdle: vi.fn(),
     handleSessionError: vi.fn(),
     markServerSessionsStale: vi.fn(),
+    recordCompactionResult: vi.fn(),
+    recordSessionUsage: vi.fn(),
     getSessionState: vi.fn(() => null),
     updateSessionMetadata: vi.fn(),
   },
@@ -195,6 +203,7 @@ describe('useGlobalEvents', () => {
     getSessionStatusMock.mockClear()
     getPendingPermissionsMock.mockClear()
     getPendingQuestionsMock.mockClear()
+    getSessionMock.mockClear()
     replyPermissionMock.mockClear()
     childBelongsToSessionMock.mockReset()
     getSessionInfoMock.mockReset()
@@ -238,6 +247,41 @@ describe('useGlobalEvents', () => {
     autoApproveStoreMock.claimAutoReply.mockReturnValue(true)
     activeSessionStoreMock.getSessionMeta.mockReturnValue({ title: 'Child Session', directory: '/workspace' })
     activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: {} })
+  })
+
+  it('setSessionMetaBulk does not stamp every running session with the same directory', async () => {
+    // 回归：v2 的 /api/session/active 是全局接口、不接受 directory（permission
+    // 列表同样）。旧实现按项目目录循环调用它，并把返回的每个会话都记成「当前
+    // 目录」，最后一个目录覆盖全部 —— 别的项目里正在跑的会话被算到该项目上，
+    // 折叠行一直转圈，展开却看不到在跑的会话。
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    // 只有 komidash 在跑
+    getSessionStatusMock.mockResolvedValue({ ses_running: { type: 'busy' } })
+    getPendingPermissionsMock.mockResolvedValue([])
+    getPendingQuestionsMock.mockResolvedValue([])
+    // meta 里还没有这个会话的目录（应用启动前就在跑）：必须回落到会话详情，
+    // 而不是套用「当前正在查询的目录」。
+    activeSessionStoreMock.getSessionMeta.mockReturnValue({ title: 'Running', directory: undefined })
+    getSessionMock.mockResolvedValue({ id: 'ses_running', directory: '/repo/komidash' })
+
+    renderHook(() => useGlobalEvents(dirsFor(['/repo/komidash', '/repo/cf-optimize-ip'])))
+
+    await waitFor(() => expect(activeSessionStoreMock.setSessionMetaBulk).toHaveBeenCalled())
+
+    const entries = activeSessionStoreMock.setSessionMetaBulk.mock.calls
+      .flatMap((call: unknown[]) => call[0] as Array<{ sessionId: string; directory?: string }>)
+      .filter(entry => entry.sessionId === 'local::ses_running')
+
+    // 绝不能出现「同一个会话被打上多个目录」，否则最后一个目录会赢
+    expect(new Set(entries.map(entry => entry.directory))).toEqual(new Set(['/repo/komidash']))
+    // 而且全局状态只拉一次，不是每个目录各拉一次
+    expect(getSessionStatusMock).toHaveBeenCalledTimes(1)
+    expect(getSessionStatusMock).toHaveBeenCalledWith(undefined, 'local')
+    expect(callbacks).toBeDefined()
   })
 
   it('stores server clock calibration when server.connected arrives', async () => {
@@ -378,6 +422,98 @@ describe('useGlobalEvents', () => {
     expect(messageStore.markServerSessionsStale).toHaveBeenCalled()
   })
 
+  it('records the post-compaction context size before invalidating messages', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    // v2 压缩事件的 tokens 是**压缩前**用量，不能拿来显示压缩后的占用；
+    // 真实构成是摘要 + 保留的近期消息（summaryChars / recentChars）。
+    const tokens = { input: 342_383, output: 2443, reasoning: 0, cache: { read: 577_024, write: 0 } }
+    callbacks!.onSessionCompacted?.({
+      sessionID: 'ses_1',
+      status: 'completed',
+      reason: 'manual',
+      tokens,
+      cost: 0.02,
+      summaryChars: 5442,
+      recentChars: 92_322,
+      time: 1_700_000_000_000,
+    })
+
+    expect(messageStore.recordCompactionResult).toHaveBeenCalledWith(
+      expect.stringContaining('ses_1'),
+      expect.objectContaining({
+        summaryChars: 5442,
+        recentChars: 92_322,
+        at: 1_700_000_000_000,
+      }),
+    )
+    // 关键：不能把压缩前的 tokens 当成压缩后的占用写进去
+    expect(messageStore.recordCompactionResult).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tokens }),
+    )
+    expect(messageStore.markServerSessionsStale).toHaveBeenCalled()
+  })
+
+  it('does not write a zero-size marker when the event carries no sizes', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    // message.part.updated 的 compaction part 只带 tail_start_id，没有摘要规模。
+    // 若写成 {summaryChars:0, recentChars:0}，圆环会被误算成 0。
+    callbacks!.onSessionCompacted?.({
+      sessionID: 'ses_1',
+      status: 'completed',
+      reason: 'manual',
+      tailStartID: 'msg_tail',
+      time: 1_700_000_000_000,
+    })
+
+    const lastCall = vi.mocked(messageStore.recordCompactionResult).mock.calls.at(-1) as
+      | [unknown, Record<string, unknown>]
+      | undefined
+    expect(lastCall).toBeDefined()
+    const options = lastCall![1]
+    expect(options.summaryChars).toBeUndefined()
+    expect(options.recentChars).toBeUndefined()
+    // 分隔条仍要前移
+    expect(options.at).toBe(1_700_000_000_000)
+  })
+
+  it('records session cumulative usage from session.usage.updated', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    const tokens = { input: 5000, output: 900, reasoning: 100, cache: { read: 300, write: 20 } }
+    callbacks!.onSessionUsageUpdated?.({ sessionID: 'ses_1', tokens, cost: 1.25 })
+
+    // 压缩裁掉旧轮次后，按可见消息汇总会变小；这份是服务端累计口径
+    expect(messageStore.recordSessionUsage).toHaveBeenCalledWith(
+      expect.stringContaining('ses_1'),
+      tokens,
+      1.25,
+    )
+  })
+
   it('reconciles full server status when SSE reconnects to drop stale busy entries', async () => {
     let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
     subscribeToEventsMock.mockImplementation(cb => {
@@ -399,13 +535,12 @@ describe('useGlobalEvents', () => {
   })
 
   it('ignores stale initialization responses after directories change', async () => {
-    const statusDeferreds = new Map<string, ReturnType<typeof createDeferred<Record<string, { type: string }>>>>()
+    const statusDeferreds: Array<ReturnType<typeof createDeferred<Record<string, { type: string }>>>> = []
     getPendingPermissionsMock.mockResolvedValue([])
     getPendingQuestionsMock.mockResolvedValue([])
-    getSessionStatusMock.mockImplementation(directory => {
-      const key = directory || 'root'
+    getSessionStatusMock.mockImplementation(() => {
       const deferred = createDeferred<Record<string, { type: string }>>()
-      statusDeferreds.set(key, deferred)
+      statusDeferreds.push(deferred)
       return deferred.promise
     })
 
@@ -413,20 +548,20 @@ describe('useGlobalEvents', () => {
       initialProps: { directories: dirsFor(['/one']) },
     })
 
-    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith('/one', 'local'))
+    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith(undefined, 'local'))
 
     rerender({ directories: dirsFor(['/two']) })
 
-    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith('/two', 'local'))
+    await waitFor(() => expect(statusDeferreds.length).toBe(2))
 
-    statusDeferreds.get('/two')?.resolve({ 'new-session': { type: 'busy' } })
+    statusDeferreds[1]?.resolve({ 'new-session': { type: 'busy' } })
 
     await waitFor(() => {
       expect(activeSessionStoreMock.mergeStatusRefresh).toHaveBeenCalledTimes(1)
       expect(activeSessionStoreMock.mergeStatusRefresh).toHaveBeenCalledWith({ 'local::new-session': { type: 'busy' } })
     })
 
-    statusDeferreds.get('/one')?.resolve({ 'old-session': { type: 'idle' } })
+    statusDeferreds[0]?.resolve({ 'old-session': { type: 'idle' } })
     await Promise.resolve()
     await Promise.resolve()
 
@@ -448,7 +583,7 @@ describe('useGlobalEvents', () => {
 
     renderHook(() => useGlobalEvents(dirsFor(['/workspace'])))
 
-    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith('/workspace', 'local'))
+    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith(undefined, 'local'))
     await waitFor(() => expect(callbacks).toBeDefined())
 
     callbacks!.onPermissionAsked?.({
@@ -480,7 +615,7 @@ describe('useGlobalEvents', () => {
 
   it('keeps replaying pending requests across overlapping initialization fetches', async () => {
     let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
-    const statusDeferreds = new Map<string, ReturnType<typeof createDeferred<Record<string, { type: string }>>>>()
+    const statusDeferreds: Array<ReturnType<typeof createDeferred<Record<string, { type: string }>>>> = []
 
     subscribeToEventsMock.mockImplementation(cb => {
       callbacks = cb
@@ -491,10 +626,9 @@ describe('useGlobalEvents', () => {
       if (sessionId === 'local::question-session') return { title: 'Question Session', directory: '/two' }
       return { title: 'Session', directory: '/workspace' }
     })
-    getSessionStatusMock.mockImplementation(directory => {
-      const key = directory || 'root'
+    getSessionStatusMock.mockImplementation(() => {
       const deferred = createDeferred<Record<string, { type: string }>>()
-      statusDeferreds.set(key, deferred)
+      statusDeferreds.push(deferred)
       return deferred.promise
     })
     getPendingPermissionsMock.mockResolvedValue([])
@@ -504,7 +638,7 @@ describe('useGlobalEvents', () => {
       initialProps: { directories: dirsFor(['/one']) },
     })
 
-    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith('/one', 'local'))
+    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith(undefined, 'local'))
     await waitFor(() => expect(callbacks).toBeDefined())
 
     callbacks!.onPermissionAsked?.({
@@ -516,7 +650,7 @@ describe('useGlobalEvents', () => {
 
     rerender({ directories: dirsFor(['/two']) })
 
-    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith('/two', 'local'))
+    await waitFor(() => expect(statusDeferreds.length).toBe(2))
 
     callbacks!.onQuestionAsked?.({
       id: 'question-1',
@@ -524,7 +658,7 @@ describe('useGlobalEvents', () => {
       questions: [{ header: 'Need input' }],
     } as never)
 
-    statusDeferreds.get('/two')?.resolve({})
+    statusDeferreds[1]?.resolve({})
 
     await waitFor(() => expect(activeSessionStoreMock.mergePendingRequests).toHaveBeenCalledTimes(1))
 

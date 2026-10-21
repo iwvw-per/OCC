@@ -305,14 +305,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [hasMore, sessions.length, fetchSessions])
 
   const createSession = useCallback(
-    async (title?: string, directory?: string) => {
+    async (title?: string, directory?: string, serverId?: string) => {
       // 使用正斜杠格式传给后端；directory 用于在创建瞬间切换工作目录，
       // targetDir 是渲染时冻结的值，同一时机传入可避免「切换项目后立即新建」
       // 与目录同步到达顺序竞争，导致新会话仍落到旧目录。
-      const newSession = await apiCreateSession({
-        title,
-        directory: directory ?? targetDir,
-      })
+      //
+      // serverId 缺省时退回活动服务器（老调用方的语义），但 pane 场景必须显式传：
+      // 否则「pane 在 A 主机、活动服务器已切到 B」时会把会话建到 B 上。
+      const newSession = await apiCreateSession(
+        {
+          title,
+          directory: directory ?? (serverId ? undefined : targetDir),
+        },
+        serverId,
+      )
       // D30：创建后立即 upsert 进索引，与 useSessions.create 行为一致。此前完全依赖
       // SSE session.created，SSE 未连/事件丢失时新会话不立即出现。
       if (!searchRef.current) sessionListIndexStore.upsert(bucket, newSession)

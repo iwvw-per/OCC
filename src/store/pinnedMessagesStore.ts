@@ -80,12 +80,12 @@ class PinnedMessagesStore {
   }
 
   private reload() {
-    this.bySession = sanitize(serverStorage.getJSON<unknown>(STORAGE_KEY)).bySession
+    this.bySession = sanitize(serverStorage.getJSON<unknown>(STORAGE_KEY, serverStore.getActiveServerId())).bySession
     this.snapshotCache.clear()
   }
 
   private persist() {
-    serverStorage.setJSON(STORAGE_KEY, { version: 1, bySession: this.bySession } satisfies PersistedShape)
+    serverStorage.setJSON(STORAGE_KEY, { version: 1, bySession: this.bySession } satisfies PersistedShape, serverStore.getActiveServerId())
   }
 
   private invalidate(sessionId: string) {

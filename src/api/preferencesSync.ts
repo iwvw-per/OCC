@@ -15,6 +15,9 @@
 //   2. opencode-pinned-sessions / opencode-pinned-messages —— 置顶
 //   3. opencode-read-watermarks / opencode-project-last-used —— 单调计数
 //   4. theme-preset / theme-mode —— 主题
+//   5. srv:aiagent:{id}:hidden-model-keys / model-pinned —— 模型可见性与置顶
+//   6. srv:aiagent:{id}:opencode-hidden-projects —— 被隐藏的派生项目
+//   7. opencode-sidebar-expanded-projects —— 项目行展开/收起
 //
 // **个性化设置不同步**：外观、布局、字号、音效、通知开关等一律不参与。
 // 它们对跨端一致性的要求低，却需要额外的时间戳仲裁与冲突处理；去掉之后
@@ -55,10 +58,13 @@
 //
 // 排除清单：
 //   - opencode-sidebar-expanded：侧栏开合
-//   - opencode-sidebar-expanded-projects：项目行展开/收起
 //   - opencode-panel-layout：右侧/底部面板开合与面板 tab
 //   - opencode-work-status-enabled / opencode-work-status-expanded：
 //     工作状态面板开关与板块展开
+//
+// 例外：opencode-sidebar-expanded-projects（项目行的展开/收起）**参与同步**。
+// 它不是一屏的临时状态——用户往往固定只展开当前在做的项目，换设备看到另一套
+// 展开结果会被当成「状态丢了」。
 //
 // 注意「项目列表本身」（srv:aiagent:inst_X:opencode-saved-directories）不在此
 // 列：那是用户显式保存的项目，属于偏好，仍跨端同步。
@@ -72,6 +78,9 @@
 //   - opencode-pinned-sessions：数组，按 sessionId 去重并集
 //   - opencode-saved-directories：数组，按 path 去重并集
 //   - opencode-pinned-messages：数组，按 sessionId 去重并集
+//   - hidden-model-keys / model-pinned：字符串数组，元素本身即 id
+//   - opencode-hidden-projects：字符串数组（被隐藏的项目目录）
+//   - opencode-sidebar-expanded-projects：字符串数组（展开的项目名）
 //
 // 合并范围仅限「同一个键」：saved-directories 按实例分桶
 // （srv:aiagent:inst_X:opencode-saved-directories），各实例互不干扰。
@@ -98,6 +107,12 @@
 
 import { accountRequest, accountRequestWithMeta, readAccount, type AiAgentAccount } from './aiagent'
 import { notifyPerServerStorageChanged } from '../utils/perServerStorage'
+import { isScopedProjectExpandKey } from '../utils/projectExpandKeys'
+import {
+  hiddenProjectsStore as hiddenProjectsDataStore,
+  recentProjectsStore as recentProjectsDataStore,
+  savedDirectoriesStore as savedDirectoriesDataStore,
+} from '../storage/appData'
 import { layoutStore } from '../store/layoutStore'
 import { serverStore } from '../store/serverStore'
 import { readWatermarkStore } from '../store/readWatermarkStore'
@@ -171,19 +186,42 @@ const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000
  * 只有「多端看到不一致会被当成 bug」的数据才能出现在这里：
  *   - 项目列表（按服务器分桶）
  *   - 置顶会话 / 置顶消息
+ *   - 模型可见性（隐藏的模型）/ 置顶模型
+ *   - 被用户隐藏的派生项目
  *   - 已读水位、项目最后活跃时间
  *   - 主题（preset + mode）
  *
  * 外观/布局/音效/通知等个性化设置**不参与同步**：它们对跨端一致性要求低，
  * 却带来大量合并分支与流量，收益远小于成本。要新增同步项，必须在
  * SYNCABLE_PATTERNS 里显式登记，并为其指定合并策略（见 MERGE_RULES）。
+ *
+ * 判定标准是「用户是否会把不一致当成故障」：
+ *   - 隐藏模型后另一端仍列出它 → 用户认为隐藏没生效；
+ *   - 侧栏字号/动画速度不一致 → 用户认为是设备差异，不是 bug。
+ * 模型可见性与置顶模型属于前者，因此进白名单；它们都是字符串数组，
+ * 走 'string-array' 合并（并集 + 墓碑）。
  */
 const SYNCABLE_PATTERNS: RegExp[] = [
   // 项目列表：按服务器分桶，数组并集 + 墓碑
   /^srv:aiagent:[^:]+:opencode-saved-directories$/,
-  // 置顶会话 / 置顶消息
-  /^opencode-pinned-sessions$/,
-  /^opencode-pinned-messages$/,
+  // 置顶会话 / 置顶消息：同样是 per-server 分桶（历史上写成裸键导致从未真正同步，
+  // 这里同时接受带前缀与裸键两种形态，兼容旧客户端写下的数据）
+  /^(srv:aiagent:[^:]+:)?opencode-pinned-sessions$/,
+  /^(srv:aiagent:[^:]+:)?opencode-pinned-messages$/,
+  // 模型可见性 / 置顶模型：per-server 分桶的字符串数组
+  /^srv:aiagent:[^:]+:hidden-model-keys$/,
+  /^srv:aiagent:[^:]+:model-pinned$/,
+  /**
+   * 侧栏项目行的展开/收起（存的是项目名，不是路径）。
+   *
+   * 以前被排除在同步之外，理由是「界面开合属浏览状态」。但项目行展开不是
+   * 一屏的临时状态：用户往往固定只展开当前在做的项目，换台设备（或在网页端
+   * 和桌面端之间切换）看到另一套展开结果，会被当成「状态丢了」。
+   * 它与 opencode-sidebar-expanded（整个侧栏开合）不同——后者才是瞬时的。
+   */
+  /^opencode-sidebar-expanded-projects$/,
+  // 用户主动隐藏的派生项目目录（与 saved-directories 对称）
+  /^srv:aiagent:[^:]+:opencode-hidden-projects$/,
   // 已读水位、项目最后活跃时间（均为 map<id, 时间戳>，逐键取 max）
   /^opencode-read-watermarks$/,
   /^opencode-project-last-used$/,
@@ -442,7 +480,32 @@ function resolveStamps(
 // ============================================
 
 type MergeRule =
-  | { kind: 'array'; id: (entry: Record<string, unknown>) => string | null; order?: 'newest' }
+  | {
+      kind: 'array'
+      id: (entry: Record<string, unknown>) => string | null
+      order?: 'newest'
+      /**
+       * 只向上合并：本地「删除」不上传、也不生成墓碑。
+       *
+       * 用于「收起」这类不该广播的动作 —— 例如项目行展开状态：本端展开要同步
+       * 到别的端，但本端收起只是「我现在不想看」，不该把另一端的展开也收掉。
+       */
+      upOnly?: boolean
+      /**
+       * 只保留合法 id。
+       *
+       * 用于「键格式升级」：旧的裸项目名无法判断属于哪台主机，若让它们进入
+       * 本地，就会随「当前活动主机」漂移 —— 用户切换主机后展开状态自己变。
+       * 本地在读取时已完成迁移（见 layoutStore.restoreFromStorage），因此同步
+       * 链路里出现的裸名一律视为过期数据丢弃。
+       */
+      keepId?: (id: string) => boolean
+    }
+  /**
+   * 纯字符串数组（如隐藏的模型键、置顶模型键）。与 'array' 的区别只在元素形态：
+   * 这里没有 `id` 提取函数，元素本身就是 id，因此不能走 asRecord。
+   */
+  | { kind: 'string-array' }
   | { kind: 'map-number' }
   /**
    * B 类缺陷 3：对象型键的字段级三方合并。此前这类键走整键 last-write-wins，
@@ -475,6 +538,37 @@ const MERGE_RULES: Record<string, MergeRule> = {
     id: entry => (typeof entry.sessionId === 'string' ? entry.sessionId : null),
     order: 'newest',
   },
+  // 模型可见性（被用户隐藏的模型键）与置顶模型：集合语义的字符串数组，
+  // 多端一致才符合直觉——一端隐藏了模型，另一端还列在候选里会被当成 bug。
+  'hidden-model-keys': {
+    kind: 'string-array',
+  },
+  // 侧栏项目行的展开/收起：只向上合并（并集），本地收起不上传。
+  //   - 本端展开 → 同步给其它端（用户要的）
+  //   - 本端收起 → 只影响本端，不把另一端的展开收掉
+  //
+  // id 是 `serverId::项目名`（见 utils/projectExpandKeys）。旧的裸项目名会被
+  // keepId 挡掉：它们无法判断属于哪台主机，让它们进来就会让两台主机的同名项目
+  // 再次共用状态（即本次修复的 bug）。
+  'opencode-sidebar-expanded-projects': {
+    kind: 'array',
+    id: entry =>
+      typeof entry === 'string'
+        ? entry
+        : typeof entry.value === 'string'
+          ? entry.value
+          : null,
+    upOnly: true,
+    keepId: isScopedProjectExpandKey,
+  },
+  'model-pinned': {
+    kind: 'string-array',
+  },
+  // 被用户隐藏的派生项目目录（服务器当前 worktree 自动置顶的那类）。
+  // 与 saved-directories 语义对称：一个是要显示的列表，一个是要隐藏的列表。
+  'opencode-hidden-projects': {
+    kind: 'string-array',
+  },
   // 未读「已读水位」：{ [sessionId]: 校准时间戳 }，逐键取最大值（单调、收敛）。
   // 使一端已读后，另一端不会回退成未读。详见数据同步层设计 §10.3 C3。
   'opencode-read-watermarks': {
@@ -502,12 +596,147 @@ function mergeRuleFor(key: string): MergeRule | undefined {
   return MERGE_RULES[keySuffix(key)]
 }
 
+/**
+ * 只向上合并的键：把本地值与基线取并集，保序，本地「删除」不生效。
+ *
+ * 语义：这类键表达的是「我展开了什么」，不是「我收起了什么」。因此
+ *   - 本地新增 → 上传，另一端能收到；
+ *   - 本地删除 → 不上传、不生成墓碑，另一端的展开不受影响。
+ *
+ * 为什么必须在上传前就地合并而不是只在拉取时处理：上传链路（pickChangedEntries
+ * + recordTombstones）都基于「本地相对基线少了什么 = 删除意图」。只要本地列表
+ * 变短，就会记墓碑并整键上传，另一端 pull 时按墓碑排除 —— 用户看到的就是
+ * 「刚展开又被自动收起」。把它收敛在「值」这一层，下游全部自然正确。
+ */
+function mergeUpOnly(
+  rule: MergeRule,
+  baseRaw: string | null | undefined,
+  localRaw: string | null | undefined,
+): string | null {
+  if (rule.kind !== 'array' || !rule.upOnly) return null
+  if (localRaw == null) return null // 本地整个键消失：不当作删除
+
+  const parse = (raw: string | null | undefined): unknown[] => {
+    if (typeof raw !== 'string') return []
+    const value = parseJson(raw)
+    return Array.isArray(value) ? value : []
+  }
+
+  const baseList = parse(baseRaw)
+  const localList = parse(localRaw)
+  const seen = new Set<string>()
+  const merged: unknown[] = []
+  const push = (item: unknown) => {
+    const record = typeof item === 'string' ? { value: item } : asRecord(item)
+    if (!record) return
+    const id = rule.id(record)
+    if (!id || seen.has(id)) return
+    if (rule.keepId && !rule.keepId(id)) return
+    seen.add(id)
+    // 保留原始元素（纯字符串仍是字符串），回写时不改变存储形态
+    merged.push(item)
+  }
+
+  // 顺序：先本地（用户当前看到的顺序），再补基线里本地缺失的项。
+  localList.forEach(push)
+  baseList.forEach(push)
+
+  if (JSON.stringify(merged) === JSON.stringify(localList)) return localRaw
+  return JSON.stringify(merged)
+}
+
+/**
+ * 只向上合并的键在拉取时的合并：本地为准，只追加服务端独有、且本机未主动收起的项。
+ *
+ * 关键难点：数组本身无法区分「服务端独有（另一端新展开，应当同步进来）」与
+ * 「本端刚收起、服务端还留着」。只看数组只能二选一，两种做法都会错。
+ *
+ * 因此用 localCollapsed 显式记录「本机主动收起的项」：
+ *   - 本地列表 → 全部保留
+ *   - 服务端列表 → 只追加既不在本地、也不在 localCollapsed 里的项
+ * 这样收起只影响本机，另一端的展开仍能同步过来。
+ */
+function mergeUpOnlyFromServer(
+  rule: MergeRule,
+  localRaw: string | null,
+  serverValue: unknown,
+  localCollapsed: string[],
+): { value: unknown; changed: boolean } {
+  if (rule.kind !== 'array') return { value: undefined, changed: false }
+  const localList = Array.isArray(parseJson(localRaw ?? '')) ? (parseJson(localRaw ?? '') as unknown[]) : []
+  const serverList = Array.isArray(serverValue) ? serverValue : null
+  if (serverList === null) return { value: undefined, changed: false }
+
+  const toRecord = (item: unknown): Record<string, unknown> | null =>
+    typeof item === 'string' ? { value: item } : asRecord(item)
+
+  const collapsed = new Set(localCollapsed)
+  const seen = new Set<string>()
+  const merged: unknown[] = []
+  const push = (item: unknown) => {
+    const record = toRecord(item)
+    if (!record) return
+    const id = rule.id(record)
+    if (!id || seen.has(id) || collapsed.has(id)) return
+    // 键格式升级后，服务端可能还留着旧的裸项目名：无法判断属于哪台主机，
+    // 并进来就会随「当前活动主机」漂移（表现为展开状态自己变）。
+    if (rule.keepId && !rule.keepId(id)) return
+    seen.add(id)
+    merged.push(item)
+  }
+
+  localList.forEach(push)
+  serverList.forEach(push)
+
+  // changed 表示「合并结果与本地不同」，而不是「服务端新增了项」：
+  // 本地列表可能因为过滤掉已收起项而与原始值不同（例如服务端残留被丢弃）。
+  const changed = JSON.stringify(merged) !== JSON.stringify(localList)
+  return { value: merged, changed }
+}
+
+/**
+ * 本机主动收起的项目名。
+ *
+ * 与 layoutStore 的 STORAGE_KEY_SIDEBAR_COLLAPSED_PROJECTS 必须是同一个键：
+ * 写入侧在用户展开/收起时维护它，这里读它来决定「服务端独有的项要不要并回本地」。
+ * 不属于同步数据 —— 它正是用来阻止「收起」被传播的本地记录。
+ */
+const LOCAL_COLLAPSED_KEY = 'opencode-sidebar-collapsed-projects'
+
+function readLocalCollapsed(_key?: string): string[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_COLLAPSED_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is string => typeof item === 'string')
+  } catch {
+    return []
+  }
+}
+
+function writeLocalCollapsed(_key: string, ids: string[]): void {
+  try {
+    if (ids.length === 0) localStorage.removeItem(LOCAL_COLLAPSED_KEY)
+    else localStorage.setItem(LOCAL_COLLAPSED_KEY, JSON.stringify(ids))
+  } catch {
+    /* 存储不可用时放弃这次记录，不影响主流程 */
+  }
+}
+
 function parseJson(raw: string): unknown {
   try {
     return JSON.parse(raw)
   } catch {
     return undefined
   }
+}
+
+/** 解析为字符串数组；非法/非数组一律得到空数组。 */
+function parseStringArray(raw: string | null): string[] {
+  const parsed = raw === null ? undefined : parseJson(raw)
+  if (!Array.isArray(parsed)) return []
+  return parsed.filter((item): item is string => typeof item === 'string' && item !== '')
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -601,10 +830,19 @@ function recordTombstones(entries: Record<string, string>, state: TombstoneState
 function entryIds(value: unknown, rule: MergeRule): Set<string> {
   const ids = new Set<string>()
   if (value === undefined || value === null) return ids
+  if (rule.kind === 'string-array') {
+    if (!Array.isArray(value)) return ids
+    for (const item of value) {
+      if (typeof item === 'string' && item) ids.add(item)
+    }
+    return ids
+  }
   if (rule.kind === 'array') {
     if (!Array.isArray(value)) return ids
     for (const item of value) {
-      const record = asRecord(item)
+      // 数组元素可能是纯字符串（如展开状态存的是项目名），
+      // asRecord 会直接丢掉它们，这里包装成 { value } 交给 id 提取。
+      const record = typeof item === 'string' ? { value: item } : asRecord(item)
       if (!record) continue
       const id = rule.id(record)
       if (id) ids.add(id)
@@ -622,6 +860,41 @@ function entryIds(value: unknown, rule: MergeRule): Set<string> {
 // ============================================
 
 /** 稳定的内容指纹：键排序后拼接，用于判断是否需要上传。 */
+/**
+ * 挑出需要上传的键。
+ *
+ * 判定「有变化」= 当前值与该键上次成功推送时的基线不同（基线存在 `known` 里）。
+ * 基线缺失（首次同步、新键）一律上传。force 时返回全部。
+ *
+ * force 用于「用户点立即同步」：此时即使指纹一致也要把本地状态推一遍，
+ * 避免本端认为已同步、服务端却被别处改坏的情形。
+ */
+function pickChangedEntries(
+  entries: Record<string, string>,
+  known: Record<string, string>,
+  /** 存在待上传删除意图的键：必须整键上传，不受基线影响 */
+  pendingDeletionKeys: string[],
+): Record<string, string> {
+  // 基线未知（没有 known 记录）时无法判断是否变化，一律上传：宁可多推一次，
+  // 也不能因为「以为没变」而丢掉用户的删除/新增意图。
+  const forced = new Set(pendingDeletionKeys)
+  const hasBaseline = Object.keys(known).length > 0 && known.__snapshot__ !== undefined
+  if (!hasBaseline) return { ...entries }
+
+  const changed: Record<string, string> = {}
+  for (const [key, value] of Object.entries(entries)) {
+    if (forced.has(key) || known[key] !== value) changed[key] = value
+  }
+  // 删除到空也需要上传（墓碑语义依赖服务端收到空数组）。这类键在 entries 里
+  // 仍然存在（只是值为 []），所以上面的差分会命中；这里额外保证「基线里有、
+  // 本地已整个键消失」的聚合键也上报，否则删除意图永远传不出去。
+  for (const key of Object.keys(known)) {
+    if (key === '__snapshot__') continue
+    if (!(key in changed) && !(key in entries) && mergeRuleFor(key)) changed[key] = JSON.stringify([])
+  }
+  return changed
+}
+
 function fingerprint(entries: Record<string, string>): string {
   const keys = Object.keys(entries).sort()
   let hash = 2166136261
@@ -710,6 +983,25 @@ function mergeSyncValue(
   dead: Set<string>,
   serverNewer = false,
 ): MergeResult {
+  if (rule.kind === 'string-array') {
+    const baseList = parseStringArray(baseRaw)
+    const localList = localRaw === null ? null : parseStringArray(localRaw)
+    const serverList = Array.isArray(serverValue) ? serverValue.filter((item): item is string => typeof item === 'string') : null
+    if (localList === null || serverList === null) return { value: undefined, changed: false }
+
+    const keep = threeWayMergeIds(entryIds(baseList, rule), entryIds(localList, rule), entryIds(serverList, rule), dead)
+    // 保持本地顺序，追加服务端独有的项：这类列表是集合语义，顺序无意义，
+    // 但稳定的输出能避免每次 pull 都产生一次无谓的写入。
+    const merged: string[] = []
+    const seen = new Set<string>()
+    for (const item of [...localList, ...serverList]) {
+      if (!item || seen.has(item) || !keep.has(item)) continue
+      seen.add(item)
+      merged.push(item)
+    }
+    return { value: merged, changed: true }
+  }
+
   if (rule.kind === 'array') {
     const baseList = Array.isArray(parseJson(baseRaw ?? '')) ? (parseJson(baseRaw ?? '') as unknown[]) : []
     const localValue = localRaw === null ? undefined : parseJson(localRaw)
@@ -719,16 +1011,23 @@ function mergeSyncValue(
 
     const keep = threeWayMergeIds(entryIds(baseList, rule), entryIds(localList, rule), entryIds(serverList, rule), dead)
 
+    // 元素可能是纯字符串（如展开状态存项目名）。统一包装成 { value } 提取 id，
+    // 输出时再还原成原始元素，保持存储形态不变。
+    const toRecord = (item: unknown): Record<string, unknown> | null =>
+      typeof item === 'string' ? { value: item } : asRecord(item)
+    const fromRecord = (record: Record<string, unknown>): unknown =>
+      typeof record.value === 'string' && Object.keys(record).length === 1 ? record.value : record
+
     const localById = new Map<string, Record<string, unknown>>()
     for (const item of localList) {
-      const record = asRecord(item)
+      const record = toRecord(item)
       if (!record) continue
       const id = rule.id(record)
       if (id) localById.set(id, record)
     }
     const serverById = new Map<string, Record<string, unknown>>()
     for (const item of serverList) {
-      const record = asRecord(item)
+      const record = toRecord(item)
       if (!record) continue
       const id = rule.id(record)
       if (id) serverById.set(id, record)
@@ -737,20 +1036,20 @@ function mergeSyncValue(
     // order: 'newest' 时，排列顺序跟随较新的一侧；否则沿用「本地顺序 + 服务端新增」。
     // 重复 id 的内容仍优先取本地那条（不让服务端的旧副本覆盖本地名称等字段）。
     const orderSource = rule.order === 'newest' && serverNewer ? serverList : localList
-    const merged: Record<string, unknown>[] = []
+    const merged: unknown[] = []
     const seen = new Set<string>()
     const push = (record: Record<string, unknown>) => {
       const id = rule.id(record)
       if (!id || seen.has(id) || !keep.has(id)) return
       seen.add(id)
-      merged.push(localById.get(id) ?? record)
+      merged.push(fromRecord(localById.get(id) ?? record))
     }
     for (const item of orderSource) {
-      const record = asRecord(item)
+      const record = toRecord(item)
       if (record) push(record)
     }
     for (const item of [...localList, ...serverList]) {
-      const record = asRecord(item)
+      const record = toRecord(item)
       if (record) push(record)
     }
     return { value: merged, changed: true }
@@ -871,11 +1170,16 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
       const baseRaw = typeof snapshotRaw === 'string' ? snapshotRaw : null
 
       // 本地相对基线消失的条目 → 记墓碑，防止它从服务端被再次带回来。
+      // 只向上合并的键例外：本地收起不是删除意图，不能生成墓碑，
+      // 否则下一次 pull 会按墓碑把该项排除（表现为「收起后展开不回来/状态乱跳」）。
       const bucket = tombstones[key] ?? {}
       const baseIds = entryIds(parseJson(baseRaw ?? ''), rule)
       const localIds = entryIds(parseJson(localRaw ?? ''), rule)
-      for (const id of baseIds) {
-        if (!localIds.has(id) && id) bucket[id] = now
+      const upOnly = rule.kind === 'array' && rule.upOnly === true
+      if (!upOnly) {
+        for (const id of baseIds) {
+          if (!localIds.has(id) && id) bucket[id] = now
+        }
       }
       // 只有「本地条目比墓碑更新」才说明用户是删除后又重新添加，此时清除墓碑。
       //
@@ -905,7 +1209,45 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
       const serverNewer =
         !localChanged && Number.isFinite(serverAt) && Number.isFinite(localStamp) && serverAt > localStamp
       const dead = new Set(Object.keys(bucket))
-      const merged = mergeSyncValue(rule, baseRaw, localRaw, item.value, dead, serverNewer)
+      /**
+       * 只向上合并的键：合并结果必须以**本地**为准。
+       *
+       * mergeSyncValue 是「集合并集」，会把服务端仍保留的项并回本地 —— 用户刚
+       * 收起的那一项随即被重新展开。这里改为：本地已有的项保持原样，只把服务端
+       * 独有的项追加进来（这样另一端新展开的仍能同步过来）。
+       */
+      const merged = upOnly
+        ? mergeUpOnlyFromServer(rule, localRaw, item.value, readLocalCollapsed(key))
+        : mergeSyncValue(rule, baseRaw, localRaw, item.value, dead, serverNewer)
+      if (upOnly) {
+        // 只有当服务端**确实**把某项并进本地时，才让那条「已收起」记录失效，
+        // 否则它会永久挡住该项目之后再被展开。
+        // 注意判定依据是「本地原本没有、合并后有了」，而不是「合并结果包含它」——
+        // 后者对本地原本就展开的项恒成立，会把收起记录无条件清空。
+        const localIds = new Set(
+          (Array.isArray(parseJson(localRaw ?? '')) ? (parseJson(localRaw ?? '') as unknown[]) : []).flatMap(
+            entry => {
+              const record = typeof entry === 'string' ? { value: entry } : asRecord(entry)
+              const id = record ? rule.id(record) : null
+              return id ? [id] : []
+            },
+          ),
+        )
+        const mergedIds = new Set(
+          (Array.isArray(merged.value) ? merged.value : []).flatMap(entry => {
+            const record = typeof entry === 'string' ? { value: entry } : asRecord(entry)
+            const id = record ? rule.id(record) : null
+            return id ? [id] : []
+          }),
+        )
+        const revived = new Set([...mergedIds].filter(id => !localIds.has(id)))
+        if (revived.size > 0) {
+          writeLocalCollapsed(
+            key,
+            readLocalCollapsed(key).filter(id => !revived.has(id)),
+          )
+        }
+      }
       if (merged.changed) {
         const raw = JSON.stringify(merged.value)
         try {
@@ -913,13 +1255,20 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
             localStorage.setItem(key, raw)
             written += 1
           }
-          known[key] = raw
-          stamps[key] = new Date(Math.max(Number.isFinite(serverAt) ? serverAt : 0, Date.now())).toISOString()
+          // 本地相对基线已变更（尚未上传）时不能刷新基线：否则增量推送会把这次
+          // 本地改动误判成「已同步」，删除/新增意图永远传不出去。
+          if (!localChanged) {
+            known[key] = raw
+            stamps[key] = new Date(Math.max(Number.isFinite(serverAt) ? serverAt : 0, Date.now())).toISOString()
+          }
         } catch {
           // 单项写入失败不影响其余键
         }
-        continue
       }
+      // 只向上合并的键到此为止：哪怕合并结果与本地相同（changed=false），
+      // 也不能落进下面的「服务端值覆盖本地」分支 —— 那会把刚收起的项写回来。
+      if (upOnly) continue
+      if (merged.changed) continue
     }
 
     const value = typeof item.value === 'string' ? item.value : JSON.stringify(item.value)
@@ -955,6 +1304,12 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
   // 订阅者重新读取，否则 UI 停在初始化快照上。
   if (written > 0) {
     notifyPerServerStorageChanged()
+    // 项目列表 / 最近使用 / 隐藏项目都是 createStore 实例，它们的快照只在自身
+    // commit 时更新，收不到上面这个版本通知。必须显式重读，否则数据已落盘但
+    // 侧栏不变 ——「必须手动刷新才能看到同步结果」正是缺了这一步。
+    savedDirectoriesDataStore.reload()
+    recentProjectsDataStore.reload()
+    hiddenProjectsDataStore.reload()
     // layoutStore 管着一批只读一次的偏好（侧栏排序、开关等），它们不走
     // per-server 存储，需要单独触发重读，否则表现为「另一台改了排序，这边要
     // 切换主机才生效」。
@@ -980,15 +1335,43 @@ export async function pushPreferences(account?: AiAgentAccount | null, force = f
   const current = account ?? readAccount()
   if (!current) throw new Error('尚未登录')
 
-  const entries = collectLocalPreferences()
-  const currentFingerprint = fingerprint(entries)
+  const allEntries = collectLocalPreferences()
+  const currentFingerprint = fingerprint(allEntries)
   const meta = readSyncMeta()
   if (!force && currentFingerprint === meta.fingerprint) {
     return 0
   }
 
+  // 增量推送：只上传相对上次成功推送发生变化（或有缺省基线）的键。
+  // 白名单只有 6 类数据，全量上传的收益本来就低；真正省流量的是这里 ——
+  // 一次主题切换从「推全部键」降到「推 1 个键」。
+  const baselineKnown = readStampState().known
+  const pendingDeletions = Object.keys(readTombstones())
+
+  // 只向上合并的键：先把本地值与基线取并集，使「本地删除」不被下游
+  // （pickChangedEntries 的差分 / recordTombstones 的墓碑）识别成删除意图。
+  // 否则本端一收起，就会记墓碑并整键上传，另一端 pull 时按墓碑排除，
+  // 表现为「刚展开又被自动收起」。
+  const upOnlyMerged: Record<string, string> = { ...allEntries }
+  const baselineSnapshot = asRecord(
+    typeof baselineKnown[SNAPSHOT_KEY] === 'string' ? parseJson(baselineKnown[SNAPSHOT_KEY]) : undefined,
+  )
+  for (const [key, value] of Object.entries(allEntries)) {
+    const rule = mergeRuleFor(key)
+    if (!rule) continue
+    // 基线值取自 __snapshot__，不是 known[key]（后者只在推送时写入增量值）
+    const baseRaw = typeof baselineSnapshot?.[key] === 'string' ? (baselineSnapshot[key] as string) : null
+    const merged = mergeUpOnly(rule, baseRaw, value)
+    if (merged !== null) upOnlyMerged[key] = merged
+  }
+
+  const entries = pickChangedEntries(upOnlyMerged, baselineKnown, pendingDeletions)
+
   const stampState = readStampState()
-  const tombstones = recordTombstones(entries, readTombstones())
+  // 墓碑必须基于「全量本地状态」计算：增量 entries 里不含未变化的键，
+  // 拿它做差分会把「没上传」误判成「已删除」，从而生成假墓碑。
+  // 用 upOnlyMerged 而非 allEntries：只向上合并的键里，本地删除不算删除意图。
+  const tombstones = recordTombstones(upOnlyMerged, readTombstones())
   const mergedEntries = { ...entries }
   for (const key of mergeRuleKeysFromSnapshot()) {
     const raw = entries[key]
@@ -1002,7 +1385,9 @@ export async function pushPreferences(account?: AiAgentAccount | null, force = f
       if (!Array.isArray(value)) continue
       mergedEntries[key] = JSON.stringify(
         value.filter(entry => {
-          const record = asRecord(entry)
+          // 元素可能是纯字符串（展开状态存项目名）：asRecord 会把它判成
+          // 非法并整项丢弃，导致整键被错误写成 []。这里兼容两种形态。
+          const record = typeof entry === 'string' ? { value: entry } : asRecord(entry)
           if (!record) return false
           const id = rule.id(record)
           return !id || !dead.has(id)

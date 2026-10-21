@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { diffLines } from 'diff'
 import { DisclosureRow } from '../../../components/ui/DisclosureRow'
-import { StopIcon, TaskDoneIcon } from '../../../components/Icons'
+import { StopIcon, TaskDoneIcon, ChevronDownIcon } from '../../../components/Icons'
 import { ToolParamChip } from './ToolParamChip'
 import type { ToolPart } from '../../../types/message'
 import { isSubagentToolName, getSubagentSessionId, isBackgroundSubagentOutput } from '../subagentUtils'
@@ -14,7 +14,7 @@ import { childSessionStore, useChildSessionStatus } from '../../../store/childSe
 import { messageStore } from '../../../store/messageStore'
 import { useSessionStatus } from '../../../store/activeSessionStore'
 import { useSessionNavigation } from '../../../contexts/SessionNavigationContext'
-import { abortSession } from '../../../api'
+import { abortSession, backgroundSessionTools } from '../../../api'
 import { makeSessionKey, splitSessionKey } from '../../../utils/sessionKey'
 import { useTheme } from '../../../hooks/useTheme'
 import { formatToolName, formatDuration } from '../../../utils/formatUtils'
@@ -28,6 +28,7 @@ import { InlinePermission } from '../../chat/InlinePermission'
 import { InlineQuestion } from '../../chat/InlineQuestion'
 import {
   getToolIcon,
+  extractToolCallsFromCode,
   getToolColorClass,
   extractToolData,
   getToolConfig,
@@ -40,6 +41,7 @@ import {
 import { MSG_SPACING } from '../messageSpacing'
 import { MessageExpandPanel } from '../messageExpand'
 import { useMessageExpandRender } from '../messageExpandShared'
+import { getToolDisplayName } from './toolDisplayName'
 
 // ============================================
 // ToolPartView - 单个工具调用
@@ -86,7 +88,22 @@ export const ToolPartView = memo(function ToolPartView({
   const { t } = useTranslation('message')
   const { state, tool: toolName } = part
   const { currentSessionId } = useSessionNavigation()
+  // part.tool 就是真实工具名（已由数据库实测确认）。个别 MCP 代理工具会显式
+  // 提供 displayName，仅在存在时才覆盖。
+  const toolDisplayName = getToolDisplayName(part) ?? toolName
   const title = state.title || getInputDescription(part) || ''
+
+  /**
+   * execute（Code Mode）在 input.code 里通过 tools.xxx() 调用其它工具。
+   * 只显示「Execute」等于什么都没说 —— 摘要里补上实际调用，例如
+   * 「Execute · get_system_status, find_api」，一眼能看出做了什么。
+   */
+  const executeCallSummary = useMemo(() => {
+    if (part.tool !== 'execute') return ''
+    const code = (state.input as Record<string, unknown> | undefined)?.code
+    if (typeof code !== 'string') return ''
+    return extractToolCallsFromCode(code).slice(0, 3).join(', ')
+  }, [part.tool, state.input])
 
   const isActive = state.status === 'running' || state.status === 'pending'
   const isError = state.status === 'error'
@@ -359,19 +376,48 @@ export const ToolPartView = memo(function ToolPartView({
     },
     [currentSessionId],
   )
+
+  /**
+   * 把卡住的工具转入后台（v2 session.background）。
+   *
+   * 比 abortSession 温和得多：工具继续跑，会话立刻可以继续下一轮。
+   * 之前用户面对卡住的工具只有「中止整个会话」一条路，代价是这一轮全废。
+   */
+  const handleBackgroundStuck = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!currentSessionId) return
+      const { serverId } = splitSessionKey(currentSessionId)
+      const state = messageStore.getSessionState(currentSessionId)
+      void backgroundSessionTools(currentSessionId, state?.directory || '', serverId || undefined).catch(() => {})
+    },
+    [currentSessionId],
+  )
   const stuckHint = isStuck ? (
     <span className="flex items-center gap-1 shrink-0 text-[length:var(--fs-xxs)] font-medium text-warning-100">
       {t('toolPart.maybeStuck')}
       {!taskStopButton && (
-        <button
-          type="button"
-          onClick={handleAbortStuck}
-          aria-label={t('toolPart.abortStuck')}
-          title={t('toolPart.abortStuck')}
-          className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
-        >
-          <StopIcon size={10} />
-        </button>
+        <>
+          {/* 转后台：比「中止整个会话」温和得多 —— 工具继续跑，会话可以立刻继续 */}
+          <button
+            type="button"
+            onClick={handleBackgroundStuck}
+            aria-label={t('toolPart.moveToBackground')}
+            title={t('toolPart.moveToBackground')}
+            className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-accent-main-100 hover:bg-accent-main-100/10 active:bg-accent-main-100/20 rounded-sm transition-colors bg-transparent border-none"
+          >
+            <ChevronDownIcon size={10} />
+          </button>
+          <button
+            type="button"
+            onClick={handleAbortStuck}
+            aria-label={t('toolPart.abortStuck')}
+            title={t('toolPart.abortStuck')}
+            className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
+          >
+            <StopIcon size={10} />
+          </button>
+        </>
       )}
     </span>
   ) : null
@@ -442,10 +488,11 @@ export const ToolPartView = memo(function ToolPartView({
               {taskTitle ?? (
                 <>
                   <span className="shrink-0 font-medium text-[length:var(--fs-md)] leading-tight">
-                    {formatToolName(toolName)}
+                    {formatToolName(toolDisplayName)}
                   </span>
 
                   {title && <ToolParamChip text={title} error={isError} />}
+                  {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                 </>
               )}
 
@@ -509,9 +556,10 @@ export const ToolPartView = memo(function ToolPartView({
                 {taskTitle ?? (
                   <>
                     <span className="font-medium text-[length:var(--fs-md)] leading-tight transition-colors duration-300 shrink-0">
-                      {formatToolName(toolName)}
+                      {formatToolName(toolDisplayName)}
                     </span>
                     {title && <ToolParamChip text={title} error={isError} />}
+                    {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                   </>
                 )}
               </span>
@@ -590,10 +638,11 @@ export const ToolPartView = memo(function ToolPartView({
               {taskTitle ?? (
                 <>
                   <span className="font-medium text-[length:var(--fs-md)] leading-tight transition-colors duration-300 shrink-0">
-                    {formatToolName(toolName)}
+                    {formatToolName(toolDisplayName)}
                   </span>
 
                   {title && <ToolParamChip text={title} error={isError} />}
+                  {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                 </>
               )}
             </span>

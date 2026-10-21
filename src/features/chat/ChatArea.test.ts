@@ -9,6 +9,7 @@ import {
   collectTurnChangedFiles,
   computeAnchorRestoreScrollDelta,
   computeExpandedPageRange,
+  computePrependRestoreScrollTop,
   estimateMessageRenderWeight,
   expandSelectionWithPageKeys,
   findMessageSequenceOffset,
@@ -1482,5 +1483,43 @@ describe('collectTurnChangedFiles', () => {
     const user = { ...createUserMessage('user-1', 1), content: [editToolPart('t1', 'user-1', 'src/a.ts', 'x\n', 'x\ny\n')] }
     const files = collectTurnChangedFiles([user])
     expect(files).toEqual([])
+  })
+})
+
+/**
+ * 向上加载历史后的视口复原。
+ *
+ * 用户报的原始问题：「向上自动加载的过程中，能否不要自动跳转到最上面刚加载
+ * 的内容？」—— 也就是加载完之后视口被甩到了新内容的顶部。
+ *
+ * 这里固定住补偿公式的语义，避免以后有人"优化"成每批重置基线或改用
+ * 「距底部距离」（这两个都被实测否定）。
+ */
+describe('computePrependRestoreScrollTop', () => {
+  it('keeps the viewport on the same content by shifting down by the added height', () => {
+    // 触发时在 251，加载进来 754px 更早的内容
+    // → 视口必须下移 754，原本贴在顶部的内容才还在原位
+    expect(computePrependRestoreScrollTop(251, 8285, 8285 + 754)).toBe(1005)
+  })
+
+  it('never compensates during the collapse phase', () => {
+    // prepend 的过渡态容器高度会先塌缩（实测 13181 → 5483），
+    // 此时补偿会把视口往回拖，必须原样返回基线
+    expect(computePrependRestoreScrollTop(400, 13181, 5483)).toBe(400)
+    expect(computePrependRestoreScrollTop(400, 13181, 13181)).toBe(400)
+  })
+
+  it('accumulates across batches within one upward-browse session', () => {
+    // 一次快速上滑常触发多批加载。用「首次基线 + 总高度差」而不是每批重置，
+    // 否则误差逐批累积（实测 sh 涨 6557 而 st 只补了 2363）。
+    const baseline = 300
+    const startHeight = 10000
+    // 第 1 批 +900，第 2 批再 +1200（总计 +2100）
+    expect(computePrependRestoreScrollTop(baseline, startHeight, startHeight + 2100)).toBe(2400)
+  })
+
+  it('handles a trigger at the very top', () => {
+    // 用户已经滚到 0 才触发：视口下移到新内容的底部即原内容处
+    expect(computePrependRestoreScrollTop(0, 5000, 6200)).toBe(1200)
   })
 })

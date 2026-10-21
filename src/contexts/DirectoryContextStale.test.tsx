@@ -3,6 +3,7 @@ import { useContext, useEffect, type ContextType } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DirectoryContext } from './DirectoryContext.shared'
 import { DirectoryProvider } from './DirectoryContext'
+import { resetAppDataBindingForTests } from '../storage/appData'
 
 const { buckets, serverChangeListeners, serverState, notifyListeners } = vi.hoisted(() => ({
   buckets: new Map<string, string>(),
@@ -49,6 +50,11 @@ vi.mock('../utils', async importOriginal => {
 vi.mock('../store/serverStore', () => ({
   serverStore: {
     getActiveServerId: () => serverState.activeServerId,
+    getServerBaseUrl: () => 'http://127.0.0.1:4096',
+    getActiveBaseUrl: () => 'http://127.0.0.1:4096',
+    getServerAuth: () => undefined,
+    getActiveAuth: () => undefined,
+    getApiVersion: () => 'v2',
     onServerChange: (fn: (id: string, reason: string) => void) => {
       serverChangeListeners.push(fn)
       return () => {
@@ -98,6 +104,7 @@ describe('rapid successive adds (stale closure / external write)', () => {
 
   beforeEach(() => {
     localStorage.clear()
+    resetAppDataBindingForTests()
     buckets.clear()
     serverChangeListeners.length = 0
     notifyListeners.length = 0
@@ -156,7 +163,9 @@ describe('rapid successive adds (stale closure / external write)', () => {
     })
 
     expect(latest?.savedDirectories.map(d => d.path)).toContain('D:/Code/RaceAdd')
-    const raw = buckets.get('srv:aiagent:inst_work:opencode-saved-directories')
+    const raw =
+      localStorage.getItem('srv:aiagent:inst_work:opencode-saved-directories') ??
+      buckets.get('srv:aiagent:inst_work:opencode-saved-directories')
     expect(JSON.parse(raw || '[]').map((d: { path: string }) => d.path)).toContain('D:/Code/RaceAdd')
   })
 })

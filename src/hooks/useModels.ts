@@ -1,6 +1,5 @@
 import { useSyncExternalStore, useCallback, useEffect } from 'react'
 import { getActiveModels, type ModelInfo } from '../api'
-import { getSDKClientAsync } from '../api/sdk'
 import { serverStore } from '../store/serverStore'
 import i18n from '../i18n'
 
@@ -49,14 +48,24 @@ async function _fetchModels(serverId: string, force = false) {
   const promise = (async () => {
     _setState(serverId, { isLoading: true, error: null })
     try {
-      await getSDKClientAsync(serverId)
       const data = await getActiveModels(undefined, serverId)
       if (generation === _fetchGenerations.get(serverId)) {
         _setState(serverId, { models: data, isLoading: false })
+        if (data.length > 0) {
+          _failureCount.delete(serverId)
+        } else {
+          // 空列表也重试：服务端刚起来时 200 但 providers 为空是常见情况
+          // （配置尚未加载完）。不重试就会一直显示「未找到模型」。
+          _scheduleRetry(serverId)
+        }
       }
     } catch (e) {
       if (generation === _fetchGenerations.get(serverId)) {
-        _setState(serverId, { error: e instanceof Error ? e : new Error(i18n.t('chat:errors.fetchModels')), isLoading: false })
+        _setState(serverId, {
+          error: e instanceof Error ? e : new Error(i18n.t('chat:errors.fetchModels')),
+          isLoading: false,
+        })
+        _scheduleRetry(serverId)
       }
     } finally {
       if (generation === _fetchGenerations.get(serverId)) {
@@ -67,6 +76,30 @@ async function _fetchModels(serverId: string, force = false) {
 
   _fetchPromises.set(serverId, promise)
   return promise
+}
+
+/**
+ * 失败后自动重试（指数退避，上限 RETRY_MAX_DELAYS）。
+ *
+ * 刷新页面时服务端常常还没就绪（本地 serve 刚启动、隧道刚建立），首拉必然失败。
+ * 之前失败只记 error 就再也不管，模型选择器会一直空着，直到用户手动切换服务器
+ * 或重新打开页面 —— 用户报的「模型一直是空的，刷新后没及时加载出来」正是这里。
+ */
+const _retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const _failureCount = new Map<string, number>()
+const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000]
+
+function _scheduleRetry(serverId: string) {
+  if (_retryTimers.has(serverId)) return
+  const attempt = _failureCount.get(serverId) ?? 0
+  if (attempt >= RETRY_DELAYS_MS.length) return
+  _failureCount.set(serverId, attempt + 1)
+  const delay = RETRY_DELAYS_MS[attempt]
+  const timer = setTimeout(() => {
+    _retryTimers.delete(serverId)
+    void _fetchModels(serverId, true)
+  }, delay)
+  _retryTimers.set(serverId, timer)
 }
 
 /** 强制刷新指定服务器（缺省 = 活动服务器）的模型列表 */

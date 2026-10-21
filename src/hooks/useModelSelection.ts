@@ -3,6 +3,7 @@
 // ============================================
 
 import { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
+import { serverStore } from '../store/serverStore'
 import type { ModelInfo } from '../api'
 import {
   getModelKey,
@@ -48,7 +49,7 @@ export function useModelSelection({ models, sessionId = null }: UseModelSelectio
       }
     }
 
-    const initialModelKey = serverStorage.get(STORAGE_KEY_SELECTED_MODEL)
+    const initialModelKey = serverStorage.get(STORAGE_KEY_SELECTED_MODEL, serverStore.getActiveServerId())
 
     return {
       selectedModelKey: initialModelKey,
@@ -108,14 +109,14 @@ export function useModelSelection({ models, sessionId = null }: UseModelSelectio
     }
 
     if (resolvedModelKey) {
-      serverStorage.set(STORAGE_KEY_SELECTED_MODEL, resolvedModelKey)
+      serverStorage.set(STORAGE_KEY_SELECTED_MODEL, resolvedModelKey, serverStore.getActiveServerId())
       if (sessionId) {
         saveSessionModelSelection(sessionId, resolvedModelKey, resolvedSelectedVariant)
       }
       return
     }
 
-    serverStorage.remove(STORAGE_KEY_SELECTED_MODEL)
+    serverStorage.remove(STORAGE_KEY_SELECTED_MODEL, serverStore.getActiveServerId())
   }, [resolvedModelKey, resolvedSelectedVariant, sessionId, sessionSelection])
 
   // 切换模型

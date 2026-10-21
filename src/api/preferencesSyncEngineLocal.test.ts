@@ -83,7 +83,7 @@ describe('preferences sync engine (instant local change)', () => {
     const before = sse.putCount()
 
     // 模拟「新建项目」：写入当前实例的 per-server 存储（触发变更通知）
-    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/New', name: 'New', addedAt: 1 }])
+    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/New', name: 'New', addedAt: 1 }], 'aiagent:inst_1')
 
     // 只需等 debounce（500ms）后上传发生，远小于 15 秒轮询
     await waitFor(() => sse.putCount() > before)
@@ -104,9 +104,9 @@ describe('preferences sync engine (instant local change)', () => {
     const before = sse.putCount()
 
     // 连续三次写入（如删一项 + 重排 + 改名）
-    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/A', name: 'A', addedAt: 1 }])
-    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/B', name: 'B', addedAt: 2 }])
-    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/C', name: 'C', addedAt: 3 }])
+    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/A', name: 'A', addedAt: 1 }], 'aiagent:inst_1')
+    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/B', name: 'B', addedAt: 2 }], 'aiagent:inst_1')
+    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/C', name: 'C', addedAt: 3 }], 'aiagent:inst_1')
 
     await waitFor(() => sse.putCount() > before)
     // 再等一小段确认没有多余的第 2 次上传（debounce 生效）
@@ -129,7 +129,7 @@ describe('preferences sync engine (instant local change)', () => {
     stopPreferencesSync()
 
     const before = sse.putCount()
-    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/After', name: 'After', addedAt: 9 }])
+    serverStorage.setJSON('opencode-saved-directories', [{ path: 'D:/Code/After', name: 'After', addedAt: 9 }], 'aiagent:inst_1')
     await new Promise(resolve => setTimeout(resolve, 1500))
 
     expect(sse.putCount()).toBe(before)

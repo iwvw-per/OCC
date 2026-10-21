@@ -5,22 +5,12 @@ import type {
   McpRemoteConfig as SDKMcpRemoteConfig,
   McpStatusResponse as SDKMcpStatusResponse,
   McpStatus as SDKMcpStatus,
-  McpStatusConnected as SDKMcpStatusConnected,
-  McpStatusDisabled as SDKMcpStatusDisabled,
-  McpStatusFailed as SDKMcpStatusFailed,
-  McpStatusNeedsAuth as SDKMcpStatusNeedsAuth,
-  McpStatusNeedsClientRegistration as SDKMcpStatusNeedsClientRegistration,
 } from '@opencode-ai/sdk/v2/client'
 
-export type MCPStatusConnected = SDKMcpStatusConnected
 
-export type MCPStatusDisabled = SDKMcpStatusDisabled
 
-export type MCPStatusFailed = SDKMcpStatusFailed
 
-export type MCPStatusNeedsAuth = SDKMcpStatusNeedsAuth
 
-export type MCPStatusNeedsClientRegistration = SDKMcpStatusNeedsClientRegistration
 
 export type MCPStatus = SDKMcpStatus
 

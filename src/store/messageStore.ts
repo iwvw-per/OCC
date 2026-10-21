@@ -9,7 +9,7 @@
 // 4. RAF 批量通知 React 组件更新
 
 import i18n from '../i18n'
-import type { Message, MessageError, Content, TextContent } from '../types/message'
+import type { Message, MessageError, Content, TextContent, TokenUsage } from '../types/message'
 import type { ApiMessageWithParts, ApiMessage, ApiPart, ApiSession, Attachment } from '../api/types'
 import { logger } from '../utils/logger'
 import { isUserUIMessage, toUIMessage, toUIMessageInfo, toUIPart } from '../utils/messageConversion'
@@ -303,6 +303,22 @@ class MessageStore {
 
   getSessionState(sessionId: string): SessionState | undefined {
     return this.sessions.get(this.resolveKey(sessionId))
+  }
+
+  /**
+   * 列出某台服务器上**已加载进内存**的会话 key（复合 key）。
+   *
+   * 供重连后的纠错路径使用（如补拉未投递的入队消息）：只处理已经存在的会话，
+   * 否则会在 store 里给没打开过的会话建档，侧栏冒出幽灵条目。
+   */
+  getLoadedSessionKeysForServer(serverId: string): string[] {
+    const keys: string[] = []
+    for (const key of this.sessions.keys()) {
+      const separator = key.indexOf('::')
+      if (separator < 0) continue
+      if (key.slice(0, separator) === serverId) keys.push(key)
+    }
+    return keys
   }
 
   getVisibleMessages(sessionId: string | null): Message[] {
@@ -663,6 +679,13 @@ class MessageStore {
       shareUrl?: string
       loadError?: MessageError
       compactedAt?: number
+      compactionMarker?: { at: number; summaryChars: number; recentChars: number }
+      /** 会话绑定的模型（服务端权威） */
+      model?: { providerID: string; modelID: string; variant?: string }
+      /** 会话绑定的 agent（服务端权威） */
+      agent?: string
+      /** 最近一次轮次结论（消息列表的 idle 记录） */
+      lastTurn?: SessionState['lastTurn']
     },
   ) {
     sessionId = this.resolveKey(sessionId)
@@ -678,6 +701,10 @@ class MessageStore {
     if (options.loadError !== undefined) state.loadError = options.loadError
     if (options.shareUrl !== undefined) state.shareUrl = options.shareUrl
     if (options.compactedAt !== undefined) state.compactedAt = options.compactedAt
+    if (options.compactionMarker !== undefined) state.compactionMarker = options.compactionMarker
+    if (options.model !== undefined) state.model = options.model
+    if (options.agent !== undefined) state.agent = options.agent
+    if (options.lastTurn !== undefined) state.lastTurn = options.lastTurn
 
     this.notify([sessionId])
   }
@@ -705,8 +732,88 @@ class MessageStore {
     this.notify([sessionKey])
   }
 
-  removeMessage(sessionId: string, messageId: string) {
-    sessionId = this.resolveKey(sessionId)
+  /**
+   * 写入一条来自其它端（或本端回环）的用户消息。
+   *
+   * v2 的实时事件流没有 message.updated，用户消息的唯一信号是
+   * `session.inbox.enqueued`（带 inboxID = 客户端生成的 messageID 与文本）。
+   * 这里把它落成与历史拉取同构的用户消息（`${id}-text` part），使：
+   *   - 其它端在 agent 处理前就能看到这条消息（此前完全看不到 → 像被吞掉）；
+   *   - 本端乐观占位按同一 id 被原地替换，不产生重复；
+   *   - 后续 agent 回复按 id 关联 parentID 时顺序正确。
+   *
+   * 与 upsertLocalMessage 的区别：这里不把 id 记入 optimisticMessageIds ——
+   * 它来自服务端事件，是权威消息而不是待替换的占位。
+   */
+  upsertRemoteUserMessage(
+    sessionId: string,
+    input: { messageId: string; text: string; createdAt: number; directory?: string },
+  ) {
+    const sessionKey = this.resolveKey(sessionId, true)
+    const state = this.ensureSession(sessionKey)
+    // 复合 key 的权威 bucket 与 API 里的原始 sessionID 不同：消息 info/part 上都应
+    // 用复合 key，UI 与 store 内部一致（历史拉取走 toUIMessage 时也由 store 统一）。
+    const rawSessionID = sessionKey
+    const existingIndex = state.messages.findIndex(item => item.info.id === input.messageId)
+    const existing = existingIndex >= 0 ? state.messages[existingIndex] : undefined
+
+    // 正文来源优先级：服务端已建好的 canonical part > 事件里的文本。
+    // inbox.enqueued 可能晚于 message.part.updated 到达（重连补发），此时已有
+    // `prt_` 开头的权威 part，不能被这里的本地形式 `${id}-text` 覆盖。
+    const hasCanonicalText =
+      !!existing && existing.content.some(part => part.type === 'text' && isServerPartId(part.id))
+    const content: Content[] =
+      existing && hasCanonicalText
+        ? existing.content
+        : [
+            {
+              id: `${input.messageId}-text`,
+              type: 'text',
+              text: input.text,
+              synthetic: false,
+              sessionID: rawSessionID,
+              messageID: input.messageId,
+            } as TextContent,
+          ]
+    const message: Message = existing
+      ? {
+          ...existing,
+          content,
+          // 时间以服务端事件时间为准：跨端排序必须同基准。本地乐观消息的
+          // `Date.now()` 只是本机时钟，两端差几秒就会让同一轮消息顺序不一致。
+          info: { ...existing.info, time: { ...existing.info.time, created: input.createdAt } },
+        }
+      : {
+          info: {
+            id: input.messageId,
+            sessionID: rawSessionID,
+            role: 'user',
+            time: { created: input.createdAt },
+            agent: '',
+            model: { providerID: '', modelID: '' },
+          } as Message['info'],
+          content,
+          isStreaming: false,
+        }
+
+    if (existingIndex >= 0) {
+      state.messages = [...state.messages.slice(0, existingIndex), message, ...state.messages.slice(existingIndex + 1)]
+    } else {
+      state.messages = [...state.messages, message].sort((a, b) => {
+        const aCreated = a.info.time?.created ?? 0
+        const bCreated = b.info.time?.created ?? 0
+        return aCreated - bCreated
+      })
+      this.capSessionMessages(state)
+    }
+
+    // 这条消息的 id 不再是「待替换的乐观占位」：服务端已确认它入队。
+    this.optimisticMessageIds.delete(input.messageId)
+    this.recordUserMessageAnchor(sessionKey, message.info, input.directory)
+    this.notify([sessionKey])
+  }
+
+  removeMessage(sessionId: string, messageId: string) {    sessionId = this.resolveKey(sessionId)
     const state = this.sessions.get(sessionId)
     if (!state) return
     const nextMessages = state.messages.filter(message => message.info.id !== messageId)
@@ -714,6 +821,98 @@ class MessageStore {
     state.messages = nextMessages
     this.optimisticMessageIds.delete(messageId)
     this.notify([sessionId])
+  }
+
+  /**
+   * 记录会话级累计用量（服务端 `session.usage.updated`）。
+   *
+   * 压缩裁掉旧轮次后，按可见消息汇总的累计值会变小；服务端这份不受裁剪影响。
+   * 只在会话已存在时写入——为不存在的会话建档会让侧栏冒出幽灵项。
+   */
+  recordSessionUsage(sessionId: string, tokens: TokenUsage, cost: number) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    const prev = state.usage
+    if (
+      prev &&
+      prev.cost === cost &&
+      prev.tokens.input === tokens.input &&
+      prev.tokens.output === tokens.output &&
+      prev.tokens.reasoning === tokens.reasoning &&
+      prev.tokens.cache.read === tokens.cache.read &&
+      prev.tokens.cache.write === tokens.cache.write
+    ) {
+      return
+    }
+    state.usage = { tokens, cost }
+    this.notify([sessionId])
+  }
+
+  /**
+   * 用 `session.context` 汇总出的用量兜底会话累计值。
+   *
+   * 为什么需要兜底：`usage` 的唯一来源是 `session.usage.updated` 事件，而它是
+   * **ephemeral**（不落盘）。断线重连、切设备、刷新页面之后这个事件不会再补发，
+   * 于是侧栏的 token/花费统计会一直停在「按已加载消息累加」的口径上 ——
+   * 而首屏只加载 50 条，真实上下文可能有 300+ 条，数字会小一个数量级。
+   *
+   * `session.context` 返回「最后一次压缩之后」的完整消息，正好覆盖这个缺口。
+   * 已有的事件值优先（它更实时），这里只在缺失时写入。
+   */
+  recordSessionUsageFallback(sessionId: string, tokens: TokenUsage, cost: number) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    // 事件来源更实时：已有值就不覆盖
+    if (state.usage) return
+    state.usage = { tokens, cost }
+    this.notify([sessionId])
+  }
+
+  /**
+   * 记录压缩完成后的上下文规模。
+   *
+   * 圆环能在压缩后立刻掉下来的关键。v2 的压缩事件里 `tokens` 是**压缩前**用量，
+   * 不能直接显示；真实构成是「摘要 + 保留的近期消息」，由 summaryChars /
+   * recentChars 表达。同时把 compactedAt 前移，消息流末尾的压缩分隔条才有依据。
+   */
+  recordCompactionResult(
+    sessionId: string,
+    options: { summaryChars?: number; recentChars?: number; tokens?: TokenUsage; cost?: number; at?: number },
+  ) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    const at = options.at ?? Date.now()
+    if (options.summaryChars !== undefined || options.recentChars !== undefined) {
+      state.compactionMarker = {
+        at,
+        summaryChars: options.summaryChars ?? 0,
+        recentChars: options.recentChars ?? 0,
+      }
+    }
+    // 兼容旧调用方（只有 tokens 的场景，如 v1 风格事件）
+    if (options.tokens) {
+      state.compactionUsage = { tokens: options.tokens, cost: options.cost, at }
+    }
+    if (state.compactedAt === undefined || at > state.compactedAt) state.compactedAt = at
+    this.notify([sessionId])
+  }
+
+  getSessionUsage(sessionId: string | null): SessionState['usage'] {
+    if (!sessionId) return undefined
+    return this.sessions.get(this.resolveKey(sessionId))?.usage
+  }
+
+  getCompactionUsage(sessionId: string | null): SessionState['compactionUsage'] {
+    if (!sessionId) return undefined
+    return this.sessions.get(this.resolveKey(sessionId))?.compactionUsage
+  }
+
+  getCompactionMarker(sessionId: string | null): SessionState['compactionMarker'] {
+    if (!sessionId) return undefined
+    return this.sessions.get(this.resolveKey(sessionId))?.compactionMarker
   }
 
   markAllSessionsStale() {
@@ -773,6 +972,7 @@ class MessageStore {
       revertState?: ApiSession['revert'] | null
       shareUrl?: string
       compactedAt?: number
+      compactionMarker?: { at: number; summaryChars: number; recentChars: number }
     },
   ) {
     sessionId = this.resolveKey(sessionId, true)
@@ -799,6 +999,7 @@ class MessageStore {
     if (options?.title !== undefined) state.title = options.title
     state.shareUrl = options?.shareUrl
     state.compactedAt = options?.compactedAt
+    if (options?.compactionMarker !== undefined) state.compactionMarker = options.compactionMarker
     state.isStale = false
 
     // D5：HTTP 快照是权威全量，此前因乱序暂存的 delta 已被快照覆盖，丢弃以免重复回放
@@ -860,7 +1061,13 @@ class MessageStore {
    * 刚拉回来就裁掉会让上滑「拉不动」。单会话条数上限只在 append/SSE 增长路径
    * 作为内存兜底，历史加载路径的规模由用户滚动行为决定。
    */
-  prependMessages(sessionId: string, apiMessages: ApiMessageWithParts[], hasMore: boolean, historyCursor?: string) {
+  prependMessages(
+    sessionId: string,
+    apiMessages: ApiMessageWithParts[],
+    hasMore: boolean,
+    historyCursor?: string,
+    options?: { compactedAt?: number; compaction?: SessionState['compactionMarker'] },
+  ) {
     sessionId = this.resolveKey(sessionId)
     const state = this.sessions.get(sessionId)
     if (!state) return
@@ -882,6 +1089,8 @@ class MessageStore {
     }
     state.hasMoreHistory = hasMore
     state.historyCursor = historyCursor
+    if (options?.compactedAt !== undefined) state.compactedAt = options.compactedAt
+    if (options?.compaction !== undefined) state.compactionMarker = options.compaction
 
     this.notify([sessionId])
   }
@@ -1260,6 +1469,11 @@ class MessageStore {
       }
       const part = msg.content[partIndex]
       if (!('text' in part)) continue
+      // 与 handlePartDelta 同一条规则：已定稿（带 time.end）的 part 不再追加迟到增量。
+      // 回放路径原先缺这一检查，于是「text.ended 到达后仍有在途 delta」时，
+      // 这些增量会在回放阶段被补到完整文本后面 —— 表现为停止后内容还在往里流。
+      const partTime = (part as { time?: { end?: number } }).time
+      if (partTime && typeof partTime.end === 'number') continue
       ;(part as { text: string }).text += delta
       let dirtyPartsByMessage = this.dirtyPartsBySession.get(sessionKey)
       if (!dirtyPartsByMessage) {
@@ -1372,6 +1586,65 @@ class MessageStore {
     if (changed) {
       state.messages = messages
       this.notify([sessionId])
+    }
+  }
+
+  /**
+   * 把工具执行中的进度 metadata 合到对应 part 上。
+   *
+   * 只在 part 当前是 running/pending 时更新：`session.tool.progress` 是
+   * ephemeral 事件，可能与 `tool.success` 乱序到达；无条件覆盖会把已完成的
+   * 工具改回「运行中」，表现为「跑完了又转回去」。
+   *
+   * metadata 是合并而非替换（{...old, ...new}）：不同进度事件可能各带一部分
+   * 信息（先给 shellID，后给阶段/百分比）。
+   */
+  applyToolProgress(sessionId: string, callID: string, metadata?: Record<string, unknown>): void {
+    if (!metadata || Object.keys(metadata).length === 0) return
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+
+    /**
+     * 只替换命中的那一条消息，其余保留引用。
+     *
+     * progress 事件在长命令期间每秒可能来多条，而会话可能有几千条消息。
+     * 若每次都 `state.messages.map(...)` 全量重建，React 会认为整条会话都变了，
+     * 每秒触发一次全量重渲染 —— 正是「一边跑命令一边滚动就卡」的成因。
+     * 这里改成「定位命中消息 → 只换那一条」，未命中的消息对象引用不变，
+     * 虚拟列表与 memo 化的消息行都能直接跳过。
+     */
+    for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+      const message = state.messages[i]
+      let hitIndex = -1
+      for (let j = 0; j < message.content.length; j += 1) {
+        const part = message.content[j]
+        if (part.type !== 'tool') continue
+        const toolPart = part as Extract<typeof part, { type: 'tool' }>
+        if ((toolPart as { callID?: string }).callID !== callID) continue
+        const status = (toolPart.state as { status?: string })?.status
+        if (status !== 'running' && status !== 'pending') continue
+        hitIndex = j
+        break
+      }
+      if (hitIndex === -1) continue
+
+      const hitPart = message.content[hitIndex] as Extract<typeof message.content[number], { type: 'tool' }>
+      const prevState = hitPart.state as unknown as Record<string, unknown>
+      const nextContent = message.content.slice()
+      nextContent[hitIndex] = {
+        ...hitPart,
+        state: {
+          ...prevState,
+          metadata: { ...((prevState.metadata as Record<string, unknown> | undefined) ?? {}), ...metadata },
+        },
+      } as (typeof message.content)[number]
+
+      const nextMessages = state.messages.slice()
+      nextMessages[i] = { ...message, content: nextContent }
+      state.messages = nextMessages
+      this.notify([sessionId])
+      return
     }
   }
 
@@ -1490,6 +1763,46 @@ class MessageStore {
   /** D7：读取会话的结束世代（发送前记录，await 后比对） */
   getIdleGeneration(sessionId: string): number {
     return this.idleGeneration.get(this.resolveKey(sessionId)) ?? 0
+  }
+
+  /**
+   * 按**权威轮次记录**（消息列表里的 `type: "idle"`）落定流式态。
+   *
+   * 事件流负责「及时」：`session.execution.succeeded` 一到就收尾。但事件是
+   * **易失**的 —— 断线重连期间的事件直接丢失（见服务端 `/api/event` 的描述：
+   * "Volatile by contract: a slow consumer overflows and fails the stream, and
+   * events during disconnection are missed"），隧道抖动、进程重启同理。
+   *
+   * 一旦收尾事件丢了，界面就会永远显示「生成中」：发送按钮变停止键、项目行
+   * 一直转圈、消息永远半透明。而 idle 记录写在消息列表里，刷新即可恢复。
+   *
+   * 所以这里提供「按记录校正」的入口：只要有一条 idle 记录不早于最后一条
+   * assistant 消息，就说明那一轮在服务端已经结束。
+   *
+   * @returns 是否真的改变了状态（供调用方决定是否要额外通知）
+   */
+  settleByAuthoritativeIdle(sessionId: string): boolean {
+    sessionId = this.resolveKey(sessionId, true)
+    const state = this.sessions.get(sessionId)
+    if (!state) return false
+    const turn = state.lastTurn
+    if (!turn) return false
+    if (!state.isStreaming) return false
+
+    const lastAssistant = state.messages.filter(m => m.info.role === 'assistant').at(-1)
+    const lastAssistantAt = lastAssistant?.info.time?.created ?? 0
+    // idle 必须不早于最后一条 assistant：否则那是「上一轮」的结论，
+    // 新一轮可能刚开始，不能据此落定。
+    if (turn.at < lastAssistantAt) return false
+
+    state.isStreaming = false
+    // 最后一条 assistant 若还挂着 isStreaming，一并落定（否则渲染层仍显示光标）。
+    const last = state.messages.at(-1)
+    if (last?.isStreaming) {
+      state.messages = state.messages.map(m => (m.isStreaming ? { ...m, isStreaming: false } : m))
+    }
+    this.notify([sessionId])
+    return true
   }
 
   // ============================================

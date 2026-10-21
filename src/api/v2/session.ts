@@ -37,9 +37,16 @@ export function adaptSession(raw: unknown): ApiSession {
       created: num(time.created) ?? 0,
       updated: num(time.updated) ?? 0,
       compacting: num(time.compacting),
+      // idle / viewed 是 v2 的跨端已读语义载体：
+      //   viewed < idle  → 这一轮完成后用户还没看过（未读）
+      //   outcome        → 这一轮的结论（succeeded / failed / interrupted）
+      // 此前两者都没映射，前端只能靠本机通知表推断未读，跨端不同步。
+      idle: num(time.idle),
+      viewed: num(time.viewed),
       // 兼容两种归档落点：标准 time.archived，或旧实现的 metadata.__archived
       archived: num(time.archived) ?? num(meta.__archived),
     },
+    outcome: str(s.outcome),
     permission: s.permissions as ApiSession['permission'],
     revert: s.revert as ApiSession['revert'],
   } as ApiSession

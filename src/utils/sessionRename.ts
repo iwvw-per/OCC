@@ -14,16 +14,15 @@
 // 临时会话通过 utils/ephemeralSessions 登记，SSE 事件与列表索引据此把它
 // 挡在侧栏列表、搜索结果、会话导航等所有用户可见的会话视图之外。
 
-import { createSession, deleteSession, updateSession } from '../api/session'
-import { getSessionMessages, sendMessage } from '../api/message'
+import { updateSession } from '../api/session'
+import { getSessionMessages } from '../api/message'
+import { nativeGenerateSessionText, nativeGenerateText } from '../api/v2NativeSession'
 import type { ApiSession, ApiMessageWithParts } from '../api/types'
 import type { ModelInfo } from '../types/ui'
-import { markEphemeralSession, unmarkEphemeralSession } from './ephemeralSessions'
 import { getModelKey } from './modelUtils'
 import { serverStorage } from './perServerStorage'
 import { STORAGE_KEY_SELECTED_MODEL } from '../constants'
 import { aiRenameModelStore } from '../store/aiRenameModelStore'
-import { sessionListIndexStore } from '../store/sessionListIndexStore'
 import { serverStore } from '../store/serverStore'
 
 const MAX_TITLE_LENGTH = 60
@@ -95,7 +94,7 @@ export function resolveAiRenameModel(models: ModelInfo[], serverId?: string): Mo
     const stored = serverStorage.getJSONFor<string[]>(HIDDEN_MODELS_STORAGE_KEY, serverId)
     if (Array.isArray(stored)) stored.forEach(key => hidden.add(key))
   } else {
-    const stored = serverStorage.getJSON<string[]>(HIDDEN_MODELS_STORAGE_KEY)
+    const stored = serverStorage.getJSON<string[]>(HIDDEN_MODELS_STORAGE_KEY, serverStore.getActiveServerId())
     if (Array.isArray(stored)) stored.forEach(key => hidden.add(key))
   }
   const visible = models.filter(model => !hidden.has(getModelKey(model)))
@@ -110,7 +109,7 @@ export function resolveAiRenameModel(models: ModelInfo[], serverId?: string): Mo
   if (preferredModel && !hidden.has(getModelKey(preferredModel))) return preferredModel
 
   const remembered =
-    serverId ? serverStorage.getFor(STORAGE_KEY_SELECTED_MODEL, serverId) : serverStorage.get(STORAGE_KEY_SELECTED_MODEL)
+    serverId ? serverStorage.getFor(STORAGE_KEY_SELECTED_MODEL, serverId) : serverStorage.get(STORAGE_KEY_SELECTED_MODEL, serverStore.getActiveServerId())
   const rememberedModel = pick(remembered)
   if (rememberedModel && !hidden.has(getModelKey(rememberedModel))) return rememberedModel
 
@@ -118,61 +117,25 @@ export function resolveAiRenameModel(models: ModelInfo[], serverId?: string): Mo
   return models[0]
 }
 
-/** 最长等待模型回复文本的时间 */
-const MAX_REPLY_WAIT_MS = 60_000
-const REPLY_POLL_MS = 800
-
-/**
- * 从临时会话读回模型回复。v1 的 prompt 同步返回体已带完整 parts；v2 网关的
- * prompt 同步返回体不含 parts，因此退化为「轮询会话消息拿到最新助手文本」。
- */
-async function fetchReplyText(
-  sessionId: string,
-  directory: string | undefined,
-  serverId: string | undefined,
-  signal?: AbortSignal,
-): Promise<string> {
-  const deadline = Date.now() + MAX_REPLY_WAIT_MS
-  let messages: ApiMessageWithParts[] = []
-
-  const readOnce = async (): Promise<ApiMessageWithParts[]> => {
-    try {
-      return await getSessionMessages(sessionId, 8, directory, serverId)
-    } catch {
-      return []
-    }
-  }
-
-  // 先立即读一次，避免 v1 已同步完成时还白等一轮
-  messages = await readOnce()
-  while (Date.now() < deadline) {
-    signal?.throwIfAborted()
-    const assistantTexts = messages
-      .filter(m => m.info.role === 'assistant')
-      .map(extractText)
-      .filter(Boolean)
-    if (assistantTexts.length > 0) {
-      // 取最后一条助手消息的文本（流式过程中后到的才是完整版）
-      return assistantTexts[assistantTexts.length - 1]
-    }
-    await new Promise(resolve => setTimeout(resolve, REPLY_POLL_MS))
-    messages = await readOnce()
-  }
-  return ''
-}
-
 /**
  * 生成并写回会话标题。返回新标题；无可用内容时返回 null。
+ *
+ * 走 v2 `session.generate`：它**在会话上下文之上**做一次性生成，不写入历史、
+ * 不产生事件、不占用会话。旧实现要「建临时会话 → 发消息 → 轮询读回复 → 删会话」
+ * 四个往返，且临时会话必须靠 ephemeralSessions 登记 + 索引墓碑才能不露在侧栏里
+ * （每生成一个标题都是一次和 SSE 的竞态）。现在只剩「取消息算上下文」+
+ * 「一次 generate」+「写回标题」三步。
  */
 export async function generateSessionTitle(
   session: ApiSession,
   options: AiRenameOptions,
 ): Promise<string | null> {
   const { directory, serverId, model, signal } = options
+  const dir = directory ?? session.directory
 
   let messages: ApiMessageWithParts[] = []
   try {
-    messages = await getSessionMessages(session.id, undefined, directory ?? session.directory, serverId)
+    messages = await getSessionMessages(session.id, undefined, dir, serverId)
   } catch {
     return null
   }
@@ -181,34 +144,25 @@ export async function generateSessionTitle(
 
   signal?.throwIfAborted()
 
-  const temp = await createSession({ directory: directory ?? session.directory }, serverId)
-  markEphemeralSession(temp.id)
-  // SSE 的 session.created 可能与 createSession 的响应竞态：若事件先到、临时会话
-  // 已进索引桶，这里按「已删除」语义从所有桶摘掉并记墓碑，保证绝不露面。
   const sid = serverId ?? serverStore.getActiveServerId()
-  sessionListIndexStore.applyDeleted(sid, temp.id)
+  let raw = ''
   try {
-    const response = await sendMessage(
-      {
-        sessionId: temp.id,
-        text: `${TITLE_SYSTEM_PROMPT}\n\nConversation to title:\n\n${context}`,
-        attachments: [],
-        model: { providerID: model.providerId, modelID: model.id },
-        directory: directory ?? session.directory,
-      },
-      serverId,
-    )
-    const rawFromSync = response.parts
-      .filter(part => (part as { type?: string }).type === 'text')
-      .map(part => (part as { text?: string }).text ?? '')
-      .join('\n')
-    const raw = (rawFromSync.trim() ? rawFromSync : await fetchReplyText(temp.id, directory, serverId, signal)).trim()
-    const title = cleanTitle(raw)
-    if (!title) return null
-    await updateSession(session.id, { title }, directory ?? session.directory, serverId)
-    return title
-  } finally {
-    unmarkEphemeralSession(temp.id)
-    void deleteSession(temp.id, directory ?? session.directory, serverId).catch(() => {})
+    raw = await nativeGenerateSessionText(sid, {
+      sessionID: session.id,
+      prompt: `${TITLE_SYSTEM_PROMPT}\n\nConversation to title:\n\n${context}`,
+    })
+  } catch {
+    // session.generate 不可用（旧版服务端 / 该会话无可用模型）时退回无上下文的
+    // 一次性生成：只把对话摘要作为 prompt，仍是一个往返。
+    raw = await nativeGenerateText(sid, {
+      prompt: `${TITLE_SYSTEM_PROMPT}\n\nConversation to title:\n\n${context}`,
+      model: { providerID: model.providerId, id: model.id },
+    }).catch(() => '')
   }
+
+  signal?.throwIfAborted()
+  const title = cleanTitle(raw)
+  if (!title) return null
+  await updateSession(session.id, { title }, dir, serverId)
+  return title
 }

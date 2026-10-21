@@ -6,6 +6,8 @@ import { HISTORY_TURN_BATCH_SIZE } from '../constants'
 const {
   getSessionMock,
   getSessionTurnPageMock,
+  lightweightMessagesMock,
+  probeLightweightSupportMock,
   messageStoreMock,
   sessionErrorHandlerMock,
   revertMessageMock,
@@ -13,6 +15,8 @@ const {
 } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   getSessionTurnPageMock: vi.fn(),
+  lightweightMessagesMock: vi.fn(),
+  probeLightweightSupportMock: vi.fn(async () => false),
   messageStoreMock: {
     getSessionState: vi.fn(),
     setLoadState: vi.fn(),
@@ -24,6 +28,7 @@ const {
     compressHistoricalTurns: vi.fn(() => false),
     hydrateMessages: vi.fn(() => false),
     getTrimmedCount: vi.fn(() => 0),
+    settleByAuthoritativeIdle: vi.fn(() => false),
   },
   sessionErrorHandlerMock: vi.fn(),
   revertMessageMock: vi.fn(),
@@ -33,9 +38,19 @@ const {
 vi.mock('../api', () => ({
   getSession: (...args: unknown[]) => getSessionMock(...args),
   getSessionTurnPage: (...args: unknown[]) => getSessionTurnPageMock(...args),
+  // 首屏两段式：测试里等价于「一次就取够」，不额外发第二段请求。
+  // 需要验证分段行为时单独 mock getSessionFirstScreenMock。
+  getSessionFirstScreen: async (...args: unknown[]) => {
+    const page = await getSessionTurnPageMock(...args)
+    return { ...page, complete: true }
+  },
   getSessionMessagePage: (...args: unknown[]) => getSessionTurnPageMock(...args),
-  getSessionLightweightMessages: vi.fn(),
-  probeLightweightSupport: vi.fn(async () => false),
+  // 轻量投影路径已停用：主机 Agent 实现它时会**忽略 limit**、返回整个会话
+  // （实测 4810 条消息 = 25MB），连「探测是否支持」这个请求本身都是 25MB。
+  // 首屏必须只走按量分页。这里保留 mock 以便断言它从不被调用。
+  getSessionLightweightMessages: (...args: unknown[]) => lightweightMessagesMock(...args),
+  probeLightweightSupport: (...args: unknown[]) => probeLightweightSupportMock(...(args as [])),
+  peekLightweightSupport: vi.fn(() => undefined),
   revertMessage: (...args: unknown[]) => revertMessageMock(...args),
   unrevertSession: vi.fn(),
   encodeBeforeCursor: (message: unknown) => `cursor:${(message as { info?: { id?: string } }).info?.id ?? ''}`,
@@ -54,6 +69,9 @@ describe('useSessionManager', () => {
   beforeEach(() => {
     getSessionMock.mockReset()
     getSessionTurnPageMock.mockReset()
+    lightweightMessagesMock.mockReset()
+    probeLightweightSupportMock.mockReset()
+    probeLightweightSupportMock.mockResolvedValue(false)
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
@@ -66,6 +84,7 @@ describe('useSessionManager', () => {
     messageStoreMock.hydrateMessages.mockReset()
     messageStoreMock.hydrateMessages.mockReturnValue(false)
     messageStoreMock.getTrimmedCount.mockReset()
+    messageStoreMock.settleByAuthoritativeIdle.mockReset()
     messageStoreMock.getTrimmedCount.mockReturnValue(0)
     sessionErrorHandlerMock.mockReset()
     revertMessageMock.mockReset()
@@ -103,6 +122,25 @@ describe('useSessionManager', () => {
     )
   })
 
+  it('never uses the lightweight projection path for the first screen', async () => {
+    // 回归防线：主机 Agent 实现轻量投影时会**忽略 limit**、返回整个会话
+    // （实测 4810 条消息 = 25MB）。连「探测是否支持」的请求本身都带
+    // X-Lightweight 头、同样是 25MB。所以首屏既不能走轻量拉取，也不能探测。
+    // 一旦有人把它接回来，用户打开会话就要等十几秒（实测 14784ms vs 1634ms）。
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'session-1', directory: '/workspace/demo' }),
+    )
+
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    expect(lightweightMessagesMock).not.toHaveBeenCalled()
+    expect(probeLightweightSupportMock).not.toHaveBeenCalled()
+  })
+
   it('loads history by turn batch with the store cursor', async () => {
     const apiMessage = {
       info: { id: 'message-0', role: 'user', time: { created: 1 } },
@@ -130,6 +168,7 @@ describe('useSessionManager', () => {
       'cursor-1',
       '/workspace/demo',
       expect.anything(),
+      expect.objectContaining({ pageLimit: expect.any(Number) }),
     )
     expect(messageStoreMock.prependMessages).toHaveBeenCalledWith('session-1', [apiMessage], true, 'cursor-2')
   })
@@ -165,6 +204,7 @@ describe('useSessionManager', () => {
       'cursor-1',
       '/workspace/demo',
       expect.anything(),
+      expect.objectContaining({ pageLimit: expect.any(Number) }),
     )
     expect(messageStoreMock.prependMessages).toHaveBeenCalledWith('session-1', [], false, undefined)
   })
@@ -393,6 +433,7 @@ describe('useSessionManager', () => {
       'cursor:msg-oldest',
       '/workspace/demo',
       expect.anything(),
+      expect.objectContaining({ pageLimit: expect.any(Number) }),
     )
     expect(messageStoreMock.prependMessages).toHaveBeenCalledWith('session-1', [older], true, 'cursor-next')
   })
@@ -505,8 +546,8 @@ describe('useSessionManager', () => {
         await loadPromise
       })
 
-      // 1 次初始 + 3 次重试
-      expect(getSessionTurnPageMock).toHaveBeenCalledTimes(4)
+      // 1 次初始 + 2 次重试（退避已缩短为 [300, 800]，最多 3 次尝试）
+      expect(getSessionTurnPageMock).toHaveBeenCalledTimes(3)
       expect(messageStoreMock.setLoadError).toHaveBeenCalledWith('session-1', expect.objectContaining({ name: 'APIError' }))
     } finally {
       vi.useRealTimers()

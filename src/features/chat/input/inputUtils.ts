@@ -102,12 +102,24 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 // 任何一步失败都回退原图，不阻塞入图。
 // ============================================
 
-/** 触发压缩的最小字节数：小图不值得付出重编码开销 */
-const IMAGE_COMPRESS_THRESHOLD_BYTES = 512 * 1024
-/** 压缩后最长边上限 */
-const MAX_IMAGE_EDGE = 2048
+/**
+ * 触发压缩的最小字节数：小图不值得付出重编码开销。
+ *
+ * 取 128KB：截图类图片（PNG）通常 300KB–2MB，而它们几乎都能压到 1/10 以下。
+ * 实测一张 2000×1078、1018KB 的截图，WebP 质量 82 后只有 115KB（缩到 1600px
+ * 为 79KB）——省 89%~92%。原阈值 512KB 太大，会把「刚好在阈值附近」的截图
+ * 原样放行，随后 base64 再膨胀 33%，整条消息因此多传 1MB 以上。
+ */
+const IMAGE_COMPRESS_THRESHOLD_BYTES = 128 * 1024
+/**
+ * 压缩后最长边上限。
+ *
+ * 1600px 对截图/界面图已经远超实际显示需要（聊天气泡通常 < 800px 宽），
+ * 而 2048 与 1600 的差别在体积上很明显（79KB vs 115KB）。
+ */
+const MAX_IMAGE_EDGE = 1600
 /** WebP 编码质量 */
-const IMAGE_WEBP_QUALITY = 0.85
+const IMAGE_WEBP_QUALITY = 0.82
 
 /** 不适合重编码的图片类型（动图 / 矢量） */
 function isCompressibleImageType(mime: string): boolean {
@@ -138,8 +150,16 @@ export async function compressImageFile(file: File): Promise<{ dataUrl: string; 
     const targetWidth = Math.max(1, Math.round(bitmap.width * scale))
     const targetHeight = Math.max(1, Math.round(bitmap.height * scale))
 
-    // 无需缩放且已经足够小：不值得重编码（避免 WebP 反而变大）
-    if (scale === 1 && file.size < IMAGE_COMPRESS_THRESHOLD_BYTES * 2) return original
+    // ⚠️ 不要因为「无需缩放」就跳过重编码。
+    //
+    // 原实现有一条 `scale === 1 && file.size < threshold*2 → return original` 的
+    // 捷径，本意是「图和阈值差不多大，重编码可能反而变大」。但 PNG 截图恰恰是
+    // 最容易吃亏的一类：实测一张 2000×1078、1018KB 的 PNG 未超 2048 上限所以
+    // scale=1，文件又刚好小于 1024KB，于是被原样放行 —— 而它转 WebP 后只有
+    // 115KB（省 89%）。只差 6KB 就白白多传 1MB。
+    //
+    // 现在改为：只要通过上面的阈值筛（≥128KB），就一律尝试重编码；
+    // 最终由下面的 `blob.size >= file.size` 兜底 —— 真的变大就保留原图。
 
     const canvas = new OffscreenCanvas(targetWidth, targetHeight)
     const ctx = canvas.getContext('2d')

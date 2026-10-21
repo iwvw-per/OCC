@@ -2,7 +2,7 @@
 // PTY API - 终端管理
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
+import { getV2Client } from './sdkV2'
 import {
   nativeListPtySessions,
   nativeCreatePtySession,
@@ -14,9 +14,8 @@ import { getApiBaseUrl, getAuthHeader, buildQueryString } from './http'
 import { formatPathForApi } from '../utils/directoryUtils'
 import { serverStore, getUnifiedFetch } from '../store/serverStore'
 import { isTauri } from '../utils/tauri'
-import type { Pty, PtyCreateParams, PtyUpdateParams } from '../types/api/pty'
+import type { Pty, PtyCreateParams, PtyUpdateParams } from '../types/domain/pty'
 
-type LegacyPty = Pty & { running?: boolean; status?: Pty['status'] }
 export interface ShellInfo {
   path: string
   name: string
@@ -37,34 +36,21 @@ interface PtyConnectUrlOptions {
   streamToken?: string
 }
 
-function normalizePty(pty: LegacyPty): Pty {
-  if (pty.status) return pty as Pty
-  return {
-    ...pty,
-    status: pty.running ? 'running' : 'exited',
-  } as Pty
-}
-
 /**
  * 获取所有 PTY 会话列表
  */
 export async function listPtySessions(directory?: string, serverId?: string): Promise<Pty[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeListPtySessions(sid, { directory })
-  }
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.pty.list({ directory: formatPathForApi(directory, serverId) })).map(pty =>
-    normalizePty(pty as LegacyPty),
-  )
+  return nativeListPtySessions(sid, { directory })
 }
 
 /**
  * 获取当前机器可用 shell 列表，用于 opencode config.shell 的候选项。
  */
-export async function listAvailableShells(directory?: string, serverId?: string): Promise<ShellInfo[]> {
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.pty.shells({ directory: formatPathForApi(directory, serverId) }))
+export async function listAvailableShells(_directory?: string, serverId?: string): Promise<ShellInfo[]> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  const res = await getV2Client(sid).config.shells()
+  return res as unknown as ShellInfo[]
 }
 
 /**
@@ -72,11 +58,7 @@ export async function listAvailableShells(directory?: string, serverId?: string)
  */
 export async function createPtySession(params: PtyCreateParams, directory?: string, serverId?: string): Promise<Pty> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeCreatePtySession(sid, { directory, ...params })
-  }
-  const sdk = getSDKClient(serverId)
-  return normalizePty(unwrap(await sdk.pty.create({ directory: formatPathForApi(directory, serverId), ...params })) as LegacyPty)
+  return nativeCreatePtySession(sid, { directory, ...params })
 }
 
 /**
@@ -84,13 +66,7 @@ export async function createPtySession(params: PtyCreateParams, directory?: stri
  */
 export async function getPtySession(ptyId: string, directory?: string, serverId?: string): Promise<Pty> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeGetPtySession(sid, { ptyID: ptyId, directory })
-  }
-  const sdk = getSDKClient(serverId)
-  return normalizePty(
-    unwrap(await sdk.pty.get({ ptyID: ptyId, directory: formatPathForApi(directory, serverId) })) as LegacyPty,
-  )
+  return nativeGetPtySession(sid, { ptyID: ptyId, directory })
 }
 
 /**
@@ -99,39 +75,31 @@ export async function getPtySession(ptyId: string, directory?: string, serverId?
 export async function updatePtySession(
   ptyId: string,
   params: PtyUpdateParams,
-  directory?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<Pty> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeUpdatePtySession(sid, { ptyID: ptyId, ...params })
-  }
-  const sdk = getSDKClient(serverId)
-  return normalizePty(
-    unwrap(await sdk.pty.update({ ptyID: ptyId, directory: formatPathForApi(directory, serverId), ...params })) as LegacyPty,
-  )
+  return nativeUpdatePtySession(sid, { ptyID: ptyId, ...params })
 }
 
 /**
  * 删除 PTY 会话
  */
-export async function removePtySession(ptyId: string, directory?: string, serverId?: string): Promise<boolean> {
+export async function removePtySession(ptyId: string, _directory?: string, serverId?: string): Promise<boolean> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeRemovePtySession(sid, ptyId)
-  }
-  const sdk = getSDKClient(serverId)
-  unwrap(await sdk.pty.remove({ ptyID: ptyId, directory: formatPathForApi(directory, serverId) }))
-  return true
+  return nativeRemovePtySession(sid, ptyId)
 }
 
 /**
  * 获取 PTY 连接 WebSocket URL
  *
  * 浏览器 WebSocket 不支持自定义 header，认证方式：
- * - 跨域：auth_token query parameter（与官方 opencode app 一致）
- * - 同源：浏览器会复用页面的 Basic auth 凭据
- * - Tauri bridge：不走这里，通过 Rust 的 HTTP header 传认证
+ * - 远程/直连服务器的首选：先用 `getPtyConnectUrlAsync` 换一次性短令牌（`st`）；
+ * - 同源：浏览器会复用页面的 Basic auth 凭据；
+ * - Tauri bridge：不走这里，通过 Rust 的 HTTP header 传认证。
+ *
+ * 本函数**不再**默认写入 `auth_token` / userinfo —— 那会把长期密码暴露在 URL
+ * （日志、浏览器历史、错误上报）。仅当调用方显式传 `streamToken` 时带上凭据。
  */
 export function getPtyConnectUrl(
   ptyId: string,
@@ -147,61 +115,43 @@ export function getPtyConnectUrl(
       ? options.cursor
       : undefined
 
-  const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
   const formatted = formatPathForApi(directory, serverId)
-  const isV2 = (serverId ? serverStore.getApiVersion(serverId) : serverStore.getApiVersion(serverStore.getActiveServerId() ?? '')) === 'v2'
-  // v1：/pty/{id}/connect?directory=；v2：/api/pty/{id}/connect?location[directory]=
-  const connectPath = isV2 ? `/api/pty/${ptyId}/connect` : `/pty/${ptyId}/connect`
-  const dirParam = isV2 ? 'location[directory]' : 'directory'
-
+  // v2：/api/pty/{id}/connect?location[directory]=
+  const connectPath = `/api/pty/${ptyId}/connect`
+  const dirParam = 'location[directory]'
   // Tauri bridge 不需要在 URL 里放认证
   if (!includeAuthInUrl) {
     return `${wsBase}${connectPath}${buildQueryString({ [dirParam]: formatted, cursor })}`
   }
 
-  // 浏览器原生 WebSocket：
-  // 跨域时用 auth_token query parameter + userinfo fallback
-  // 同源时浏览器会自动复用 Basic auth
-  const isCrossOrigin = (() => {
-    try {
-      return new URL(httpBase).origin !== location.origin
-    } catch {
-      return true
-    }
-  })()
-
+  // 浏览器原生 WebSocket：同源时浏览器会自动复用 Basic auth；
+  // 跨域时依靠一次性短令牌（见上）。
   const queryParams: Record<string, string | number | undefined> = { [dirParam]: formatted, cursor }
 
-  // 一次性短令牌：优先于 auth_token。远程服务器（如 API Monitor 网关）在
-  // 需要认证时用短令牌握手，短令牌由调用方在连接前通过 streamToken 换取。
+  // 一次性短令牌：远程网关（API Monitor）与直连 opencode 都支持，由
+  // `getPtyConnectUrlAsync` 在连接前换取。URL 里只出现这个短令牌，不出现长期密码。
   if (options?.streamToken) {
     queryParams.st = options.streamToken
   }
 
-  let wsUrl = wsBase
-  if (auth?.password) {
-    if (isCrossOrigin) {
-      // auth_token = base64(username:password)，与官方 opencode app 一致
-      queryParams.auth_token = btoa(`${auth.username}:${auth.password}`)
-    }
-    // 同时设 userinfo 作为 fallback（部分浏览器直连时能用）
-    const creds = `${encodeURIComponent(auth.username)}:${encodeURIComponent(auth.password)}@`
-    wsUrl = wsBase.replace('://', `://${creds}`)
-  }
+  // 同源场景浏览器会自动复用页面的 Basic 凭据，无需写进 URL。
+  // 跨域且没有短令牌时，只能依赖服务端放行或调用方显式提供令牌——
+  // 宁可握手失败暴露问题，也不把密码放进 URL。
 
-  return `${wsUrl}${connectPath}${buildQueryString(queryParams)}`
+  return `${wsBase}${connectPath}${buildQueryString(queryParams)}`
 }
 
 /**
  * 获取 PTY 连接 WebSocket URL（异步）。
  *
- * 浏览器模式下 WebSocket 无法自定义请求头，而远程服务器（API Monitor 网关）
- * 要求鉴权。思路：先用 fetch（可带 header）调网关的 stream-token 接口换取
- * 一次性短令牌，再拼进 WebSocket URL 的 `st` 参数完成握手。
+ * 浏览器模式下 WebSocket 无法自定义请求头，只能把凭据放进 URL。为不给长期密码
+ * 留机会，凡需要鉴权的服务器都先换一次性短令牌，再拼 `st` 参数：
  *
- * - 本地服务器（Local）：本地 opencode 通常无鉴权，返回原始 URL。
+ * - 本地服务器（Local）：无鉴权，返回原始 URL。
  * - Tauri bridge：走 header 传认证，返回不带鉴权的 URL。
- * - 浏览器 + 远程需要认证的服务器：先换短令牌再返回带 `st` 的 URL。
+ * - 远程网关（API Monitor）：`POST /stream-token` 换 `st`。
+ * - 直连 opencode（Basic）：`GET /api/server/token` 换 `st`（同一网关接口）。
+ * - 换取失败：返回不带凭据的 URL，让握手失败暴露真实错误，而不是回退到明文密码。
  */
 export async function getPtyConnectUrlAsync(
   ptyId: string,
@@ -217,21 +167,21 @@ export async function getPtyConnectUrlAsync(
     return getPtyConnectUrl(ptyId, directory, options, serverId)
   }
 
-  // 非 token 服务器：本地无鉴权或走 password 的 auth_token 方案，直接用原始 URL。
-  if (!auth?.token) {
+  // 无鉴权的本地服务器：直接连。
+  if (!auth) {
     return getPtyConnectUrl(ptyId, directory, options, serverId)
   }
 
-  // token 认证的远程服务器（如 API Monitor 的 AI Agent 网关）：浏览器 WebSocket
-  // 无法带 Authorization header，必须先用 fetch 换一次性短令牌再拼进 URL。
-  // 换取失败（服务器不支持/未登录）时回退到原始 URL，让握手失败暴露真实错误。
+  // 需要鉴权：一律换一次性短令牌（网关或直连 opencode 均走同一接口）。
+  // 换取失败时返回不带凭据的 URL —— 握手会失败并暴露真实错误，绝不回退到
+  // 把长期密码写进 URL。
   try {
     const streamToken = await fetchStreamToken(serverId)
     if (streamToken) {
       return getPtyConnectUrl(ptyId, directory, { ...options, streamToken }, serverId)
     }
   } catch {
-    // ignore: fallthrough to raw URL
+    // ignore: fallthrough to credential-free URL
   }
   return getPtyConnectUrl(ptyId, directory, options, serverId)
 }

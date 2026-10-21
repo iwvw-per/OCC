@@ -1,13 +1,13 @@
 // ============================================
 // v2 原生 Pty 访问层
 //
-// 直接用 @opencode/client（v2 原生）调用 pty，不经过 facade。
+// 直接用 @opencode/client（v2 原生）调用 pty。
 // ============================================
 
 import { getV2Client } from './sdkV2'
 import { adaptDataList, adaptEnvelope } from './v2/session'
 import { adaptPty } from './v2/entities'
-import type { Pty } from './types'
+import type { Pty } from '../types/domain/pty'
 
 /**
  * 原生列出 PTY 会话（v2 pty.list）。

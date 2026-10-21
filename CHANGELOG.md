@@ -1,5 +1,84 @@
 # Changelog
 
+## [v2.0.15] - 2026-10-21
+
+- fix: 纯图片消息（正文为空）整条不显示 (a9af297a)
+
+## [v2.0.14] - 2026-10-21
+
+- fix: 解释并预警「只发两个字却 413」的上下文超限 (25c863d7)
+
+## [v2.0.13] - 2026-10-21
+
+- feat: 轮次级历史导航 + 长命令实时输出 + 修首屏 25MB 与加载跳位 (3bcf71a6)
+- perf: 大幅削减首屏往返次数，压缩图片附件，修多端同步与发送语义 (043285bf)
+
+## [v2.0.12] - 2026-10-19
+
+- fix: 压缩后上下文不更新；未读跨端不同步；同名项目跨主机共用展开状态 (a16b3a83)
+
+## [v2.0.11] - 2026-10-19
+
+- fix(tools): 给 Code Mode 的 execute 单独登记图标与摘要 (2971275f)
+- fix: 模型列表失败后不重试；工具运行中丢失标题导致全显示 Execute (f07f0505)
+
+## [v2.0.10] - 2026-10-19
+
+- fix(sync): 项目展开状态改为只向上合并，本地收起不再广播 (f686e95b)
+- fix(sidebar): 运行中不显示动画、跑完才亮；已读状态入队不看水位 (eb384c6f)
+- fix(sidebar): 项目展开/收起判定与作用范围不一致，且展开状态多端不同步 (7c414c9d)
+- fix(sidebar): 补回顶栏分割线、统一两端宽度限制、网页端新建标签页 (5a6a54db)
+
+## [v2.0.9] - 2026-10-19
+
+- fix(sidebar): 网页端顶栏改用与桌面端同一套导航控件 (4e2a3449)
+
+## [v2.0.8] - 2026-10-19
+
+- fix(sync): 项目列表同步后需手动刷新才生效 (a2e8318e)
+
+## [v2.0.7] - 2026-10-19
+
+- fix(sidebar): 侧栏默认宽度固定 288px，网页端与桌面端一致 (59bd73a7)
+- fix(stats): 压缩后上下文圆环与占用不更新 (e6cc925e)
+- feat(sync): 模型可见性/置顶模型/隐藏项目纳入跨端同步 (41b57477)
+- fix(sidebar): 派生项目移除改为持久隐藏（刷新后不再出现） (e5fe27a2)
+- fix(sidebar): 派生项目可从侧栏移除 (5e719eff)
+- fix(sidebar): 派生项目无法从侧栏移除 (e3884cfa)
+- security(pty): WebSocket 握手不再把长期密码写进 URL (529eb3c6)
+- docs: 更新进度（阶段 8 完成、当前状态） (c0648c3f)
+- docs(desktop): 记录与 OpenCode Desktop 的通信对照及凭据迁移边界 (a85b37e2)
+- feat(desktop): 宿主注入启动上下文 + 预检诊断工具 (a6403f0a)
+- perf(storage): createStore 支持 write-behind 合并落盘 (a2517356)
+- docs: 新增 v2 架构说明，清理残留 v1 注释 (022548bf)
+- refactor(logging): 统一日志入口 (b88bbe08)
+- refactor(ui): 设置行通用结构 + 文件树离屏跳过渲染 (35306fca)
+- perf(chat): 虚拟行不再因测量回写而整行重渲染 (bf0d2a98)
+- refactor(input): 输入框抽出触发态与粘贴策略 (9e6c521e)
+- docs: 更正组件行数 (60a8d328)
+- docs: 更新 v2 重构任务清单（阶段 0-3 完成、阶段 4/6 进展） (4be92899)
+- perf(highlight): 语法高亮缓存改为进程级共享 + 控件样式词汇表 (b054520f)
+- perf(diff): 离屏 diff/代码块不挂载，useInView 支持延迟挂载节点 (3961cd72)
+- perf: 大 diff、消息分页适配、时间线估算的卡顿治理 (0423ed99)
+- refactor(chat): ChatPane 抽出输入停靠区 PaneInputDock (55857bcd)
+- refactor(sidebar): FolderRecentList 抽出列表工具与排序 hook (ba470da9)
+- refactor(sidebar): 拆分 SidePanel，抽出选择状态/项目分组/会话补全 (86d1ed4c)
+- refactor(app): 拆分 App.tsx，抽出 4 个 hook (5428d4c9)
+- refactor(types): 类型层收敛，删除 43 个未使用导出 (60cfb3db)
+- refactor(api): 删除 v1→v2 facade 层，API 模块直连 @opencode/client (fddee27a)
+- refactor(api): 只支持 OpenCode 2.x，移除 v1 运行时与版本分派 (fe866a4e)
+- feat(sync): 增量推送（只传变化的键）与 SSE 感知的轮询节奏 (aae6a8e9)
+- refactor(storage): 移除 serverStorage 的隐式「当前服务器」API (4577e29e)
+- refactor(storage): 项目列表与最近使用迁到 createStore，删除手写桶读写 (a304ff99)
+- feat(storage): 引入 createStore，迁移 autoApprove / aiRenameModel 两个 store (ccfb30b5)
+- feat(sync): 同步白名单收窄为 6 类核心数据，并清理服务端历史键 (b984f015)
+- fix: 自审 polish —— 统一项目列表写回路径、修正时间字段缺失的边界 (64ca5ccb)
+- fix(sidebar): 修复添加项目后「切回别的项目就消失」与触摸端条目添加按钮缺失 (fb4a8524)
+- fix(sidebar): 已存在项目的提示改用存在的文案 key (23e00490)
+- fix(sidebar): 添加已存在的项目时给出提示，不再静默无反馈 (49b8698d)
+- fix: 切到缺 time 字段的会话时白屏；重复添加同一项目 (e2db5d9c)
+- chore: 新增 deploy:local 脚本，构建并刷新本机预览站点 (bd54a790)
+
 ## [v2.0.6] - 2026-10-18
 
 - fix(aiagent): 面板不支持 If-None-Match 时自动降级，避免同步整体失败 (290ef08d)

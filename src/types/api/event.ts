@@ -4,8 +4,6 @@
 // ============================================
 
 import type {
-  EventMessagePartDelta as SDKEventMessagePartDelta,
-  EventMessagePartRemoved as SDKEventMessagePartRemoved,
   EventPermissionReplied as SDKEventPermissionReplied,
   EventQuestionRejected as SDKEventQuestionRejected,
   EventQuestionReplied as SDKEventQuestionReplied,
@@ -28,7 +26,16 @@ import type { Project } from './project'
 // Event Payload Types
 // ============================================
 
-export type SessionIdlePayload = SDKEventSessionIdle['properties']
+export type SessionIdlePayload = SDKEventSessionIdle['properties'] & {
+  /**
+   * 服务端完成事件的时间（v2 事件的 created）。
+   *
+   * 通知时间戳必须用它，而不是各端处理事件的本地时刻：两端处理同一轮完成
+   * 的时刻必然不同，而「已读水位」要跨端比较，基准不一致就会出现「一端读了、
+   * 另一端还亮着」。
+   */
+  timestamp?: number
+}
 
 export interface SessionErrorPayload {
   sessionID: string
@@ -36,24 +43,102 @@ export interface SessionErrorPayload {
   data: unknown
 }
 
-export type SessionStatusPayload = SDKEventSessionStatus['properties']
+export type SessionStatusPayload = SDKEventSessionStatus['properties'] & {
+  /** 服务端事件时间；用于完成通知的跨端一致时间戳，同 SessionIdlePayload */
+  timestamp?: number
+}
 
 /**
  * 会话压缩结果（v2 `session.compaction.ended` / `session.compaction.failed`）。
  * 失败时带 error.message（如 "Nothing to compact yet"），用于提示用户。
  */
+/**
+ * v2 `session.compaction.ended` 的 tokens 形状。
+ *
+ * 压缩结束时服务端会带上「压缩后这次摘要请求的上下文用量」——这正是压缩后
+ * 新上下文的真实占用，比自己按消息文本估算准确得多。旧代码丢掉了它，
+ * 导致压缩完成后圆环仍按估算值显示。
+ */
+export interface CompactionTokenUsage {
+  input: number
+  output: number
+  reasoning: number
+  cache: { read: number; write: number }
+}
+
 export interface SessionCompactedPayload {
   sessionID: string
   status: 'started' | 'completed' | 'failed'
   reason?: 'auto' | 'manual'
   error?: string
+  /**
+   * 压缩摘要字符数与保留的近期消息字符数（`session.compaction.ended` 的
+   * text / recent，或 compaction part 的等价信息）。
+   *
+   * 这两个字段是**压缩后上下文**的真实构成：旧轮次已被摘要取代。压缩事件里的
+   * `tokens` 实测是**压缩前**用量（input 342383 / cache.read 577024），拿它显示
+   * 「压缩后的占用」会让圆环停在压缩前的高水位 —— 正是用户报的现象。
+   */
+  summaryChars?: number
+  recentChars?: number
+  /**
+   * 压缩后这次摘要请求的上下文用量（completed 才可能有）。
+   *
+   * ⚠️ v2 实测该值是**压缩前**的用量，不能直接当作压缩后的上下文大小；
+   * 优先用 summaryChars + recentChars 推算。
+   */
+  tokens?: CompactionTokenUsage
+  cost?: number
+  /** 压缩完成时间（服务端事件时间，缺失时由前端补） */
+  time?: number
+  /** 压缩边界：压缩后保留内容的第一条消息 id（v2 compaction part 的 tail_start_id） */
+  tailStartID?: string
+}
+
+/**
+ * 会话级累计用量（v2 `session.usage.updated`）。
+ *
+ * 会话被压缩后，历史轮次的 assistant 消息可能被裁掉/折叠，前端从可见消息
+ * 汇总出的「累计 token / 花费」会随之变小。服务端这份累计值不随消息裁剪
+ * 变化，是唯一正确的累计口径。
+ */
+export interface SessionUsagePayload {
+  sessionID: string
+  tokens: CompactionTokenUsage
+  cost: number
 }
 
 export type SessionDiffPayload = SDKEventSessionDiff['properties']
 
-export type PartRemovedPayload = SDKEventMessagePartRemoved['properties']
+/** message.part.delta 载荷（v2 原生） */
+export interface PartDeltaPayload {
+  sessionID: string
+  assistantMessageID: string
+  ordinal: number
+  delta?: string
+}
 
-export type PartDeltaPayload = SDKEventMessagePartDelta['properties']
+/** message.part.removed 载荷 */
+export interface PartRemovedPayload {
+  sessionID: string
+  messageID: string
+  partID: string
+}
+
+/**
+ * v2 用户消息入队（`session.inbox.enqueued`）。
+ *
+ * 实测 v2 的实时事件流里没有 `message.updated`，用户消息唯一的实时信号就是它。
+ * `inboxID` 由客户端生成（= prompt 的 messageID），因此各端看到的 id 与服务端
+ * 落库后的消息 id 一致，可以按 id 精确替换本端乐观占位。
+ */
+export interface InboxEnqueuedPayload {
+  sessionID: string
+  inboxID: string
+  /** 服务端事件时间 */
+  created: number
+  text: string
+}
 
 export type PermissionRepliedPayload = SDKEventPermissionReplied['properties']
 
@@ -94,6 +179,14 @@ export interface NextToolSettledPayload {
   metadata?: Record<string, unknown>
 }
 
+/** 工具执行中的进度更新（v2 `session.tool.progress`） */
+export interface NextToolProgressPayload {
+  sessionID: string
+  callID: string
+  /** 工具自定义的进度信息（bash 给 `{ shellID }`，其它工具各异） */
+  metadata?: Record<string, unknown>
+}
+
 // ============================================
 // Global Event Type
 // ============================================
@@ -119,6 +212,10 @@ export const EventTypes = {
   SESSION_STATUS: 'session.status',
   SESSION_DIFF: 'session.diff',
   SESSION_COMPACTED: 'session.compacted',
+  /** v2 用户消息入队（session.inbox.enqueued）：让所有端实时看到这条用户消息 */
+  SESSION_INBOX_ENQUEUED: 'session.inbox.enqueued',
+  /** v2 会话累计用量（tokens / cost），不随消息裁剪变化 */
+  SESSION_USAGE_UPDATED: 'session.usage.updated',
   /**
    * v2 重试信号：`session.retry.scheduled`。后端因限流/超时对某条 assistant
    * 消息发起重试时，会先广播此事件（带被放弃的 assistantMessageID），随后用
@@ -191,7 +288,15 @@ export const EventTypes = {
   PTY_UPDATED: 'pty.updated',
   PTY_EXITED: 'pty.exited',
   PTY_DELETED: 'pty.deleted',
-} as const satisfies Record<string, SDKGlobalEvent['payload']['type'] | 'session.renamed' | 'session.retry.scheduled'>
+} as const satisfies Record<
+  string,
+  // 前端自有的补充事件名：SDK 的类型联合里没有，但内部事件总线需要承载。
+  | SDKGlobalEvent['payload']['type']
+  | 'session.renamed'
+  | 'session.retry.scheduled'
+  | 'session.usage.updated'
+  | 'session.inbox.enqueued'
+>
 
 export type EventType = SDKGlobalEvent['payload']['type']
 
@@ -203,7 +308,11 @@ export interface EventCallbacks {
   onMessageUpdated?: (message: Message) => void
   onPartUpdated?: (part: Part) => void
   onPartDelta?: (data: PartDeltaPayload) => void
+  /** v2 用户消息入队（session.inbox.enqueued）：让所有端实时看到这条用户消息 */
+  onInboxEnqueued?: (data: InboxEnqueuedPayload) => void
   onPartRemoved?: (data: PartRemovedPayload) => void
+  /** 整条消息被移除（v2 session.inbox.cancelled：入队后被撤销的用户消息） */
+  onMessageRemoved?: (data: { sessionID: string; messageID: string }) => void
   onServerConnected?: (data: ServerConnectedPayload) => void
   onSessionCreated?: (session: Session) => void
   onSessionUpdated?: (session: Session) => void
@@ -215,6 +324,7 @@ export interface EventCallbacks {
   onSessionIdle?: (data: SessionIdlePayload) => void
   /** 会话压缩结束（v2）：成功/失败都回调，用于提示与刷新消息 */
   onSessionCompacted?: (data: SessionCompactedPayload) => void
+  onSessionUsageUpdated?: (data: SessionUsagePayload) => void
   onSessionError?: (data: SessionErrorPayload) => void
   onSessionStatus?: (data: SessionStatusPayload) => void
   onPermissionAsked?: (request: PermissionRequest) => void
@@ -228,6 +338,13 @@ export interface EventCallbacks {
    * 用于对账：若后端未补发 message.part.updated，仍能把 running/pending 的 part 收尾。
    */
   onNextToolSettled?: (data: NextToolSettledPayload) => void
+  /**
+   * 工具执行中的实时进度（v2 `session.tool.progress`，ephemeral）。
+   *
+   * 带 `metadata`（bash 是 `{ shellID }`，其它工具各异）。用于让长时间运行的
+   * 工具在界面上有「还在动」的反馈，而不是从「已调用」直接静止到「已完成」。
+   */
+  onNextToolProgress?: (data: NextToolProgressPayload) => void
   onProjectUpdated?: (project: Project) => void
   onWorktreeReady?: (data: WorktreeReadyPayload) => void
   onWorktreeFailed?: (data: WorktreeFailedPayload) => void

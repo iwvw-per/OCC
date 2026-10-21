@@ -45,7 +45,7 @@ export function useProject(): UseProjectResult {
       setProjects(all)
 
       // 检查 localStorage 中是否有保存的选择
-      const savedProjectId = serverStorage.get(STORAGE_KEY)
+      const savedProjectId = serverStorage.get(STORAGE_KEY, serverStore.getActiveServerId())
 
       if (savedProjectId) {
         // 尝试找到保存的项目
@@ -55,7 +55,7 @@ export function useProject(): UseProjectResult {
         } else {
           // 保存的项目不存在了，用当前项目
           setCurrentProject(current)
-          serverStorage.remove(STORAGE_KEY)
+          serverStorage.remove(STORAGE_KEY, serverStore.getActiveServerId())
         }
       } else {
         // 没有保存的，用当前项目
@@ -85,7 +85,7 @@ export function useProject(): UseProjectResult {
       const project = projects.find(p => p.id === projectId)
       if (project) {
         setCurrentProject(project)
-        serverStorage.set(STORAGE_KEY, projectId)
+        serverStorage.set(STORAGE_KEY, projectId, serverStore.getActiveServerId())
       }
     },
     [projects],

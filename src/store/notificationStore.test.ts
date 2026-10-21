@@ -17,9 +17,18 @@ function unreadIds(): Set<string> {
   )
 }
 
+/** 清空已读水位（store 没有 reset()，直接清存储后 reload）。 */
+function clearWatermarks(): void {
+  localStorage.removeItem('opencode-read-watermarks')
+  readWatermarkStore.reload()
+}
+
 describe('notificationStore 未读 completed 标记', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   it('push 后该 session 出现在未读集合中', () => {
@@ -69,17 +78,38 @@ describe('notificationStore 未读 completed 标记', () => {
   })
 
   it('useUnreadCompletedSessionIds 的过滤口径与之一致', () => {
+    // 前面的用例可能已抬高该会话水位（markRead 会写水位），这里重置，
+    // 否则新通知按新语义一入队就会被判为已读。
+    clearWatermarks()
     notificationStore.push('completed', 'Done', 'completed', SESSION, '/repo')
     // 该 hook 只是同一份数据的 selector 包装，这里直接验证底层过滤条件
     const ids = unreadIds()
     expect(ids.size).toBe(1)
     expect(typeof useUnreadCompletedSessionIds).toBe('function')
   })
+
+  it('pushes a completed notification as already-read when the watermark is ahead', () => {
+    // 跨端场景：另一台设备已展开该会话 → 水位抬高 → 本端后到的通知
+    // 不应再亮未读点（那里对应的消息用户早已看过）。
+    clearWatermarks()
+    readWatermarkStore.raise('ses_1', Date.now() + 60_000)
+
+    notificationStore.push('completed', 'Done', 'completed', SESSION, '/repo')
+
+    const entry = notificationStore.getSnapshot().notifications.find(n => n.sessionId === SESSION)
+    expect(entry?.read).toBe(true)
+    expect(unreadIds().has(SESSION)).toBe(false)
+
+    clearWatermarks()
+  })
 })
 
 describe('notificationStore 会话删除时清理通知', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   it('按复合 key 精确删除', () => {
@@ -121,6 +151,9 @@ describe('notificationStore 会话删除时清理通知', () => {
 describe('notificationStore 跨前缀匹配（同一会话多条 SSE）', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   // 场景来源：两台已连接服务器指向同一后端时，同一个 session 会被两条 SSE
@@ -167,6 +200,9 @@ describe('notificationStore 跨前缀匹配（同一会话多条 SSE）', () => 
 describe('notificationStore serverId 归属', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   it('push 时从复合 key 记录 serverId', () => {
@@ -235,6 +271,9 @@ describe('notificationStore 已读水位跨端同步', () => {
 describe('notificationStore 按目录批量已读', () => {
   beforeEach(() => {
     notificationStore.clearAll()
+    // 每个用例从干净水位开始：push 现在参考水位决定 read，
+    // 用例间残留水位会让「push 后应未读」的断言随执行顺序漂移。
+    clearWatermarks()
   })
 
   it('清掉指定服务器 + 目录下的未读 completed', () => {
@@ -281,5 +320,60 @@ describe('notificationStore 按目录批量已读', () => {
     notificationStore.push('completed', 'A', 'done', 'local::ses_a', '/repo')
     notificationStore.markDirectoryNotificationsRead('local', [], 'completed')
     expect(notificationStore.getSnapshot().notifications.filter(n => !n.read)).toHaveLength(1)
+  })
+})
+
+describe('notificationStore 已读水位跨端比较', () => {
+  beforeEach(() => {
+    notificationStore.clearAll()
+    localStorage.removeItem('opencode-read-watermarks')
+    readWatermarkStore.reload()
+  })
+
+  it('两端用同一个服务端时间戳打戳，已读水位才能对齐', () => {
+    // 同一轮完成的权威时间由服务端给出（v2 事件的 created），两端拿到的是同一个值。
+    // 旧实现用「各自处理事件的本地时刻」，两端必然差几秒，于是一端读了、另一端仍亮。
+    const serverCompletedAt = 1_700_000_000_000
+
+    // 设备 A：收到通知，标记已读
+    notificationStore.push('completed', 'Done', 'completed', 'local::ses_shared', '/repo', serverCompletedAt)
+    expect(notificationStore.getSnapshot().notifications[0].timestamp).toBe(serverCompletedAt)
+    notificationStore.markSessionNotificationsRead('local::ses_shared', 'completed')
+
+    // 设备 B：同一事件、同一个时间戳 → 依据同步来的水位即判定已读
+    expect(readWatermarkStore.isRead('ses_shared', serverCompletedAt)).toBe(true)
+  })
+
+  it('没有服务端时间时退回本机时钟', () => {
+    const before = Date.now()
+    notificationStore.push('permission', 'Perm', 'needs approval', 'local::ses_perm', '/repo')
+    const [entry] = notificationStore.getSnapshot().notifications
+
+    // permission 不参与跨端已读，用本机时钟即可；关键是不能是 undefined/NaN
+    expect(Number.isFinite(entry.timestamp)).toBe(true)
+    expect(entry.timestamp).toBeGreaterThanOrEqual(before)
+  })
+
+  it('markAllRead 把每个会话抬到不低于自身通知时间戳', () => {
+    const at = 1_700_000_500_000
+    notificationStore.push('completed', 'A', 'done', 'agent-a::ses_a', '/repo', at)
+    notificationStore.push('completed', 'B', 'done', 'agent-b::ses_b', '/repo', at)
+
+    notificationStore.markAllRead()
+
+    expect(readWatermarkStore.get('ses_a')).toBeGreaterThanOrEqual(at)
+    expect(readWatermarkStore.get('ses_b')).toBeGreaterThanOrEqual(at)
+    expect(notificationStore.getSnapshot().notifications.every(n => n.read)).toBe(true)
+  })
+
+  it('按会话主机取时钟：另一主机的通知不会被活动主机时钟带偏', () => {
+    // 水位必须不低于该通知时间戳，且标记后本端立即已读。
+    notificationStore.push('completed', 'Done', 'completed', 'agent-b::ses_clock', '/repo', 1_700_000_900_000)
+    const [entry] = notificationStore.getSnapshot().notifications
+
+    notificationStore.markRead(entry.id)
+
+    expect(readWatermarkStore.get('ses_clock')).toBeGreaterThanOrEqual(entry.timestamp)
+    expect(unreadIds().has('agent-b::ses_clock')).toBe(false)
   })
 })

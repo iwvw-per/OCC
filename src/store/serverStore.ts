@@ -4,7 +4,6 @@
 
 import { API_BASE_URL } from '../constants'
 import { isTauri } from '../utils/tauri'
-import { detectServerVersion, type ApiVersion } from '../api/serverVersion'
 import i18n from '../i18n'
 
 // Tauri plugin-http fetch 缓存（避免重复 dynamic import）
@@ -57,8 +56,6 @@ export interface ServerHealth {
   error?: string // 错误信息
   details?: string // 原始诊断信息
   version?: string // 服务器版本
-  /** opencode API 代次（v1 根路径 / v2 /api/* 前缀），探测不到时缺省 */
-  apiVersion?: ApiVersion
 }
 
 export interface ServerSettingsBackup {
@@ -139,7 +136,6 @@ function formatExceptionDiagnostics(url: string, err: unknown): string {
 
 const STORAGE_KEY = 'opencode-servers'
 const ACTIVE_SERVER_KEY = 'opencode-active-server'
-const API_VERSIONS_KEY = 'opencode-server-api-versions'
 export const LOCAL_SERVER_ID = 'local'
 
 /**
@@ -154,16 +150,6 @@ class ServerStore {
   /** 每台服务器的在途健康检查：并发触发只发一次网络 */
   private healthInflight = new Map<string, Promise<ServerHealth>>()
   private clockCalibrationMap = new Map<string, ServerClockCalibration>()
-  /**
-   * 探测到的 API 版本（v1/v2），持久化到 localStorage。
-   *
-   * healthMap 是内存态，应用重启即清空。笔电上 v2 服务器「重启后首请求走 v1
-   * 根路径 → text/html」正是这个窗口造成的：版本未知时 getSDKClient 按 v1
-   * 处理，首屏 /session、/agent 打在 v2 服务器的 SPA 兜底上。把探测结果持久化，
-   * 重启后启动瞬间版本已知，client 工厂直接产出正确代次的客户端。
-   * 服务器升级/降级导致版本变化时，下一次 checkHealth 会覆盖本表。
-   */
-  private apiVersionMap = new Map<string, ApiVersion>()
   private listeners: Set<Listener> = new Set()
   private localServerUrlOverride: string | null = null
 
@@ -180,7 +166,6 @@ class ServerStore {
 
   constructor() {
     this.loadFromStorage()
-    this.loadApiVersions()
     this.updateSnapshots()
   }
 
@@ -244,29 +229,6 @@ class ServerStore {
         sessionStorage.setItem(ACTIVE_SERVER_KEY, this.activeServerId)
         localStorage.setItem(ACTIVE_SERVER_KEY, this.activeServerId)
       }
-    } catch {
-      // ignore
-    }
-  }
-
-  /** 读取持久化的 API 版本表（损坏/非对象按空处理，下次健康检查会重建） */
-  private loadApiVersions(): void {
-    try {
-      const stored = localStorage.getItem(API_VERSIONS_KEY)
-      if (!stored) return
-      const parsed: unknown = JSON.parse(stored)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
-      for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
-        if (value === 'v1' || value === 'v2') this.apiVersionMap.set(id, value)
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  private persistApiVersions(): void {
-    try {
-      localStorage.setItem(API_VERSIONS_KEY, JSON.stringify(Object.fromEntries(this.apiVersionMap)))
     } catch {
       // ignore
     }
@@ -478,7 +440,18 @@ class ServerStore {
   }
 
   getActiveCalibratedNow(): number | undefined {
-    const calibration = this.clockCalibrationMap.get(this.getActiveServerId())
+    return this.getCalibratedNow(this.getActiveServerId())
+  }
+
+  /**
+   * 指定服务器的校准时钟。
+   *
+   * 只提供「活动服务器」的版本会让跨主机的比较错位：同一会话的通知在 A 端用
+   * A 的时钟打戳、B 端用 B 的时钟打戳，而两台机器的时钟并不相同。已读水位要
+   * 跨端比较，就必须统一到「会话所属主机」的时钟上。
+   */
+  getCalibratedNow(serverId: string): number | undefined {
+    const calibration = this.clockCalibrationMap.get(serverId)
     if (!calibration) return undefined
     return calibration.serverTimestamp + (performance.now() - calibration.calibratedAtMonotonic)
   }
@@ -568,8 +541,6 @@ class ServerStore {
     this.healthCheckSeqMap.delete(id)
     this.healthInflight.delete(id)
     this.clockCalibrationMap.delete(id)
-    this.apiVersionMap.delete(id)
-    this.persistApiVersions()
 
     // 如果删除的是当前选中的，切换到默认
     const wasActive = this.activeServerId === id
@@ -647,51 +618,6 @@ class ServerStore {
     return request
   }
 
-  /**
-   * 探测服务器 API 版本（v1/v2）。供健康检查在 /global/health 返回 HTML 时调用。
-   * 探测失败返回 undefined，由调用方按原错误路径处理。
-   */
-  private async detectVersion(
-    server: ServerConfig,
-    headers: Record<string, string>,
-  ): Promise<{ apiVersion: ApiVersion; version?: string } | undefined> {
-    try {
-      const f = await getUnifiedFetch()
-      return await detectServerVersion({ baseUrl: server.url, headers, fetch: f, timeoutMs: 5000 })
-    } catch {
-      return undefined
-    }
-  }
-
-  /** 读取某服务器的 API 版本（无记录返回 undefined）。
-   *
-   * 优先取 healthMap 里本次健康检查的结论；healthMap 是内存态，重启后为空，
-   * 此时回退到持久化的 apiVersionMap —— 它记录了上次真实探测到的版本。
-   * 离线/检查失败（health.apiVersion 缺失）同样回退：服务器短暂不可达不应让
-   * 客户端退回 v1 根路径，否则对 v2 服务器会打出 text/html。
-   */
-  getApiVersion(serverId: string): ApiVersion | undefined {
-    return this.healthMap.get(serverId)?.apiVersion ?? this.apiVersionMap.get(serverId)
-  }
-
-  /**
-   * 确保某服务器的 API 版本已知：已有结论（内存或持久化）立即返回；未知时
-   * 跑一次健康检查探测。供数据初始化/SSE 连接前调用，避免版本未知的窗口里
-   * getSDKClient 按 v1 建 client，首屏 /session、/agent、/global/event 打在
-   * v2 服务器的 SPA 兜底上（text/html）。探测失败不抛：保持原「版本未知按 v1
-   * 处理」的回退，由调用方照常继续。
-   */
-  async ensureApiVersion(serverId: string): Promise<ApiVersion | undefined> {
-    const known = this.getApiVersion(serverId)
-    if (known) return known
-    try {
-      const health = await this.checkHealth(serverId, { silent: true })
-      return health.apiVersion
-    } catch {
-      return undefined
-    }
-  }
-
   /** 健康检查的实际网络逻辑（由 checkHealth 做在途合并后调用） */
   private async performHealthCheck(
     serverId: string,
@@ -701,15 +627,11 @@ class ServerStore {
     const server = this.withRuntimeServerUrl(storedServer)
     const checkSeq = (this.healthCheckSeqMap.get(serverId) ?? 0) + 1
     this.healthCheckSeqMap.set(serverId, checkSeq)
-    const healthUrl = `${server.url}/global/health`
+    const infoUrl = `${server.url}/api/info`
 
     const commitHealth = (health: ServerHealth) => {
       if (this.healthCheckSeqMap.get(serverId) === checkSeq) {
         this.healthMap.set(serverId, health)
-        if (health.apiVersion && this.apiVersionMap.get(serverId) !== health.apiVersion) {
-          this.apiVersionMap.set(serverId, health.apiVersion)
-          this.persistApiVersions()
-        }
         this.notify()
       }
       return health
@@ -737,7 +659,7 @@ class ServerStore {
       }
 
       const f = await getUnifiedFetch()
-      const response = await f(healthUrl, {
+      const response = await f(infoUrl, {
         method: 'GET',
         signal: controller.signal,
         headers,
@@ -745,39 +667,10 @@ class ServerStore {
 
       const latency = Date.now() - startTime
       const responseBody = await response.text().catch(err => `[Failed to read response body: ${normalizeConnectionError(err)}]`)
-      const details = formatResponseDiagnostics({ url: healthUrl, response, latency, body: responseBody })
+      const details = formatResponseDiagnostics({ url: infoUrl, response, latency, body: responseBody })
 
       if (response.ok) {
-        const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
-        if (!contentType.includes('application/json')) {
-          // v2 的根路径 /global/health 被前端 SPA 接管返回 HTML。此时按 v1 判定
-          // 会误报「非 OpenCode 服务器」；改用版本探测识别 v2，识别成功即视为在线。
-          if (contentType.includes('text/html')) {
-            const detected = await this.detectVersion(server, headers)
-            if (detected) {
-              const health: ServerHealth = {
-                status: 'online',
-                latency,
-                lastCheck: Date.now(),
-                version: detected.version,
-                apiVersion: detected.apiVersion,
-                details,
-              }
-              return commitHealth(health)
-            }
-          }
-          const health: ServerHealth = {
-            status: 'error',
-            latency,
-            lastCheck: Date.now(),
-            error: contentType.includes('text/html')
-              ? i18n.t('settings:servers.healthHtmlInsteadOfJson')
-              : i18n.t('settings:servers.healthNoJson'),
-            details,
-          }
-          return commitHealth(health)
-        }
-
+        // OCC 只支持 opencode 2.x：GET /api/info 返回 { version } 即在线。
         let data: unknown
         try {
           data = JSON.parse(responseBody)
@@ -792,7 +685,7 @@ class ServerStore {
           return commitHealth(health)
         }
 
-        if (!isRecord(data) || data.healthy !== true || typeof data.version !== 'string' || !data.version.trim()) {
+        if (!isRecord(data) || typeof data.version !== 'string' || !data.version.trim()) {
           const health: ServerHealth = {
             status: 'error',
             latency,
@@ -808,7 +701,6 @@ class ServerStore {
           latency,
           lastCheck: Date.now(),
           version: data.version,
-          apiVersion: 'v1',
           details,
         }
         return commitHealth(health)
@@ -837,7 +729,7 @@ class ServerStore {
         status: 'offline',
         lastCheck: Date.now(),
         error: normalizeConnectionError(err),
-        details: formatExceptionDiagnostics(healthUrl, err),
+        details: formatExceptionDiagnostics(infoUrl, err),
       }
       return commitHealth(health)
     } finally {

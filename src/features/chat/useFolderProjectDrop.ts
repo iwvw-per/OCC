@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
+import { logger } from '../../utils/logger'
 import { resolveDropZone } from './PaneDropOverlay'
 import {
   getDroppedPathsInfo,
@@ -91,7 +92,7 @@ export function useFolderProjectDrop(
           }
         })
         .catch(err => {
-          console.warn('[useFolderProjectDrop] Failed to add dropped folders:', err)
+          logger.warn('[useFolderProjectDrop] Failed to add dropped folders:', err)
         })
     })
 

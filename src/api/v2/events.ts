@@ -1,5 +1,5 @@
 // ============================================
-// v2 事件 → v1 GlobalEvent 适配
+// v2 原生事件 → 内部 GlobalEvent 适配
 //
 // v2 的 event.subscribe() 产出 V2Event：`{ id, created, type, data, location }`，
 // 事件名与 v1 完全不同（如 session.text.delta / session.tool.success）。
@@ -12,6 +12,7 @@
 
 import type { GlobalEvent } from '../types'
 import type { ApiSession } from '../../types'
+import type { CompactionTokenUsage } from '../../types/api/event'
 import { EventTypes } from '../../types/api/event'
 import { rec, str, num, toolResultMetadata } from './adapt'
 import { adaptSession } from './session'
@@ -20,6 +21,21 @@ import { adaptPermission } from './entities'
 
 function globalEvent(directory: string, type: string, properties: Record<string, unknown>): GlobalEvent {
   return { directory, payload: { type, properties } } as unknown as GlobalEvent
+}
+
+/** 归一 tokens 形状；全零/缺失时返回 null（调用方不应把 0 当成「有测量」）。 */
+function adaptTokenUsage(raw: unknown): CompactionTokenUsage | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const t = rec(raw)
+  const cache = rec(t.cache)
+  const usage: CompactionTokenUsage = {
+    input: num(t.input) ?? 0,
+    output: num(t.output) ?? 0,
+    reasoning: num(t.reasoning) ?? 0,
+    cache: { read: num(cache.read) ?? 0, write: num(cache.write) ?? 0 },
+  }
+  const total = usage.input + usage.output + usage.reasoning + usage.cache.read + usage.cache.write
+  return total > 0 ? usage : null
 }
 
 /**
@@ -130,6 +146,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
   const location = rec(e.location)
   const directory = str(location.directory) ?? ''
   const sessionID = str(data.sessionID) ?? str(e.sessionID) ?? ''
+  const eventCreated = num(e.created)
 
   switch (type) {
     case 'server.connected':
@@ -164,9 +181,13 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     case 'session.deleted':
       return globalEvent(directory, EventTypes.SESSION_DELETED, { sessionID })
     case 'session.idle':
-      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID })
+      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID, timestamp: eventCreated })
     case 'session.status':
-      return globalEvent(directory, EventTypes.SESSION_STATUS, { sessionID, status: data.status })
+      return globalEvent(directory, EventTypes.SESSION_STATUS, {
+        sessionID,
+        status: data.status,
+        timestamp: eventCreated,
+      })
     case 'session.execution.failed': {
       const messageError = toMessageError(rec(data.error))
       return globalEvent(directory, EventTypes.SESSION_ERROR, {
@@ -179,13 +200,74 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     // 主动停止发 execution.interrupted（+ step.failed aborted），同样不发 idle。
     // 两者都归一为 IDLE：若不映射，流式消息永不收尾、会话永久停在 Working。
     // 上层 handleSessionIdle 会定稿流式消息、落定悬空 tool、移除 Working 状态。
-    case 'session.execution.succeeded':
-    case 'session.execution.interrupted':
-      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID })
+    //
+    // interrupted 带 reason（user | shutdown | superseded | inactivity）：
+    // 用户主动停止和「服务端重启打断」在界面上是两回事，带上它才能区分。
+    case 'session.execution.succeeded': {
+      const outcome = str(data.outcome)
+      return globalEvent(directory, EventTypes.SESSION_IDLE, {
+        sessionID,
+        timestamp: eventCreated,
+        ...(outcome === 'failed' ? { outcome: 'failed' as const } : {}),
+      })
+    }
+    case 'session.execution.interrupted': {
+      const reason = str(data.reason)
+      return globalEvent(directory, EventTypes.SESSION_IDLE, {
+        sessionID,
+        timestamp: eventCreated,
+        outcome: 'interrupted' as const,
+        ...(reason ? { interruptReason: reason } : {}),
+      })
+    }
     // v2 运行态：execution.started 表示开始，映射为 busy 以便侧栏显示动态图标
     // （v2 不发 session.status，若只靠 /session/active 轮询则侧栏不实时）。
     case 'session.execution.started':
       return globalEvent(directory, EventTypes.SESSION_STATUS, { sessionID, status: { type: 'busy' } })
+
+    // ============================================================
+    // 用户投递队列（v2 的多端输入通道）→ v1 user 消息
+    //
+    // 实测 v2 的 SSE 流里**没有** message.updated（本机 39,446 条 durable 事件
+    // 里只有 message.*，而实时流只发 session.*）。用户消息唯一的实时信号就是
+    // `session.inbox.enqueued`：它在 prompt 被受理的瞬间广播，带 inboxID（=
+    // 客户端传的 messageID）与 item.payload.text/files/agents。
+    //
+    // 不映射它的后果是确定性的：A 端发的消息，B 端在它被 agent 读取之前
+    // 完全看不到；若 A 端连发两条，B 端只在轮次结束后靠重拉才补齐，中间的
+    // 那条就是用户说的「吞消息」。这里把它转成 MESSAGE_UPDATED + PART_UPDATED，
+    // 让所有端在同一时刻看到同一条用户消息。
+    //
+    // 注意：enqueued 只是「进入队列」，还没被 agent 消费；cancelled 表示这条
+    // 被撤销（前端要移除占位，否则会显示一条永远不会被处理的用户消息）。
+    // ============================================================
+    case 'session.inbox.enqueued': {
+      const inboxID = str(data.inboxID) ?? ''
+      if (!inboxID) return null
+      const item = rec(data.item)
+      const itemType = str(item.type)
+      // 只有用户文本消息对应 UI 里的一条消息；compaction/synthetic/move 等
+      // 系统投递项由各自的入口处理，不能在这里伪造用户消息。
+      if (itemType !== 'user') return null
+      const payload = rec(item.payload)
+      const created = eventCreated ?? Date.now()
+      // 两条事件：先建消息骨架，再补文本 part。
+      // 只发骨架的话，UI 里会出现一条空白用户消息（text 在 part 上，不在 info 上）。
+      // 用 TEXT_STARTED 语义等价的形式（MESSAGE_PART_UPDATED + text）让 store
+      // 走与历史拉取一致的路径（part id `${id}-text` 与 adaptUserParts 对齐）。
+      return globalEvent(directory, EventTypes.SESSION_INBOX_ENQUEUED, {
+        sessionID,
+        inboxID,
+        created,
+        text: str(payload.text) ?? '',
+      })
+    }
+
+    case 'session.inbox.cancelled': {
+      const inboxID = str(data.inboxID) ?? ''
+      if (!inboxID) return null
+      return globalEvent(directory, EventTypes.MESSAGE_REMOVED, { sessionID, messageID: inboxID })
+    }
 
     // ============================================================
     // v2 消息流事件 → v1 Message 事件
@@ -246,6 +328,7 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       if (!messageID) return null
       return globalEvent(directory, EventTypes.MESSAGE_PART_DELTA, {
         sessionID,
+        assistantMessageID: messageID,
         messageID,
         partID: `${messageID}-text-${ordinal}`,
         field: 'text',
@@ -296,6 +379,59 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
           synthetic: false,
           time: { start: 0, end: num(e.created) ?? 0 },
         },
+      })
+    }
+
+    /**
+     * 推理结束：定稿 reasoning part。
+     *
+     * 缺这条映射会有两个可观测后果：
+     *   1. reasoning part 的 `time.end` 永远是 undefined，UI 上推理块一直算
+     *      「进行中」，折叠/耗时统计都不准；
+     *   2. `handlePartDelta` 依靠 `time.end` 丢弃已定稿 part 的迟到增量。
+     *      没有 end，用户按下停止后服务端仍在途的 reasoning.delta 会继续被
+     *      追加到推理块里 —— 表现就是「点了停止，内容还在往里流」。
+     */
+    case 'session.reasoning.ended': {
+      const messageID = str(data.assistantMessageID) ?? ''
+      const ordinal = num(data.ordinal) ?? 0
+      if (!messageID) return null
+      return globalEvent(directory, EventTypes.MESSAGE_PART_UPDATED, {
+        part: {
+          id: `${messageID}-reasoning-${ordinal}`,
+          sessionID,
+          messageID,
+          type: 'reasoning',
+          text: str(data.text) ?? '',
+          time: { start: 0, end: num(e.created) ?? 0 },
+        },
+      })
+    }
+
+    /**
+     * 压缩 part（v2 的实时压缩信号）。
+     *
+     * `session.compaction.*` 事件在 schema 里存在，但实测**不一定发**；压缩过程
+     * 还会走 `message.part.updated` + `part.type === "compaction"`：
+     *   - 开始时只有 {id, sessionID, messageID, type, auto}；
+     *   - 结束时多出 `tail_start_id`，指向压缩后保留内容的起点（schema 已确认）。
+     *
+     * 这条路径比只等压缩事件可靠：压缩完成的瞬间就能让前端重拉，
+     * 且给出了压缩边界。没有 tail_start_id 时视为仍在进行中，只通知开始。
+     */
+    case 'message.part.updated': {
+      const part = rec(data.part)
+      if (str(part.type) !== 'compaction') return null
+      const messageID = str(part.messageID) ?? str(data.messageID) ?? ''
+      const columnID = str(part.id) ?? ''
+      if (!messageID || !columnID) return null
+      const tailStartID = str(part.tail_start_id) ?? str(part.tailStartID) ?? ''
+      return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
+        sessionID,
+        status: tailStartID ? 'completed' : 'started',
+        reason: part.auto === true ? 'auto' : 'manual',
+        // 压缩边界：压缩后保留内容的第一条消息 id（v2 用 id 而非时间戳）
+        ...(tailStartID ? { tailStartID } : {}),
       })
     }
 
@@ -388,11 +524,39 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         // task 工具的子会话 id 在结果 metadata 里（metadata.sessionId），透传供子代理识别。
         metadata: toolResultMetadata(data),
       })
+
+    /**
+     * 工具执行中的实时进度。
+     *
+     * 实测载荷（bash 工具）：
+     *   data: { sessionID, assistantMessageID, id: "call_xxx",
+     *           metadata: { shellID: "sh_xxx" } }
+     *
+     * 它是 ephemeral（不落库），只在执行期间间歇发送。不同工具填的 metadata
+     * 不一样（bash 给 shellID，别的工具可能给阶段/百分比）。这里统一透传，
+     * 让渲染层按 `state.metadata` 自行取用 —— 关键是**状态必须是 running**，
+     * 否则会覆盖掉已经 completed 的 part（乱序到达时）。
+     *
+     * 不映射它的后果：一个跑 30 秒的命令，界面上只有「已调用」和「已完成」
+     * 两个状态，中间 30 秒完全静止，用户以为卡死了。
+     */
+    case 'session.tool.progress': {
+      const messageID = str(data.assistantMessageID) ?? ''
+      const callID = str(data.id) ?? ''
+      if (!messageID || !callID) return null
+      const metadata = rec(data.metadata)
+      return globalEvent(directory, EventTypes.SESSION_NEXT_TOOL_PROGRESS, {
+        sessionID,
+        callID,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+      })
+    }
     case 'session.tool.failed':
       return globalEvent(directory, EventTypes.SESSION_NEXT_TOOL_FAILED, {
         sessionID,
         callID: str(data.callID) ?? str(data.id) ?? '',
-        error: errorMessage(rec(data.error)) ?? str(data.error),
+        // v2 的失败事件用 data.error（{type,message}）；兼容 content[] 文本块形状。
+        error: errorMessage(rec(data.error)) ?? str(data.error) ?? toolContentToText(data.content),
         metadata: toolResultMetadata(data),
       })
 
@@ -466,11 +630,21 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     // v2 压缩成功：携带压缩摘要文本，落定后需要刷新消息列表才能看到压缩分隔与
     // 精简后的历史。失败（如 "Nothing to compact yet"）同样要提示，否则用户点了
     // /compact 后界面毫无反应，误以为功能失效。
+    //
+    // ⚠️ 这里**不能**用 data.tokens 当作压缩后的上下文用量：实测 gzip 前后都显示
+    // 它是「压缩前」的用量（input 342383 / cache.read 577024），而压缩后实际约
+    // 24k。真实构成是 text（摘要）+ recent（保留的近期消息），用它们推算才正确。
+    // 旧实现用 tokens，结果圆环在压缩后反而显得更满 —— 用户报的正是这个。
     case 'session.compaction.ended':
       return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
         sessionID,
         status: 'completed',
         reason: str(data.reason),
+        ...(adaptTokenUsage(data.tokens) ? { tokens: adaptTokenUsage(data.tokens) } : {}),
+        ...(num(data.cost) != null ? { cost: num(data.cost) } : {}),
+        summaryChars: (str(data.text) ?? '').length,
+        recentChars: (str(data.recent) ?? '').length,
+        time: eventCreated ?? Date.now(),
       })
     case 'session.compaction.failed':
       return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
@@ -479,6 +653,15 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         reason: str(data.reason),
         error: str(rec(data.error).message) ?? str(data.error) ?? '',
       })
+    case 'session.usage.updated': {
+      const tokens = adaptTokenUsage(data.tokens)
+      if (!tokens) return null
+      return globalEvent(directory, EventTypes.SESSION_USAGE_UPDATED, {
+        sessionID,
+        tokens,
+        cost: num(data.cost) ?? 0,
+      })
+    }
 
     default:
       // 未映射的 v2 事件（step/text.started/ended、usage、inbox、retry 等）

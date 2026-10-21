@@ -48,6 +48,7 @@
     "interrupted": "已中断",
     "maybeStuck": "可能已卡住",
     "abortStuck": "中止会话",
+    "moveToBackground": "转入后台（继续运行）",
     "toolFailed": "工具执行失败"
   },
   "toolSteps": {
@@ -149,6 +150,8 @@
     "messageAbortedDesc": "消息生成已被中断。",
     "apiError": "API 错误",
     "apiErrorWithCode": "API 错误 ({{code}})",
+    "payloadTooLarge": "对话上下文过大 (413)",
+    "payloadTooLargeDesc": "服务端把这一轮的上下文发给模型时，体积超过了上游上限。常见原因是 AI 读取了大量截图或大文件，这些内容会以 base64 一直留在会话里。可以这样脱困：新建一个会话继续；或先让 AI 不要再读图；必要时在「会话」面板压缩上下文后再试。",
     "rawDiagnostics": "查看原始诊断信息",
     "unknownError": "错误",
     "unknownErrorDesc": "发生未知错误。"

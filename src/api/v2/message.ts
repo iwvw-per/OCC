@@ -1,5 +1,6 @@
 import type { MessageWithParts, Part, TextPart, ReasoningPart, ToolPart, FilePart, AgentPart } from '../../types'
 import { rec, str, num, list } from './adapt'
+import { mapInSlices } from '../../utils/chunkedWork'
 
 function adaptToolState(raw: unknown): ToolPart['state'] {
   const state = rec(raw)
@@ -8,26 +9,49 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
   const metadata = rec(state.metadata)
   const time = rec(state.time)
   const start = num(time.start) ?? num(time.created) ?? 0
+  // title 与状态无关：v2 在 running 阶段也会给出标题（如命令摘要），
+  // 只有 completed 分支读它会让运行中的工具退化成类型名（全都显示 "Execute"）。
+  const title = str(state.title) ?? ''
   switch (status) {
     case 'pending':
     case 'streaming':
-      return { status: 'pending', input, raw: str(state.input) ?? '' } as ToolPart['state']
+      return { status: 'pending', input, raw: str(state.input) ?? '', title } as ToolPart['state']
     case 'running':
-      return { status: 'running', input, metadata, time: { start } } as ToolPart['state']
+      return { status: 'running', input, metadata, title, time: { start } } as ToolPart['state']
     case 'error':
       return {
         status: 'error',
         input,
         error: str(rec(state.error).message) ?? str(state.error) ?? 'tool error',
         metadata,
+        title,
         time: { start, end: num(time.end) ?? start },
       } as ToolPart['state']
     case 'completed':
     default: {
       // v2 用 content: ToolContent[]，v1 用 output: string：拼接文本内容。
+      //
+      // ⚠️ 同时统计**被丢弃的内联文件体积**。
+      // content[] 里的 `type: "file"` 块带 `uri`，值是完整的 `data:image/png;base64,...`
+      // （实测一张截图 2.3MB）。这部分不能留在内存里，所以只拼文本、把图片丢掉。
+      // 但它**仍然留在服务端上下文**，会让「上下文转发给模型」的请求体膨胀 ——
+      // 真实故障就是 5 张截图累计 11MB，触发上游网关 16MB 上限，返回 413。
+      // 这里只记一个数字（体积），用于发送前预警，不保留任何字节。
+      let omittedFileBytes = 0
       const output = list(state.content)
         .map(item => {
           const c = rec(item)
+          if (str(c.type) === 'file') {
+            const uri = str(c.uri) ?? str(c.url) ?? ''
+            if (uri) {
+              const comma = uri.indexOf(',')
+              omittedFileBytes +=
+                comma > 0 && uri.slice(0, comma).includes('base64')
+                  ? Math.floor(((uri.length - comma) * 3) / 4)
+                  : Math.max(0, uri.length - comma)
+            }
+            return ''
+          }
           return str(c.text) ?? str(c.content) ?? ''
         })
         .join('')
@@ -35,9 +59,10 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
         status: 'completed',
         input,
         output,
-        title: str(state.title) ?? '',
+        title,
         metadata,
         time: { start, end: num(time.end) ?? start },
+        ...(omittedFileBytes > 0 ? { omittedFileBytes } : {}),
       } as ToolPart['state']
     }
   }
@@ -111,7 +136,16 @@ function adaptUserParts(raw: Record<string, unknown>): Part[] {
     const f = rec(rawFile)
     const mime = str(f.mime) ?? 'text/plain'
     const source = rec(f.source)
-    const uri = source.type === 'uri' ? str(source.uri) : ''
+    // v2 的 file 有两种来源：
+    //   - source.type === 'uri'   ：引用一个地址（file:// / https://）
+    //   - source.type === 'inline'：正文以 base64 放在 f.data 里
+    //
+    // 此前只处理了 uri，inline 的 data 被**直接丢弃** —— 于是用户发的图片既显示
+    // 不出来，又白白把 base64 下载了下来。实测一条带截图的会话里，60 条消息中
+    // 有 1358KB 是 inline 图片数据（占 92%），首屏 18 秒基本都花在它上面。
+    const inlineData = str(f.data)
+    const uri = source.type === 'uri' ? (str(source.uri) ?? '') : ''
+    const url = uri || (inlineData ? `data:${mime};base64,${inlineData}` : '')
     parts.push({
       id: `${id}-file-${ordinal++}`,
       sessionID,
@@ -119,11 +153,11 @@ function adaptUserParts(raw: Record<string, unknown>): Part[] {
       type: 'file',
       mime,
       filename: str(f.name),
-      url: uri,
-      source: uri
+      url,
+      source: url
         ? {
             type: 'file',
-            path: uri,
+            path: uri || str(f.name) || '',
             text: { value: '', start: 0, end: 0 },
           }
         : undefined,
@@ -211,6 +245,92 @@ function adaptLightweight(raw: unknown): { reasoningCount?: number; stepCount?: 
   return { reasoningCount, stepCount }
 }
 
+/** 轮次结论（来自 `type: "idle"` 消息）。 */
+export interface IdleMarker {
+  /** 轮次结束时间（消息 time.created） */
+  at: number
+  /** succeeded | failed | interrupted */
+  outcome: 'succeeded' | 'failed' | 'interrupted'
+  /** 失败/中断时的错误说明 */
+  error?: string
+}
+
+/** 会话配置切换记录（来自 `model-switched` / `agent-switched` 消息）。 */
+export interface SessionConfigMarkers {
+  model?: { providerID: string; modelID: string; at: number }
+  agent?: { agent: string; at: number }
+}
+
+/**
+ * 从一页消息里收集「轮次结论 + 会话配置切换」这类**非对话**的系统记录。
+ *
+ * v2 的 `SessionMessage.Info` 有 11 种类型，其中只有 user/assistant 是对话内容：
+ *
+ *   user  assistant  idle  compaction  system  synthetic  skill  shell
+ *   agent-switched  model-switched  location-switched
+ *
+ * 我们的对话渲染只处理 user/assistant（其余若塞进消息流会让用户/助手位置错乱，
+ * 所以继续丢弃）。但丢弃**不等于**信息无用 —— 其中两类是权威状态：
+ *
+ *   - `idle`：带 `outcome: succeeded | failed | interrupted` 和 `error`。
+ *     这是「这一轮到底结束了吗、是成功还是失败」的**权威来源**。事件流里的
+ *     `session.execution.succeeded` 一旦丢失/重连漏收，界面就会永远转圈；
+ *     而 idle 在消息列表里，刷新即可恢复。
+ *   - `model-switched` / `agent-switched`：带 `model` / `agent`。
+ *     这是「这个会话绑定什么模型/agent」的权威历史。v2 的 user 消息**没有**
+ *     model 字段（实测只有 time/text/files），所以「无痕窗口/新设备打开会话
+ *     显示成默认模型」这类问题只能靠这里（或 session 元数据）还原。
+ *
+ * 这里只做**提取**，不改消息数组形状，避免污染对话流。
+ */
+export function collectSessionMarkers(data: unknown[]): {
+  idle?: IdleMarker
+  config: SessionConfigMarkers
+} {
+  let idle: IdleMarker | undefined
+  const config: SessionConfigMarkers = {}
+
+  for (const item of data) {
+    const m = rec(item)
+    const type = str(m.type)
+    if (!type) continue
+    const created = num(rec(m.time).created) ?? 0
+
+    if (type === 'idle') {
+      // 取最近一次（消息按 asc 或 desc 都可能，用时间比较而不是位置）
+      if (idle && created <= idle.at) continue
+      const rawOutcome = str(m.outcome)
+      const outcome: IdleMarker['outcome'] =
+        rawOutcome === 'failed' || rawOutcome === 'interrupted' ? rawOutcome : 'succeeded'
+      const err = rec(m.error)
+      const errMessage = str(err.message)
+      const errData = rec(err.data)
+      const errMsg = errMessage ?? str(errData.message) ?? undefined
+      idle = { at: created, outcome, ...(errMsg ? { error: errMsg } : {}) }
+      continue
+    }
+
+    if (type === 'model-switched') {
+      const model = rec(m.model)
+      const providerID = str(model.providerID)
+      const modelID = str(model.id) ?? str(model.modelID)
+      if (!providerID || !modelID) continue
+      if (config.model && created <= config.model.at) continue
+      config.model = { providerID, modelID, at: created }
+      continue
+    }
+
+    if (type === 'agent-switched') {
+      const agent = str(m.agent)
+      if (!agent) continue
+      if (config.agent && created <= config.agent.at) continue
+      config.agent = { agent, at: created }
+    }
+  }
+
+  return { ...(idle ? { idle } : {}), config }
+}
+
 /** v2 message.list 响应 → 内部 messages + 双向游标 */
 export function adaptMessagePage(raw: unknown): {
   messages: MessageWithParts[]
@@ -218,23 +338,99 @@ export function adaptMessagePage(raw: unknown): {
   prevCursor?: string
   /** 本页内最近一次「已完成」压缩的时间戳；用于在消息流末尾展示压缩分隔条 */
   compactedAt?: number
+  /** 压缩标记（摘要/近期消息规模） */
+  compaction?: CompactionMarker
+  /** 本页内最近一次轮次结论（idle 消息） */
+  idle?: IdleMarker
+  /** 本页内的会话配置切换记录 */
+  config: SessionConfigMarkers
 } {
   const r = rec(raw)
   const cursor = rec(r.cursor)
   const data = list(r.data)
-  let compactedAt: number | undefined
+  const compaction = findCompactionMarker(data)
+  const markers = collectSessionMarkers(data)
+  return {
+    messages: data.map(adaptMessage).filter((m): m is MessageWithParts => m != null),
+    nextCursor: str(cursor.next) ?? undefined,
+    prevCursor: str(cursor.previous) ?? undefined,
+    compactedAt: compaction?.at,
+    compaction,
+    idle: markers.idle,
+    config: markers.config,
+  }
+}
+
+/**
+ * 分块版：逐条适配，每 ~6ms 让出一帧。
+ *
+ * 一页可达数千条消息，同步 `map(adaptMessage)`（含 content[] 展开、part 构造）
+ * 在低端设备上会卡住主线程数百毫秒——正好落在首屏/上滑加载这些用户能感知的时机。
+ * 结果与同步版完全一致，仅执行节奏不同。
+ */
+export async function adaptMessagePageAsync(raw: unknown): Promise<{
+  messages: MessageWithParts[]
+  nextCursor?: string
+  prevCursor?: string
+  compactedAt?: number
+  compaction?: CompactionMarker
+  idle?: IdleMarker
+  config: SessionConfigMarkers
+}> {
+  const r = rec(raw)
+  const cursor = rec(r.cursor)
+  const data = list(r.data)
+  const messages = await mapInSlices(data, adaptMessage)
+  const compaction = findCompactionMarker(data)
+  const markers = collectSessionMarkers(data)
+  return {
+    messages: messages.filter((m): m is MessageWithParts => m != null),
+    nextCursor: str(cursor.next) ?? undefined,
+    prevCursor: str(cursor.previous) ?? undefined,
+    compactedAt: compaction?.at,
+    compaction,
+    idle: markers.idle,
+    config: markers.config,
+  }
+}
+
+/**
+ * 压缩标记：`message.list` 里 `type: "compaction"` 的那条系统消息。
+ *
+ * 为什么不能只靠事件：`session.compaction.ended` 在 schema 里存在（带 text/recent），
+ * 但实测它**不一定发**——本机 39,446 条事件里没有任何 `session.compaction.*`，
+ * 而同一次压缩在消息列表里有完整的 `type: "compaction"` 记录。压缩是历史事实，
+ * 消息列表才是权威来源，事件只当加速通道。
+ *
+ * 另有一个关键坑：该记录的 `tokens` 是**压缩前**用量（实测 input 342383 /
+ * cache.read 577024），不能用它显示压缩后的占用；压缩后的上下文 ≈ 摘要 + 保留的
+ * 近期消息，即下面两个字符数。
+ */
+export interface CompactionMarker {
+  /** 压缩完成时间（消息的 time.created） */
+  at: number
+  /** 压缩摘要字符数 */
+  summaryChars: number
+  /** 保留的近期消息字符数 */
+  recentChars: number
+}
+
+/** 从一页消息里找出最近一次「已完成」的压缩标记（含摘要规模）。 */
+export function findCompactionMarker(data: unknown[]): CompactionMarker | undefined {
+  let marker: CompactionMarker | undefined
   for (const item of data) {
     const m = rec(item)
     if (str(m.type) !== 'compaction' || str(m.status) !== 'completed') continue
     const created = num(rec(m.time).created)
-    if (created != null && (compactedAt == null || created > compactedAt)) compactedAt = created
+    if (created == null) continue
+    if (marker && created <= marker.at) continue
+    marker = {
+      at: created,
+      summaryChars: (str(m.summary) ?? '').length,
+      // `recent` 是压缩后原样保留的近期消息；没有该字段时按 0 计，
+      // 让上界只包含摘要（宁可低估也不虚高）。
+      recentChars: (str(m.recent) ?? '').length,
+    }
   }
-  return {
-    messages: data
-      .map(adaptMessage)
-      .filter((m): m is MessageWithParts => m != null),
-    nextCursor: str(cursor.next) ?? undefined,
-    prevCursor: str(cursor.previous) ?? undefined,
-    compactedAt,
-  }
+  return marker
 }

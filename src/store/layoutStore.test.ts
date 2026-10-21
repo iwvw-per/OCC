@@ -68,26 +68,53 @@ describe('LayoutStore panel and terminal layout', () => {
     expect(store.getState().sidebarExpanded).toBe(false)
   })
 
-  it('persists the expanded project names for cross-device sync', () => {
+  it('persists the expanded project keys for cross-device sync', () => {
     const store = new LayoutStore()
-    store.setSidebarExpandedProjects(['API-Monitor', 'OpenCodeUI'])
+    // 存储键是 `主机::项目名`：裸名会让两台主机上的同名项目共用一份状态
+    store.setSidebarExpandedProjects(['local::API-Monitor', 'local::OpenCodeUI'])
 
     expect(JSON.parse(localStorage.getItem('opencode-sidebar-expanded-projects') ?? 'null')).toEqual([
-      'API-Monitor',
-      'OpenCodeUI',
+      'local::API-Monitor',
+      'local::OpenCodeUI',
     ])
     // 重建后恢复
-    expect(new LayoutStore().getState().sidebarExpandedProjects).toEqual(['API-Monitor', 'OpenCodeUI'])
+    expect(new LayoutStore().getState().sidebarExpandedProjects).toEqual([
+      'local::API-Monitor',
+      'local::OpenCodeUI',
+    ])
   })
 
-  it('picks up expanded project names written externally (sync pull)', () => {
+  it('migrates legacy bare project names to the active host', () => {
+    // 旧版本只存裸名；升级后归给当前活动主机，否则已有展开状态全部失效
+    localStorage.setItem('opencode-sidebar-expanded-projects', JSON.stringify(['HS10162']))
+
+    const store = new LayoutStore()
+
+    expect(store.getState().sidebarExpandedProjects).toEqual(['local::HS10162'])
+    // 迁移结果要落盘，避免每次读取都重新推断
+    expect(JSON.parse(localStorage.getItem('opencode-sidebar-expanded-projects') ?? 'null')).toEqual([
+      'local::HS10162',
+    ])
+  })
+
+  it('does not let the same project name on another host share expand state', () => {
+    const store = new LayoutStore()
+    // 笔电主机展开了 OCC；工作机上的同名项目不应受影响
+    store.setSidebarExpandedProjects(['aiagent:inst_laptop::OCC'])
+
+    const expanded = store.getState().sidebarExpandedProjects
+    expect(expanded).toContain('aiagent:inst_laptop::OCC')
+    expect(expanded).not.toContain('aiagent:inst_work::OCC')
+  })
+
+  it('picks up expanded project keys written externally (sync pull)', () => {
     const store = new LayoutStore()
     expect(store.getState().sidebarExpandedProjects).toEqual([])
 
-    localStorage.setItem('opencode-sidebar-expanded-projects', JSON.stringify(['HS10162']))
+    localStorage.setItem('opencode-sidebar-expanded-projects', JSON.stringify(['local::HS10162']))
     store.reloadFromStorage()
 
-    expect(store.getState().sidebarExpandedProjects).toEqual(['HS10162'])
+    expect(store.getState().sidebarExpandedProjects).toEqual(['local::HS10162'])
   })
 
   it('reveals a changed file in the changes tab and clears it after consumption', () => {

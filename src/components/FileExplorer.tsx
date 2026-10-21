@@ -851,7 +851,8 @@ const FileTreeItem = memo(function FileTreeItem({
   )
 
   return (
-    <div>
+    // 离屏节点跳过渲染：文件树常见上千行，全部参与布局/绘制会拖慢滚动
+    <div style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 24px' }}>
       <button
         type="button"
         onPointerDown={handlePointerDragStart}

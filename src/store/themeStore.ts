@@ -139,7 +139,6 @@ const DEFAULT_TOOL_CARD_STYLE: ToolCardStyle = 'compact'
 const DEFAULT_IMMERSIVE_MODE = true
 const DEFAULT_COMPACT_INLINE_PERMISSION = true
 const DEFAULT_GLASS_EFFECT = true
-const DEFAULT_QUEUE_FOLLOWUP_MESSAGES = false
 const DEFAULT_MANUAL_TERMINAL_TITLES = false
 const DEFAULT_EXTERNAL_FILE_DROP_MODE: ExternalFileDropMode = 'upload-first'
 const DEFAULT_OUTLINE_CURRENT_HIGHLIGHT = true
@@ -200,8 +199,6 @@ export interface ThemeState {
   compactInlinePermission: boolean
   /** 毛玻璃效果开关（backdrop-filter blur） */
   glassEffect: boolean
-  /** 忙碌时后续消息是否进入队列 */
-  queueFollowupMessages: boolean
   /** 终端标签是否改为手动命名模式 */
   manualTerminalTitles: boolean
   /** 外部文件拖入输入框时的处理方式 */
@@ -249,7 +246,6 @@ const STORAGE_KEY_TOOL_CARD_STYLE = 'tool-card-style'
 const STORAGE_KEY_IMMERSIVE_MODE = 'immersive-mode'
 const STORAGE_KEY_COMPACT_INLINE_PERMISSION = 'compact-inline-permission'
 const STORAGE_KEY_GLASS_EFFECT = 'glass-effect'
-const STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES = 'queue-followup-messages'
 const STORAGE_KEY_MANUAL_TERMINAL_TITLES = 'manual-terminal-titles'
 const STORAGE_KEY_EXTERNAL_FILE_DROP_MODE = 'external-file-drop-mode'
 const STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT = 'outline-current-highlight'
@@ -371,10 +367,6 @@ class ThemeStore {
     const savedGlassEffect = localStorage.getItem(STORAGE_KEY_GLASS_EFFECT)
     const glassEffect = savedGlassEffect === null ? DEFAULT_GLASS_EFFECT : savedGlassEffect === 'true'
 
-    const savedQueueFollowupMessages = localStorage.getItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES)
-    const queueFollowupMessages =
-      savedQueueFollowupMessages === null ? DEFAULT_QUEUE_FOLLOWUP_MESSAGES : savedQueueFollowupMessages === 'true'
-
     const savedManualTerminalTitles = localStorage.getItem(STORAGE_KEY_MANUAL_TERMINAL_TITLES)
     const manualTerminalTitles =
       savedManualTerminalTitles === null ? DEFAULT_MANUAL_TERMINAL_TITLES : savedManualTerminalTitles === 'true'
@@ -442,7 +434,6 @@ class ThemeStore {
       immersiveMode,
       compactInlinePermission,
       glassEffect,
-      queueFollowupMessages,
       manualTerminalTitles,
       externalFileDropMode,
       outlineCurrentHighlight,
@@ -523,9 +514,6 @@ class ThemeStore {
   }
   get glassEffect() {
     return this.state.glassEffect
-  }
-  get queueFollowupMessages() {
-    return this.state.queueFollowupMessages
   }
   get manualTerminalTitles() {
     return this.state.manualTerminalTitles
@@ -814,13 +802,6 @@ class ThemeStore {
     this.state = { ...this.state, glassEffect: enabled }
     localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, String(enabled))
     this.applyGlassClass()
-    this.emit()
-  }
-
-  setQueueFollowupMessages(enabled: boolean) {
-    if (this.state.queueFollowupMessages === enabled) return
-    this.state = { ...this.state, queueFollowupMessages: enabled }
-    localStorage.setItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(enabled))
     this.emit()
   }
 
@@ -1125,10 +1106,6 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
         ? parsed.compactInlinePermission
         : DEFAULT_COMPACT_INLINE_PERMISSION,
     glassEffect: typeof parsed?.glassEffect === 'boolean' ? parsed.glassEffect : DEFAULT_GLASS_EFFECT,
-    queueFollowupMessages:
-      typeof parsed?.queueFollowupMessages === 'boolean'
-        ? parsed.queueFollowupMessages
-        : DEFAULT_QUEUE_FOLLOWUP_MESSAGES,
     manualTerminalTitles:
       typeof parsed?.manualTerminalTitles === 'boolean'
         ? parsed.manualTerminalTitles
@@ -1203,7 +1180,6 @@ export function importThemeBackup(raw: unknown): void {
   localStorage.setItem(STORAGE_KEY_IMMERSIVE_MODE, String(backup.immersiveMode))
   localStorage.setItem(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(backup.compactInlinePermission))
   localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, String(backup.glassEffect))
-  localStorage.setItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(backup.queueFollowupMessages))
   localStorage.setItem(STORAGE_KEY_MANUAL_TERMINAL_TITLES, String(backup.manualTerminalTitles))
   localStorage.setItem(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, backup.externalFileDropMode)
   localStorage.setItem(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(backup.outlineCurrentHighlight))

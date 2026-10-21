@@ -47,14 +47,14 @@ import {
 } from '../api'
 import { getMessageText, isUserMessage, type AssistantMessageInfo, type Message as UIMessage } from '../types/message'
 import { clipboardErrorHandler, copyTextToClipboard, createErrorHandler } from '../utils'
+import { logger } from '../utils/logger'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { serverStorage } from '../utils/perServerStorage'
 import { sessionKeyToServerId, splitSessionKey, makeSessionKey } from '../utils/sessionKey'
 import { serverStore } from '../store/serverStore'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
 import type { ChatAreaHandle } from '../features/chat'
-import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
-import { themeStore } from '../store/themeStore'
+import { followupQueueStore } from '../store/followupQueueStore'
 import i18n from '../i18n'
 
 const handleError = createErrorHandler('session')
@@ -83,6 +83,8 @@ const EMPTY_SESSION_STATE = {
   directory: '',
   title: null,
   compactedAt: undefined as number | undefined,
+  model: undefined as { providerID: string; modelID: string; variant?: string } | undefined,
+  agent: undefined as string | undefined,
 } as const
 
 interface UseChatSessionOptions {
@@ -112,19 +114,18 @@ export function useChatSession({
   navigateHome,
 }: UseChatSessionOptions) {
   const routeStatus = useSessionStatus(routeSessionId)
-  const { queueFollowupMessages } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
 
   // Agents
   const [agents, setAgents] = useState<ApiAgent[]>([])
   const [selectedAgent, setSelectedAgentRaw] = useState<string>(
-    () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`) || '',
+    () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`, serverStore.getActiveServerId()) || '',
   )
   const [restoredContent, setRestoredContent] = useState<{ sessionId: string; content: RevertHistoryItem } | null>(null)
 
   const setSelectedAgent = useCallback(
     (agentName: string) => {
       setSelectedAgentRaw(agentName)
-      serverStorage.set(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`, agentName)
+      serverStorage.set(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`, agentName, serverStore.getActiveServerId())
     },
     [paneId],
   )
@@ -160,11 +161,8 @@ export function useChatSession({
     [navigateHome],
   )
 
-  const {
-    items: queuedFollowups,
-    sendingId: queuedFollowupSendingId,
-    failedId: queuedFollowupFailedId,
-  } = useFollowupQueue(routeSessionId)
+  // 排队消息改由「发送即打断」语义承载（见 handleSend），本机不再有待发队列。
+  // 仍保留 store 仅供清理历史遗留条目（sessionLifecycle 里会 clearSession）。
 
   const perSessionStateRaw = useSessionState(routeSessionId)
   const perSessionState = perSessionStateRaw ?? EMPTY_SESSION_STATE
@@ -475,9 +473,13 @@ export function useChatSession({
         }
         // 应用内 toast 已在 useGlobalEvents 中统一处理
       },
-      onSessionCompacted: (_data: import('../types/api/event').SessionCompactedPayload) => {
+      onSessionCompacted: (data: import('../types/api/event').SessionCompactedPayload) => {
         // 压缩改写了历史（摘要 + 裁剪旧轮次），强制重拉当前会话，
         // 否则界面仍显示压缩前的完整历史，看不到「历史已压缩」分隔。
+        //
+        // 只在 completed 时重拉：started 也会走这个回调（压缩 part 开始时没有
+        // tail_start_id），压缩进行中反复重拉既浪费又会打断滚动位置。
+        if (data.status !== 'completed') return
         if (routeSessionId) void loadSession(routeSessionId, { force: true })
       },
       onSessionError: (sessionID: string) => {
@@ -655,27 +657,37 @@ export function useChatSession({
     let cancelled = false
 
     async function loadChildSessionsAndPermissions() {
-      // Step 1: 恢复子 session 关系（如果 store 中还没有）
-      const existingChildren = childSessionStore.getChildSessionIds(routeSessionId!)
-      if (existingChildren.length === 0) {
-        try {
-          const children = await getSessionChildren(routeSessionId!, effectiveDirectory, paneServerId)
-          if (cancelled) return
-          // 注册所有子 session 到 store。
-          // 刷新后拉回的是历史会话，可能早已结束——不能让它们默认成「正在工作」。
-          // 依据服务端的实时状态判断：busy/retry 才算运行中，其余一律视为已完成。
-          for (const child of children) {
-            const childKey = makeSessionKey(paneServerId, child.id)
-            const status = activeSessionStore.getSessionStatus(childKey)
-            const running = status?.type === 'busy' || status?.type === 'retry'
-            childSessionStore.registerChildSession(child, paneServerId, running ? 'running' : 'idle')
-          }
-        } catch {
-          // 获取子 session 失败不影响主流程
-        }
-      }
+      // 子会话关系与待处理请求**互不依赖**，必须并行。
+      //
+      // 原实现把 getSessionChildren 串行 await 掉，才开始拉 permissions/questions：
+      // 经网关时每次新建隧道要 700-900ms 反向握手，这一串行就多付一个完整往返。
+      // 打开会话时这类串行叠加正是「要等十几秒」的主要来源。
+      //
+      // 另外 useGlobalEvents 的 fetchActiveScopeData 已经在拉同一份全局
+      // permissions/questions；两处都会命中 microCache，因此这条路径几乎不额外
+      // 产生网络请求，纯粹是「别让它挡住别的请求」。
+      const needsChildren = childSessionStore.getChildSessionIds(routeSessionId!).length === 0
 
+      const childrenPromise = needsChildren
+        ? getSessionChildren(routeSessionId!, effectiveDirectory, paneServerId).catch(() => [])
+        : Promise.resolve([])
+
+      const requestsPromise = Promise.all([
+        getPendingPermissions(undefined, effectiveDirectory, paneServerId).catch(() => []),
+        getPendingQuestions(undefined, effectiveDirectory, paneServerId).catch(() => []),
+      ])
+
+      // 先等子会话（需要它才能算出 family），但请求已经同时在飞了。
+      const children = await childrenPromise
       if (cancelled) return
+      for (const child of children) {
+        // 刷新后拉回的是历史会话，可能早已结束——不能让它们默认成「正在工作」。
+        // 依据服务端的实时状态判断：busy/retry 才算运行中，其余一律视为已完成。
+        const childKey = makeSessionKey(paneServerId, child.id)
+        const status = activeSessionStore.getSessionStatus(childKey)
+        const running = status?.type === 'busy' || status?.type === 'retry'
+        childSessionStore.registerChildSession(child, paneServerId, running ? 'running' : 'idle')
+      }
 
       // Step 2: 获取完整的 session family（主 session + 所有子孙）
       const family = new Set(childSessionStore.getSessionAndDescendants(routeSessionId!))
@@ -684,12 +696,9 @@ export function useChatSession({
       const matchesFamily = (rawSessionId: string) =>
         familyRaw.has(rawSessionId) || familyRaw.has(splitSessionKey(rawSessionId).sessionId)
 
-      // Step 3: 获取所有待处理请求，然后用 family 过滤
+      // Step 3: 取待处理请求（与子会话并发，此处只是收口）
       // GET /permission 和 GET /question 返回全量数据，不传 sessionId 避免 N 次重复请求
-      const [allPerms, allQuestions] = await Promise.all([
-        getPendingPermissions(undefined, effectiveDirectory, paneServerId).catch(() => []),
-        getPendingQuestions(undefined, effectiveDirectory, paneServerId).catch(() => []),
-      ])
+      const [allPerms, allQuestions] = await requestsPromise
 
       if (cancelled) return
 
@@ -731,6 +740,14 @@ export function useChatSession({
       model: { providerID: string; modelID: string }
       options?: { agent?: string; variant?: string }
       allowCreateSession?: boolean
+      /**
+       * 发送前先终止当前正在进行的轮次（用户语义：我发了新消息，旧的就该停）。
+       *
+       * v2 实测：`interrupt` 返回 200 后立刻 `prompt` 完全可用（11ms，
+       * 事件顺序 interrupted → started → 新消息 delivered），服务端会先落定旧轮次
+       * 再开始新的。因此这里不需要等 idle 事件再发，串行两个请求即可。
+       */
+      interruptCurrentTurn?: boolean
     }) => {
       let sessionId = input.sessionId ?? routeSessionId
 
@@ -748,7 +765,11 @@ export function useChatSession({
       try {
         if (!sessionId) {
           if (!input.allowCreateSession) return false
-          const newSession = await createSession(undefined, input.directory)
+          // 必须把 pane 绑定的服务器传下去：SessionContext.createSession 原先只
+          // 用「活动服务器」，于是在 pane 绑着 A 主机、而活动服务器已被切到 B 时，
+          // 新会话会建到 B 上（并把这条消息发到 B）——正是「刚发出就切服务器，
+          // 消息跑到新服务器、旧服务器没发出去」的根因。
+          const newSession = await createSession(undefined, input.directory, paneServerId)
           sessionId = newSession.id
           navigateToSession(sessionId, newSession.directory)
         }
@@ -787,6 +808,29 @@ export function useChatSession({
         // 本地乐观置忙：请求往返期间侧栏/项目行立即显示「运行中」，停止按钮也可用。
         // 服务端 status 到达后会转成「有佐证」；若这一轮根本没跑起来，超时自动回收。
         activeSessionStore.applyOptimisticBusy(sessionId)
+
+        // 「发新消息 = 终止旧轮次」。
+        //
+        // 先 abort 再 prompt，而不是靠 delivery=steer 去挤：steer 是把新消息插进
+        // 正在跑的轮次，旧回复会继续往下写；用户要的是「这条新消息取代旧的」。
+        //
+        // 两步都必须是同一台主机（paneServerId）。abort 失败不阻断发送：最坏情况
+        // 是新消息排队到旧轮次之后，比「消息发不出去」好得多。
+        //
+        // 顺序不能并行：prompt 若先到，服务端会把它排进旧轮次（steer），旧回复仍会
+        // 继续写。所以这里必须等 abort 返回。好在 abort 本身很轻（实测 7ms，隧道下
+        // 约 1 个往返），而「本地立刻落定」让用户不会看到旧回复继续闪。
+        if (input.interruptCurrentTurn) {
+          // 本地立刻落定：不等 HTTP 往返，否则用户点了发送后旧回复还会继续闪。
+          activeSessionStore.updateStatus(sessionId, { type: 'idle' })
+          messageStore.handleSessionIdle(sessionId)
+          try {
+            await abortSession(sessionId, input.directory, paneServerId)
+          } catch (error) {
+            logger.warn('[send] interrupt before send failed', error)
+          }
+        }
+
         await sendMessageAsync(
           {
             sessionId,
@@ -797,6 +841,21 @@ export function useChatSession({
             variant: input.options?.variant,
             directory: input.directory,
             messageID: optimisticMessageId,
+            // 显式声明投递语义，不依赖服务端默认值。
+            //
+            // 实测（opencode v2.0.32，源码 packages/core/src/session/prompt.ts:50）：
+            //   `delivery: request.input.delivery ?? "steer"`
+            // 也就是**默认就是 steer**。steer 的语义是：
+            //   - session 空闲时：立即开始执行（实测 3s 内出结果）；
+            //   - session 忙碌时：入队，在**下一个 step 边界**注入上下文，
+            //     不会打断当前正在跑的工具/模型请求（实测 12s 的 sleep 跑完后
+            //     才处理新消息）。
+            //
+            // 我们在忙碌时已经先 abort 了（用户要的是「新消息取代旧轮次」），
+            // 所以这里必然走「空闲 → 立即执行」。显式写出来是为了：
+            //   1. 服务端未来改默认值时行为不漂移；
+            //   2. 读代码的人不必去翻服务端实现才知道语义。
+            delivery: 'steer',
           },
           paneServerId,
         )
@@ -862,42 +921,15 @@ export function useChatSession({
         return false
       }
 
-      // 如果队列头有失败项，用户重新发送时先清掉失败项（内容已恢复到输入框）
-      if (routeSessionId && queuedFollowupFailedId) {
-        followupQueueStore.remove(routeSessionId, queuedFollowupFailedId)
-      }
-
-      const shouldQueueFollowup =
-        !!routeSessionId && (queuedFollowups.length > 0 || (queueFollowupMessages && isSessionBusy))
-
-      if (shouldQueueFollowup) {
-        const queued = followupQueueStore.enqueue({
-          sessionId: routeSessionId,
-          directory: effectiveDirectory || '',
-          text: content,
-          attachments,
-          model: {
-            providerID: currentModel.providerId,
-            modelID: currentModel.id,
-            variant: options?.variant,
-          },
-          variant: options?.variant,
-          agent: options?.agent,
-        })
-        messageStore.upsertLocalMessage(
-          buildLocalQueuedMessage({
-            sessionId: queued.sessionId,
-            messageId: queued.id,
-            text: queued.text,
-            attachments: queued.attachments,
-            agent: queued.agent,
-            model: queued.model,
-            createdAt: queued.createdAt,
-          }),
-          queued.directory,
-        )
-        return true
-      }
+      // 发送新消息 = 终止当前轮次，然后用这条新消息重新开始。
+      //
+      // 这是用户明确要的语义：不要让旧回复继续跑，也不要把新消息排到队列里等。
+      // 旧实现把这类消息塞进本机队列（id 为 `queued_*`，服务端不知道它存在），
+      // 于是刷新就丢、别的端也看不到 —— 那是「吞消息」的来源之一。
+      //
+      // 现在：先在服务端 abort 当前轮次（实测 abort 返回后立刻 prompt 完全可用，
+      // 服务端会先落定旧轮次再开始新的），再发这条消息。
+      const shouldInterrupt = !!routeSessionId && isSessionBusy
 
       return sendMessageNow({
         sessionId: routeSessionId,
@@ -910,93 +942,18 @@ export function useChatSession({
         options,
         directory: effectiveDirectory || '',
         allowCreateSession: true,
+        interruptCurrentTurn: shouldInterrupt,
       })
     },
-    [
-      currentModel,
-      routeSessionId,
-      queuedFollowups.length,
-      queuedFollowupFailedId,
-      queueFollowupMessages,
-      isSessionBusy,
-      effectiveDirectory,
-      buildLocalQueuedMessage,
-      sendMessageNow,
-    ],
+    [currentModel, routeSessionId, isSessionBusy, effectiveDirectory, sendMessageNow],
   )
 
-  const sendQueuedFollowup = useCallback(
-    async (draftId: string, sessionId: string) => {
-      const draft = followupQueueStore.getItem(sessionId, draftId)
-      if (!draft) return false
-      if (!followupQueueStore.startSending(draft.sessionId, draft.id)) return false
-
-      // 发送前先移除占位消息，让 sendMessageNow 走和正常发送完全一样的路径
-      messageStore.removeMessage(draft.sessionId, draft.id)
-
-      const ok = await sendMessageNow({
-        sessionId: draft.sessionId,
-        content: draft.text,
-        attachments: draft.attachments,
-        model: {
-          providerID: draft.model.providerID,
-          modelID: draft.model.modelID,
-        },
-        options: {
-          agent: draft.agent,
-          variant: draft.variant,
-        },
-        directory: draft.directory,
-      })
-
-      followupQueueStore.finishSending(draft.sessionId, draft.id)
-
-      if (ok) {
-        followupQueueStore.remove(draft.sessionId, draft.id)
-      } else {
-        // 标记失败，阻塞后续队列项
-        followupQueueStore.markFailed(draft.sessionId, draft.id)
-        // 移除剩余排队消息的本地占位，恢复队头到输入框
-        const remaining = followupQueueStore.getItems(draft.sessionId)
-        for (const item of remaining) {
-          messageStore.removeMessage(draft.sessionId, item.id)
-        }
-        setRestoredContent({
-          sessionId: draft.sessionId,
-          content: {
-            messageId: draft.id,
-            text: draft.text,
-            attachments: draft.attachments,
-            model: draft.model,
-            variant: draft.variant ?? draft.model.variant,
-            agent: draft.agent,
-          },
-        })
-      }
-
-      return ok
-    },
-    [sendMessageNow],
-  )
-
-  useEffect(() => {
-    if (!routeSessionId) return
-
-    const nextQueued = queuedFollowups[0]
-    if (!nextQueued) return
-    if (queuedFollowupSendingId) return
-    if (queuedFollowupFailedId) return
-    if (isSessionBusy) return
-
-    void sendQueuedFollowup(nextQueued.id, routeSessionId)
-  }, [
-    routeSessionId,
-    queuedFollowups,
-    queuedFollowupSendingId,
-    queuedFollowupFailedId,
-    isSessionBusy,
-    sendQueuedFollowup,
-  ])
+  // 排队消息已改由服务端承载（prompt delivery=queue），本机不再有「待发队列」，
+  // 因此既不需要 sendQueuedFollowup，也不需要「忙转闲时自动发出队头」的 effect：
+  // 服务端会在当前轮次结束后自行读取队列里的下一条。
+  //
+  // 这样还顺带修掉一个跨端不一致：本地队列里 `queued_*` 的消息在其它端不存在，
+  // 让两端看到不同的「待发」状态。
 
   // New chat handler
   const handleNewChat = useCallback(() => {
@@ -1076,6 +1033,12 @@ export function useChatSession({
     // 只清 messageStore 清不掉 activeSessionStore 里的 status，
     // 而 isSessionBusy 由它主导——按钮点了像没反应就是这里空窗。
     // 真正的服务端 status 到达后会覆盖本次本地值。
+    //
+    // 两处必须一起做：
+    //   1. activeSessionStore → idle（按钮/侧栏立即停止转圈）
+    //   2. messageStore.handleSessionIdle → 定稿流式消息、落定悬空工具
+    // 第 2 步还会抬高 idleGeneration，使「发送请求返回后置 streaming」的兜底
+    // 逻辑不会把刚停下的会话重新点亮。
     activeSessionStore.updateStatus(routeSessionId, { type: 'idle' })
     messageStore.handleSessionIdle(routeSessionId)
     const directory = sessionDirectory || currentDirectory
@@ -1122,7 +1085,8 @@ export function useChatSession({
 
         // Create session if needed (like handleSend does)
         if (!sessionId) {
-          const newSession = await createSession()
+          // 同 sendMessageNow：带上 pane 的目录与服务器，避免建到活动服务器上。
+          const newSession = await createSession(undefined, effectiveDirectory || undefined, paneServerId)
           sessionId = newSession.id
           navigateToSession(sessionId, newSession.directory)
         }
@@ -1190,12 +1154,41 @@ export function useChatSession({
 
       // 网络请求与淡出动画并行：原来先 await 动画再发请求，两段耗时叠加，
       // 体感就是「点了以后要等一下才开始」。并行后总耗时约为二者较大者。
+      //
+      // 另外要「先落状态、再等网络」：requestUndo 成功返回后才 commit 的话，
+      // 网络慢时动画放完了界面却还停在原样，用户以为没生效（这就是「重编辑延迟
+      // 好大」的直接来源）。这里用本地已知信息立即构造 revertState 提交，
+      // 服务端返回后用它的 revert 点做一次校正；失败则回滚。
+      const history = currentMessages
+        .slice(messageIndex)
+        .filter(m => isUserMessage(m.info))
+        .map(m => {
+          const content = extractUserMessageContent(m)
+          const userInfo = m.info as import('../types/message').UserMessageInfo
+          return {
+            messageId: m.info.id,
+            text: content.text,
+            attachments: content.attachments,
+            model: userInfo.model,
+            variant: userInfo.model.variant,
+            agent: userInfo.agent,
+          }
+        })
+      const optimisticRevert = { messageId: userMessageId, history }
+      commitUndo(optimisticRevert)
+
       const undoRequest = requestUndo(userMessageId)
       await animateUndo(messageIdsToRemove)
       const revertState = await undoRequest
-      if (revertState) commitUndo(revertState)
+      if (revertState) {
+        // 服务端确认：用权威 revert 点覆盖（历史条目可能因并发编辑而不同）
+        commitUndo(revertState)
+      } else {
+        // 失败：撤销本地乐观状态，避免界面显示「已撤销」而服务端并未回退
+        clearRevert()
+      }
     },
-    [animateUndo, requestUndo, commitUndo],
+    [animateUndo, requestUndo, commitUndo, clearRevert],
   )
 
   // Redo with animation
@@ -1313,6 +1306,10 @@ export function useChatSession({
     /** 消息级流式（不含 session.status）；一般 UI 用 isStreaming 即可 */
     messageIsStreaming: isStreaming,
     sessionDirectory,
+    /** 会话在服务端绑定的模型（无痕/新设备靠它恢复，而不是全局默认） */
+    sessionModel: perSessionState.model,
+    /** 会话绑定的 agent（服务端权威） */
+    sessionAgent: perSessionState.agent,
     canUndo,
     canRedo,
     redoSteps,
@@ -1333,8 +1330,6 @@ export function useChatSession({
     // Permissions
     pendingPermissionRequests,
     pendingQuestionRequests,
-    queuedFollowups,
-    queuedFollowupSendingId,
     handlePermissionReply,
     handleQuestionReply,
     handleQuestionReject,

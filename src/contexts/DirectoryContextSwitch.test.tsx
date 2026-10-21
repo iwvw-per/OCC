@@ -3,6 +3,7 @@ import { useContext, useEffect, type ContextType } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DirectoryContext } from './DirectoryContext.shared'
 import { DirectoryProvider } from './DirectoryContext'
+import { resetAppDataBindingForTests } from '../storage/appData'
 
 /**
  * 用真实的内存版 serverStorage 模拟两台服务器的桶，
@@ -32,7 +33,7 @@ vi.mock('../utils', async importOriginal => {
   return {
     ...actual,
     serverStorage: {
-      get: (key: string) => buckets.get(makeKey(key)) ?? null,
+      get: (key: string) => buckets.get(makeKey(key)) ?? localStorage.getItem(makeKey(key)),
       getJSON: <T,>(key: string) => {
         const raw = buckets.get(makeKey(key))
         return raw ? (JSON.parse(raw) as T) : null
@@ -45,7 +46,8 @@ vi.mock('../utils', async importOriginal => {
         buckets.set(makeKey(key), JSON.stringify(value))
         setJSONMock(key, value)
       },
-      getFor: (key: string, serverId: string) => buckets.get(makeKey(key, serverId)) ?? null,
+      getFor: (key: string, serverId: string) =>
+        buckets.get(makeKey(key, serverId)) ?? localStorage.getItem(makeKey(key, serverId)),
       getJSONFor: <T,>(key: string, serverId: string) => {
         const raw = buckets.get(makeKey(key, serverId))
         return raw ? (JSON.parse(raw) as T) : null
@@ -64,6 +66,11 @@ vi.mock('../utils', async importOriginal => {
 vi.mock('../store/serverStore', () => ({
   serverStore: {
     getActiveServerId: () => serverState.activeServerId,
+    getServerBaseUrl: () => 'http://127.0.0.1:4096',
+    getActiveBaseUrl: () => 'http://127.0.0.1:4096',
+    getServerAuth: () => undefined,
+    getActiveAuth: () => undefined,
+    getApiVersion: () => 'v2',
     onServerChange: (fn: (id: string, reason: string) => void) => {
       serverChangeListeners.push(fn)
       return () => {
@@ -114,6 +121,7 @@ describe('DirectoryContext across a server switch', () => {
 
   beforeEach(() => {
     localStorage.clear()
+    resetAppDataBindingForTests()
     buckets.clear()
     serverChangeListeners.length = 0
     serverState.activeServerId = 'aiagent:inst_work'
@@ -171,10 +179,10 @@ describe('DirectoryContext across a server switch', () => {
     })
 
     // A 桶内容不受影响
-    const workBucket = buckets.get('srv:aiagent:inst_work:opencode-saved-directories')
+    const workBucket = buckets.get('srv:aiagent:inst_work:opencode-saved-directories') ?? localStorage.getItem('srv:aiagent:inst_work:opencode-saved-directories')
     expect(JSON.parse(workBucket || '[]').map((d: { path: string }) => d.path)).toEqual(['D:/Code/OnWork'])
     // B 桶没有被写入 A 的内容
-    const laptopBucket = buckets.get('srv:aiagent:inst_laptop:opencode-saved-directories')
+    const laptopBucket = buckets.get('srv:aiagent:inst_laptop:opencode-saved-directories') ?? localStorage.getItem('srv:aiagent:inst_laptop:opencode-saved-directories')
     expect(JSON.parse(laptopBucket || '[]')).toEqual([])
   })
 

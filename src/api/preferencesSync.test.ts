@@ -113,14 +113,19 @@ describe('preferences sync', () => {
     expect(getCalls).toBe(2)
   })
 
-  it('admits exactly the five cross-device data families', async () => {
+  it('admits exactly the cross-device data families', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
 
     // 项目列表（按服务器分桶）
     expect(isSyncableKey('srv:aiagent:inst_1:opencode-saved-directories')).toBe(true)
-    // 置顶
+    // 置顶：per-server 分桶；裸键形态保留兼容
+    expect(isSyncableKey('srv:aiagent:inst_1:opencode-pinned-sessions')).toBe(true)
+    expect(isSyncableKey('srv:aiagent:inst_1:opencode-pinned-messages')).toBe(true)
     expect(isSyncableKey('opencode-pinned-sessions')).toBe(true)
     expect(isSyncableKey('opencode-pinned-messages')).toBe(true)
+    // 模型可见性 / 置顶模型：一端隐藏了模型，另一端还列出来会被当成 bug
+    expect(isSyncableKey('srv:aiagent:inst_1:hidden-model-keys')).toBe(true)
+    expect(isSyncableKey('srv:aiagent:inst_1:model-pinned')).toBe(true)
     // 单调计数（逐键取 max，天然无冲突）
     expect(isSyncableKey('opencode-read-watermarks')).toBe(true)
     expect(isSyncableKey('opencode-project-last-used')).toBe(true)
@@ -164,19 +169,26 @@ describe('preferences sync', () => {
     }
   })
 
-  it('rejects UI open/collapse state so panels do not fight across devices', async () => {
+  it('rejects transient panel open/collapse state so panels do not fight across devices', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
 
     // 侧栏、面板、工作状态板块的开合是当前这一屏的浏览状态，不是偏好：
     // 同步会让一端展开后另一端被同步折叠，反复拉锯。
     expect(isSyncableKey('opencode-sidebar-expanded')).toBe(false)
-    expect(isSyncableKey('opencode-sidebar-expanded-projects')).toBe(false)
     expect(isSyncableKey('opencode-panel-layout')).toBe(false)
     expect(isSyncableKey('opencode-work-status-enabled')).toBe(false)
     expect(isSyncableKey('opencode-work-status-expanded')).toBe(false)
 
     // 项目列表本身仍是偏好，继续同步
     expect(isSyncableKey('srv:aiagent:inst_1:opencode-saved-directories')).toBe(true)
+  })
+
+  it('syncs which project rows are expanded', async () => {
+    const { isSyncableKey } = await import('./preferencesSync')
+
+    // 项目行的展开不是「这一屏的临时状态」：用户往往固定只展开当前在做的项目，
+    // 换设备看到另一套结果会被当成「状态丢了」。
+    expect(isSyncableKey('opencode-sidebar-expanded-projects')).toBe(true)
   })
 
   it('rejects per-server settings other than the project list', async () => {
@@ -293,12 +305,17 @@ describe('preferences sync', () => {
     const callsBefore = fetchMock.mock.calls.length
     localStorage.setItem('theme-preset', '"ocean"')
     const second = await pushPreferences()
-    expect(second).toBe(2)
+    // 增量推送：只有改动的 theme-preset 会上传，theme-mode 与基线一致被跳过
+    expect(second).toBe(1)
     expect(fetchMock.mock.calls.length).toBe(callsBefore + 1)
 
-    const secondStamps = (sentBody as unknown as { updatedAt: Record<string, string> }).updatedAt
-    expect(secondStamps['theme-mode']).toBe(firstDiffStamp)
-    expect(secondStamps['theme-preset']).not.toBe(updatedAt.updatedAt['theme-preset'])
+    const secondBody = sentBody as unknown as {
+      values: Record<string, unknown>
+      updatedAt: Record<string, string>
+    }
+    expect(Object.keys(secondBody.values)).toEqual(['theme-preset'])
+    expect(secondBody.updatedAt['theme-mode']).toBeUndefined()
+    expect(secondBody.updatedAt['theme-preset']).not.toBe(firstDiffStamp)
 
     const afterChange = fetchMock.mock.calls.length
     const third = await pushPreferences()

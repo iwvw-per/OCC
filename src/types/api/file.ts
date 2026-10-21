@@ -7,13 +7,10 @@ import type {
   FindTextResponse as SDKFindTextResponse,
 } from '@opencode-ai/sdk/v2/client'
 
-export type FileNodeType = SDKFileNode['type']
 
 export type FileNode = SDKFileNode
 
-export type FilePatch = NonNullable<SDKFileContent['patch']>
 
-export type PatchHunk = FilePatch['hunks'][number]
 
 export type FileContent = SDKFileContent
 
@@ -31,9 +28,7 @@ export function normalizeFileDiffs(diffs: SDKSnapshotFileDiff[] | undefined): Fi
   )
 }
 
-export type SymbolRange = SDKSymbol['location']['range']
 
-export type SymbolLocation = SDKSymbol['location']
 
 export type Symbol = SDKSymbol
 

@@ -33,65 +33,22 @@ type IdleWindowApi = {
 
 type HighlightTask = () => Promise<void>
 
+import { highlightHtmlCache, highlightTokensCache } from '../utils/codeCache'
+
 // ============================================
 // LRU 缓存层 - 避免重复高亮相同代码
 // ============================================
 
-interface CacheEntry<T> {
-  value: T
-  timestamp: number
-}
-
-class LRUCache<T> {
-  private cache = new Map<string, CacheEntry<T>>()
-  private maxSize: number
-
-  constructor(maxSize: number = 100) {
-    this.maxSize = maxSize
-  }
-
-  get(key: string): T | undefined {
-    const entry = this.cache.get(key)
-    if (entry) {
-      entry.timestamp = Date.now()
-      return entry.value
-    }
-    return undefined
-  }
-
-  set(key: string, value: T): void {
-    if (this.cache.has(key)) {
-      this.cache.get(key)!.value = value
-      this.cache.get(key)!.timestamp = Date.now()
-      return
-    }
-
-    if (this.cache.size >= this.maxSize) {
-      let oldestKey: string | null = null
-      let oldestTime = Infinity
-      for (const [k, v] of this.cache) {
-        if (v.timestamp < oldestTime) {
-          oldestTime = v.timestamp
-          oldestKey = k
-        }
-      }
-      if (oldestKey) this.cache.delete(oldestKey)
-    }
-
-    this.cache.set(key, { value, timestamp: Date.now() })
-  }
-
-  clear(): void {
-    this.cache.clear()
-  }
-
-  get size(): number {
-    return this.cache.size
-  }
-}
-
-const htmlCache = new LRUCache<string>(120)
-const tokensCache = new LRUCache<HighlightTokens>(80)
+/** 进程级共享缓存：同一段代码在消息流 / 全屏 / 面板里复用同一份高亮结果。 */
+const htmlCache = {
+  get: (k: string) => highlightHtmlCache.get(k),
+  // html 结果由 worker 产出，key 已含内容哈希 + 语言 + 主题
+  set: (k: string, v: string) => highlightHtmlCache.set(k, v),
+} as const
+const tokensCache = {
+  get: (k: string) => highlightTokensCache.get(k) as HighlightTokens | undefined,
+  set: (k: string, v: HighlightTokens) => highlightTokensCache.set(k, v),
+} as const
 
 const highlightQueue: HighlightTask[] = []
 let highlightQueueRunning = false

@@ -111,14 +111,40 @@ describe('v2 event → GlobalEvent', () => {
     expect(p?.properties).toEqual({ sessionID: 'ses_1', assistantMessageID: 'msg_old' })
   })
 
-  it('maps execution.succeeded to SESSION_IDLE (v2 has no session.idle)', () => {
+  it('maps execution.succeeded to SESSION_IDLE with the server event time', () => {
     const p = payloadOf({
       type: 'session.execution.succeeded',
+      created: 1_700_000_123_456,
       data: { sessionID: 's' },
       location: { directory: '/w' },
     })
     expect(p?.type).toBe(EventTypes.SESSION_IDLE)
     expect(p?.properties.sessionID).toBe('s')
+    // 完成时间必须取服务端事件时间：两端处理事件的本地时刻不同，
+    // 用它做通知时间戳才能让「已读水位」跨端比较一致。
+    expect(p?.properties.timestamp).toBe(1_700_000_123_456)
+  })
+
+  it('maps session.idle to SESSION_IDLE with the server event time', () => {
+    const p = payloadOf({
+      type: 'session.idle',
+      created: 1_700_000_222_000,
+      data: { sessionID: 's' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_IDLE)
+    expect(p?.properties.timestamp).toBe(1_700_000_222_000)
+  })
+
+  it('carries the server event time on session.status idle', () => {
+    const p = payloadOf({
+      type: 'session.status',
+      created: 1_700_000_333_000,
+      data: { sessionID: 's', status: { type: 'idle' } },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_STATUS)
+    expect(p?.properties.timestamp).toBe(1_700_000_333_000)
   })
 
   it('maps execution.started to SESSION_STATUS busy (drives sidebar activity)', () => {
@@ -129,6 +155,66 @@ describe('v2 event → GlobalEvent', () => {
     })
     expect(p?.type).toBe(EventTypes.SESSION_STATUS)
     expect((p?.properties.status as { type: string }).type).toBe('busy')
+  })
+
+  it('carries the compaction sizes so the context ring can drop', () => {
+    const p = payloadOf({
+      type: 'session.compaction.ended',
+      created: 1_700_000_000_000,
+      data: {
+        sessionID: 's',
+        reason: 'manual',
+        text: 's'.repeat(5442),
+        recent: 'r'.repeat(92_322),
+        // 压缩前用量：绝不能当作压缩后的上下文
+        tokens: { input: 342_383, output: 2443, reasoning: 0, cache: { read: 577_024, write: 0 } },
+        cost: 0,
+      },
+      location: { directory: '/w' },
+    })
+
+    expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
+    expect(p?.properties.summaryChars).toBe(5442)
+    expect(p?.properties.recentChars).toBe(92_322)
+  })
+
+  it('maps a compaction part to SESSION_COMPACTED with its boundary', () => {
+    // v2 的实时压缩信号走 message.part.updated + part.type === "compaction"
+    const started = payloadOf({
+      type: 'message.part.updated',
+      created: 1,
+      data: { part: { id: 'prt_1', sessionID: 's', messageID: 'msg_1', type: 'compaction', auto: false } },
+      location: { directory: '/w' },
+    })
+    expect(started?.type).toBe(EventTypes.SESSION_COMPACTED)
+    expect(started?.properties.status).toBe('started')
+
+    const ended = payloadOf({
+      type: 'message.part.updated',
+      created: 2,
+      data: {
+        part: {
+          id: 'prt_1',
+          sessionID: 's',
+          messageID: 'msg_1',
+          type: 'compaction',
+          auto: false,
+          tail_start_id: 'msg_tail',
+        },
+      },
+      location: { directory: '/w' },
+    })
+    expect(ended?.properties.status).toBe('completed')
+    expect(ended?.properties.tailStartID).toBe('msg_tail')
+  })
+
+  it('ignores non-compaction parts on message.part.updated', () => {
+    const p = payloadOf({
+      type: 'message.part.updated',
+      data: { part: { id: 'prt_1', sessionID: 's', messageID: 'msg_1', type: 'text' } },
+      location: { directory: '/w' },
+    })
+    expect(p).toBeNull()
   })
 
   it('maps text.started to MESSAGE_PART_UPDATED text part', () => {
@@ -279,6 +365,20 @@ describe('v2 event → GlobalEvent', () => {
     expect(p?.properties.sessionID).toBe('s')
   })
 
+  it('keeps the interrupt reason so the UI can tell "user stopped" from "server restarted"', () => {
+    // v2 的 reason 取值：user | shutdown | superseded | inactivity
+    // 用户主动点停止，和服务端重启把轮次打断，是两件不同的事。
+    for (const reason of ['user', 'shutdown', 'superseded', 'inactivity']) {
+      const p = payloadOf({
+        type: 'session.execution.interrupted',
+        data: { sessionID: 's', reason },
+        location: { directory: '/w' },
+      })
+      expect(p?.properties.outcome).toBe('interrupted')
+      expect(p?.properties.interruptReason).toBe(reason)
+    }
+  })
+
   it('maps provider.quota error type to APIError (not generic UnknownError)', () => {
     const p = payloadOf({
       type: 'session.execution.failed',
@@ -316,7 +416,71 @@ describe('v2 event → GlobalEvent', () => {
   })
 
   it('drops unmapped events', () => {
-    expect(v2EventToGlobalEvent({ type: 'session.usage.updated', data: {}, location: { directory: '/w' } })).toBeNull()
+    expect(v2EventToGlobalEvent({ type: 'session.inbox.updated', data: {}, location: { directory: '/w' } })).toBeNull()
+  })
+
+  /**
+   * v2 的实时流里没有 message.updated，用户消息唯一信号是 session.inbox.enqueued。
+   * 不映射它 = 其他端看不到这条消息（用户报的「多端同时用会吞消息」）。
+   */
+  it('maps session.inbox.enqueued (user item) to SESSION_INBOX_ENQUEUED', () => {
+    const p = payloadOf({
+      id: 'evt_1',
+      created: 1_700_000_000_000,
+      type: 'session.inbox.enqueued',
+      data: {
+        inboxID: 'msg_abc',
+        sessionID: 'ses_1',
+        item: { type: 'user', payload: { text: 'hello' }, delivery: 'steer' },
+      },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_INBOX_ENQUEUED)
+    expect(p?.properties).toMatchObject({
+      sessionID: 'ses_1',
+      inboxID: 'msg_abc',
+      created: 1_700_000_000_000,
+      text: 'hello',
+    })
+  })
+
+  // compaction / synthetic / move 等系统投递项不是用户消息，不能伪造成用户气泡
+  it('ignores non-user inbox items', () => {
+    const p = payloadOf({
+      type: 'session.inbox.enqueued',
+      data: { inboxID: 'msg_c', sessionID: 's', item: { type: 'compaction', payload: {} } },
+      location: { directory: '/w' },
+    })
+    expect(p).toBeNull()
+  })
+
+  it('maps session.inbox.cancelled to MESSAGE_REMOVED', () => {
+    const p = payloadOf({
+      type: 'session.inbox.cancelled',
+      data: { inboxID: 'msg_c', sessionID: 's' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.MESSAGE_REMOVED)
+    expect(p?.properties).toMatchObject({ sessionID: 's', messageID: 'msg_c' })
+  })
+
+  /**
+   * reasoning.ended 缺失时：推理块永远算「进行中」，且 handlePartDelta 靠
+   * time.end 丢弃迟到增量 —— 点了停止推理还会继续往里流。
+   */
+  it('maps session.reasoning.ended to a finalized reasoning part', () => {
+    const p = payloadOf({
+      created: 1_700_000_000_500,
+      type: 'session.reasoning.ended',
+      data: { sessionID: 's', assistantMessageID: 'm', ordinal: 1, text: 'done' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.MESSAGE_PART_UPDATED)
+    const part = p?.properties.part as { id: string; type: string; text: string; time?: { end?: number } }
+    expect(part.id).toBe('m-reasoning-1')
+    expect(part.type).toBe('reasoning')
+    expect(part.text).toBe('done')
+    expect(part.time?.end).toBe(1_700_000_000_500)
   })
 
   it('maps session.compaction.failed to SESSION_COMPACTED with error message', () => {
@@ -338,13 +502,111 @@ describe('v2 event → GlobalEvent', () => {
     })
   })
 
-  it('maps session.compaction.ended to SESSION_COMPACTED completed', () => {
+    it('maps session.compaction.ended to SESSION_COMPACTED completed', () => {
+      const p = payloadOf({
+        type: 'session.compaction.ended',
+        data: { sessionID: 's', reason: 'manual', text: 'summary' },
+        location: { directory: '/w' },
+      })
+      expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
+      expect(p?.properties).toMatchObject({ sessionID: 's', status: 'completed', reason: 'manual' })
+    })
+
+    it('carries the post-compaction context tokens on completion', () => {
+      // v2 在压缩结束时回报这次摘要请求的 tokens —— 压缩后的真实上下文占用。
+      // 丢掉它，前端只能估算，用户在压缩后看不到圆环下降。
+      const p = payloadOf({
+        type: 'session.compaction.ended',
+        data: {
+          sessionID: 's',
+          reason: 'auto',
+          text: 'summary',
+          cost: 0.5,
+          tokens: { input: 900, output: 100, reasoning: 50, cache: { read: 30, write: 20 } },
+        },
+        location: { directory: '/w' },
+        created: 1_700_000_000_000,
+      })
+      expect(p?.properties).toMatchObject({
+        status: 'completed',
+        tokens: { input: 900, output: 100, reasoning: 50, cache: { read: 30, write: 20 } },
+        cost: 0.5,
+        time: 1_700_000_000_000,
+      })
+    })
+
+    it('maps session.usage.updated to SESSION_USAGE_UPDATED', () => {
+      const p = payloadOf({
+        type: 'session.usage.updated',
+        data: {
+          sessionID: 's',
+          cost: 2,
+          tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 0 } },
+        },
+        location: { directory: '/w' },
+      })
+      expect(p?.type).toBe(EventTypes.SESSION_USAGE_UPDATED)
+      expect(p?.properties).toMatchObject({
+        sessionID: 's',
+        cost: 2,
+        tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 0 } },
+      })
+    })
+
+    it('drops a usage event whose tokens are all zero', () => {
+      // 全零不是「0 token」，是「没测到」，不能覆盖已有的累计值
+      const p = payloadOf({
+        type: 'session.usage.updated',
+        data: { sessionID: 's', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+        location: { directory: '/w' },
+      })
+      expect(p).toBeNull()
+    })
+  })
+
+/**
+ * 工具执行中的进度。
+ *
+ * 实测载荷（opencode v2.0.32，真实 bash 调用）：
+ *   { type: "session.tool.progress",
+ *     data: { sessionID, assistantMessageID, id: "call_x", metadata: { shellID: "sh_x" } } }
+ *
+ * 它是 ephemeral（不落库）、只在执行期间间歇发送。不映射它的后果很具体：
+ * 一个跑 30 秒的命令，界面上只有「已调用」和「已完成」两个状态，中间 30 秒
+ * 完全静止，用户会以为卡死。
+ */
+describe('session.tool.progress', () => {
+  it('maps progress to a dedicated event carrying callID and metadata', () => {
     const p = payloadOf({
-      type: 'session.compaction.ended',
-      data: { sessionID: 's', reason: 'manual', text: 'summary' },
+      type: 'session.tool.progress',
+      data: {
+        sessionID: 's',
+        assistantMessageID: 'msg_1',
+        id: 'call_1',
+        metadata: { shellID: 'sh_1' },
+      },
       location: { directory: '/w' },
     })
-    expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
-    expect(p?.properties).toMatchObject({ sessionID: 's', status: 'completed', reason: 'manual' })
+    expect(p?.type).toBe(EventTypes.SESSION_NEXT_TOOL_PROGRESS)
+    expect(p?.properties).toEqual({ sessionID: 's', callID: 'call_1', metadata: { shellID: 'sh_1' } })
+  })
+
+  it('omits metadata when the tool reports none', () => {
+    const p = payloadOf({
+      type: 'session.tool.progress',
+      data: { sessionID: 's', assistantMessageID: 'msg_1', id: 'call_1', metadata: {} },
+      location: { directory: '/w' },
+    })
+    expect(p?.properties.metadata).toBeUndefined()
+  })
+
+  it('drops progress without a call id', () => {
+    expect(
+      payloadOf({
+        type: 'session.tool.progress',
+        data: { sessionID: 's', assistantMessageID: 'msg_1' },
+        location: { directory: '/w' },
+      }),
+    ).toBeNull()
   })
 })

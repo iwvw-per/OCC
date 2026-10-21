@@ -48,17 +48,22 @@ describe('activeSessionStore running sources', () => {
     expect(activeSessionStore.getBusySessions()).toEqual([])
   })
 
-  it('keeps an optimistic session alive while it keeps producing events', () => {
+  it('promotes optimistic busy as soon as real session activity arrives', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     activeSessionStore.applyOptimisticBusy('local::ses_4')
-
-    vi.setSystemTime(1_000 + OPTIMISTIC_BUSY_TTL_MS - 1)
-    activeSessionStore.touchSession('local::ses_4')
-    vi.setSystemTime(1_000 + OPTIMISTIC_BUSY_TTL_MS + 1)
-
-    expect(activeSessionStore.expireStaleOptimisticEntries()).toBe(false)
     expect(activeSessionStore.getBusySessions().find(e => e.sessionId === 'local::ses_4')?.source).toBe('local')
+
+    // 消息/工具事件 = 确实在跑。此前 touchSession 只续期乐观计时、不改 source，
+    // 条目一直停在 'local'，超时后被回收 —— 用户看到「运行中不转圈，跑完反而
+    // 冒出状态点」。这里必须升级为有佐证。
+    activeSessionStore.touchSession('local::ses_4')
+    expect(activeSessionStore.getBusySessions().find(e => e.sessionId === 'local::ses_4')?.source).toBe('server')
+
+    // 有佐证后不再被乐观超时回收：长轮次中途不会掉状态
+    vi.setSystemTime(1_000 + OPTIMISTIC_BUSY_TTL_MS + 1)
+    expect(activeSessionStore.expireStaleOptimisticEntries()).toBe(false)
+    expect(activeSessionStore.getBusySessions().find(e => e.sessionId === 'local::ses_4')?.source).toBe('server')
   })
 
   it('promotes optimistic busy to server source once the server confirms it', () => {

@@ -87,3 +87,35 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
     }),
   })
 }
+
+// jsdom 不实现 IntersectionObserver：默认「进入视口」，让依赖可见性节流的组件
+// （如按需挂载的 diff/代码块）在测试里照常渲染。需要精确控制可见性的用例
+// 自行 stub 这个全局。
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  class IntersectionObserverMock {
+    readonly root: Element | Document | null = null
+    readonly rootMargin = ''
+    readonly thresholds: ReadonlyArray<number> = []
+    private readonly callback: IntersectionObserverCallback
+    constructor(callback: IntersectionObserverCallback) {
+      this.callback = callback
+    }
+    observe(target: Element) {
+      this.callback(
+        [{ isIntersecting: true, target, intersectionRatio: 1 } as unknown as IntersectionObserverEntry],
+        this as unknown as IntersectionObserver,
+      )
+    }
+    unobserve() {}
+    disconnect() {}
+    takeRecords(): IntersectionObserverEntry[] {
+      return []
+    }
+  }
+
+  Object.defineProperty(globalThis, 'IntersectionObserver', {
+    configurable: true,
+    writable: true,
+    value: IntersectionObserverMock,
+  })
+}

@@ -1,13 +1,12 @@
 // ============================================
 // v2 原生 Message 访问层
 //
-// 直接用 @opencode/client（v2 原生）调用消息相关接口，
-// 不经过 clientFacade 的 v1→v2 facade 层。
+// 直接用 @opencode/client（v2 原生）调用消息相关接口。
 // ============================================
 
 import { getV2Client } from './sdkV2'
 import type { ApiMessageWithParts } from './types'
-import { adaptMessagePage } from './v2/message'
+import { adaptMessagePageAsync, type CompactionMarker, type IdleMarker, type SessionConfigMarkers } from './v2/message'
 
 export interface V2PromptInput {
   sessionID: string
@@ -16,6 +15,8 @@ export interface V2PromptInput {
   model?: { providerID: string; modelID: string }
   agent?: string
   messageID?: string
+  /** 投递方式：steer（插队，缺省）/ queue（排到当前轮次之后） */
+  delivery?: 'steer' | 'queue'
 }
 
 /** 把 v1 形状的 prompt parts 转成 v2 的 { text, files[], agents[] }（与 facade 一致） */
@@ -37,12 +38,40 @@ function buildV2Prompt(input: V2PromptInput): { text: string; files?: Array<{ ur
 
 /**
  * 原生发送消息（v2 session.prompt）。
- * model 先 switchModel（v2 用 {providerID, id}），再 prompt。
+ *
+ * ⚠️ 延迟敏感：这里绝不能串行发多个请求。
+ *
+ * v2 的 agent/model 是**会话级**状态。旧实现每次发送都串行做
+ * 「switchAgent → switchModel → prompt」三次往返：本机各 2–7ms 看不出来，但经隧道
+ * 连远程主机时每次约 1.1s，用户点发送后要等 2–3 秒才开始出字，于是以为没发出去、
+ * 反复重发 —— 这正是「输入发送后停很久才出现回复」的直接原因。
+ *
+ * 改法：
+ *   - 调用方先用会话元数据判断「服务端已经是这个 agent/model 了吗」，是则跳过对应
+ *     switch，正常发送只剩 prompt 一次往返；
+ *   - 确实需要切换时，两个 switch 并行发出，再发 prompt（必须等它们落定，否则这一轮
+ *     会用旧 agent/model）。
  */
-export async function nativePrompt(serverId: string | undefined, input: V2PromptInput): Promise<unknown> {
+export async function nativePrompt(
+  serverId: string | undefined,
+  input: V2PromptInput & { skipAgentSwitch?: boolean; skipModelSwitch?: boolean },
+): Promise<unknown> {
   const client = getV2Client(serverId)
-  if (input.agent) await client.session.switchAgent({ sessionID: input.sessionID, agent: input.agent })
-  if (input.model) await client.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID } })
+
+  const switches: Array<Promise<unknown>> = []
+  if (input.agent && !input.skipAgentSwitch) {
+    switches.push(client.session.switchAgent({ sessionID: input.sessionID, agent: input.agent }))
+  }
+  if (input.model && !input.skipModelSwitch) {
+    switches.push(
+      client.session.switchModel({
+        sessionID: input.sessionID,
+        model: { providerID: input.model.providerID, id: input.model.modelID },
+      }),
+    )
+  }
+  if (switches.length > 0) await Promise.all(switches)
+
   const prompt = buildV2Prompt(input)
   const res = await client.session.prompt({
     sessionID: input.sessionID,
@@ -50,6 +79,8 @@ export async function nativePrompt(serverId: string | undefined, input: V2Prompt
     text: prompt.text,
     files: prompt.files as never,
     agents: prompt.agents as never,
+    // 缺省时由服务端按 steer 处理；显式传 queue 才是「排到本轮之后」。
+    ...(input.delivery ? { delivery: input.delivery } : {}),
   })
   return res
 }
@@ -70,20 +101,28 @@ export async function nativePrompt(serverId: string | undefined, input: V2Prompt
 export async function nativeListMessages(
   serverId: string | undefined,
   input: { sessionID: string; limit?: number; cursor?: string; order?: 'desc'; headers?: Record<string, string> },
-): Promise<{ messages: ApiMessageWithParts[]; nextCursor?: string; prevCursor?: string; compactedAt?: number }> {
+): Promise<{
+  messages: ApiMessageWithParts[]
+  nextCursor?: string
+  prevCursor?: string
+  compactedAt?: number
+  compaction?: CompactionMarker
+  idle?: IdleMarker
+  config: SessionConfigMarkers
+}> {
   const client = getV2Client(serverId)
-  const page = adaptMessagePage(
-    await client.message.list(
-      {
-        sessionID: input.sessionID,
-        limit: input.limit,
-        cursor: input.cursor,
-        // 有 cursor 时不能传 order（服务端 400）；首页显式 desc，与官方客户端一致。
-        ...(input.cursor ? {} : { order: input.order ?? 'desc' }),
-      },
-      input.headers ? { headers: input.headers } : undefined,
-    ),
+  const res = await client.message.list(
+    {
+      sessionID: input.sessionID,
+      limit: input.limit,
+      cursor: input.cursor,
+      // 有 cursor 时不能传 order（服务端 400）；首页显式 desc，与官方客户端一致。
+      ...(input.cursor ? {} : { order: input.order ?? 'desc' }),
+    },
+    input.headers ? { headers: input.headers } : undefined,
   )
+  // 分块适配：一页几千条时避免长时间占用主线程
+  const page = await adaptMessagePageAsync(res)
   // desc（最新在前）→ 升序（时间正序），与前端渲染顺序一致。
   return { ...page, messages: [...page.messages].reverse() }
 }

@@ -70,6 +70,22 @@ interface ActiveSessionState {
 
 type Subscriber = () => void
 
+/** 两份 statusMap 是否等价（键集合与每个键的状态字段都相同）。 */
+function sameStatusMaps(a: SessionStatusMap, b: SessionStatusMap): boolean {
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+  for (const key of keysA) {
+    const left = a[key]
+    const right = b[key]
+    if (!right || left.type !== right.type) return false
+    if (left.type === 'retry' && right.type === 'retry') {
+      if (left.attempt !== right.attempt || left.message !== right.message || left.next !== right.next) return false
+    }
+  }
+  return true
+}
+
 function isSameBusySessions(a: ActiveSessionEntry[], b: ActiveSessionEntry[]): boolean {
   if (a === b) return true
   if (a.length !== b.length) return false
@@ -331,17 +347,34 @@ class ActiveSessionStore {
     for (const [key, status] of Object.entries(this.state.statusMap)) {
       if (!key.startsWith(prefix)) nextMap[key] = status
     }
-    const replaced = this.applyStatusSnapshot(statusMap, nextMap)
+    for (const [sessionId, status] of Object.entries(statusMap)) {
+      if (status.type === 'idle') continue
+      // 复用已有对象：周期性对账每分钟跑一次，若每次都新建 { type: 'busy' }，
+      // useSessionStatus 的引用比较会全部失效 —— 每个会话行都白白重渲染一次。
+      const previous = this.state.statusMap[sessionId]
+      nextMap[sessionId] =
+        previous && previous.type === status.type
+          ? previous
+          : status.type === 'retry'
+            ? { ...status }
+            : { type: 'busy' }
+    }
     // 仍有未回复 pending 的会话要保留，否则等待用户操作的条目会被误清
     for (const sessionId of this.pendingRequestSessionIds()) {
       if (!sessionId.startsWith(prefix)) continue
-      if (!replaced[sessionId]) {
-        replaced[sessionId] = { type: 'busy' }
+      if (!nextMap[sessionId]) {
+        nextMap[sessionId] = { type: 'busy' }
         this.serverBusySessions.delete(sessionId)
       }
     }
-    this.state = { statusMap: replaced, initialized: true }
-    this.notify()
+    // 内容确实变化时才替换 state：否则每轮轮询都会换掉 statusMap 引用，
+    // 订阅方（Working 列表、会话行）跟着无谓重渲染。
+    const statusChanged = !sameStatusMaps(this.state.statusMap, nextMap)
+    const initChanged = !this.state.initialized
+    if (statusChanged || initChanged) {
+      this.state = { statusMap: nextMap, initialized: true }
+      this.notify()
+    }
   }
 
   private pendingRequestSessionIds(): Set<string> {
@@ -580,14 +613,17 @@ class ActiveSessionStore {
 
   /**
    * 会话产生了真实活动（消息/part/工具事件）：证明它确实在跑。
-   * 有佐证后停止乐观超时；对纯本地条目续期，避免长轮次中途被回收。
+   *
+   * 这里必须同时 markEvidence：只刷新乐观计时是不够的 —— 条目会一直停在
+   * source='local'，超过 OPTIMISTIC_BUSY_TTL_MS 就被回收。表现为「会话正在跑，
+   * 项目行却不转圈；跑完之后反而冒出状态点」。发送消息时我们只做本地乐观置忙，
+   * 服务端不一定每次都补 session.status，因此消息/工具事件才是更常见的佐证。
    */
   touchSession(sessionId: string) {
     if (this.serverBusySessions.has(sessionId)) return
     if (!this.state.statusMap[sessionId]) return
-    if (this.optimisticBusyAt.has(sessionId)) {
-      this.optimisticBusyAt.set(sessionId, Date.now())
-    }
+    this.markEvidence(sessionId)
+    this.notify()
   }
 
   removeSession(sessionId: string) {

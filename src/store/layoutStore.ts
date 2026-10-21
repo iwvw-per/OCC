@@ -5,6 +5,8 @@
 // 直接引文件而非 '../utils' barrel：barrel 会连带 settingsBackup → store，形成循环依赖
 import { DEFAULT_PROJECT_SORT_FIELD, DEFAULT_PROJECT_SORT_DESC, isSessionSortField, type SessionSortField } from '../utils/sessionSort'
 import { notifyPerServerStorageChanged } from '../utils/perServerStorage'
+import { migrateProjectExpandKeys } from '../utils/projectExpandKeys'
+import { serverStore } from './serverStore'
 import i18n from '../i18n'
 
 // 面板位置
@@ -171,6 +173,34 @@ const STORAGE_KEY_SIDEBAR_FOLDER_RECENTS_SHOW_DIFF = 'opencode-sidebar-folder-re
 const STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS = 'opencode-sidebar-show-child-sessions'
 const STORAGE_KEY_SIDEBAR_PROJECT_SORT = 'opencode-sidebar-project-sort'
 const STORAGE_KEY_SIDEBAR_EXPANDED_PROJECTS = 'opencode-sidebar-expanded-projects'
+/**
+ * 本机主动收起的项目名（不参与同步）。
+ *
+ * 与同步层的 LOCAL_COLLAPSED_KEY 必须是同一个键：写入侧在这里维护，
+ * 拉取侧读它来决定「服务端独有的项要不要并回本地」。
+ */
+const STORAGE_KEY_SIDEBAR_COLLAPSED_PROJECTS = 'opencode-sidebar-collapsed-projects'
+
+function readLocalCollapsedExpandedProjects(): string[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SIDEBAR_COLLAPSED_PROJECTS)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is string => typeof item === 'string')
+  } catch {
+    return []
+  }
+}
+
+function writeLocalCollapsedExpandedProjects(names: string[]): void {
+  try {
+    if (names.length === 0) localStorage.removeItem(STORAGE_KEY_SIDEBAR_COLLAPSED_PROJECTS)
+    else localStorage.setItem(STORAGE_KEY_SIDEBAR_COLLAPSED_PROJECTS, JSON.stringify(names))
+  } catch {
+    /* ignore */
+  }
+}
 const STORAGE_KEY_SEND_ON_ENTER = 'opencode-send-on-enter'
 const STORAGE_KEY_PANEL_LAYOUT = 'opencode-panel-layout'
 const STORAGE_KEY_TERMINAL_LAYOUT = 'opencode-terminal-layout'
@@ -518,13 +548,20 @@ export class LayoutStore {
         // ignore malformed preference
       }
 
-      // 展开的项目名列表（跨端对齐用项目名，见 sidebarExpandedProjects 注释）
+      // 展开的项目键（`主机::项目名`，见 utils/projectExpandKeys）。
+      // 旧版本只存裸项目名，升级时归给当前活动主机：跨主机同名项目共用状态的
+      // 问题正是裸名导致的，不迁移会让已有展开状态全部失效（看起来像"状态丢了"）。
       try {
         const rawExpanded = localStorage.getItem(STORAGE_KEY_SIDEBAR_EXPANDED_PROJECTS)
         if (rawExpanded !== null) {
           const parsed = JSON.parse(rawExpanded) as unknown
           if (Array.isArray(parsed)) {
-            this.state.sidebarExpandedProjects = parsed.filter((item): item is string => typeof item === 'string')
+            const raw = parsed.filter((item): item is string => typeof item === 'string')
+            const migrated = migrateProjectExpandKeys(raw, serverStore.getActiveServerId())
+            this.state.sidebarExpandedProjects = migrated.values
+            if (migrated.changed) {
+              localStorage.setItem(STORAGE_KEY_SIDEBAR_EXPANDED_PROJECTS, JSON.stringify(migrated.values))
+            }
           }
         }
       } catch {
@@ -695,6 +732,31 @@ export class LayoutStore {
     ) {
       return
     }
+
+    /**
+     * 记录「用户主动收起的项」。
+     *
+     * 收起状态不同步：同步层只做上行合并（展开会传出去），但拉取时无法仅凭
+     * 数组区分「服务端独有（另一端新展开）」与「本端刚收起、服务端还留着」。
+     * 这份本地记录消除了歧义 —— 它存的是用户明确的收起意图，不参与同步。
+     * 展开回某项时从记录里移除，避免永久挡住之后再被同步展开。
+     */
+    const previous = new Set(this.state.sidebarExpandedProjects)
+    const nextSet = new Set(names)
+    const removed = [...previous].filter(name => !nextSet.has(name))
+    if (removed.length > 0) {
+      const existing = readLocalCollapsedExpandedProjects()
+      const merged = Array.from(new Set([...existing.filter(name => !nextSet.has(name)), ...removed]))
+      writeLocalCollapsedExpandedProjects(merged)
+    } else if (names.length > 0) {
+      // 重新展开：清掉对应的收起记录
+      const existing = readLocalCollapsedExpandedProjects()
+      if (existing.length > 0) {
+        const kept = existing.filter(name => !nextSet.has(name))
+        if (kept.length !== existing.length) writeLocalCollapsedExpandedProjects(kept)
+      }
+    }
+
     this.state.sidebarExpandedProjects = [...names]
     try {
       localStorage.setItem(STORAGE_KEY_SIDEBAR_EXPANDED_PROJECTS, JSON.stringify(this.state.sidebarExpandedProjects))

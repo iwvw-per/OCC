@@ -7,9 +7,9 @@
  */
 
 import { memo, useRef, useEffect, useState, useCallback, useMemo, useDeferredValue, useSyncExternalStore } from 'react'
-import { Trans, useTranslation } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 
-import { ChatArea, Header, InputBox, PermissionDialog, QuestionDialog, type ChatAreaHandle } from '.'
+import { ChatArea, Header, PermissionDialog, QuestionDialog, type ChatAreaHandle } from '.'
 import { type ModelSelectorHandle } from './ModelSelector'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { LoadingState } from '../../components/ui/LoadingState'
@@ -17,11 +17,19 @@ import { PaneHeader } from './PaneHeader'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from './PaneDropOverlay'
 import { useFolderProjectDrop } from './useFolderProjectDrop'
 import { FolderProjectDropOverlay } from './FolderProjectDropOverlay'
-import { useChatSession, useModels, useModelSelection, useTurnOutlineEntries, useMergeTurnOutline } from '../../hooks'
+import {
+  useChatSession,
+  useModels,
+  useModelSelection,
+  useTurnOutlineEntries,
+  useMergeTurnOutline,
+  useBackfillTurnOutline,
+} from '../../hooks'
 import { useServerStore } from '../../hooks/useServerStore'
 import { useHostSlideState } from './sidebar/hostSwitchDirection'
 import { useCancelHint } from '../../hooks/useCancelHint'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../../utils/sessionKey'
+import { summarizeHeavyContent, formatHeavyBytes } from './heavyContent'
 import { serverStore } from '../../store/serverStore'
 import {
   InlineToolRequestContext,
@@ -31,7 +39,7 @@ import {
 import { ChatViewportProvider, canUseSplitPane, useChatViewportMaybe, type ChatViewportValue } from './chatViewport'
 import { ChatWidthControls } from './ChatWidthControls'
 import { useChatPageViewModel } from './useChatPageViewModel'
-import { WelcomeHero, WelcomeProjectPill } from './welcome/WelcomeHero'
+import { PaneInputDock } from './PaneInputDock'
 import { SessionNavigationContext } from '../../contexts/SessionNavigationContext'
 import { useDirectory } from '../../contexts/useDirectory'
 import { usesCustomDesktopTitlebar } from '../../utils/tauri'
@@ -464,14 +472,61 @@ export const ChatPane = memo(function ChatPane({
   // 并用 store 的完整大纲渲染侧边轴，历史未加载完也能显示全部轮次。
   const routeRawSessionId = routeSessionId ? sessionKeyToSessionId(routeSessionId) : null
   useMergeTurnOutline(paneServerId, routeRawSessionId, renderedMessages)
+  /**
+   * 后台补全完整轮次大纲（侧边轴据此显示**全部**轮次，而不只是已加载的）。
+   *
+   * 只在会话已加载完成后再触发：这条请求可能十几 MB（见 useTurnOutline 说明），
+   * 必须等首屏渲染完、应用空闲时再做，绝不能和首屏抢带宽。
+   */
+  useBackfillTurnOutline(paneServerId, routeRawSessionId, loadState === 'loaded')
   const turnOutlineEntries = useTurnOutlineEntries(paneServerId, routeRawSessionId)
+
+  /**
+   * 上下文过重预警。
+   *
+   * 真实故障：用户只发「继续」两个字却收到 413。原因是 agent 读了 5 张截图，
+   * base64 累计 8MB+ 留在服务端上下文里，转发给模型时超过上游 16MB 上限。
+   * 前端无法减小它，但提前说明能让用户理解并主动脱困。
+   */
+  const heavyContent = useMemo(() => summarizeHeavyContent(renderedMessages), [renderedMessages])
+  const heavyWarning = useMemo(() => {
+    if (!heavyContent.shouldWarn) return undefined
+    /**
+     * 用字符串拼接而不是 i18next 插值。
+     *
+     * 实测 `t('chat:inputBox.heavyContext', { size })` 在这里会原样渲染出
+     * `{size}` —— 该命名空间的插值在本项目的 i18next 配置下不生效
+     * （同类 key 在 InputBox 里能生效，是因为那里用的是不带 `chat:` 前缀的
+     * 默认命名空间解析路径）。这里只需要拼一个数字，不值得去动全局配置。
+     */
+    const sizeLabel = formatHeavyBytes(heavyContent.totalBytes)
+    return {
+      label: t('chat:inputBox.heavyContextLabel', { defaultValue: 'heavy' }).replace('{{size}}', sizeLabel),
+      title: t('chat:inputBox.heavyContextTitle'),
+    }
+  }, [heavyContent, t])
+
   const outlineSourceEntries = useMemo(() => {
+    /**
+     * 已加载轮次的标记。
+     *
+     * 侧边轴现在包含**全部**轮次（含尚未加载进内存的），所以必须让用户能看出
+     * 哪些点一下就到、哪些需要先补拉。判定依据就是 messageStore 里当前有哪些
+     * 消息 id —— 这与「点击时走 scroll 还是 loadUntilMessage」用的是同一判据
+     * （见 handleOutlineScrollToMessage），不会出现「看起来已加载、点下去却在转圈」。
+     */
+    const loadedIds = new Set(renderedMessages.map(message => message.info.id))
+    const withLoaded = (entry: { messageId: string; title: string }) => ({
+      messageId: entry.messageId,
+      title: entry.title,
+      loaded: loadedIds.has(entry.messageId),
+    })
     // store 有数据时以它为准（含未加载轮次）；否则退回消息派生的条目
     if (turnOutlineEntries.length >= chatPageViewModel.outlineSourceEntries.length && turnOutlineEntries.length > 0) {
-      return turnOutlineEntries.map(entry => ({ messageId: entry.messageId, title: entry.title }))
+      return turnOutlineEntries.map(withLoaded)
     }
-    return chatPageViewModel.outlineSourceEntries
-  }, [turnOutlineEntries, chatPageViewModel.outlineSourceEntries])
+    return chatPageViewModel.outlineSourceEntries.map(withLoaded)
+  }, [turnOutlineEntries, chatPageViewModel.outlineSourceEntries, renderedMessages])
 
   // 切 session remount 时默认视为贴底，避免回底按钮闪一下
   useEffect(() => {
@@ -620,7 +675,16 @@ export const ChatPane = memo(function ChatPane({
     }
   }, [inputRestoreContent, visibleModels, restoreFromMessage])
 
-  // session 切换：只在 routeSessionId 变化时，从最后一条 user 消息恢复模型
+  // session 切换：只在 routeSessionId 变化时，从消息里恢复模型
+  //
+  // ⚠️ v2 的 user 消息**没有 model 字段**（实测只有 time/text），
+  // 模型记在 assistant 消息的 `model: { id, providerID, variant }` 上。
+  // 原实现只找 user 消息的 model，必然拿到 undefined，于是「新开无痕页面/
+  // 换一台设备打开同一会话」时显示的是全局默认（models[0]），
+  // 看起来就是「会话没有绑定模型」。
+  //
+  // 现在优先取最近一条**带 model 的 assistant 消息**；user 消息仍作兜底
+  // （v1 形状或未来版本可能回填）。
   const restoredSessionRef = useRef<string | null>(null)
   useEffect(() => {
     // 没有 session、或者这个 session 已经恢复过了 → 跳过
@@ -630,13 +694,30 @@ export const ChatPane = memo(function ChatPane({
 
     restoredSessionRef.current = routeSessionId
 
+    type ModelCarrier = { model?: { providerID: string; modelID: string; variant?: string }; variant?: string }
+
+    // 1) 最近的 assistant 消息（v2 唯一可靠的模型来源）
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.info.role !== 'assistant') continue
+      const info = message.info as ModelCarrier & { modelID?: string; providerID?: string }
+      // v2 适配层把 model 摊平到 modelID/providerID；也兼容仍有 model 对象的形状
+      const model = info.model ?? (info.modelID && info.providerID
+        ? { providerID: info.providerID, modelID: info.modelID }
+        : undefined)
+      if (model?.providerID && model?.modelID) {
+        restoreFromMessage(model, info.variant ?? model.variant ?? null)
+        return
+      }
+    }
+
+    // 2) 兜底：user 消息（v1 形状 / 未来版本可能回填）
     const lastUserMsg = [...messages].reverse().find(m => m.info.role === 'user')
     if (lastUserMsg && 'model' in lastUserMsg.info) {
-      const userInfo = lastUserMsg.info as {
-        model?: { providerID: string; modelID: string; variant?: string }
-        variant?: string
+      const userInfo = lastUserMsg.info as ModelCarrier
+      if (userInfo.model?.providerID && userInfo.model?.modelID) {
+        restoreFromMessage(userInfo.model, userInfo.variant ?? userInfo.model.variant)
       }
-      restoreFromMessage(userInfo.model, userInfo.variant ?? userInfo.model?.variant)
     }
     // 依赖 routeSessionId 和 messages.length（等加载完），不依赖 messages 引用
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1110,118 +1191,75 @@ export const ChatPane = memo(function ChatPane({
         onScrollToMessageId={handleOutlineScrollToMessage}
       />
 
-      <div
-        ref={inputBoxWrapperRef}
-        className={`absolute left-0 right-0 z-10 pointer-events-none ${
-          hostSlideState.switching
-            ? 'transition-none'
-            : 'transition-[top] duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none'
-        }`}
-        style={{
-          // 欢迎态（无会话无消息）：输入框垂直居中悬浮，hero 在正上方；
-          // 发送后 showWelcome 翻 false，容器滑回贴底 —— 与原始设计一致。
-          //
-          // 用整数像素 top 定位，而不是 bottom:50% + translateY(50%)：
-          // 后者会产生非整数位移（实测 65.75px），让整个子树落在半像素上，
-          // 文字/图标子像素渲染发虚。这里显式取整，落到整数像素网格。
-          top:
-            showWelcome && chatContentHeight > 0
-              ? `${Math.round((chatContentHeight - inputBoxHeight) / 2)}px`
+      <PaneInputDock
+        inputBoxWrapperRef={inputBoxWrapperRef}
+        hostSlideSwitching={hostSlideState.switching}
+        showCompactShell={showCompactShell}
+        showWelcome={showWelcome}
+        chatContentHeight={chatContentHeight}
+        inputBoxHeight={inputBoxHeight}
+        showCancelHint={showCancelHint}
+        fullAutoHint={fullAutoHint}
+        isSubtaskPane={isSubtaskPane}
+        welcomeDirectory={effectiveDirectory || ''}
+        onWelcomeSelectProject={handleWelcomeSelectProject}
+        onWelcomeClearProject={handleWelcomeClearProject}
+        onWelcomeAddProject={handleWelcomeAddProject}
+        inputBoxProps={{
+          paneId,
+          onSend: handleSend,
+          onAbort: handleAbort,
+          onCommand: handleCommand,
+          disabled: inputDisabled,
+          isStreaming,
+          agents,
+          selectedAgent,
+          onAgentChange: handleAgentChange,
+          variants: currentModel?.variants ?? [],
+          selectedVariant,
+          onVariantChange: handleVariantChange,
+          fileCapabilities,
+          models: visibleModels,
+          selectedModelKey,
+          onModelChange: handleModelChange,
+          modelsLoading,
+          modelSelectorRef,
+          rootPath: effectiveDirectory,
+          sessionId: routeSessionId,
+          revertedText: revertedMessage?.text,
+          revertedAttachments: revertedMessage?.attachments,
+          canRedo,
+          revertSteps: redoSteps,
+          onRedo: handleRedoWithAnimation,
+          onRedoAll: handleRedoAll,
+          onClearRevert: clearRevert,
+          registerInputBox,
+          isAtBottom,
+          onScrollToBottom: handleScrollToBottom,
+          collapsedPermission:
+            !inlineToolRequests && pendingPermissionRequests.length > 0 && permissionCollapsed
+              ? {
+                  label: t('chat:permissionDialog.permission', {
+                    permission: pendingPermissionRequests[0].permission,
+                  }),
+                  queueLength: pendingPermissionRequests.length,
+                  onExpand: () => setPermissionCollapsed(false),
+                }
               : undefined,
-          bottom: showWelcome ? undefined : '0',
-          // 欢迎态且尚未测到容器/自身高度时先隐藏，避免贴顶闪一帧或半像素。
-          visibility: showWelcome && chatContentHeight === 0 ? 'hidden' : undefined,
+          collapsedQuestion:
+            !inlineToolRequests &&
+            pendingPermissionRequests.length === 0 &&
+            pendingQuestionRequests.length > 0 &&
+            questionCollapsed
+              ? {
+                  label: t('chat:questionDialog.title'),
+                  queueLength: pendingQuestionRequests.length,
+                  onExpand: () => setQuestionCollapsed(false),
+                }
+              : undefined,
+          heavyContent: heavyWarning,
         }}
-      >
-        {!showCompactShell && <WelcomeHero active={showWelcome} disableTransition={hostSlideState.switching} />}
-        {(showCancelHint || (fullAutoHint && !showCancelHint)) && (
-          <div className="absolute bottom-full inset-x-0 flex justify-center pb-2 pointer-events-none z-20">
-            <div className="px-3 py-1.5 glass border border-border-200/60 rounded-lg shadow-lg text-[length:var(--fs-sm)] text-text-300 animate-in fade-in slide-in-from-bottom-2 duration-150">
-              {showCancelHint ? (
-                <Trans
-                  i18nKey="chat:hints.pressEscAgain"
-                  components={{
-                    1: (
-                      <kbd className="mx-0.5 px-1.5 py-0.5 bg-bg-200 border border-border-200 rounded text-[length:var(--fs-xs)] font-mono font-medium text-text-200" />
-                    ),
-                  }}
-                />
-              ) : (
-                fullAutoHint
-              )}
-            </div>
-          </div>
-        )}
-        {!isSubtaskPane && (
-          <InputBox
-            paneId={paneId}
-            onSend={handleSend}
-            onAbort={handleAbort}
-            onCommand={handleCommand}
-            disabled={inputDisabled}
-            isStreaming={isStreaming}
-            agents={agents}
-            selectedAgent={selectedAgent}
-            onAgentChange={handleAgentChange}
-            variants={currentModel?.variants ?? []}
-            selectedVariant={selectedVariant}
-            onVariantChange={handleVariantChange}
-            fileCapabilities={fileCapabilities}
-            models={visibleModels}
-            selectedModelKey={selectedModelKey}
-            onModelChange={handleModelChange}
-            modelsLoading={modelsLoading}
-            modelSelectorRef={modelSelectorRef}
-            rootPath={effectiveDirectory}
-            sessionId={routeSessionId}
-            revertedText={revertedMessage?.text}
-            revertedAttachments={revertedMessage?.attachments}
-            canRedo={canRedo}
-            revertSteps={redoSteps}
-            onRedo={handleRedoWithAnimation}
-            onRedoAll={handleRedoAll}
-            onClearRevert={clearRevert}
-            registerInputBox={registerInputBox}
-            isAtBottom={isAtBottom}
-            onScrollToBottom={handleScrollToBottom}
-            hideFooter={showWelcome}
-            topAccessory={
-              !showCompactShell ? (
-                <WelcomeProjectPill
-                  active={showWelcome}
-                  directory={effectiveDirectory || ''}
-                  onSelectProject={handleWelcomeSelectProject}
-                  onClearProject={handleWelcomeClearProject}
-                  onAddProject={handleWelcomeAddProject}
-                />
-              ) : undefined
-            }
-            collapsedPermission={
-              !inlineToolRequests && pendingPermissionRequests.length > 0 && permissionCollapsed
-                ? {
-                    label: t('chat:permissionDialog.permission', {
-                      permission: pendingPermissionRequests[0].permission,
-                    }),
-                    queueLength: pendingPermissionRequests.length,
-                    onExpand: () => setPermissionCollapsed(false),
-                  }
-                : undefined
-            }
-            collapsedQuestion={
-              !inlineToolRequests &&
-              pendingPermissionRequests.length === 0 &&
-              pendingQuestionRequests.length > 0 &&
-              questionCollapsed
-                ? {
-                    label: t('chat:questionDialog.title'),
-                    queueLength: pendingQuestionRequests.length,
-                    onExpand: () => setQuestionCollapsed(false),
-                  }
-                : undefined
-            }
-          />
-        )}
-      </div>
+      />
 
       {/* 内容列宽拖拽手柄：只在非紧凑视图启用，两条手柄对称加宽 */}
       <ChatWidthControls container={chatContentEl} enabled={!showCompactShell} />

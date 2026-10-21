@@ -97,8 +97,6 @@
     "clearFrontendRulesConfirm": "Switching to Backend Always will delete all temporary frontend allow rules. Continue?",
     "approvePendingOnFullAuto": "Approve Waiting Permissions",
     "approvePendingOnFullAutoDesc": "When enabled, switching the footer auto-approve control to this session or all sessions also approves already waiting permissions with once",
-    "queueFollowupMessages": "Queue Follow-Up Messages",
-    "queueFollowupMessagesDesc": "When the current session is still busy, keep new messages in a queue and send them automatically after the turn finishes",
     "questionAutoSelect": "Auto-select on Question Timeout",
     "questionAutoSelectDesc": "When a question stays unanswered past the timeout, automatically pick the recommended option and submit; falls back to the first option when no recommendation is marked",
     "questionAutoSelectOff": "Off",

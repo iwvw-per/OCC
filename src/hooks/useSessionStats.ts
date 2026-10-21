@@ -20,7 +20,15 @@ export function useSessionStats(contextLimit: number = 200000): SessionStats {
   const getSnapshot = useCallback((): SessionStats => {
     const sessionId = paneLayoutStore.getFocusedSessionId()
     const messages = messageStore.getVisibleMessages(sessionId)
-    const next = computeSessionStatsCached(messages, contextLimit)
+    // 压缩快照 / 会话累计值来自服务端事件：压缩结束后消息可能还没重拉，
+    // 必须把它们一并传进去，圆环与占用数字才会立刻更新。
+    const next = computeSessionStatsCached(
+      messages,
+      contextLimit,
+      messageStore.getCompactionUsage(sessionId),
+      messageStore.getSessionUsage(sessionId),
+      messageStore.getCompactionMarker(sessionId),
+    )
     const prev = cacheRef.current
     if (prev && isSameSessionStats(prev, next)) return prev
     cacheRef.current = next

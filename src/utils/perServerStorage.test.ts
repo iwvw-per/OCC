@@ -14,14 +14,14 @@ describe('per-server storage change notification', () => {
     const calls: number[] = []
     const unsubscribe = subscribePerServerStorageVersion(() => calls.push(1))
 
-    serverStorage.set('opencode-saved-directories', '[]')
+    serverStorage.set('opencode-saved-directories', '[]', 'aiagent:inst_1')
     expect(calls.length).toBe(1)
 
-    serverStorage.setJSON('opencode-recent-projects', {})
+    serverStorage.setJSON('opencode-recent-projects', {}, 'aiagent:inst_1')
     expect(calls.length).toBe(2)
 
     unsubscribe()
-    serverStorage.set('opencode-saved-directories', '[1]')
+    serverStorage.set('opencode-saved-directories', '[1]', 'aiagent:inst_1')
     expect(calls.length).toBe(2)
   })
 
@@ -50,7 +50,7 @@ describe('per-server storage change notification', () => {
     const { getStorageVersion, serverStorage, notifyPerServerStorageChanged } = await import('./perServerStorage')
 
     const before = getStorageVersion()
-    serverStorage.set('opencode-saved-directories', '[]')
+    serverStorage.set('opencode-saved-directories', '[]', 'aiagent:inst_1')
     const afterWrite = getStorageVersion()
     expect(afterWrite).toBeGreaterThan(before)
 

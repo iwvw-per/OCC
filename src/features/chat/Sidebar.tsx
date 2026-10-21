@@ -447,6 +447,9 @@ export const Sidebar = memo(function Sidebar({
           </div>
         )}
 
+        {/* 网页端顶栏与桌面端共用同一排导航控件（DesktopNavControls）：
+            两端若各写一套按钮，尺寸/间距/hover 必然逐渐分叉。桌面端 Windows
+            用全高侧栏，控件放在上面那条独立工具栏里（见上方分支）。 */}
         <SidePanel
           onNewSession={onNewSession}
           onSelectSession={onSelectSession}
@@ -459,6 +462,7 @@ export const Sidebar = memo(function Sidebar({
           contextLimit={contextLimit}
           onOpenSettings={onOpenSettings}
           hideHeader={getDesktopPlatform() === 'windows'}
+          headerContent={<DesktopNavControls sidebarOpen={isOpen} onToggleSidebar={handleToggle} showExtra={isOpen} />}
         />
 
         {isOpen && (

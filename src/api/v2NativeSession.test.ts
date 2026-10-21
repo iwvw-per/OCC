@@ -22,7 +22,6 @@ describeIf('v2 原生 session 访问层', () => {
   it('nativeListSessions 返回真实会话', async () => {
     serverStore.removeServer(SERVER_ID)
     serverStore.addServerWithId(SERVER_ID, { name: 'v2-native', url: URL!, auth: { username: 'opencode', password: PWD! } })
-    await serverStore.ensureApiVersion(SERVER_ID)
 
     const page = await nativeListSessions(SERVER_ID, { limit: 5 })
     expect(Array.isArray(page.sessions)).toBe(true)
@@ -35,7 +34,6 @@ describeIf('v2 原生 session 访问层', () => {
   it('nativeCreateSession + nativeGetSession 闭环', async () => {
     serverStore.removeServer(SERVER_ID)
     serverStore.addServerWithId(SERVER_ID, { name: 'v2-native', url: URL!, auth: { username: 'opencode', password: PWD! } })
-    await serverStore.ensureApiVersion(SERVER_ID)
 
     const created = await nativeCreateSession(SERVER_ID, { title: 'v2-native-dialog' })
     expect(created.id).toBeTruthy()
@@ -47,7 +45,6 @@ describeIf('v2 原生 session 访问层', () => {
   it('nativeUpdateSession 更新标题', async () => {
     serverStore.removeServer(SERVER_ID)
     serverStore.addServerWithId(SERVER_ID, { name: 'v2-native', url: URL!, auth: { username: 'opencode', password: PWD! } })
-    await serverStore.ensureApiVersion(SERVER_ID)
 
     const created = await nativeCreateSession(SERVER_ID, { title: 'orig' })
     const updated = await nativeUpdateSession(SERVER_ID, { sessionID: created.id, title: 'renamed' })
@@ -57,7 +54,6 @@ describeIf('v2 原生 session 访问层', () => {
   it('nativeRemoveSession 删除会话', async () => {
     serverStore.removeServer(SERVER_ID)
     serverStore.addServerWithId(SERVER_ID, { name: 'v2-native', url: URL!, auth: { username: 'opencode', password: PWD! } })
-    await serverStore.ensureApiVersion(SERVER_ID)
 
     const created = await nativeCreateSession(SERVER_ID, { title: 'to-delete' })
     const ok = await nativeRemoveSession(SERVER_ID, created.id)

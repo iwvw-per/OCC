@@ -3,16 +3,19 @@
 // 基于 @opencode-ai/sdk: /session/{sessionID}/message 相关接口
 // ============================================
 
-import { getSDKClient, unwrap, buildHeaders } from './sdk'
+import { buildHeaders } from './sdk'
+import { logger } from '../utils/logger'
 import { nativePrompt, nativeListMessages } from './v2NativeMessage'
-import { adaptMessagePage } from './v2/message'
+import { adaptMessagePage, type CompactionMarker, type IdleMarker, type SessionConfigMarkers } from './v2/message'
 import { sanitizeMessageWithParts } from './sanitize'
 import { resolveSessionTarget } from '../utils/sessionKey'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { peekSessionCache } from './session'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import { sharedInflightRequest } from '../utils/singleFlight'
 import { serverStorage } from '../utils/perServerStorage'
 import { serverStore } from '../store/serverStore'
-import { TURN_FETCH_MAX_PAGES, TURN_FETCH_MESSAGE_LIMIT } from '../constants/pagination'
+import { TURN_FETCH_MAX_PAGES, TURN_FETCH_MESSAGE_LIMIT, FIRST_SCREEN_PAGE_LIMIT, HISTORY_PAGE_LIMIT_MAX } from '../constants/pagination'
+import { estimateHistoryPageSize } from '../constants/pagination'
 import type {
   ApiMessageWithParts,
   AgentPartInput,
@@ -23,6 +26,7 @@ import type {
   SendMessageResponse,
   TextPartInput,
 } from './types'
+import type { ApiSession } from '../types'
 import type { Message, TextContent } from '../types/message'
 
 /** 判定是否为「传输层把响应体截断」导致的解析失败：
@@ -45,14 +49,21 @@ async function getWithTruncationRetry<T>(fn: () => Promise<T>, retries = 3, dela
     } catch (error) {
       lastError = error
       if (!isTruncatedJsonError(error)) throw error
-      if (import.meta.env.DEV) console.warn(`[Message] Truncated response, retry ${attempt + 1}/${retries}`)
+      if (import.meta.env.DEV) logger.warn(`[Message] Truncated response, retry ${attempt + 1}/${retries}`)
       if (attempt < retries - 1) await new Promise(resolve => setTimeout(resolve, delay * (attempt + 1)))
     }
   }
   throw lastError
 }
 
-type PromptParams = Parameters<ReturnType<typeof getSDKClient>['session']['prompt']>[0]
+type PromptParams = {
+  sessionID: string
+  messageID?: string
+  parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+  model?: { providerID: string; modelID: string }
+  agent?: string
+  variant?: string
+}
 
 // ============================================
 // Message Query
@@ -65,6 +76,12 @@ export interface SessionMessagePage {
   nextCursor?: string
   /** 本页内最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
   compactedAt?: number
+  /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
+  compaction?: CompactionMarker
+  /** 本页内最近一次轮次结论（`type: "idle"` 消息） */
+  idle?: IdleMarker
+  /** 本页内的会话配置切换记录（model-switched / agent-switched） */
+  config: SessionConfigMarkers
 }
 
 /**
@@ -114,29 +131,20 @@ export async function getSessionMessagePage(
     key,
     () =>
       getWithTruncationRetry(async () => {
-        const isV2 = serverStore.getApiVersion(target.serverId) === 'v2'
-        if (isV2) {
-          const page = await nativeListMessages(target.serverId, {
-            sessionID: target.sessionId,
-            limit: limit ? Math.min(limit, 200) : undefined,
-            cursor: before,
-          })
-          // nativeListMessages 已把 v2 的 desc 结果反转为时间升序；v1 分支同样重排为升序。
-          const messages = project ? projectPageMessages(page.messages) : page.messages
-          return { messages, nextCursor: page.nextCursor, compactedAt: page.compactedAt }
-        }
-        const sdk = getSDKClient(target.serverId)
-        const result = await sdk.session.messages({
+        const page = await nativeListMessages(target.serverId, {
           sessionID: target.sessionId,
-          directory: formatPathForApi(directory, target.serverId),
-          limit,
-          before,
+          limit: limit ? Math.min(limit, 200) : undefined,
+          cursor: before,
         })
-        const messages = unwrap<ApiMessageWithParts[]>(result)
-        const nextCursor = result.response?.headers?.get('X-Next-Cursor') ?? undefined
+        // nativeListMessages 已把 v2 的 desc 结果反转为时间升序。
+        const messages = project ? projectPageMessages(page.messages) : page.messages
         return {
-          messages: project ? projectPageMessages(messages) : messages,
-          nextCursor: nextCursor || undefined,
+          messages,
+          nextCursor: page.nextCursor,
+          compactedAt: page.compactedAt,
+          compaction: page.compaction,
+          idle: page.idle,
+          config: page.config,
         }
       }),
     options?.signal,
@@ -144,14 +152,17 @@ export async function getSessionMessagePage(
 }
 
 /**
- * 轻量消息拉取的一次性上限。轻量响应已被主机 Agent 投影（只含对话 + 元数据），
- * 体积小，用一个大 limit 即可一次拿全整个会话的所有轮次。
+ * 轻量消息拉取的一次性上限。
  *
- * 取 5000 而非 100000：messageStore 的内存上限本就是 20000 条，正常会话的
- * 消息数远达不到 5000，这个值已能覆盖「一次拿全」的语义；而异常超大会话
- * （实测有单次 3MB+ 的响应）在 100000 下会把整段历史一次性拉下来，代价很高。
+ * ⚠️ 必须是 200，不能更大：v2 服务端对 `message.list` 的 limit 做了硬校验，
+ * 超过 200 直接返回 400 `InvalidRequestError: Expected a value less than or equal to 200`。
+ * 此前这里写 5000，导致每一次「轻量拉取」都必然失败（400），再退回串行分页；
+ * 会话越大越明显 —— 这正是首屏要等几十秒的直接原因。
+ *
+ * 真正的「一次拿全」由主机 Agent 侧完成（它在自己的投影实现里按 cursor 翻页取全），
+ * 前端只需要把上限交给它，不必也不应该自己传一个超限值。
  */
-export const LIGHTWEIGHT_MESSAGE_LIMIT = 5000
+export const LIGHTWEIGHT_MESSAGE_LIMIT = 200
 
 /** 轻量投影响应的标记头：主机 Agent 命中投影时回填，用于判定服务端是否支持。 */
 const LIGHTWEIGHT_HEADER = 'X-Lightweight'
@@ -204,7 +215,18 @@ function v2MessageUrl(serverId: string, sessionId: string, params: Record<string
   return url.toString()
 }
 
-/** 走裸 fetch 直连 v2 消息端点（v2 SDK 不透出响应头，探测/读头必须自己发）。 */
+/**
+ * 走裸 fetch 直连 v2 消息端点（v2 SDK 不透出响应头，探测/读头必须自己发）。
+ *
+ * ⚠️ 必须带超时：这里绕过了 trackedFetch 的 30s 超时与取消代次，裸 fetch 一旦
+ * 挂起就会让首屏永久停在加载态（实测能卡到几十秒甚至不返回）。
+ * 超时用 AbortController 实现，并保留调用方传入的 signal（切走会话时仍可取消）。
+ *
+ * 取 12s：消息响应体可能较大（200 条约 500KB），隧道下需要留足传输时间；
+ * 但也不能像 30s 那样让用户盯着加载动画半分钟。
+ */
+const RAW_FETCH_TIMEOUT_MS = 12_000
+
 async function fetchV2MessageRaw(
   serverId: string,
   url: string,
@@ -212,17 +234,37 @@ async function fetchV2MessageRaw(
 ): Promise<Response> {
   const { getUnifiedFetch } = await import('../store/serverStore')
   const fetchImpl = await getUnifiedFetch()
-  return fetchImpl(url, {
-    headers: { ...buildHeaders(serverId), Accept: 'application/json', [LIGHTWEIGHT_HEADER]: '1' },
-    signal,
-  })
+
+  const controller = new AbortController()
+  const abortFromExternal = () => controller.abort(signal?.reason)
+  if (signal?.aborted) abortFromExternal()
+  else signal?.addEventListener('abort', abortFromExternal, { once: true })
+  const timeoutId = setTimeout(() => controller.abort(new Error('v2 message request timed out')), RAW_FETCH_TIMEOUT_MS)
+
+  try {
+    return await fetchImpl(url, {
+      headers: { ...buildHeaders(serverId), Accept: 'application/json', [LIGHTWEIGHT_HEADER]: '1' },
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', abortFromExternal)
+  }
 }
 
 /** v2 轻量能力探测：连本机 Agent 是否对 /api/session/{id}/message 做投影。 */
 async function probeV2LightweightSupport(serverId: string, sessionId: string): Promise<boolean> {
   const res = await fetchV2MessageRaw(serverId, v2MessageUrl(serverId, sessionId, { limit: '1' }))
   if (!res.ok) return false
-  return (res.headers.get(LIGHTWEIGHT_HEADER) ?? '') === '1'
+  const supported = (res.headers.get(LIGHTWEIGHT_HEADER) ?? '') === '1'
+  // ⚠️ 必须掐断响应体。
+  //
+  // 主机 Agent 实现轻量投影时会**忽略 limit**，任何带 X-Lightweight 的消息
+  // 请求都返回**整个会话**（实测 4810 条消息 = 25MB）。我们只要一个响应头，
+  // 若把 body 读完/放着不管，等于每次探测都白下载几十 MB。
+  // cancel 掉流，传输立刻停止（HTTP/2 下服务端随即收到 RST_STREAM）。
+  void res.body?.cancel().catch(() => {})
+  return supported
 }
 
 /**
@@ -250,7 +292,27 @@ async function fetchV2LightweightMessages(
   const body: unknown = await res.json()
   const page = adaptMessagePage(body)
   // Agent 按 desc（最新在前）累积返回，这里反转为时间升序，与前端渲染顺序一致。
-  return { messages: [...page.messages].reverse(), hasMore: false, compactedAt: page.compactedAt }
+  return {
+    messages: [...page.messages].reverse(),
+    hasMore: false,
+    compactedAt: page.compactedAt,
+    compaction: page.compaction,
+  }
+}
+
+/**
+ * 只读取已知的轻量投影支持结果，**绝不发请求**。
+ *
+ * 给延迟敏感路径用（首屏加载）：未知时调用方应立刻走分页路径，而不是等一次探测
+ * 往返；同时可在后台调用 probeLightweightSupport 预热缓存。
+ */
+export function peekLightweightSupport(serverId?: string): boolean | undefined {
+  const cacheKey = serverId ?? serverStore.getActiveServerId()
+  const cached = lightweightSupportCache.get(cacheKey)
+  if (cached !== undefined) return cached
+  const persisted = readPersistedSupport(cacheKey)
+  if (persisted !== undefined) lightweightSupportCache.set(cacheKey, persisted)
+  return persisted
 }
 
 /**
@@ -265,7 +327,7 @@ async function fetchV2LightweightMessages(
  */
 export async function probeLightweightSupport(
   sessionId: string,
-  directory?: string,
+  _directory?: string,
   serverId?: string,
 ): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
@@ -284,37 +346,22 @@ export async function probeLightweightSupport(
   const inflight = lightweightProbeInflight.get(cacheKey)
   if (inflight) return inflight
 
-  const request = (async () => {
-    try {
-      // v2：主机 Agent 同样支持轻量投影，但走的是 /api/session/{id}/message
-      // （v2 前缀）。v2 SDK 不透出响应头，故用裸 fetch 探测。
-      if (serverStore.getApiVersion(target.serverId) === 'v2') {
-        const supported = await probeV2LightweightSupport(target.serverId, target.sessionId)
-        lightweightSupportCache.set(cacheKey, supported)
-        if (supported) writePersistedSupport(cacheKey)
-        return supported
-      }
-      const sdk = getSDKClient(target.serverId)
-      const result = await sdk.session.messages(
-        {
-          sessionID: target.sessionId,
-          directory: formatPathForApi(directory, target.serverId),
-          limit: 1,
-        },
-        { headers: { [LIGHTWEIGHT_HEADER]: '1' } },
-      )
-      const supported = (result.response?.headers?.get(LIGHTWEIGHT_HEADER) ?? '') === '1'
+  // ⚠️ 必须在**同步阶段**就把 promise 登记进 inflight，不能等 async 函数体开始执行。
+  // 否则同一 tick 内的两个调用都会走到上面那行、都看不到 inflight，各发一次请求 ——
+  // 实测首屏会因此多发一个 limit=1 探测（白白多一个往返）。
+  const request = probeV2LightweightSupport(target.serverId, target.sessionId)
+    .then(supported => {
       lightweightSupportCache.set(cacheKey, supported)
-      // 只持久化正结果，负结果留待下次冷启动重探（Agent 可能已升级）。
       if (supported) writePersistedSupport(cacheKey)
       return supported
-    } catch {
+    })
+    .catch(() => {
       // 探测失败按不支持处理，走既有分页路径，不阻断加载；不写入任何缓存，下次重试。
       return false
-    }
-  })().finally(() => {
-    if (lightweightProbeInflight.get(cacheKey) === request) lightweightProbeInflight.delete(cacheKey)
-  })
+    })
+    .finally(() => {
+      if (lightweightProbeInflight.get(cacheKey) === request) lightweightProbeInflight.delete(cacheKey)
+    })
 
   lightweightProbeInflight.set(cacheKey, request)
   return request
@@ -332,6 +379,8 @@ export interface LightweightMessages {
   hasMore: boolean
   /** 最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
   compactedAt?: number
+  /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
+  compaction?: CompactionMarker
 }
 
 /**
@@ -371,22 +420,9 @@ export async function getSessionLightweightMessages(
   return sharedInflightRequest(
     key,
     async () => {
-      // v2：走原生的 /api/session/{id}/message + X-Lightweight，由主机 Agent 内部
+      // 走原生的 /api/session/{id}/message + X-Lightweight，由主机 Agent 内部
       // 分页取全并投影；v2 SDK 不便于读响应头，这里用裸 fetch。
-      if (serverStore.getApiVersion(target.serverId) === 'v2') {
-        return fetchV2LightweightMessages(target.serverId, target.sessionId, options?.signal)
-      }
-      const sdk = getSDKClient(target.serverId)
-      const result = await sdk.session.messages({
-        sessionID: target.sessionId,
-        directory: formatPathForApi(directory, target.serverId),
-        limit: LIGHTWEIGHT_MESSAGE_LIMIT,
-      }, { headers: { [LIGHTWEIGHT_HEADER]: '1' } })
-      const messages = unwrap<ApiMessageWithParts[]>(result)
-      return {
-        messages,
-        hasMore: messages.length >= LIGHTWEIGHT_MESSAGE_LIMIT,
-      }
+      return fetchV2LightweightMessages(target.serverId, target.sessionId, options?.signal)
     },
     options?.signal,
   )
@@ -415,6 +451,12 @@ export interface SessionTurnPage {
   hasMore: boolean
   /** 本批内最近一次已完成压缩的时间戳 */
   compactedAt?: number
+  /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
+  compaction?: CompactionMarker
+  /** 本批内最近一次轮次结论（`type: "idle"` 消息） */
+  idle?: IdleMarker
+  /** 本批内的会话配置切换记录（model-switched / agent-switched） */
+  config: SessionConfigMarkers
 }
 
 /** 一条消息是否为用户消息（轮次分隔点） */
@@ -482,17 +524,11 @@ export function encodeV2MessageCursor(
 }
 
 /**
- * 按服务器协议选择「取该消息更早一侧」的游标编码。
- *
- * v1 用 {id,time}（time=created 表示不含自身），v2 用 {id,order,direction:next}。
+ * 按 v2 协议编码「取该消息更早一侧」的游标（{id,order,direction:next}）。
  * 供 hydrateTurn（展开被压缩轮次）等需要本地自造游标的场景调用。
  */
-export function encodeBeforeCursor(message: ApiMessageWithParts, serverId?: string): string {
-  const resolvedServerId = serverId ?? serverStore.getActiveServerId()
-  if (resolvedServerId && serverStore.getApiVersion(resolvedServerId) === 'v2') {
-    return encodeV2MessageCursor(message, 'next')
-  }
-  return encodeMessageCursor(message, false)
+export function encodeBeforeCursor(message: ApiMessageWithParts, _serverId?: string): string {
+  return encodeV2MessageCursor(message, 'next')
 }
 
 /**
@@ -527,14 +563,18 @@ export function decodeMessageCursor(cursor: string): { id: string; time: number 
  *
  * 服务端只有「最新 limit 条 + before 游标」，没有轮次概念；一个轮次常被拆成多条
  * assistant 消息（每步思考 / 每次工具调用各一条），所以固定条数的首屏往往只覆盖
- * 两三轮。这里以 TURN_FETCH_MESSAGE_LIMIT 条为一页向前拉，累计到至少
- * targetTurnCount 个 user 边界后返回，保证调用方拿到的是完整轮次而非半截。
+ * 两三轮。这里以 pageLimit 条为一页向前拉，累计到至少 targetTurnCount 个 user
+ * 边界后返回，保证调用方拿到的是完整轮次而非半截。
  *
  * 返回的 messages 不做裁剪：分页是连续的（游标指向本页最老一条之前），任何半截
  * 轮次只会出现在「当前已加载区间的最顶端」，上滑继续加载时自然补齐，不会产生缺口。
  *
  * 对「单轮几千条」这类病态会话设了 TURN_FETCH_MAX_PAGES 上限，超长轮次不会
  * 无限拉取，剩余内容由用户上滑按需加载。
+ *
+ * pageLimit 由调用方决定：首屏用**小页**先出内容（见 getSessionFirstScreen），
+ * 只有需要一次补齐更多轮次时才用大页。小页的意义在于响应体大小 —— 实测同一个
+ * 会话，200 条响应 536KB、35 条只有 86KB，而首屏通常只需要 3 轮。
  */
 export async function getSessionTurnPage(
   sessionId: string,
@@ -542,28 +582,49 @@ export async function getSessionTurnPage(
   before?: string,
   directory?: string,
   serverId?: string,
-  options?: { project?: boolean; signal?: AbortSignal },
+  options?: { project?: boolean; signal?: AbortSignal; pageLimit?: number; maxPages?: number },
 ): Promise<SessionTurnPage> {
-  const resolvedServerId = serverId ?? serverStore.getActiveServerId()
-  const isV2 = resolvedServerId ? serverStore.getApiVersion(resolvedServerId) === 'v2' : false
+  const pageLimit = options?.pageLimit ?? TURN_FETCH_MESSAGE_LIMIT
+  const maxPages = options?.maxPages ?? TURN_FETCH_MAX_PAGES
   const collected: ApiMessageWithParts[] = []
   let cursor = before
   let pagesFetched = 0
-  let lastPageFull = true
   let reachedEnd = false
   let compactedAt: number | undefined
+  let compaction: CompactionMarker | undefined
+  let idle: IdleMarker | undefined
+  const config: SessionConfigMarkers = { model: undefined, agent: undefined }
+
+  /** 合并一页里带来的 markers（取「时间更晚」的那个） */
+  const mergeMarkers = (page: {
+    idle?: IdleMarker
+    config?: SessionConfigMarkers
+  }) => {
+    if (page.idle && (!idle || page.idle.at >= idle.at)) idle = page.idle
+    const m = page.config?.model
+    if (m && (!config.model || m.at >= config.model.at)) {
+      config.model = { providerID: m.providerID, modelID: m.modelID, at: m.at }
+    }
+    const a = page.config?.agent
+    if (a && (!config.agent || a.at >= config.agent.at)) {
+      config.agent = { agent: a.agent, at: a.at }
+    }
+  }
 
   while (true) {
-    const page = await getSessionMessagePage(sessionId, TURN_FETCH_MESSAGE_LIMIT, cursor, directory, serverId, options)
+    const page = await getSessionMessagePage(sessionId, pageLimit, cursor, directory, serverId, options)
     collected.unshift(...page.messages)
     pagesFetched += 1
-    lastPageFull = page.messages.length >= TURN_FETCH_MESSAGE_LIMIT
     cursor = page.nextCursor
     if (page.compactedAt != null && (compactedAt == null || page.compactedAt > compactedAt)) {
       compactedAt = page.compactedAt
     }
+    if (page.compaction && (!compaction || page.compaction.at >= compaction.at)) {
+      compaction = page.compaction
+    }
+    mergeMarkers(page)
 
-    // 无游标（v1 新 serve 到最早 / v2 到最早）或空页（残留游标）都算到最早。
+    // 无游标或空页（残留游标）都算到最早。
     if (!cursor || page.messages.length === 0) {
       reachedEnd = true
       break
@@ -571,16 +632,157 @@ export async function getSessionTurnPage(
 
     const turnCount = collected.reduce((count, message) => count + (isUserApiMessage(message) ? 1 : 0), 0)
     if (turnCount >= targetTurnCount) break
-    if (pagesFetched >= TURN_FETCH_MAX_PAGES) break
+    if (pagesFetched >= maxPages) break
   }
 
-  // v2：cursor 权威——已到最早（无游标 / 空页）即没有更早，不再被「末页恰好满 30 条」
+  // cursor 权威——已到最早（无游标 / 空页）即没有更早，不再被「末页恰好满 30 条」
   // 误判成还有历史（否则点开别端已建的会话，拉完仍会无限自动上滑加载更多）。
-  // v1：旧版 serve 不给游标但返回满页，无法区分「到最早」与「还有更多」，保守视为还有。
-  const hasMore = isV2 ? !reachedEnd && cursor != null : cursor != null || lastPageFull
+  const hasMore = !reachedEnd && cursor != null
 
   // 已到最早时清掉游标，避免 loadMoreHistory 因残留游标继续触发空拉。
-  return { messages: collected, nextCursor: reachedEnd ? undefined : cursor, hasMore, compactedAt }
+  return {
+    messages: collected,
+    nextCursor: reachedEnd ? undefined : cursor,
+    hasMore,
+    compactedAt,
+    compaction,
+    ...(idle ? { idle } : {}),
+    config,
+  }
+}
+
+/**
+ * 首屏「先出内容、再补齐」的两段式加载。
+ *
+ * 背景（实测，本机 4288 条消息的会话）：
+ *   - 取 200 条 = 536KB；取 35 条（最近 3 轮）= 86KB。
+ *   - 经隧道单次往返约 1s，大响应还要额外传输与解析时间。
+ * 而首屏真正需要的只是「最近几轮能看见」，用户不必等整段历史。
+ *
+ * 因此拆成两段：
+ *   1. `first`：小页（默认 40 条）一次往返，通常已覆盖 2–3 轮，**立刻**可以渲染；
+ *   2. `rest`：若首段不足目标轮数，继续向前补足（同一游标链，不会重复也不会缺口）。
+ *
+ * 调用方拿到 first 就先上屏，rest 到达后原地替换（不闪 loading、不跳滚动位置）。
+ */
+export interface FirstScreenPage extends SessionTurnPage {
+  /** 首段是否已满足目标轮数；false 时调用方应等待 rest */
+  complete: boolean
+  /** 继续补足剩余轮次（complete=true 时为 undefined） */
+  rest?: () => Promise<SessionTurnPage>
+}
+
+export async function getSessionFirstScreen(
+  sessionId: string,
+  targetTurnCount: number,
+  directory?: string,
+  serverId?: string,
+  options?: { project?: boolean; signal?: AbortSignal },
+): Promise<FirstScreenPage> {
+  // 第一段：极小页。只要「能立刻看到最近内容」，不强求凑满轮数。
+  const first = await getSessionTurnPage(sessionId, targetTurnCount, undefined, directory, serverId, {
+    ...options,
+    pageLimit: FIRST_SCREEN_PAGE_LIMIT,
+    maxPages: 1,
+  })
+
+  const firstTurnCount = first.messages.reduce((count, m) => count + (isUserApiMessage(m) ? 1 : 0), 0)
+  if (firstTurnCount >= targetTurnCount || !first.nextCursor) {
+    return { ...first, complete: true }
+  }
+
+  return {
+    ...first,
+    complete: false,
+    rest: async () => {
+      // 补齐是**后台行为**：逐小块向前补，凑满目标轮数即停。
+      //
+      // 除了不占满连接，更重要的是：大附件（实测有 1.3MB 的 inline 图片）只在
+      // 真正翻到它所在的那一块时才付出代价。分块后即使某块很慢，用户也已经
+      // 看到首段内容，其余块不受影响。
+      //
+      // 上限 RES5T_MAX_PAGES 防止「单轮几千条」时无限补：那种情况下多发几块
+      // 也凑不满一轮，只会持续占用带宽，剩余内容应由用户上滑按需加载。
+      const collected: ApiMessageWithParts[] = [...first.messages]
+      let cursor = first.nextCursor
+      let turns = first.messages.reduce((count, m) => count + (isUserApiMessage(m) ? 1 : 0), 0)
+      let compactedAt = first.compactedAt
+      let compaction = first.compaction
+      let idle = first.idle
+      const config: SessionConfigMarkers = { ...(first.config ?? {}) }
+      let pages = 0
+
+      /**
+       * 补齐页的大小按密度自适应，并受**总条数预算**约束。
+       *
+       * 首屏那 12 条能看出「这个会话一轮有多少条消息」：普通聊天 2~4 条，
+       * 工具密集的 30+ 条。
+       *
+       * 但有一种情况密度**根本测不出来**：首屏那 12 条全是助手消息/工具调用，
+       * 一条用户消息都没有 —— 说明当前正处在一个超长轮次里。此时与其用默认
+       * 密度一次取 22 条、连翻 4 页（4 次串行往返），不如按上限一次多取，
+       * 把「补齐 3 轮」一次做完。
+       *
+       * 预算是总条数（不是页数）：不管密度怎么估，补齐最多再拉这么多条，
+       * 避免在病态会话里持续占带宽。
+       */
+      const REST_BUDGET_MESSAGES = 240
+      let restBudget = REST_BUDGET_MESSAGES
+
+      const pickRestPageLimit = (): number => {
+        const collectedUserCount = collected.reduce((count, m) => count + (isUserApiMessage(m) ? 1 : 0), 0)
+        if (collectedUserCount < 2) {
+          // 还看不到用户轮次 → 大概率在超长轮次里，按上限取
+          return Math.min(HISTORY_PAGE_LIMIT_MAX, restBudget)
+        }
+        const density = collected.length / collectedUserCount
+        return Math.min(estimateHistoryPageSize(density, Math.max(1, targetTurnCount - turns)), restBudget)
+      }
+
+      let restPageLimit = pickRestPageLimit()
+
+      while (turns < targetTurnCount && cursor && pages < 4 && restBudget > 0) {
+        const more = await getSessionTurnPage(sessionId, targetTurnCount - turns, cursor, directory, serverId, {
+          ...options,
+          pageLimit: restPageLimit,
+          maxPages: 1,
+        })
+        pages += 1
+        collected.unshift(...more.messages)
+        turns += more.messages.reduce((count, m) => count + (isUserApiMessage(m) ? 1 : 0), 0)
+        cursor = more.nextCursor
+        restBudget -= more.messages.length
+        // 样本变多了，重新估一次密度与页大小。
+        restPageLimit = pickRestPageLimit()
+        if (more.compactedAt != null && (compactedAt == null || more.compactedAt > compactedAt)) {
+          compactedAt = more.compactedAt
+        }
+        if (more.compaction && (!compaction || more.compaction.at >= compaction.at)) {
+          compaction = more.compaction
+        }
+        if (more.idle && (!idle || more.idle.at >= idle.at)) idle = more.idle
+        const mModel = more.config?.model
+        if (mModel && (!config.model || mModel.at >= config.model.at)) {
+          config.model = { providerID: mModel.providerID, modelID: mModel.modelID, at: mModel.at }
+        }
+        const mAgent = more.config?.agent
+        if (mAgent && (!config.agent || mAgent.at >= config.agent.at)) {
+          config.agent = { agent: mAgent.agent, at: mAgent.at }
+        }
+        if (more.messages.length === 0) break
+      }
+
+      return {
+        messages: collected,
+        nextCursor: cursor,
+        hasMore: cursor != null,
+        compactedAt,
+        compaction,
+        ...(idle ? { idle } : {}),
+        config,
+      }
+    },
+  }
 }
 
 // ============================================
@@ -632,10 +834,10 @@ function toFileUrl(path: string): string {
 }
 
 /**
- * 构建 SDK 发送消息所需的参数
+ * 构建发送消息所需的参数
  */
-function buildPromptParams(params: SendMessageParams, serverId?: string): PromptParams {
-  const { sessionId, text, attachments, model, agent, variant, directory, messageID } = params
+function buildPromptParams(params: SendMessageParams, _serverId?: string): PromptParams {
+  const { sessionId, text, attachments, model, agent, variant, messageID } = params
 
   const parts: NonNullable<PromptParams['parts']> = []
 
@@ -664,7 +866,7 @@ function buildPromptParams(params: SendMessageParams, serverId?: string): Prompt
     } else {
       const fileUrl = toFileUrl(attachment.url || '')
       if (!fileUrl) {
-        console.warn('Skipping attachment with empty URL:', attachment)
+        logger.warn('Skipping attachment with empty URL:', attachment)
         continue
       }
 
@@ -691,7 +893,6 @@ function buildPromptParams(params: SendMessageParams, serverId?: string): Prompt
 
   return {
     sessionID: sessionId,
-    directory: formatPathForApi(directory, serverId),
     messageID,
     parts,
     model,
@@ -701,23 +902,76 @@ function buildPromptParams(params: SendMessageParams, serverId?: string): Prompt
 }
 
 /**
+ * 判断这次发送是否真的需要 switchAgent / switchModel（同步、绝不发请求）。
+ *
+ * v2 的 agent 与 model 是会话级状态，只要上次发送已经设过、且期间没有别处改动，
+ * 就不必每轮都重新 switch。省掉这两次往返对本地几乎无感，但经隧道连远程主机时
+ * 每次约 1.1s —— 这是「点发送后要停两三秒才出字」的主要来源之一。
+ *
+ * 关键：这里**只能读缓存，不能 await 拉取**。发送路径上多一次串行往返，就等于
+ * 把延迟又加回去；宁可缓存未命中时照常 switch（多一次并行请求），也不阻塞。
+ */
+function resolveSwitchSkips(
+  serverId: string,
+  sessionId: string,
+  directory: string | undefined,
+  agent: string | undefined,
+  model: { providerID: string; modelID: string } | undefined,
+): { skipAgentSwitch: boolean; skipModelSwitch: boolean } {
+  const cached = peekSessionCache(sessionId, directory, serverId)
+  if (!cached) {
+    // 未命中：保守地照常切换，正确性优先
+    return { skipAgentSwitch: false, skipModelSwitch: false }
+  }
+  const currentModel = cached.model as { providerID?: string; id?: string; modelID?: string } | undefined
+  const sameAgent = !agent || !cached.agent || cached.agent === agent
+  const sameModel =
+    !model ||
+    !currentModel?.providerID ||
+    (currentModel.providerID === model.providerID &&
+      (currentModel.id ?? currentModel.modelID) === model.modelID)
+  return { skipAgentSwitch: sameAgent, skipModelSwitch: sameModel }
+}
+
+/**
+ * 发送成功后回填「这轮用的 agent/model」到会话元数据缓存。
+ *
+ * 只是缓存写，不发请求；缓存里没有该会话时跳过（不凭空造一条假元数据）。
+ */
+function rememberSessionAgentModel(
+  serverId: string,
+  sessionId: string,
+  directory: string | undefined,
+  agent: string | undefined,
+  model: { providerID: string; modelID: string } | undefined,
+): void {
+  const cached = peekSessionCache(sessionId, directory, serverId)
+  if (!cached) return
+  // ttlCacheGet 返回的是缓存里的同一对象引用；直接改它等价于原地更新缓存。
+  // 这里只动 agent/model 两个字段，其它字段（title/directory/time）保持原样。
+  cached.agent = agent ?? cached.agent
+  if (model) {
+    cached.model = { providerID: model.providerID, id: model.modelID } as ApiSession['model']
+  }
+}
+
+/**
  * 同步发送消息（等待完成）
  */
 export async function sendMessage(params: SendMessageParams, serverId?: string): Promise<SendMessageResponse> {
   const target = resolveSessionTarget(params.sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
-    await nativePrompt(target.serverId, {
-      sessionID: target.sessionId,
-      parts: built.parts as never,
-      model: built.model,
-      agent: built.agent,
-      messageID: built.messageID,
-    })
-    return { info: {} as SendMessageResponse['info'], parts: [] }
-  }
-  const sdk = getSDKClient(target.serverId)
-  return unwrap<SendMessageResponse>(await sdk.session.prompt(buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)))
+  const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
+  const skips = resolveSwitchSkips(target.serverId, target.sessionId, params.directory, built.agent, built.model)
+  await nativePrompt(target.serverId, {
+    sessionID: target.sessionId,
+    parts: built.parts as never,
+    model: built.model,
+    agent: built.agent,
+    messageID: built.messageID,
+    delivery: params.delivery,
+    ...skips,
+  })
+  return { info: {} as SendMessageResponse['info'], parts: [] }
 }
 
 /**
@@ -725,17 +979,20 @@ export async function sendMessage(params: SendMessageParams, serverId?: string):
  */
 export async function sendMessageAsync(params: SendMessageParams, serverId?: string): Promise<void> {
   const target = resolveSessionTarget(params.sessionId, serverId)
-  if (serverStore.getApiVersion(target.serverId) === 'v2') {
-    const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
-    await nativePrompt(target.serverId, {
-      sessionID: target.sessionId,
-      parts: built.parts as never,
-      model: built.model,
-      agent: built.agent,
-      messageID: built.messageID,
-    })
-    return
-  }
-  const sdk = getSDKClient(target.serverId)
-  unwrap(await sdk.session.promptAsync(buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)))
+  const built = buildPromptParams({ ...params, sessionId: target.sessionId }, target.serverId)
+  const skips = resolveSwitchSkips(target.serverId, target.sessionId, params.directory, built.agent, built.model)
+  await nativePrompt(target.serverId, {
+    sessionID: target.sessionId,
+    parts: built.parts as never,
+    model: built.model,
+    agent: built.agent,
+    messageID: built.messageID,
+    delivery: params.delivery,
+    ...skips,
+  })
+  // 发送成功后把「这轮用的 agent/model」写回元数据缓存。
+  //
+  // 这样下一轮发送能直接命中缓存、跳过 switch（省 1–2 次往返）；否则缓存过期后
+  // 每轮都要重新 switch，远程主机下每次白付一个往返。
+  rememberSessionAgentModel(target.serverId, target.sessionId, params.directory, built.agent, built.model)
 }

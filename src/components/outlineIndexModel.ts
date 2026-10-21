@@ -6,6 +6,13 @@ const FULL_TITLE_MAX = 80
 export interface OutlineSourceEntry {
   messageId: string
   title: string
+  /**
+   * 该轮次的消息是否已经在内存里（可立即滚动到位）。
+   *
+   * 不放进 turnOutlineStore 的持久化数据：加载状态是易变的，而大纲是跨设备
+   * 长期复用的。所以这个标记在渲染时从 messageStore 现算。
+   */
+  loaded?: boolean
 }
 
 /** 独立轮次大纲的条目：在标题基础上带创建时间，供跨分页累积后稳定排序 */

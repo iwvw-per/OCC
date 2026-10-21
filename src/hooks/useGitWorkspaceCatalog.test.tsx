@@ -31,7 +31,11 @@ vi.mock('../api/events', () => ({
 
 vi.mock('../store/serverStore', () => ({
   serverStore: {
-    onServerChange: (...args: unknown[]) => onServerChangeMock(...args),
+    getActiveServerId: () => 'local',
+    onServerChange: (...args: unknown[]) => {
+      onServerChangeMock(...args)
+      return () => {}
+    },
   },
 }))
 

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore, useLayoutEffect, memo } from 'react'
+import { logger } from '../../utils/logger'
 import { useTranslation } from 'react-i18next'
 import { AttachmentPreview, type Attachment } from '../attachment'
 import {
@@ -19,6 +20,8 @@ import { ChatFab, type ChatFabMode } from './input/ChatFab'
 import { ArrowUpIcon } from '../../components/Icons'
 import { useMobileCollapse } from './input/useMobileCollapse'
 import { useAttachmentRail } from './input/useAttachmentRail'
+import { useMentionTrigger } from './input/useMentionTrigger'
+import { useSlashTrigger } from './input/useSlashTrigger'
 import { useInputHistory } from './input/useInputHistory'
 import { LargeTextPasteDialog } from './input/LargeTextPasteDialog'
 import {
@@ -187,6 +190,8 @@ export interface InputBoxProps {
   // Collapsed dialog capsules
   collapsedPermission?: CollapsedDialogInfo
   collapsedQuestion?: CollapsedDialogInfo
+  /** 上下文过重提示（见 heavyContent.ts：解释「只发两个字也 413」） */
+  heavyContent?: { label: string; title?: string }
   // 欢迎态（home 空态）隐藏底部 token/统计栏
   hideFooter?: boolean
   // 附加在输入框顶边的角标（如欢迎页项目选择按钮）。
@@ -232,16 +237,25 @@ function InputBoxComponent({
   onScrollToBottom,
   collapsedPermission,
   collapsedQuestion,
+  heavyContent,
   hideFooter = false,
   topAccessory,
 }: InputBoxProps) {
   const { t } = useTranslation('chat')
   const { sendOnEnter } = useLayoutStore()
-  // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages
+  // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages。
+  //
+  // ⚠️ 能力「未知」不等于「不支持」。模型列表尚未加载完（或加载失败）时
+  // fileCapabilities 为 undefined，若这里退化成全 false，supportsAnyFile 就是 false，
+  // handleFilesSelected 会在第一行直接 return —— 用户粘贴/选择图片后毫无反应，
+  // 也没有任何提示。这正是「仅图片发送没有反应」的一个来源。
+  //
+  // 因此未知时按「允许选择」处理，把最终裁决交给服务端：多带一个附件远好于
+  // 静默丢掉用户的图片。真正不被支持时，下面的 handleFilesSelected 会给出提示。
   const fileCaps: FileCapabilities = useMemo(
     () =>
       fileCapabilitiesProp ?? {
-        image: supportsImages,
+        image: supportsImages ?? true,
         pdf: false,
         audio: false,
         video: false,
@@ -262,15 +276,6 @@ function InputBoxComponent({
   const [pendingLargePaste, setPendingLargePaste] = useState<string | null>(null)
   const { behavior: largePasteBehavior } = useLargeTextPasteSettings()
 
-  // @ Mention 状态
-  const [mentionOpen, setMentionOpen] = useState(false)
-  const [mentionQuery, setMentionQuery] = useState('')
-  const [mentionStartIndex, setMentionStartIndex] = useState(-1)
-
-  // / Slash Command 状态
-  const [slashOpen, setSlashOpen] = useState(false)
-  const [slashQuery, setSlashQuery] = useState('')
-  const [slashStartIndex, setSlashStartIndex] = useState(-1)
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false)
@@ -545,13 +550,51 @@ function InputBoxComponent({
     [attachments, onClearRevert, onCommand, resetDraft, restoreDraft, text],
   )
 
+  // @ 提及与 / 命令的触发态（见 input/useMentionTrigger、input/useSlashTrigger）
+  const mention = useMentionTrigger({ text, setText, textareaRef })
+  const slash = useSlashTrigger({
+    text,
+    setText,
+    setAttachments,
+    textareaRef,
+    onCommand,
+    submitCommandOptimistically,
+  })
+  const { open: mentionOpen, query: mentionQuery } = mention
+  const setMentionOpen = mention.setOpen
+  const updateMentionQuery = mention.updateQuery
+  const { open: slashOpen, query: slashQuery } = slash
+  const setSlashOpen = slash.setOpen
+
   const runSubmit = useCallback(
-    async (submit: () => Promise<boolean | void> | boolean | void, onSuccess?: () => void, onFailure?: () => void) => {
+    async (
+      submit: () => Promise<boolean | void> | boolean | void,
+      onSuccess?: () => void,
+      onFailure?: () => void,
+      options?: {
+        /**
+         * 提交后立即释放 isSubmitting（不等 submit 返回）。
+         *
+         * 用于普通发消息：消息一上屏、草稿一清空，输入区就该恢复可用。若等到整条
+         * 发送链路（远程主机下 create/switch/prompt 串行可达数秒）结束才释放，
+         * 用户会盯着变灰的发送按钮，以为没发出去而重复点。
+         */
+        releaseImmediately?: boolean
+      },
+    ) => {
       if (isSubmitting) return false
 
       setIsSubmitting(true)
+      let released = false
+      const release = () => {
+        if (released) return
+        released = true
+        setIsSubmitting(false)
+      }
       try {
-        const result = await submit()
+        const pending = submit()
+        if (options?.releaseImmediately) release()
+        const result = await pending
         if (result === false) {
           onFailure?.()
           return false
@@ -564,7 +607,7 @@ function InputBoxComponent({
         onFailure?.()
         return false
       } finally {
-        setIsSubmitting(false)
+        release()
       }
     },
     [isSubmitting],
@@ -613,6 +656,8 @@ function InputBoxComponent({
           restoreDraft(draftSnapshot)
         }
       },
+      // 普通发消息：输入区立即恢复可用（详见 runSubmit 的 releaseImmediately）
+      { releaseImmediately: true },
     )
   }, [
     attachments,
@@ -631,28 +676,6 @@ function InputBoxComponent({
     text,
   ])
 
-  // 更新 @ 查询文本（用于进入/退出文件夹）
-  const updateMentionQuery = useCallback(
-    (newQuery: string) => {
-      if (!textareaRef.current) return
-
-      const beforeAt = text.slice(0, mentionStartIndex)
-      const afterQuery = text.slice(mentionStartIndex + 1 + mentionQuery.length)
-      const newText = beforeAt + '@' + newQuery + afterQuery
-
-      setText(newText)
-      setMentionQuery(newQuery)
-
-      // 移动光标到 @ 查询末尾
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return
-        const pos = mentionStartIndex + 1 + newQuery.length
-        textareaRef.current.setSelectionRange(pos, pos)
-        textareaRef.current.focus()
-      })
-    },
-    [text, mentionStartIndex, mentionQuery],
-  )
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -785,6 +808,8 @@ function InputBoxComponent({
       slashOpen,
       mentionQuery,
       updateMentionQuery,
+      setMentionOpen,
+      setSlashOpen,
       handleSend,
       text,
       attachments,
@@ -831,8 +856,7 @@ function InputBoxComponent({
       const trigger = detectMentionTrigger(newText, cursorPos, '@')
 
       if (trigger) {
-        setMentionQuery(trigger.query)
-        setMentionStartIndex(trigger.startIndex)
+        mention.updateQuery(trigger.query, trigger.startIndex)
         setMentionOpen(true)
         setSlashOpen(false) // 关闭斜杠菜单
       } else {
@@ -841,15 +865,14 @@ function InputBoxComponent({
         // 检测 / 触发（只在行首或空白后）
         const slashTrigger = detectSlashTrigger(newText, cursorPos)
         if (slashTrigger) {
-          setSlashQuery(slashTrigger.query)
-          setSlashStartIndex(slashTrigger.startIndex)
+          slash.updateQuery(slashTrigger.query, slashTrigger.startIndex)
           setSlashOpen(true)
         } else {
           setSlashOpen(false)
         }
       }
     },
-    [handleHistoryChange],
+    [handleHistoryChange, mention, slash, setMentionOpen, setSlashOpen],
   )
 
   const handleCompositionStart = useCallback(() => {
@@ -874,114 +897,21 @@ function InputBoxComponent({
   // @ Mention 选择处理
   const handleMentionSelect = useCallback(
     (item: MentionItem & { _enterFolder?: boolean }) => {
-      if (!textareaRef.current) return
-
-      // 如果是进入文件夹
-      if (item._enterFolder && item.type === 'folder') {
-        const basePath = (item.relativePath || item.displayName).replace(/\/+$/, '')
-        const folderPath = basePath + '/'
-        updateMentionQuery(folderPath)
-        return
-      }
-
-      // 构建 @ 文本
-      const mentionText = item.type === 'agent' ? `@${item.displayName}` : `@${item.relativePath || item.displayName}`
-
-      // 计算新文本
-      const beforeAt = text.slice(0, mentionStartIndex)
-      const afterQuery = text.slice(mentionStartIndex + 1 + mentionQuery.length)
-      const newText = beforeAt + mentionText + ' ' + afterQuery
-
-      // 创建附件
-      const attachment: Attachment = {
-        id: crypto.randomUUID(),
-        type: item.type,
-        displayName: item.displayName,
-        relativePath: item.relativePath,
-        url: item.type !== 'agent' ? item.value : undefined,
-        mime: item.type !== 'agent' ? 'text/plain' : undefined,
-        agentName: item.type === 'agent' ? item.displayName : undefined,
-        textRange: {
-          value: mentionText,
-          start: mentionStartIndex,
-          end: mentionStartIndex + mentionText.length,
-        },
-      }
-
-      setText(newText)
-      setAttachments(prev => [...prev, attachment])
-      setMentionOpen(false)
-
-      // 移动光标到 mention 后
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return
-        const newCursorPos = mentionStartIndex + mentionText.length + 1
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-        textareaRef.current.focus()
-      })
+      mention.selectItem(item)
     },
-    [text, mentionStartIndex, mentionQuery, updateMentionQuery],
+    [mention],
   )
 
-  const handleMentionClose = useCallback(() => {
-    setMentionOpen(false)
-    textareaRef.current?.focus()
-  }, [])
+  const handleMentionClose = mention.close
 
-  // / Slash Command 选择处理 - 类似 @ mention
   const handleSlashSelect = useCallback(
     (command: Command) => {
-      if (command.source === 'frontend') {
-        if (!onCommand) return
-
-        setSlashOpen(false)
-        submitCommandOptimistically(`/${command.name}`)
-        requestAnimationFrame(() => textareaRef.current?.focus())
-        return
-      }
-
-      if (!textareaRef.current) return
-
-      // 构建 /command 文本
-      const commandText = `/${command.name}`
-
-      // 计算新文本：替换 /query 为 /command
-      const beforeSlash = text.slice(0, slashStartIndex)
-      const afterQuery = text.slice(slashStartIndex + 1 + slashQuery.length)
-      const newText = beforeSlash + commandText + ' ' + afterQuery
-
-      // 创建 command attachment
-      const attachment: Attachment = {
-        id: crypto.randomUUID(),
-        type: 'command',
-        displayName: command.name,
-        commandName: command.name,
-        textRange: {
-          value: commandText,
-          start: slashStartIndex,
-          end: slashStartIndex + commandText.length,
-        },
-      }
-
-      setText(newText)
-      setAttachments(prev => [...prev, attachment])
-      setSlashOpen(false)
-
-      // 移动光标到命令后
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return
-        const newCursorPos = slashStartIndex + commandText.length + 1
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-        textareaRef.current.focus()
-      })
+      slash.select(command)
     },
-    [text, slashStartIndex, slashQuery, onCommand, submitCommandOptimistically],
+    [slash],
   )
 
-  const handleSlashClose = useCallback(() => {
-    setSlashOpen(false)
-    textareaRef.current?.focus()
-  }, [])
+  const handleSlashClose = slash.close
 
   // 通用文件上传 — 根据模型能力判断是否接受
   const handleFilesSelected = useCallback(
@@ -1020,7 +950,7 @@ function InputBoxComponent({
             mime,
           })
         } catch (err) {
-          console.warn('[InputBox] Failed to process file:', err)
+          logger.warn('[InputBox] Failed to process file:', err)
         }
       }
 
@@ -1031,6 +961,18 @@ function InputBoxComponent({
             'error',
             t('inputBox.fileTooLarge'),
             t('inputBox.fileTooLargeBody', { name: tooLarge[0].name, size: MAX_DROPPED_FILE_SIZE_LABEL }),
+            sessionId ?? '',
+          )
+        }
+        // 类型不被当前模型支持：必须明确告知。
+        // 此前这条分支只处理「文件太大」，类型不支持时完全静默 —— 用户粘贴/选择图片
+        // 后什么都没发生（没有附件、没有报错），看起来就是「发图片没反应」。
+        const unsupported = rejected.filter(item => item.type === 'type')
+        if (unsupported.length > 0) {
+          notificationStore.push(
+            'error',
+            t('inputBox.fileTypeUnsupported'),
+            t('inputBox.fileTypeUnsupportedBody', { name: unsupported[0].name }),
             sessionId ?? '',
           )
         }
@@ -1301,7 +1243,7 @@ function InputBoxComponent({
           mime,
         }
       } catch (err) {
-        console.warn('[InputBox] Failed to read dropped file for upload:', err)
+        logger.warn('[InputBox] Failed to read dropped file for upload:', err)
         return null
       }
     },
@@ -1337,7 +1279,7 @@ function InputBoxComponent({
 
         insertDraggedFiles(mentionFiles)
       } catch (err) {
-        console.warn('[InputBox] Failed to process Tauri dropped paths:', err)
+        logger.warn('[InputBox] Failed to process Tauri dropped paths:', err)
       }
     },
     [
@@ -1694,6 +1636,7 @@ function InputBoxComponent({
                 onRedoAll={onRedoAll}
                 collapsedPermission={collapsedPermission}
                 collapsedQuestion={collapsedQuestion}
+                heavyContent={heavyContent}
               />
             </div>
           </div>

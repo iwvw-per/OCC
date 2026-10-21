@@ -4,8 +4,11 @@
 //
 // 按服务器隔离的置顶会话列表（跨工作区持久化）。
 // 存储 { sessionId, directory, title } 以便未加载 session 详情时也能渲染。
+//
+// 持久化统一走 createStore：单写入口 + schema 校验 + 服务器切换自动 rebind。
 
-import { serverStorage } from '../utils/perServerStorage'
+import { z } from 'zod'
+import { createStore } from '../storage/createStore'
 import { serverStore } from './serverStore'
 
 export interface PinnedSessionEntry {
@@ -14,117 +17,100 @@ export interface PinnedSessionEntry {
   title: string
 }
 
-// 新：srv:{serverId}:opencode-pinned-sessions（serverStorage）
+// 新：srv:{serverId}:opencode-pinned-sessions
 // 旧：localStorage 全局 opencode-pinned-sessions（一次性迁到当前 active server）
 const STORAGE_KEY = 'opencode-pinned-sessions'
 
-function parseEntries(raw: unknown): PinnedSessionEntry[] {
-  if (!Array.isArray(raw)) return []
-  return raw.filter(
-    (item): item is PinnedSessionEntry =>
-      typeof item === 'object' &&
-      item !== null &&
-      typeof (item as PinnedSessionEntry).sessionId === 'string' &&
-      typeof (item as PinnedSessionEntry).directory === 'string' &&
-      typeof (item as PinnedSessionEntry).title === 'string',
-  )
-}
+const schema: z.ZodType<PinnedSessionEntry[]> = z.array(z.unknown()).transform(items =>
+  items.flatMap(item => {
+    const entry = item as Partial<PinnedSessionEntry> | null
+    if (!entry || typeof entry.sessionId !== 'string') return []
+    if (typeof entry.directory !== 'string' || typeof entry.title !== 'string') return []
+    return [{ sessionId: entry.sessionId, directory: entry.directory, title: entry.title }]
+  }),
+)
 
-function loadEntries(): PinnedSessionEntry[] {
-  // 已有 per-server key 时直接用（含空数组）
-  if (serverStorage.get(STORAGE_KEY) !== null) {
-    return parseEntries(serverStorage.getJSON<unknown>(STORAGE_KEY))
-  }
-
-  // 一次性迁移：旧全局列表归到当前 active server
+/** 旧全局列表迁移到当前服务器桶（只在目标桶为空时执行一次） */
+function migrateLegacyBucket(): void {
   try {
     const legacyRaw = localStorage.getItem(STORAGE_KEY)
-    if (legacyRaw) {
-      const migrated = parseEntries(JSON.parse(legacyRaw))
-      serverStorage.setJSON(STORAGE_KEY, migrated)
-      localStorage.removeItem(STORAGE_KEY)
-      return migrated
+    if (!legacyRaw) return
+    const target = `srv:${serverStore.getActiveServerId()}:${STORAGE_KEY}`
+    if (localStorage.getItem(target) === null) {
+      localStorage.setItem(target, JSON.stringify(schema.parse(JSON.parse(legacyRaw))))
     }
+    localStorage.removeItem(STORAGE_KEY)
   } catch {
-    // ignore migration failures
+    /* 迁移失败不影响后续使用 */
   }
-
-  return []
 }
 
+migrateLegacyBucket()
+
+const store = createStore({
+  key: STORAGE_KEY,
+  scope: { kind: 'server', serverId: serverStore.getActiveServerId() },
+  schema,
+  defaultValue: [],
+})
+
 class PinnedSessionsStore {
-  private entries: PinnedSessionEntry[] = []
   private listeners = new Set<() => void>()
 
   constructor() {
-    this.reload()
-    serverStore.onServerChange(() => {
-      this.reload()
-      this.emit()
-    })
-  }
-
-  private reload() {
-    this.entries = loadEntries()
-  }
-
-  isPinned(sessionId: string): boolean {
-    return this.entries.some(e => e.sessionId === sessionId)
-  }
-
-  pin(entry: PinnedSessionEntry) {
-    const existingIndex = this.entries.findIndex(e => e.sessionId === entry.sessionId)
-    if (existingIndex !== -1) {
-      const existing = this.entries[existingIndex]
-      if (existing.directory === entry.directory && existing.title === entry.title) return
-      this.entries = [
-        ...this.entries.slice(0, existingIndex),
-        entry,
-        ...this.entries.slice(existingIndex + 1),
-      ]
-      this.persist()
-      this.emit()
-      return
-    }
-    this.entries = [...this.entries, entry]
-    this.persist()
-    this.emit()
-  }
-
-  update(sessionId: string, patch: Partial<Omit<PinnedSessionEntry, 'sessionId'>>) {
-    const index = this.entries.findIndex(e => e.sessionId === sessionId)
-    if (index === -1) return
-    const next = { ...this.entries[index], ...patch }
-    if (next.directory === this.entries[index].directory && next.title === this.entries[index].title) return
-    this.entries = [...this.entries.slice(0, index), next, ...this.entries.slice(index + 1)]
-    this.persist()
-    this.emit()
-  }
-
-  unpin(sessionId: string) {
-    const idx = this.entries.findIndex(e => e.sessionId === sessionId)
-    if (idx === -1) return
-    this.entries = [...this.entries.slice(0, idx), ...this.entries.slice(idx + 1)]
-    this.persist()
-    this.emit()
-  }
-
-  private persist() {
-    serverStorage.setJSON(STORAGE_KEY, this.entries)
-  }
-
-  subscribe = (fn: () => void): (() => void) => {
-    this.listeners.add(fn)
-    return () => this.listeners.delete(fn)
-  }
-
-  getSnapshot = (): PinnedSessionEntry[] => {
-    return this.entries
+    store.subscribe(() => this.emit())
+    serverStore.onServerChange(() => store.rebind(serverStore.getActiveServerId()))
   }
 
   private emit() {
     this.listeners.forEach(fn => fn())
   }
+
+  private entries(): PinnedSessionEntry[] {
+    return store.get()
+  }
+
+  isPinned(sessionId: string): boolean {
+    return this.entries().some(e => e.sessionId === sessionId)
+  }
+
+  pin(entry: PinnedSessionEntry) {
+    store.commit(list => {
+      const index = list.findIndex(e => e.sessionId === entry.sessionId)
+      if (index === -1) return [...list, entry]
+      const existing = list[index]
+      if (existing.directory === entry.directory && existing.title === entry.title) return list
+      return [...list.slice(0, index), entry, ...list.slice(index + 1)]
+    })
+  }
+
+  update(sessionId: string, patch: Partial<Omit<PinnedSessionEntry, 'sessionId'>>) {
+    store.commit(list => {
+      const index = list.findIndex(e => e.sessionId === sessionId)
+      if (index === -1) return list
+      const next = { ...list[index], ...patch }
+      const current = list[index]
+      if (next.directory === current.directory && next.title === current.title) return list
+      return [...list.slice(0, index), next, ...list.slice(index + 1)]
+    })
+  }
+
+  unpin(sessionId: string) {
+    store.commit(list => {
+      const index = list.findIndex(e => e.sessionId === sessionId)
+      if (index === -1) return list
+      return [...list.slice(0, index), ...list.slice(index + 1)]
+    })
+  }
+
+  subscribe = (fn: () => void): (() => void) => {
+    this.listeners.add(fn)
+    return () => {
+      this.listeners.delete(fn)
+    }
+  }
+
+  getSnapshot = (): PinnedSessionEntry[] => store.get()
 }
 
 export const pinnedSessionsStore = new PinnedSessionsStore()

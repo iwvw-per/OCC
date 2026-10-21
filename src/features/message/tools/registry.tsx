@@ -13,6 +13,7 @@ import {
   QuestionIcon,
   TaskIcon,
   WrenchIcon,
+  CodeIcon,
 } from './icons'
 import { detectLanguage } from '../../../utils/languageUtils'
 
@@ -206,6 +207,58 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
 // Tool-Specific Data Extractors
 // ============================================
 
+/**
+ * Code Mode 的 execute：input.code 是一段 JS，内部通过 tools.xxx() 调用其它工具。
+ *
+ * 直接展示整段代码没有信息量（都是工具调用样板）。这里把代码里出现的
+ * `tools.foo(...)` / `tools["ns"].bar(...)` 提取成一行摘要，让人一眼看出
+ * 这次实际调了哪些工具；代码本身仍保留在展开内容里。
+ */
+function executeExtractData(part: ToolPart): ExtractedToolData {
+  const base = defaultExtractData(part)
+  const inputObj = part.state.input as Record<string, unknown> | undefined
+  const code = typeof inputObj?.code === 'string' ? inputObj.code : undefined
+  if (!code) return base
+
+  base.input = code
+  base.inputLang = 'javascript'
+  return base
+}
+
+/** 从 execute 的代码里提取实际调用的工具名（去重、保序）。 */
+export function extractToolCallsFromCode(code: string): string[] {
+  const names: string[] = []
+  const seen = new Set<string>()
+  const add = (name: string | undefined) => {
+    if (!name || seen.has(name)) return
+    seen.add(name)
+    names.push(name)
+  }
+
+  // 分两轮，但先把命名空间调用从源码里抠掉，避免第二轮把它的方法名再算一次。
+  //   命名空间：tools["api-monitor"].find_api(   /   tools.ns["name"](
+  let rest = code.replace(
+    /\btools\s*(?:\[\s*["'`][^"'`]+["'`]\s*\]|\.\s*[A-Za-z_$][\w$]*)\s*\.\s*\[?\s*["'`]([^"'`]+)["'`]\s*\]?\s*\(/g,
+    (_match, name: string) => {
+      add(name)
+      return ''
+    },
+  )
+  // v2 里 tools["ns"].method() 的方法名不带引号，单独处理
+  rest = rest.replace(
+    /\btools\s*(?:\[\s*["'`][^"'`]+["'`]\s*\]|\.\s*[A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g,
+    (_match, name: string) => {
+      add(name)
+      return ''
+    },
+  )
+  // 普通：tools.get_system_status(
+  for (const match of rest.matchAll(/\btools\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g)) {
+    add(match[1])
+  }
+  return names
+}
+
 function bashExtractData(part: ToolPart): ExtractedToolData {
   const base = defaultExtractData(part)
   const inputObj = part.state.input as Record<string, unknown> | undefined
@@ -273,6 +326,16 @@ function editExtractData(part: ToolPart): ExtractedToolData {
 // ============================================
 
 export const toolRegistry: ToolRegistry = [
+  // Code Mode 的 execute：在沙箱里执行 JS，通过 tools.* 调用其它工具。
+  // 它和 shell 是不同工具（shell 执行系统命令，execute 执行 JS 代码），
+  // 必须单独登记，否则会掉进「通用扳手」兜底，看起来和什么都像、又都分不清。
+  {
+    match: exact('execute'),
+    icon: <CodeIcon />,
+    colorClass: 'tool-color-exec',
+    extractData: executeExtractData,
+  },
+
   // Bash / Terminal
   {
     match: (name: string) => includes('bash', 'cmd', 'terminal', 'shell')(name) || exact('sh')(name),

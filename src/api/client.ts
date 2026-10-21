@@ -3,9 +3,10 @@
 // 基于 @opencode-ai/sdk: /config, /project, /provider 相关接口
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
+import { getV2Client } from './sdkV2'
+import { nativeGetProviders } from './v2NativeConfig'
 import { nativeGetCurrentProject, nativeListProjects, nativeInitGit } from './v2NativeProject'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { directoryCacheKey } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
 import { ttlCacheGet, ttlCacheSet } from '../utils/ttlCache'
 import { singleFlight } from '../utils/singleFlight'
@@ -55,9 +56,9 @@ export * from './lsp'
 // ============================================
 
 export async function getActiveModels(directory?: string, serverId?: string): Promise<ModelInfo[]> {
-  const sdk = getSDKClient(serverId)
+  const sid = serverId ?? serverStore.getActiveServerId()
   const data = requireRecord(
-    unwrap(await sdk.config.providers({ directory: formatPathForApi(directory, serverId) })),
+    await nativeGetProviders(sid, { directory }),
     'Invalid OpenCode providers response',
   )
   const providers = requireArray<Record<string, unknown>>(data.providers, 'Invalid OpenCode providers response')
@@ -113,11 +114,7 @@ export async function getActiveModels(directory?: string, serverId?: string): Pr
 export async function getCurrentProject(directory?: string, serverId?: string): Promise<ApiProject> {
   const sid = serverId ?? serverStore.getActiveServerId()
   return singleFlight(`project-current:${sid}:${directoryCacheKey(directory)}`, async () => {
-    if (serverStore.getApiVersion(sid) === 'v2') {
-      return nativeGetCurrentProject(sid, { directory }) as unknown as ApiProject
-    }
-    const sdk = getSDKClient(serverId)
-    return unwrap(await sdk.project.current({ directory: formatPathForApi(directory, serverId) }))
+    return nativeGetCurrentProject(sid, { directory }) as unknown as ApiProject
   })
 }
 
@@ -129,27 +126,18 @@ export async function getCurrentProject(directory?: string, serverId?: string): 
 export async function getProjects(directory?: string, serverId?: string): Promise<ApiProject[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
   return singleFlight(`project-list:${sid}:${directoryCacheKey(directory)}`, async () => {
-    if (serverStore.getApiVersion(sid) === 'v2') {
-      return nativeListProjects(sid, { directory }) as unknown as ApiProject[]
-    }
-    const sdk = getSDKClient(serverId)
-    return requireArray<ApiProject>(
-      unwrap(await sdk.project.list({ directory: formatPathForApi(directory, serverId) })),
-      'Invalid OpenCode project list response',
-    )
+    return nativeListProjects(sid, { directory }) as unknown as ApiProject[]
   })
 }
 
 /**
  * 初始化 Git 仓库
  */
-export async function initGitProject(directory?: string, serverId?: string): Promise<ApiProject> {
+export async function initGitProject(_directory?: string, serverId?: string): Promise<ApiProject> {
+  // v2 的 initGit 以服务器当前 project 为作用域，不接受 directory 参数；
+  // 保留形参是为了不打断调用方签名。
   const sid = serverId ?? serverStore.getActiveServerId()
-  if (serverStore.getApiVersion(sid) === 'v2') {
-    return nativeInitGit(sid) as unknown as ApiProject
-  }
-  const sdk = getSDKClient(serverId)
-  return unwrap(await sdk.project.initGit({ directory: formatPathForApi(directory, serverId) }))
+  return nativeInitGit(sid) as unknown as ApiProject
 }
 
 // ============================================
@@ -166,8 +154,17 @@ export async function getPath(serverId?: string): Promise<ApiPath> {
   const cached = ttlCacheGet<ApiPath>(cacheKey, PATH_CACHE_TTL_MS)
   if (cached) return cached
 
-  const sdk = getSDKClient(serverId)
-  const info = requireRecord(unwrap(await sdk.path.get()), 'Invalid OpenCode path response') as unknown as ApiPath
-  ttlCacheSet(cacheKey, info, PATH_CACHE_TTL_MS)
-  return info
+  const sid = serverId ?? serverStore.getActiveServerId()
+  const info = await getV2Client(sid).location.get()
+  const project = info.project as { directory?: string; canonical?: string } | undefined
+  const directory = project?.canonical ?? project?.directory ?? ''
+  const path = {
+    home: '',
+    state: '',
+    config: '',
+    worktree: directory,
+    directory,
+  } satisfies ApiPath
+  ttlCacheSet(cacheKey, path, PATH_CACHE_TTL_MS)
+  return path
 }

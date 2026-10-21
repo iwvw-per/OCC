@@ -35,6 +35,15 @@ interface FloatingActionsProps {
   onRedoAll?: () => void
   collapsedPermission?: CollapsedDialogInfo
   collapsedQuestion?: CollapsedDialogInfo
+  /**
+   * 会话里堆积的「重型内联内容」提示。
+   *
+   * 用于解释一个反直觉的故障：用户只发「继续」两个字却收到 413。
+   * 真实原因是 agent 读了若干张截图，base64 一直留在服务端上下文里，
+   * 转发给模型时超过上游上限。前端无法减小它，但必须提前说明，
+   * 否则用户完全无法理解这个错误。
+   */
+  heavyContent?: { label: string; title?: string }
 }
 
 export const FloatingActions = memo(function FloatingActions({
@@ -44,6 +53,7 @@ export const FloatingActions = memo(function FloatingActions({
   onRedoAll,
   collapsedPermission,
   collapsedQuestion,
+  heavyContent,
 }: FloatingActionsProps) {
   return (
     <div className="flex items-center justify-center gap-2 pointer-events-none">
@@ -83,6 +93,18 @@ export const FloatingActions = memo(function FloatingActions({
 
       <PresenceItem show={!!canRedo}>
         {canRedo && <UndoStatus revertSteps={revertSteps ?? 0} onRedo={onRedo} onRedoAll={onRedoAll} />}
+      </PresenceItem>
+
+      {/* 上下文过重量提示：解释「只发两个字也 413」，并给出脱困路径 */}
+      <PresenceItem show={!!heavyContent}>
+        {heavyContent && (
+          <span
+            title={heavyContent.title}
+            className="flex items-center gap-1.5 px-3 h-[32px] rounded-full bg-bg-100/95 backdrop-blur-md border border-warning-100/40 text-[length:var(--fs-sm)] leading-[14px] text-warning-100 shadow-sm"
+          >
+            <span className="whitespace-nowrap">{heavyContent.label}</span>
+          </span>
+        )}
       </PresenceItem>
     </div>
   )

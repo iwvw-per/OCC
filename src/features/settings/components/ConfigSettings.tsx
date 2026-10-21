@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { logger } from '../../../utils/logger'
 import { useTranslation } from 'react-i18next'
 import {
   AlertCircleIcon,
@@ -19,7 +20,7 @@ import {
 import { Button } from '../../../components/ui/Button'
 import { Dialog } from '../../../components/ui/Dialog'
 import { SettingsSearch } from '../SettingsSearch'
-import { getConfig, getGlobalConfig, getProviderConfigs, listAvailableShells, updateGlobalConfig } from '../../../api'
+import { getConfig, getGlobalConfig, getProviderConfigs, listAvailableShells, saveConfig } from '../../../api'
 import type { Config } from '../../../types/api/config'
 import { useCurrentDirectory, useIsMobile } from '../../../hooks'
 import { SettingsSection } from './SettingsUI'
@@ -30,7 +31,7 @@ import { SECTION_IDS, SECTION_META } from './configEditorMeta'
 import { buildConfigEditorSearchItems, type ConfigEditorSearchItem } from './configEditorSearch'
 import { SectionRouter } from './configEditorSections'
 import type { Choice, JsonRecord, SectionID } from './configEditorTypes'
-import { clone, createMergePatch, getObject, isRecord, sameValue, tx } from './configEditorUtils'
+import { clone, getObject, isRecord, sameValue, tx } from './configEditorUtils'
 import { cn } from '../../../utils/cn'
 import { interactive } from '../../../utils/interaction'
 
@@ -272,18 +273,21 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
     }
     setSaving(true)
     try {
-      const saved = await updateGlobalConfig(createMergePatch(original, snapshot) as Config)
+      // saveConfig 内部：算 patch → 读目标文件原始内容 → 合入 → fs.write → location.reload。
+      // 不能用「合并后的生效配置」整体回写，否则会把项目级配置的内容复制进全局配置。
+      await saveConfig(original, snapshot)
       if (request !== saveRequestRef.current) return
-      setOriginal(clone(saved))
-      setConfig(current => (sameValue(current, snapshot) ? clone(saved) : current))
+      setOriginal(clone(snapshot))
+      setConfig(current => (sameValue(current, snapshot) ? clone(snapshot) : current))
       try {
+        // reload 之后重新读一次生效配置，确认服务端真的接受了这份改动
         const nextEffective = await getConfig(directory)
         if (request !== saveRequestRef.current) return
         setEffective(nextEffective)
       } catch (refreshError) {
         if (request !== saveRequestRef.current) return
         setError(tx('Config was saved, but the effective config could not be refreshed.', '配置已保存，但无法刷新生效配置。', lang))
-        console.warn('[ConfigSettings] Failed to refresh effective config after save:', refreshError)
+        logger.warn('[ConfigSettings] Failed to refresh effective config after save:', refreshError)
       }
     } catch (err) {
       if (request !== saveRequestRef.current) return

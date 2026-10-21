@@ -22,6 +22,7 @@
 // ============================================
 
 import { readAccount } from './aiagent'
+import { logger } from '../utils/logger'
 import { cleanupDeprecatedSyncKeys } from './syncCleanup'
 import { subscribePreferenceEvents, type PreferenceEventsSubscription } from './preferencesEvents'
 import {
@@ -50,12 +51,15 @@ const POLL_INTERVAL_MS = 15_000
  * 拉取仍带 If-None-Match，内容未变时服务端回 304（零响应体）。
  */
 const IDLE_POLL_INTERVAL_MS = 5 * 60_000
+/** SSE 在线时的轮询间隔：实时性由推送保证，轮询只兜底漏事件 */
+const SSE_POLL_INTERVAL_MS = 60_000
 // 本地改动合并窗口：一次编辑常触发多次写入（如删一项后重排），需要合并成一次
 // 上传；但不能太长，否则「改完立刻看另一台」的体感变差。500ms 足以吸收连写，
 // 又让上传几乎立刻发生。
 const PUSH_DEBOUNCE_MS = 500
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollInterval = POLL_INTERVAL_MS
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let visibilityHandler: (() => void) | null = null
 let eventsSubscription: PreferenceEventsSubscription | null = null
@@ -116,7 +120,7 @@ async function runSync(force: boolean): Promise<void> {
     lastSyncAt = Date.now()
     setState({ status: 'synced', lastSyncedAt: Date.now(), error: undefined })
     if ((pulled > 0 || pushed > 0) && import.meta.env.DEV) {
-      console.log(`[prefs-sync] pulled ${pulled}, pushed ${pushed} preferences`)
+      logger.log(`[prefs-sync] pulled ${pulled}, pushed ${pushed} preferences`)
     }
   } catch (error) {
     setState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
@@ -135,6 +139,17 @@ function scheduleSync(): void {
     debounceTimer = null
     void runSync(false)
   }, PUSH_DEBOUNCE_MS)
+}
+
+/** 按 SSE 连接状态调整轮询节奏：在线 60s 兜底，离线 15s 追赶 */
+function syncPollInterval(): void {
+  const interval = eventsSubscription?.isConnected?.() === false ? POLL_INTERVAL_MS : SSE_POLL_INTERVAL_MS
+  if (pollInterval === interval) return
+  pollInterval = interval
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = setInterval(poll, interval)
+  }
 }
 
 function poll(): void {
@@ -221,7 +236,10 @@ export async function startPreferencesSync(): Promise<void> {
 
   startEventSubscription()
   startStorageSubscription()
+  // SSE 是实时通道；轮询只做「断线/丢事件」的兜底。SSE 在线时拉长到 60s，
+  // 断线时回到 15s。movement 由 subscribePreferenceEvents 的连接状态决定。
   pollTimer = setInterval(poll, POLL_INTERVAL_MS)
+  syncPollInterval()
   // B 类缺陷 5：回前台补跑一次同步。poll 在页面不可见时直接返回，后台期间的
   // 本地改动无法上传；回到前台立即补一次，不必等下一个轮询周期。
   if (typeof document !== 'undefined') {

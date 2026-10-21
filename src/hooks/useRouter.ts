@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { serverStore } from '../store/serverStore'
 import { isAbsoluteDirectory, normalizeToForwardSlash, serverStorage } from '../utils'
 import { STORAGE_KEY_LAST_DIRECTORY } from '../constants/storage'
 import { useIsMobile } from './useIsMobile'
@@ -59,7 +60,7 @@ function parseHash(): RouteState {
   }
 
   if (!directory) {
-    const saved = serverStorage.get(STORAGE_KEY_LAST_DIRECTORY)
+    const saved = serverStorage.get(STORAGE_KEY_LAST_DIRECTORY, serverStore.getActiveServerId())
     if (saved) directory = saved
   }
 
@@ -191,9 +192,9 @@ export function useRouter() {
     const newHash = buildHash(null, currentRoute.serverId, normalized || undefined)
     const next = { sessionId: null, serverId: currentRoute.serverId, directory: normalized || undefined }
     if (normalized) {
-      serverStorage.set(STORAGE_KEY_LAST_DIRECTORY, normalized)
+      serverStorage.set(STORAGE_KEY_LAST_DIRECTORY, normalized, serverStore.getActiveServerId())
     } else {
-      serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY)
+      serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY, serverStore.getActiveServerId())
     }
     window.location.hash = newHash
     emitRoute(next)
@@ -204,9 +205,9 @@ export function useRouter() {
     const normalized = directory ? normalizeToForwardSlash(directory) : undefined
     const newHash = buildHash(currentRoute.sessionId, currentRoute.serverId, normalized || undefined)
     if (normalized) {
-      serverStorage.set(STORAGE_KEY_LAST_DIRECTORY, normalized)
+      serverStorage.set(STORAGE_KEY_LAST_DIRECTORY, normalized, serverStore.getActiveServerId())
     } else {
-      serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY)
+      serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY, serverStore.getActiveServerId())
     }
     window.history.replaceState(null, '', newHash)
     emitRoute({
@@ -227,9 +228,9 @@ export function useRouter() {
     const normalized = directory ? normalizeToForwardSlash(directory) : undefined
     const newHash = buildHash(sessionKey, serverId, normalized)
     if (normalized) {
-      serverStorage.set(STORAGE_KEY_LAST_DIRECTORY, normalized)
+      serverStorage.set(STORAGE_KEY_LAST_DIRECTORY, normalized, serverStore.getActiveServerId())
     } else {
-      serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY)
+      serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY, serverStore.getActiveServerId())
     }
     if (isMobileRef.current) {
       window.history.replaceState(null, '', newHash)

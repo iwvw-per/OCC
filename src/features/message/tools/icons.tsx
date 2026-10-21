@@ -16,6 +16,7 @@ import {
   ListChecks,
   Loader,
   CircleHelp,
+  Code2,
 } from 'lucide-react'
 
 interface IconProps {
@@ -46,3 +47,5 @@ export const ChecklistIcon = wrapTool(ListChecks)
 export const TaskIcon = wrapTool(Loader)
 
 export const QuestionIcon = wrapTool(CircleHelp)
+/** Code Mode 的 execute：执行 JS 代码（区别于 shell 的系统命令），用代码括号图标 */
+export const CodeIcon = wrapTool(Code2)

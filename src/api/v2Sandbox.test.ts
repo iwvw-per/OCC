@@ -10,7 +10,9 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { serverStore } from '../store/serverStore'
-import { getSDKClient } from './sdk'
+import { getV2Client } from './sdkV2'
+import { nativeGetProviders } from './v2NativeConfig'
+import { nativeCreateSession } from './v2NativeSession'
 import { detectServerVersion } from './serverVersion'
 
 const V2_SANDBOX_URL = import.meta.env.VITE_V2_SANDBOX_URL as string | undefined
@@ -35,7 +37,6 @@ async function registerV2Server() {
 
 async function ensureV2() {
   await registerV2Server()
-  await serverStore.ensureApiVersion(SERVER_ID)
 }
 
 describeIf('v2 沙盒 facade 真实连接', () => {
@@ -50,33 +51,25 @@ describeIf('v2 沙盒 facade 真实连接', () => {
       fetch: globalThis.fetch,
       timeoutMs: 5000,
     })
-    expect(info.apiVersion).toBe('v2')
     expect(info.version).toMatch(/^2\./)
   })
 
-  it('session.experimental.list 返回真实会话', async () => {
+  it('session.list 返回真实会话', async () => {
     await ensureV2()
-    const sdk = getSDKClient(SERVER_ID) as {
-      experimental: { session: { list: (q: { limit?: number }) => Promise<{ data?: unknown[] }> } }
-    }
-    const res = await sdk.experimental.session.list({ limit: 5 })
-    expect(Array.isArray(res.data)).toBe(true)
+    const res = await getV2Client(SERVER_ID).session.list({ limit: 5 })
+    expect(Array.isArray(res)).toBe(true)
   })
 
-  it('config.providers 返回非空 provider/models', async () => {
+  it('provider.list 返回非空 provider/models', async () => {
     await ensureV2()
-    const sdk = getSDKClient(SERVER_ID) as {
-      config: { providers: (q: { directory?: string }) => Promise<{ data?: { providers: unknown[] } }> }
-    }
-    const res = await sdk.config.providers({})
-    expect(res.data).toBeDefined()
-    expect(Array.isArray(res.data!.providers)).toBe(true)
+    const providers = await nativeGetProviders(SERVER_ID, {})
+    expect(providers.providers).toBeDefined()
+    expect(Array.isArray(providers.providers)).toBe(true)
   }, 30000)
 
   it('session.create 能创建真实会话（对话链路第一步）', async () => {
     await ensureV2()
-    const sdk = getSDKClient(SERVER_ID) as { session: { create: (q: { title?: string; directory?: string }) => Promise<{ data?: { id: string } }> } }
-    const res = await sdk.session.create({ title: 'v2-sandbox-dialog' })
-    expect(res.data?.id).toBeTruthy()
+    const created = await nativeCreateSession(SERVER_ID, { title: 'v2-sandbox-dialog' })
+    expect(created.id).toBeTruthy()
   }, 30000)
 })

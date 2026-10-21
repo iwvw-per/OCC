@@ -20,13 +20,8 @@ export type {
   Session,
   SessionStatus,
   SessionStatusMap,
-  SessionSummary,
-  SessionShare,
   SessionRevert,
   SessionListParams,
-  SessionCreateParams,
-  SessionUpdateParams,
-  SessionForkParams,
 } from './session'
 
 // Message types
@@ -41,8 +36,6 @@ export type {
   ReasoningPart,
   ToolPart,
   FilePart,
-  FileSource,
-  FileSourceType,
   AgentPart,
   StepStartPart,
   StepFinishPart,
@@ -54,25 +47,17 @@ export type {
   TextPartInput,
   FilePartInput,
   AgentPartInput,
-  SubtaskPartInput,
 } from './message'
 
 // Model types
 export type {
   Model,
-  ModelStatus,
-  ModelLimit,
-  ModelCapabilities,
-  ModelIOCapabilities,
   Provider,
   ProvidersResponse,
-  ProviderAuthMethod,
-  ProviderAuthAuthorization,
 } from './model'
 
 // Permission types
 export type {
-  PermissionToolInfo,
   PermissionRequest,
   PermissionReply,
   QuestionOption,
@@ -84,35 +69,26 @@ export type {
 // File types
 export type {
   FileNode,
-  FileNodeType,
   FileContent,
   FileDiff,
   FileStatusItem,
-  FilePatch,
-  PatchHunk,
   Symbol,
-  SymbolLocation,
-  SymbolRange,
   TextSearchMatch,
 } from './file'
 
 // Project types
-export type { Project, ProjectIcon, ProjectCommands, ProjectUpdateParams, PathResponse } from './project'
+export type { Project, PathResponse } from './project'
 
 // Agent types
-export type { Agent, AgentMode, AgentPermission } from './agent'
+export type { Agent, AgentPermission } from './agent'
 
 // Event types
 export type {
   GlobalEvent,
-  EventType,
   EventCallbacks,
   ServerConnectedPayload,
-  SessionIdlePayload,
   SessionErrorPayload,
-  SessionStatusPayload,
   SessionCompactedPayload,
-  SessionDiffPayload,
   PartDeltaPayload,
   PartRemovedPayload,
   PermissionRepliedPayload,
@@ -121,6 +97,7 @@ export type {
   TodoItem,
   TodoUpdatedPayload,
   NextToolSettledPayload,
+  NextToolProgressPayload,
   WorktreeReadyPayload,
   WorktreeFailedPayload,
   VcsBranchUpdatedPayload,
@@ -130,44 +107,22 @@ export { EventTypes } from './event'
 // Config types
 export type {
   Config,
-  LogLevel,
   ServerConfig,
-  PermissionConfig,
-  PermissionActionConfig,
-  PermissionObjectConfig,
-  PermissionRuleConfig,
-  AgentConfig,
-  ProviderConfig,
   McpLocalConfig,
   McpOAuthConfig,
   McpRemoteConfig,
-  LayoutConfig,
 } from './config'
 
 // MCP types
 export type {
   MCPStatus,
-  MCPStatusConnected,
-  MCPStatusDisabled,
-  MCPStatusFailed,
-  MCPStatusNeedsAuth,
-  MCPStatusNeedsClientRegistration,
   MCPResource,
   MCPStatusResponse,
   McpServerConfig,
 } from './mcp'
 
-// Skill types
-export type { Skill, SkillList } from './skill'
 
-// PTY types
-export type { Pty, PtySize, PtyCreateParams, PtyUpdateParams } from './pty'
 
-// VCS types
-export type { VcsInfo, VcsDiffMode } from './vcs'
 
-// Worktree types
-export type { Worktree, WorktreeCreateInput, WorktreeRemoveInput, WorktreeResetInput } from './worktree'
 
 // Tool types
-export type { ToolIDs, ToolList, ToolListItem } from './tool'

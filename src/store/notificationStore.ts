@@ -110,6 +110,26 @@ class NotificationStore {
     // 通知时间戳 <= 水位即已读。这里只单向抬高（read: false -> true），
     // 不回退，避免「已读又变未读」。
     readWatermarkStore.subscribe(() => this.reconcileReadFromWatermarks())
+    // 启动时先对账一次：通知以 read:false 持久化、而水位在水位变化事件之外
+    // 早已推进（例如另一台设备读过并同步过来，本端 pull 时值没变因此不触发
+    // 订阅）时，这个未读点会跟着重启一直存在，且再没有机会被清掉 ——
+    // 表现为「这边有未读、那边早就读过了」。
+    this.reconcileReadFromWatermarks()
+
+    // 同源其它标签页/窗口写入通知时同步过来。
+    //
+    // 通知本身不参与跨端同步，但同一浏览器的多个窗口共用一份 localStorage：
+    // 窗口 A 里读完的通知，窗口 B 不重读就还亮着未读点（用户看到的就是
+    // 「一边已读、另一边没读」）。storage 事件只在「别的窗口写入」时触发，
+    // 本窗口自己的写入不会回环。
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', event => {
+        if (event.key !== STORAGE_KEY) return
+        this.state = { ...this.state, notifications: loadNotifications() }
+        this.reconcileReadFromWatermarks()
+        this.notify()
+      })
+    }
   }
 
   /**
@@ -178,18 +198,45 @@ class NotificationStore {
   // 推送通知（加历史 + 弹 toast）
   // ============================================
 
-  push(type: NotificationType, title: string, body: string, sessionId: string, directory?: string) {
+  push(
+    type: NotificationType,
+    title: string,
+    body: string,
+    sessionId: string,
+    directory?: string,
+    /**
+     * 事件发生时间（服务端时间）。
+     *
+     * 传入时用它作为通知时间戳；同一轮完成在多端会拿到**同一个**服务端时间，
+     * 已读水位才能跨端对齐。缺省时退回本机校准钟（本端新产生的提示，如权限、
+     * 提问、错误 —— 这些不参与跨端已读比较）。
+     */
+    at?: number,
+  ) {
+    const serverId = sessionKeyToServerId(sessionId) || undefined
+    const timestamp = at && Number.isFinite(at) ? at : watermarkNow(serverId)
+    /**
+     * 入队即判断水位，而不是一律 read: false。
+     *
+     * 水位是跨端权威：同一会话在另一端已经展开/点开过（水位已抬高），本端后到的
+     * completed 通知若仍标成未读，就会亮出一个「其实早已读过」的点 —— 用户点了
+     * 也没有任何可清的内容（对应的消息他早就看过了）。reconcileReadFromWatermarks
+     * 只在水位「变化时」触发，覆盖不到这种「水位早已领先、通知才到」的顺序。
+     */
+    const bareId = sessionKeyToSessionId(sessionId)
+    const read =
+      type === 'completed' && !!bareId && readWatermarkStore.isRead(bareId, timestamp)
+
     const entry: NotificationEntry = {
       id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       type,
       title,
       body,
       sessionId,
-      serverId: sessionKeyToServerId(sessionId) || undefined,
+      serverId,
       directory,
-      // 用校准钟（与已读水位同一基准），否则跨端比较无意义
-      timestamp: watermarkNow(),
-      read: false,
+      timestamp,
+      read,
     }
 
     // 加到历史
@@ -232,20 +279,39 @@ class NotificationStore {
     const notifications = this.state.notifications.map(n => (n.id === id && !n.read ? { ...n, read: true } : n))
     this.state = { ...this.state, notifications }
     // 抬高水位使其它端也视为已读（仅 completed 参与水位治理）
-    if (target && target.type === 'completed') readWatermarkStore.raise(target.sessionId, target.timestamp)
+    if (target && target.type === 'completed') {
+      readWatermarkStore.raise(target.sessionId, this.readInstant(target))
+    }
     this.persist()
     this.notify()
   }
 
+  /**
+   * 标记已读时水位要抬到多高。
+   *
+   * 通知时间戳已改为「服务端事件时间」（见 useGlobalEvents → notificationStore.push），
+   * 同一轮完成在多端拿到的是同一个值，因此抬到本条时间戳即可对齐。
+   *
+   * 再取一次「当前服务端时刻」作为上界：会话完成可能由两条不同事件表达
+   * （execution.succeeded / session.idle），它们的 created 会差几毫秒；只抬到
+   * 本端收到的那条，另一端稍大的那条仍会判未读。抬到「现在」表示「此刻之前
+   * 的都算读过」，与用户点已读的语义一致。
+   */
+  private readInstant(entry: NotificationEntry): number {
+    return Math.max(entry.timestamp, watermarkNow(this.entryServerId(entry)))
+  }
+
   markAllRead() {
-    const now = watermarkNow()
+    // 先收集未读的 completed，再改状态：反过来的话循环里读到的都是 read:true，
+    // 会把水位写入整段跳过，跨端的未读点永远清不掉。
+    const unreadCompleted = this.state.notifications.filter(n => n.type === 'completed' && !n.read)
     const notifications = this.state.notifications.map(n => (n.read ? n : { ...n, read: true }))
     this.state = { ...this.state, notifications }
-    // 仅 completed 参与水位治理，与 markRead/markMatching 口径一致
-    readWatermarkStore.raiseMany(
-      this.state.notifications.filter(n => n.type === 'completed').map(n => n.sessionId),
-      now,
-    )
+    // 仅 completed 参与水位治理，与 markRead/markMatching 口径一致。
+    // 按各自所属主机取时钟：跨主机共用一个「当前时刻」会让比较错位。
+    for (const entry of unreadCompleted) {
+      readWatermarkStore.raise(entry.sessionId, this.readInstant(entry))
+    }
     this.persist()
     this.notify()
   }
@@ -289,7 +355,7 @@ class NotificationStore {
 
   private markMatching(predicate: (entry: NotificationEntry) => boolean, type?: NotificationType) {
     let changed = false
-    // 记录被标记的会话及其时间戳，用于抬高水位（跨端同步已读）。
+    // 记录被标记的会话及应抬到的水位（跨端同步已读）。
     const watermarkBySession = new Map<string, number>()
     const notifications = this.state.notifications.map(n => {
       if (!predicate(n)) return n
@@ -301,8 +367,11 @@ class NotificationStore {
       if (n.type === 'completed') {
         const bareId = sessionKeyToSessionId(n.sessionId)
         if (bareId) {
+          // 抬到「当前时刻」而不是这条通知自己的时间戳：同一轮完成在多端会各自
+          // 生成通知，时间戳能差几秒；只抬到本条会让另一端那份仍判未读。
+          const at = this.readInstant(n)
           const prev = watermarkBySession.get(bareId) ?? 0
-          if (n.timestamp > prev) watermarkBySession.set(bareId, n.timestamp)
+          if (at > prev) watermarkBySession.set(bareId, at)
         }
       }
       return { ...n, read: true }
@@ -462,10 +531,27 @@ export function useUnreadNotificationCount(): number {
   return state.notifications.filter(n => !n.read).length
 }
 
-/** 未读 completed 通知对应的 sessionId 集合 */
+/**
+ * 未读 completed 通知对应的 sessionId 集合。
+ *
+ * 按 notifications 数组引用缓存：这个 hook 被每个会话行调用（SessionListItem），
+ * 每次渲染都 new Set 会让集合引用恒变，配合 useHasUnreadCompletedNotification
+ * 的逐行调用，任意一条通知变化都会让展开列表里所有会话行重渲染。
+ * store 只在内容变化时替换数组引用，按引用缓存即可稳定。
+ */
+const unreadCompletedCache = new WeakMap<readonly NotificationEntry[], Set<string>>()
+
+function unreadCompletedSessionIds(notifications: readonly NotificationEntry[]): Set<string> {
+  const cached = unreadCompletedCache.get(notifications)
+  if (cached) return cached
+  const next = new Set(notifications.filter(n => n.type === 'completed' && !n.read).map(n => n.sessionId))
+  unreadCompletedCache.set(notifications, next)
+  return next
+}
+
 export function useUnreadCompletedSessionIds(): Set<string> {
   const state = useNotificationStore()
-  return new Set(state.notifications.filter(n => n.type === 'completed' && !n.read).map(n => n.sessionId))
+  return unreadCompletedSessionIds(state.notifications)
 }
 
 /**

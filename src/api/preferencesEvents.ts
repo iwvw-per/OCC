@@ -33,6 +33,8 @@ interface SubscribeOptions {
 
 export interface PreferenceEventsSubscription {
   close: () => void
+  /** 当前是否连着（供轮询节奏参考：断线时用更短的兜底间隔） */
+  isConnected: () => boolean
 }
 
 // 重连退避：SSE 断开后逐步拉长重试间隔，避免服务端故障时高频重连。
@@ -88,11 +90,12 @@ export function subscribePreferenceEvents(
 ): PreferenceEventsSubscription {
   const current = account ?? readAccount()
   if (!current) {
-    return { close: () => {} }
+    return { close: () => {}, isConnected: () => false }
   }
 
   const controller = new AbortController()
   let closed = false
+  let connected = false
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
 
@@ -128,6 +131,7 @@ export function subscribePreferenceEvents(
         }
         throw new Error(`preferences events failed (${response.status})`)
       }
+      connected = true
       options.onStateChange?.(true)
 
       const reader = response.body.getReader()
@@ -160,6 +164,7 @@ export function subscribePreferenceEvents(
       // 主动关闭或网络异常都会走到这里，统一交由重连逻辑判定。
     }
     if (closed) return
+    connected = false
     options.onStateChange?.(false)
     // 只有连接真正存活过一段时间才算「成功」，才把退避归零。若服务端或代理
     // 接受连接后立刻关闭（鉴权通过但无事件），立即归零会退化成固定 1 秒无限
@@ -173,6 +178,7 @@ export function subscribePreferenceEvents(
   void connect()
 
   return {
+    isConnected: () => connected,
     close: () => {
       closed = true
       if (reconnectTimer) {
@@ -180,7 +186,8 @@ export function subscribePreferenceEvents(
         reconnectTimer = null
       }
       controller.abort()
-      options.onStateChange?.(false)
+      connected = false
+    options.onStateChange?.(false)
     },
   }
 }

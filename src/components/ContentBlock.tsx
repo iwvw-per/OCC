@@ -11,6 +11,7 @@ import {
   lazy,
   memo,
   Suspense,
+  useCallback,
   useState,
   useMemo,
   useEffect,
@@ -28,6 +29,7 @@ import { detectLanguage } from '../utils/languageUtils'
 import { ViewModeSwitch } from './FullscreenViewer'
 import { extractContentFromUnifiedDiff } from '../utils/diffUtils'
 import { useCompositorExpand } from '../hooks/useCompositorExpand'
+import { useInView } from '../hooks/useInView'
 import { useDelayedRender } from '../hooks/useDelayedRender'
 import { useResponsiveMaxHeight } from '../hooks/useResponsiveMaxHeight'
 import { useFullscreenLayer } from '../contexts'
@@ -248,10 +250,31 @@ export const ContentBlock = memo(function ContentBlock({
   ])
   const { isOpen: fullscreenOpen, open: openFullscreen } = useFullscreenLayer(fullscreenLayer)
 
-  // 是否展开内容区
+  // 渲染节流：超出视口的 diff/代码块只占位、不挂载。
+  // 多 diff 回合里每个块都要算行 diff + 语法高亮 + DOM，离屏块本就不该做这些。
+  // 首次进入视口后才挂载，之后保持挂载（避免滚动时反复重建、高度跳动）。
+  const { ref: observeBody, inView } = useInView({ rootMargin: '800px 0px', triggerOnce: true })
   const showBody = (hasContent && !collapsed) || (isLoading && !hasContent)
   const { contentRef, layoutOpen, keepMounted, panelClassName } = useCompositorExpand(showBody)
   const shouldRenderContent = useDelayedRender(keepMounted)
+
+  // contentRef 由展开动画创建；观察节点需要在它挂载后回填给 useInView，
+  // 因此这里在布局阶段改 ref，而不是声明期解构（开合与否都能被观察到）。
+  const setBodyRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      contentRef.current = node
+      observeBody(node)
+    },
+    [contentRef, observeBody],
+  )
+
+  // 没有内容可渲染时（如仍在加载）也要观察一次自身，否则永远进不了视口的判定。
+  const wrapperRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!shouldRenderContent || !hasContent) observeBody(node)
+    },
+    [hasContent, observeBody, shouldRenderContent],
+  )
 
   useEffect(() => {
     onFullscreenChange?.(fullscreenOpen)
@@ -389,12 +412,15 @@ export const ContentBlock = memo(function ContentBlock({
           layoutOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
         }`}
       >
-        <div className="overflow-hidden min-h-0">
+        <div ref={wrapperRef} className="overflow-hidden min-h-0">
           {shouldRenderContent && hasContent && (
-            <div ref={contentRef} className="relative group/content">
+            <div ref={setBodyRef} className="relative group/content">
               {content && <CopyButton text={content} position="absolute" groupName="content" />}
 
-              {isDiff && resolvedDiff ? (
+              {!inView ? (
+                // 离屏占位：固定一个接近实际的高度，避免滚动到时大幅跳动
+                <div aria-hidden="true" className="min-h-16" />
+              ) : isDiff && resolvedDiff ? (
                 <DiffViewer
                   before={resolvedDiff.before}
                   after={resolvedDiff.after}

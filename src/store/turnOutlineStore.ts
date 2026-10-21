@@ -90,7 +90,19 @@ class TurnOutlineStore {
     if (cached && cached.version === this.version) return cached.value
 
     const outline = this.getOrLoad(serverId, sessionId)
-    const value = outline.entries.length === 0 ? EMPTY_ENTRIES : outline.entries
+    /**
+     * ⚠️ 必须复制一份数组，不能直接返回 `outline.entries`。
+     *
+     * `merge` 是**原地** push + sort 的（为了 O(1) 的 index 维护），所以
+     * `outline.entries` 的引用在数据变化后保持不变。若快照也返回同一引用，
+     * `useSyncExternalStore` 比较时会认为「没变」→ 不重新渲染 →
+     * 后台补全进来的 138 个轮次永远不显示（本 bug 的真实表现：store 里明明
+     * 有 138 条，侧边轴却始终只画最初那 2 条）。
+     *
+     * 用 slice 产生新引用，代价是每次快照一份数组（元素仍复用），
+     * 相对渲染成本可以忽略；而 version 缓存保证同一版本内只复制一次。
+     */
+    const value = outline.entries.length === 0 ? EMPTY_ENTRIES : outline.entries.slice()
     this.snapshotCache.set(key, { version: this.version, value })
     return value
   }
@@ -162,7 +174,7 @@ class TurnOutlineStore {
     const key = this.key(serverId, sessionId)
     if (!this.sessions.delete(key)) return
     this.snapshotCache.delete(key)
-    this.persist(serverId)
+    this.persist(serverId, [sessionId])
     this.emit()
   }
 
@@ -192,13 +204,39 @@ class TurnOutlineStore {
   }
 
   /** 把某服务器的所有会话大纲写回 localStorage（按 serverId 隔离） */
-  private persist(serverId: string): void {
-    const payload: Record<string, TurnOutlineEntry[]> = {}
+  private persist(serverId: string, removedSessionIds?: Iterable<string>): void {
+    /**
+     * ⚠️ 必须与磁盘上已有的数据**合并**，不能只用内存态覆盖。
+     *
+     * 内存只保存「本次运行期间访问过」的会话；磁盘上可能还有几十个其它会话
+     * 的大纲。早先这里直接 `setJSONFor(payload)`，于是任何一个会话持久化时
+     * 都会把**其它会话的大纲整段抹掉** —— 表现就是「上次打开还有完整轮次轴，
+     * 这次只剩当前会话那两条」（本 bug 就是这么暴露的：后台补全写入了 138 条，
+     * 但下一次合并只带 2 条内存数据，把 138 条覆盖成了 2 条）。
+     */
+    let payload: Record<string, TurnOutlineEntry[]> = {}
+    try {
+      const existing = serverStorage.getJSONFor<Record<string, TurnOutlineEntry[]>>(STORAGE_KEY, serverId)
+      if (existing && typeof existing === 'object') payload = { ...existing }
+    } catch {
+      // 读取失败：退化为仅写内存态（比整段丢弃好）
+    }
+
+    // 显式删除：这些会话已从内存移除，不能靠「遍历内存」发现
+    if (removedSessionIds) {
+      for (const sessionId of removedSessionIds) delete payload[sessionId]
+    }
+
     const prefix = `${serverId}::`
     for (const [key, outline] of this.sessions) {
       if (!key.startsWith(prefix)) continue
-      if (outline.entries.length === 0) continue
-      payload[key.slice(prefix.length)] = outline.entries
+      const sessionId = key.slice(prefix.length)
+      if (outline.entries.length === 0) {
+        // 空大纲要显式删除，否则磁盘上会留下永远不更新的死数据
+        delete payload[sessionId]
+        continue
+      }
+      payload[sessionId] = outline.entries
     }
     try {
       serverStorage.setJSONFor(STORAGE_KEY, payload, serverId)

@@ -34,7 +34,6 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     'agent.toolInteraction',
     'chat.alwaysAllowMode',
     'chat.approvePendingOnFullAuto',
-    'chat.queueFollowupMessages',
     'chat.questionAutoSelect',
     'chat.immersiveMode',
     'chat.inlineToolRequests',

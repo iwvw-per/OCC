@@ -15,7 +15,6 @@ export function AgentSettings() {
   const [questionAutoSelectTimeout, setQuestionAutoSelectTimeoutState] = useState<QuestionAutoSelectTimeout>(
     autoApproveStore.questionAutoSelectTimeout,
   )
-  const [queueFollowupMessages, setQueueFollowupMessages] = useState(themeStore.queueFollowupMessages)
   const [descriptiveToolSteps, setDescriptiveToolSteps] = useState(themeStore.descriptiveToolSteps)
   const [inlineToolRequests, setInlineToolRequests] = useState(themeStore.inlineToolRequests)
   const [toolCardStyle, setToolCardStyle] = useState(themeStore.toolCardStyle)
@@ -82,12 +81,6 @@ export function AgentSettings() {
     autoApproveStore.setQuestionAutoSelectTimeout(seconds)
   }
 
-  const toggleQueueFollowup = () => {
-    const next = !queueFollowupMessages
-    setQueueFollowupMessages(next)
-    themeStore.setQueueFollowupMessages(next)
-  }
-
   const toggleInlineToolRequests = () => {
     const next = !inlineToolRequests
     setInlineToolRequests(next)
@@ -139,14 +132,6 @@ export function AgentSettings() {
           onClick={toggleApprovePending}
         >
           <Toggle enabled={approvePendingOnFullAuto} onChange={toggleApprovePending} />
-        </SettingRow>
-
-        <SettingRow
-          label={t('chat.queueFollowupMessages')}
-          description={t('chat.queueFollowupMessagesDesc')}
-          onClick={toggleQueueFollowup}
-        >
-          <Toggle enabled={queueFollowupMessages} onChange={toggleQueueFollowup} />
         </SettingRow>
 
         <SettingRow

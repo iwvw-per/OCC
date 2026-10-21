@@ -69,7 +69,7 @@ function isTask(value: unknown): value is ScheduledTask {
 
 function load(): ScheduledTask[] {
   try {
-    const raw = serverStorage.get(STORAGE_KEY)
+    const raw = serverStorage.get(STORAGE_KEY, serverStore.getActiveServerId())
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed.filter(isTask) : []
@@ -100,7 +100,7 @@ class ScheduledTaskStore {
 
   private persist() {
     try {
-      serverStorage.set(STORAGE_KEY, JSON.stringify(this.tasks))
+      serverStorage.set(STORAGE_KEY, JSON.stringify(this.tasks), serverStore.getActiveServerId())
     } catch {
       // quota exceeded
     }

@@ -18,6 +18,7 @@ vi.mock('../utils/perServerStorage', () => {
 
 vi.mock('./serverStore', () => ({
   serverStore: {
+    getActiveServerId: () => 'local',
     onServerChange: () => () => {},
   },
 }))

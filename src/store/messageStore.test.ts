@@ -124,8 +124,35 @@ describe('messageStore', () => {
     expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-1', text: 'hello world' })
   })
 
-  it('replays a delta that arrives before its message is created (D5)', () => {
+  /**
+   * 停止后不应继续追加迟到增量。
+   *
+   * handlePartDelta 已经靠 part.time.end 丢弃已定稿 part 的 delta，但**回放路径**
+   * （part 先于 delta 不存在时暂存、part 建立后回放）原先没有这条检查，于是
+   * 「text.ended 已定稿 → 仍有在途 delta 进缓冲 → 回放时补到完整文本后面」，
+   * 表现为用户按下停止后内容还在往里流。
+   */
+  it('does not replay buffered deltas into an already finalized part', () => {
     messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    // delta 先到，此时 part 还不存在 → 进缓冲
+    messageStore.handlePartDelta({
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      partID: 'part-1',
+      field: 'text',
+      delta: 'late',
+    })
+    // 服务端随后发来已定稿的完整文本（带 time.end）
+    messageStore.handlePartUpdated({
+      ...createTextPart('part-1', 'message-1', 'final'),
+      time: { start: 1, end: 2 },
+    } as ApiPart & { sessionID: string; messageID: string })
+
+    const state = messageStore.getSessionState('session-1')
+    expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-1', text: 'final' })
+  })
+
+  it('replays a delta that arrives before its message is created (D5)', () => {    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
     messageStore.handlePartUpdated(createTextPart('part-1', 'message-1', 'base'))
 
     // 消息已存在但 part 未建立时暂存的 delta，应在 part 建立后回放
@@ -173,6 +200,32 @@ describe('messageStore', () => {
 
     messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello again')])
     expect(messageStore.isSessionStale('session-1')).toBe(false)
+  })
+
+  it('records the post-compaction context usage and moves compactedAt forward', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    const tokens = { input: 900, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }
+
+    messageStore.recordCompactionResult('session-1', { tokens, cost: 0.1, at: 5000 })
+
+    expect(messageStore.getCompactionUsage('session-1')).toMatchObject({ tokens, cost: 0.1, at: 5000 })
+    expect(messageStore.getSessionState('session-1')?.compactedAt).toBe(5000)
+
+    // 更早的压缩结果不得把分隔条时间往回拨
+    messageStore.recordCompactionResult('session-1', { tokens, at: 4000 })
+    expect(messageStore.getSessionState('session-1')?.compactedAt).toBe(5000)
+  })
+
+  it('records server cumulative usage and ignores unknown sessions', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    const tokens = { input: 4000, output: 800, reasoning: 0, cache: { read: 100, write: 20 } }
+
+    messageStore.recordSessionUsage('session-1', tokens, 2.5)
+    expect(messageStore.getSessionUsage('session-1')).toEqual({ tokens, cost: 2.5 })
+
+    // 为不存在的会话建档会在侧栏冒出幽灵项，必须忽略
+    messageStore.recordSessionUsage('session-does-not-exist', tokens, 1)
+    expect(messageStore.getSessionState('session-does-not-exist')).toBeUndefined()
   })
 
   it('accepts exported message envelopes that use message instead of info', () => {
@@ -937,5 +990,232 @@ describe('optimistic user message reconciliation by id', () => {
     const textParts = row.content.filter(p => p.type === 'text')
     expect(textParts).toHaveLength(1)
     expect(textParts[0].id).toBe('prt_0001')
+  })
+})
+
+/**
+ * v2 的实时事件流没有 message.updated，用户消息的唯一信号是
+ * `session.inbox.enqueued`。它必须落成一条**带正文**的用户消息：
+ * 只建骨架不建 part 会渲染成空白气泡，完全不建则其他端看不到（吞消息）。
+ */
+describe('upsertRemoteUserMessage (v2 session.inbox.enqueued)', () => {
+  beforeEach(() => {
+    messageStore.clearAll()
+  })
+
+  const KEY = 'local::ses_inbox'
+  const MSG_ID = 'msg_inbox1'
+
+  it('creates a user message with a text part so other clients see it immediately', () => {
+    messageStore.upsertRemoteUserMessage(KEY, { messageId: MSG_ID, text: 'from another device', createdAt: 200 })
+
+    const state = messageStore.getSessionState(KEY)!
+    const row = state.messages.find(m => m.info.id === MSG_ID)!
+    expect(row.info.role).toBe('user')
+    expect(row.info.time?.created).toBe(200)
+    const textParts = row.content.filter(p => p.type === 'text')
+    expect(textParts).toHaveLength(1)
+    expect((textParts[0] as { text: string }).text).toBe('from another device')
+    // 复合 key：part/info 上都用权威 bucket，UI 与 store 内部一致
+    expect(row.info.sessionID).toBe(KEY)
+  })
+
+  it('replaces the local optimistic row instead of duplicating it', () => {
+    messageStore.upsertLocalMessage({
+      info: {
+        id: MSG_ID,
+        sessionID: 'ses_inbox',
+        role: 'user',
+        time: { created: 200 },
+        agent: 'build',
+        model: { providerID: 'p', modelID: 'm' },
+      },
+      content: [
+        { id: `${MSG_ID}:text`, sessionID: 'ses_inbox', messageID: MSG_ID, type: 'text', text: 'from another device' },
+      ],
+      isStreaming: false,
+    } as import('../types/message').Message)
+
+    messageStore.upsertRemoteUserMessage(KEY, { messageId: MSG_ID, text: 'from another device', createdAt: 200 })
+
+    const userRows = messageStore.getSessionState(KEY)!.messages.filter(m => m.info.role === 'user')
+    expect(userRows).toHaveLength(1)
+    // 保留下来的 model/agent 不被清空（服务端事件不带这些字段）
+    expect((userRows[0].info as { agent?: string }).agent).toBe('build')
+  })
+
+  it('does not resurrect a removed inbox message', () => {
+    messageStore.upsertRemoteUserMessage(KEY, { messageId: MSG_ID, text: 'x', createdAt: 200 })
+    messageStore.removeMessage(KEY, MSG_ID)
+    expect(messageStore.getSessionState(KEY)!.messages.find(m => m.info.id === MSG_ID)).toBeUndefined()
+  })
+})
+
+/**
+ * 轮次结论的权威来源：消息列表里的 `type: "idle"` 记录。
+ *
+ * 事件流（session.execution.succeeded）负责「及时」，但它**是易失的** ——
+ * 服务端对 /api/event 的契约写明「慢消费者会溢出并断开、断线期间的事件会丢失」。
+ * 一旦收尾事件丢了（隧道抖动、主机重启、浏览器后台被冻结），界面就会永远
+ * 显示「生成中」：停止按钮不消失、项目行一直转圈、消息永远半透明。
+ *
+ * idle 记录写在消息列表里，刷新即可恢复，所以用它做校正。
+ */
+describe('settleByAuthoritativeIdle', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  function seedStreamingAssistant(id: string, created: number) {
+    messageStore.handleMessageUpdated(createAssistantMessage(id))
+    messageStore.setStreaming('session-1', true)
+    // 标记这条 assistant 仍在流式中（渲染层据此显示光标）
+    const state = messageStore.getSessionState('session-1')!
+    state.messages = state.messages.map(m => ({ ...m, isStreaming: true }))
+    const msg = state.messages.find(m => m.info.id === id)!
+    msg.info.time = { created } as never
+  }
+
+  it('settles a stuck streaming state when an idle record covers it', () => {
+    seedStreamingAssistant('message-1', 1000)
+    messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+
+    expect(messageStore.getIsStreaming('session-1')).toBe(true)
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(true)
+    expect(messageStore.getIsStreaming('session-1')).toBe(false)
+    // 消息上的流式标记也要落定，否则光标还在闪
+    expect(messageStore.getSessionState('session-1')!.messages[0].isStreaming).toBe(false)
+  })
+
+  it('does not settle when the idle record predates the last assistant message', () => {
+    // 上一轮的 idle 还留在页里，而新一轮已经产生了更晚的 assistant 消息：
+    // 此时绝不能据此落定，否则会把正在跑的轮次误判成已结束。
+    seedStreamingAssistant('message-1', 5000)
+    messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(false)
+    expect(messageStore.getIsStreaming('session-1')).toBe(true)
+  })
+
+  it('is a no-op when there is no idle record', () => {
+    seedStreamingAssistant('message-1', 1000)
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(false)
+    expect(messageStore.getIsStreaming('session-1')).toBe(true)
+  })
+
+  it('is a no-op when the session is not streaming', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.setStreaming('session-1', false)
+    messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(false)
+  })
+
+  it('records interrupted/failed outcomes so the UI can distinguish them', () => {
+    seedStreamingAssistant('message-1', 1000)
+    messageStore.updateSessionMetadata('session-1', {
+      lastTurn: { at: 2000, outcome: 'interrupted', error: 'shutdown' },
+    })
+    messageStore.settleByAuthoritativeIdle('session-1')
+    expect(messageStore.getSessionState('session-1')!.lastTurn).toEqual({
+      at: 2000,
+      outcome: 'interrupted',
+      error: 'shutdown',
+    })
+  })
+})
+
+/**
+ * 工具执行中的进度（v2 `session.tool.progress`，ephemeral）。
+ *
+ * 实测载荷（bash）：{ sessionID, assistantMessageID, id: "call_x",
+ *                     metadata: { shellID: "sh_x" } }
+ *
+ * 它是 ephemeral、不落库，且可能与 tool.success 乱序到达。
+ */
+describe('applyToolProgress', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  it('merges metadata into a running tool part', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+
+    messageStore.applyToolProgress('session-1', 'call-1', { shellID: 'sh_abc' })
+
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0] as {
+      state: { status: string; metadata?: Record<string, unknown> }
+    }
+    expect(part.state.metadata).toEqual({ shellID: 'sh_abc' })
+    // 状态必须保持 running：progress 不能把工具落定
+    expect(part.state.status).toBe('running')
+  })
+
+  it('never downgrades a completed tool back to running', () => {
+    // 乱序场景：success 先到，迟到的 progress 不能把它改回运行中
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+    messageStore.settleToolByCallID('session-1', 'call-1', { status: 'completed', output: 'done' })
+
+    messageStore.applyToolProgress('session-1', 'call-1', { shellID: 'sh_late' })
+
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0] as {
+      state: { status: string; metadata?: Record<string, unknown> }
+    }
+    expect(part.state.status).toBe('completed')
+    expect(part.state.metadata).toBeUndefined()
+  })
+
+  it('merges progressively instead of replacing previous progress', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+
+    messageStore.applyToolProgress('session-1', 'call-1', { shellID: 'sh_abc' })
+    messageStore.applyToolProgress('session-1', 'call-1', { stage: 'downloading' })
+
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0] as {
+      state: { metadata?: Record<string, unknown> }
+    }
+    expect(part.state.metadata).toEqual({ shellID: 'sh_abc', stage: 'downloading' })
+  })
+
+  it('ignores progress for an unknown callID', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+    messageStore.applyToolProgress('session-1', 'other-call', { shellID: 'sh_x' })
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0] as {
+      state: { metadata?: Record<string, unknown> }
+    }
+    expect(part.state.metadata).toBeUndefined()
+  })
+})
+
+describe('applyToolProgress performance contract', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  it('keeps untouched messages by reference so React can skip them', () => {
+    // progress 事件在长命令期间每秒来多条。若每次全量 map 重建 messages，
+    // React 会认为整条会话都变了、每秒全量重渲染 —— 长会话里就是「卡」。
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+    messageStore.handleMessageUpdated(createAssistantMessage('message-2'))
+    messageStore.handlePartUpdated(createTextPart('part-2', 'message-2', 'other content'))
+
+    const before = messageStore.getSessionState('session-1')!.messages
+    const untouchedBefore = before.find(m => m.info.id === 'message-2')!
+
+    messageStore.applyToolProgress('session-1', 'call-1', { shellID: 'sh_1' })
+
+    const after = messageStore.getSessionState('session-1')!.messages
+    const untouchedAfter = after.find(m => m.info.id === 'message-2')!
+    // 同一对象引用：虚拟列表与 memo 化的行可以直接跳过重渲染
+    expect(untouchedAfter).toBe(untouchedBefore)
+    // 命中的那条必须是新对象（否则 React 看不到变化）
+    expect(after.find(m => m.info.id === 'message-1')).not.toBe(before.find(m => m.info.id === 'message-1'))
   })
 })

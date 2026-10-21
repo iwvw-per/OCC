@@ -8,26 +8,25 @@
 //   getConnectionInfo()             == getServerConnectionInfo(activeServerId)
 // ============================================
 
-import { getApiBaseUrl, getAuthHeader } from './http'
-import { createSseTextParser } from './sse'
-import { parseAndCoalesce } from './sseEvents'
 import { normalizeTodoItems } from './todo'
 import { getV2Client } from './sdkV2'
 import { v2EventToGlobalEvent } from './v2/events'
 import { toolResultMetadata } from './v2/adapt'
 import { isTauri } from '../utils/tauri'
-import { createSseEventPump } from '../lib/sseWorkerClient'
+import { logger } from '../utils/logger'
 import { serverStore } from '../store/serverStore'
 import type {
   ApiMessage,
   EventCallbacks,
   GlobalEvent,
   NextToolSettledPayload,
+  NextToolProgressPayload,
   ServerConnectedPayload,
   SessionErrorPayload,
   SessionCompactedPayload,
   TodoUpdatedPayload,
 } from './types'
+import type { PartDeltaPayload, PartRemovedPayload, SessionUsagePayload, InboxEnqueuedPayload } from '../types/api/event'
 import { EventTypes } from '../types/api/event'
 
 // ============================================
@@ -148,7 +147,7 @@ function broadcastReconnected(conn: ServerConnection, reason: 'network' | 'serve
   const now = Date.now()
   if (reason !== 'server-switch' && now - conn.lastReconnectedBroadcast < RECONNECTED_COOLDOWN) {
     if (import.meta.env.DEV) {
-      console.log('[SSE] onReconnected skipped (cooldown)')
+      logger.log('[SSE] onReconnected skipped (cooldown)')
     }
     return
   }
@@ -197,7 +196,7 @@ function resetHeartbeat(conn: ServerConnection) {
   const timeout = isInBackground ? BACKGROUND_HEARTBEAT_TIMEOUT : HEARTBEAT_TIMEOUT
 
   conn.heartbeatTimer = setTimeout(() => {
-    console.warn(`[SSE] No events received for ${timeout / 1000}s, reconnecting...`)
+    logger.warn(`[SSE] No events received for ${timeout / 1000}s, reconnecting...`)
     updateConnectionState(conn.serverId, { state: 'disconnected', error: 'Heartbeat timeout' })
     scheduleReconnect(conn)
   }, timeout)
@@ -213,7 +212,7 @@ function scheduleReconnect(conn: ServerConnection) {
   const delay = delays[Math.min(attempt, delays.length - 1)]
 
   if (import.meta.env.DEV) {
-    console.log(
+    logger.log(
       `[SSE] Reconnecting ${conn.serverId} in ${delay}ms (attempt ${attempt + 1}, background: ${isInBackground})...`,
     )
   }
@@ -236,7 +235,7 @@ function connectServer(serverId: string) {
     if (timeSinceLastEvent > staleTimeout) {
       // 太久没收到事件，连接可能已死，强制断开再重连
       if (import.meta.env.DEV) {
-        console.log(
+        logger.log(
           `[SSE] connectServer: ${serverId} state=connected but stale (${Math.round(timeSinceLastEvent / 1000)}s), forcing disconnect`,
         )
       }
@@ -257,143 +256,17 @@ function connectServer(serverId: string) {
 
   updateConnectionState(serverId, { state: 'connecting' })
   if (import.meta.env.DEV) {
-    console.log(`[SSE] Connecting ${serverId}...`)
+    logger.log(`[SSE] Connecting ${serverId}...`)
   }
 
   // 注册生命周期监听器（首次连接时）
   registerLifecycleListeners()
 
-  // v2 服务器：事件流走 @opencode/client 的 event.subscribe()（AsyncIterable），
-  // 与 v1 的 /global/event SSE 是两条不同通道。
-  const resolvedServerId = serverId
-  if (serverStore.getApiVersion(resolvedServerId) === 'v2') {
-    connectViaV2(conn)
-    return
-  }
-
-  if (isTauri()) {
-    connectViaTauri(conn)
-  } else {
-    connectViaBrowser(conn)
-  }
+  // 事件流走 @opencode/client 的 event.subscribe()（AsyncIterable）。
+  // 事件流：v2 是唯一受支持的协议。
+  connectViaV2(conn)
 }
 
-/** Unified bridge event from Rust (transparent proxy) */
-interface BridgeEvent {
-  event: 'connected' | 'data' | 'disconnected' | 'error'
-  data?: {
-    data?: string
-    code?: number
-    reason?: string
-    message?: string
-  }
-}
-
-async function connectViaTauri(conn: ServerConnection) {
-  const myGeneration = conn.generation
-  const serverId = conn.serverId
-
-  try {
-    // 等待上一次 disconnect 完成，避免 Rust 侧 connect/disconnect 竞争
-    await (pendingDisconnects.get(bridgeIdFor(serverId)) ?? Promise.resolve())
-
-    const { invoke, Channel } = await import('@tauri-apps/api/core')
-
-    const url = `${getApiBaseUrl(serverId)}/global/event`
-    const authHeader = getAuthHeader(serverId)['Authorization'] || null
-
-    const sseParser = createSseTextParser()
-
-    const onEvent = new Channel<BridgeEvent>()
-
-    onEvent.onmessage = (msg: BridgeEvent) => {
-      // 代次不匹配，说明已经 reconnect 过了，忽略旧连接的事件
-      if (myGeneration !== conn.generation) return
-
-      switch (msg.event) {
-        case 'connected': {
-          conn.isConnecting = false
-
-          updateConnectionState(serverId, {
-            state: 'connected',
-            reconnectAttempt: 0,
-            error: undefined,
-          })
-          resetHeartbeat(conn)
-          if (import.meta.env.DEV) {
-            console.log(`[SSE/Tauri] ${serverId} Connected`)
-          }
-          // 每次连接成功都通知订阅者刷新数据
-          // 覆盖场景：首次连接（先开 UI 后开 server）、网络重连、服务器切换
-          const reason = serverSwitchFlags.get(serverId) ? ('server-switch' as const) : ('network' as const)
-          serverSwitchFlags.delete(serverId)
-          broadcastReconnected(conn, reason)
-          break
-        }
-        case 'data': {
-          resetHeartbeat(conn)
-          if (!msg.data?.data) break
-
-          for (const globalEvent of parseAndCoalesce(sseParser.push(msg.data.data))) {
-            broadcastEvent(conn, globalEvent)
-          }
-          break
-        }
-        case 'disconnected': {
-          conn.isConnecting = false
-          if (import.meta.env.DEV) {
-            console.log(`[SSE/Tauri] ${serverId} Disconnected:`, msg.data?.reason)
-          }
-          updateConnectionState(serverId, { state: 'disconnected' })
-          scheduleReconnect(conn)
-          break
-        }
-        case 'error': {
-          conn.isConnecting = false
-          const errorMsg = msg.data?.message || 'Unknown error'
-          if (import.meta.env.DEV) {
-            console.warn(`[SSE/Tauri] ${serverId} Error:`, errorMsg)
-          }
-          updateConnectionState(serverId, {
-            state: 'error',
-            error: errorMsg,
-          })
-          conn.subscribers.forEach(cb => {
-            cb.onError?.(new Error(errorMsg))
-          })
-          scheduleReconnect(conn)
-          break
-        }
-      }
-    }
-
-    // 调用统一桥接命令
-    invoke('bridge_connect', {
-      args: { bridgeId: bridgeIdFor(serverId), url, authHeader },
-      onEvent,
-    }).catch((error: unknown) => {
-      if (!finalizeConnectionAttempt(conn, myGeneration)) return
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      if (import.meta.env.DEV) {
-        console.warn(`[SSE/Tauri] ${serverId} invoke error:`, errorMsg)
-      }
-      updateConnectionState(serverId, {
-        state: 'error',
-        error: errorMsg,
-      })
-      conn.subscribers.forEach(cb => {
-        cb.onError?.(new Error(errorMsg))
-      })
-      scheduleReconnect(conn)
-    })
-  } catch (error) {
-    if (!finalizeConnectionAttempt(conn, myGeneration)) return
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    console.warn(`[SSE/Tauri] ${serverId} Failed to initialize:`, errorMsg)
-    updateConnectionState(serverId, { state: 'error', error: errorMsg })
-    scheduleReconnect(conn)
-  }
-}
 
 // ============================================
 // v2 event stream (via @opencode/client event.subscribe)
@@ -412,7 +285,7 @@ function connectViaV2(conn: ServerConnection) {
       finalizeConnectionAttempt(conn, myGeneration)
       updateConnectionState(serverId, { state: 'connected', reconnectAttempt: 0, error: undefined })
       resetHeartbeat(conn)
-      if (import.meta.env.DEV) console.log(`[SSE/v2] ${serverId} connected`)
+      if (import.meta.env.DEV) logger.log(`[SSE/v2] ${serverId} connected`)
 
       const reason = serverSwitchFlags.get(serverId) ? ('server-switch' as const) : ('network' as const)
       serverSwitchFlags.delete(serverId)
@@ -434,7 +307,7 @@ function connectViaV2(conn: ServerConnection) {
       if (!finalizeConnectionAttempt(conn, myGeneration)) return
       if (error instanceof Error && error.name === 'AbortError') return
       const errorMsg = error instanceof Error ? error.message : String(error)
-      if (import.meta.env.DEV) console.warn(`[SSE/v2] ${serverId} error:`, errorMsg)
+      if (import.meta.env.DEV) logger.warn(`[SSE/v2] ${serverId} error:`, errorMsg)
       updateConnectionState(serverId, { state: 'error', error: errorMsg })
       conn.subscribers.forEach(cb => cb.onError?.(error instanceof Error ? error : new Error(errorMsg)))
       scheduleReconnect(conn)
@@ -446,112 +319,6 @@ function connectViaV2(conn: ServerConnection) {
 // Browser SSE (via fetch + ReadableStream)
 // ============================================
 
-function connectViaBrowser(conn: ServerConnection) {
-  conn.controller = new AbortController()
-
-  // 捕获当前连接代次
-  const myGeneration = conn.generation
-  const serverId = conn.serverId
-
-  fetch(`${getApiBaseUrl(serverId)}/global/event`, {
-    signal: conn.controller.signal,
-    headers: {
-      Accept: 'text/event-stream',
-      ...getAuthHeader(serverId),
-    },
-  })
-    .then(async response => {
-      if (myGeneration !== conn.generation) {
-        await response.body?.cancel?.().catch(() => {})
-        return
-      }
-
-      finalizeConnectionAttempt(conn, myGeneration)
-
-      if (!response.ok) {
-        throw new Error(`Failed to subscribe: ${response.status}`)
-      }
-
-      updateConnectionState(serverId, {
-        state: 'connected',
-        reconnectAttempt: 0,
-        error: undefined,
-      })
-      resetHeartbeat(conn)
-      if (import.meta.env.DEV) {
-        console.log(`[SSE] ${serverId} connected`)
-      }
-
-      // 每次连接成功都通知订阅者刷新数据
-      // 覆盖场景：首次连接（先开 UI 后开 server）、网络重连、服务器切换
-      const reason = serverSwitchFlags.get(serverId) ? ('server-switch' as const) : ('network' as const)
-      serverSwitchFlags.delete(serverId)
-      broadcastReconnected(conn, reason)
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('No response body')
-      }
-
-      // 解码 + SSE 帧解析 + delta 合并在 Worker 里做，主线程只接收已合并的事件。
-      // Worker 不可用时 pump 内部回退到主线程解析，行为一致。
-      const pump = createSseEventPump(bridgeIdFor(serverId), events => {
-        if (myGeneration !== conn.generation) return
-        for (const globalEvent of events) {
-          broadcastEvent(conn, globalEvent)
-        }
-      })
-
-      while (true) {
-        // 代次不匹配，说明已经 reconnect 过了，停止读取旧流
-        if (myGeneration !== conn.generation) {
-          reader.cancel().catch(() => {})
-          break
-        }
-
-        const { done, value } = await reader.read()
-        if (myGeneration !== conn.generation) {
-          reader.cancel().catch(() => {})
-          break
-        }
-
-        if (done) {
-          if (import.meta.env.DEV) {
-            console.log(`[SSE] ${serverId} Stream ended, reconnecting...`)
-          }
-          pump.reset()
-          updateConnectionState(serverId, { state: 'disconnected' })
-          scheduleReconnect(conn)
-          break
-        }
-
-        resetHeartbeat(conn)
-        pump.feed(value)
-      }
-    })
-    .catch(error => {
-      if (!finalizeConnectionAttempt(conn, myGeneration)) {
-        return
-      }
-
-      if (error.name === 'AbortError') {
-        return
-      }
-      // SSE stream error - logged for debugging
-      if (import.meta.env.DEV) {
-        console.warn(`[SSE] ${serverId} Event stream error:`, error)
-      }
-      updateConnectionState(serverId, {
-        state: 'error',
-        error: error.message || 'Connection failed',
-      })
-      // 通知所有订阅者出错
-      conn.subscribers.forEach(cb => {
-        cb.onError?.(error)
-      })
-      scheduleReconnect(conn)
-    })
-}
 
 function getMessageInfo(properties: unknown): ApiMessage | undefined {
   if (!isRecord(properties)) return undefined
@@ -583,14 +350,14 @@ function startBackgroundKeepalive() {
       const serverId = conn.serverId
 
       if (import.meta.env.DEV) {
-        console.log(
+        logger.log(
           `[SSE] Background keepalive check ${serverId}: last event ${Math.round(timeSinceLastEvent / 1000)}s ago, state=${conn.info.state}`,
         )
       }
 
       if (conn.info.state === 'connected' && timeSinceLastEvent > BACKGROUND_HEARTBEAT_TIMEOUT) {
         // 连接声称是 connected，但已经太久没收到事件了 — 连接可能已经静默断开
-        console.warn(`[SSE] Background keepalive: ${serverId} appears dead, forcing reconnect`)
+        logger.warn(`[SSE] Background keepalive: ${serverId} appears dead, forcing reconnect`)
 
         // 断开旧连接
         conn.generation++
@@ -601,7 +368,7 @@ function startBackgroundKeepalive() {
       } else if ((conn.info.state === 'disconnected' || conn.info.state === 'error') && conn.subscribers.size > 0) {
         // 已知断连状态，但可能 reconnectTimer 被后台冻结了 — 主动触发重连
         if (!conn.reconnectTimer && !conn.isConnecting) {
-          console.warn(`[SSE] Background keepalive: ${serverId} stale disconnect, forcing reconnect`)
+          logger.warn(`[SSE] Background keepalive: ${serverId} stale disconnect, forcing reconnect`)
           updateConnectionState(serverId, { reconnectAttempt: 0 })
           connectServer(serverId)
         }
@@ -656,7 +423,7 @@ function handleVisibilityChange() {
       if (conn.info.state !== 'connected') {
         // 明确断连，立即重连
         if (import.meta.env.DEV) {
-          console.log(`[SSE] Page visible: ${conn.serverId} not connected, forcing reconnect...`)
+          logger.log(`[SSE] Page visible: ${conn.serverId} not connected, forcing reconnect...`)
         }
         forceReconnectNow(conn)
       } else {
@@ -665,7 +432,7 @@ function handleVisibilityChange() {
         const timeSinceLastEvent = Date.now() - conn.info.lastEventTime
         if (timeSinceLastEvent > HEARTBEAT_TIMEOUT) {
           // 太久没收到事件了，连接大概率已死
-          console.warn(
+          logger.warn(
             `[SSE] Page visible: ${conn.serverId} may be stale (last event ${Math.round(timeSinceLastEvent / 1000)}s ago), forcing reconnect`,
           )
           forceReconnectNow(conn)
@@ -680,7 +447,7 @@ function handleVisibilityChange() {
     isInBackground = true
 
     if (import.meta.env.DEV) {
-      console.log('[SSE] Page entering background, switching to background mode')
+      logger.log('[SSE] Page entering background, switching to background mode')
     }
 
     // 保持心跳运行，但切换为后台模式（更长超时）
@@ -712,7 +479,7 @@ function forceReconnectNow(conn: ServerConnection) {
 
 function handleOnline() {
   if (import.meta.env.DEV) {
-    console.log('[SSE] Network online, forcing reconnect...')
+    logger.log('[SSE] Network online, forcing reconnect...')
   }
   for (const conn of connections.values()) {
     if (conn.info.state !== 'connected' && conn.subscribers.size > 0) {
@@ -723,7 +490,7 @@ function handleOnline() {
 
 function handleOffline() {
   if (import.meta.env.DEV) {
-    console.log('[SSE] Network offline')
+    logger.log('[SSE] Network offline')
   }
   // 标记为断连，但不尝试重连（没网重连也没用）
   for (const conn of connections.values()) {
@@ -768,7 +535,7 @@ function broadcastEvent(conn: ServerConnection, globalEvent: GlobalEvent) {
 }
 
 function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: EventCallbacks) {
-  // v2 扩展事件：session.renamed 不在 v1 SDK 的事件联合里，先于 switch 处理。
+  // 扩展事件：session.renamed 不带完整 session，先于 switch 单独处理。
   if ((payload.type as string) === EventTypes.SESSION_RENAMED) {
     const props = (payload as { properties?: { sessionID?: unknown; title?: unknown } }).properties
     const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
@@ -785,6 +552,20 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     if (sessionID && assistantMessageID) callbacks.onSessionRetryScheduled?.({ sessionID, assistantMessageID })
     return
   }
+  if ((payload.type as string) === EventTypes.SESSION_USAGE_UPDATED) {
+    const props = (payload as { properties?: SessionUsagePayload }).properties
+    if (props && typeof props.sessionID === 'string' && props.tokens) {
+      callbacks.onSessionUsageUpdated?.(props)
+    }
+    return
+  }
+  if ((payload.type as string) === EventTypes.SESSION_INBOX_ENQUEUED) {
+    const props = (payload as { properties?: InboxEnqueuedPayload }).properties
+    if (props && typeof props.sessionID === 'string' && typeof props.inboxID === 'string') {
+      callbacks.onInboxEnqueued?.(props)
+    }
+    return
+  }
   switch (payload.type) {
     case EventTypes.MESSAGE_UPDATED: {
       const message = getMessageInfo(payload.properties)
@@ -796,12 +577,23 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
       break
     }
     case EventTypes.MESSAGE_PART_DELTA: {
-      callbacks.onPartDelta?.(payload.properties)
+      callbacks.onPartDelta?.(payload.properties as unknown as PartDeltaPayload)
       break
     }
     case EventTypes.MESSAGE_PART_REMOVED:
-      callbacks.onPartRemoved?.(payload.properties)
+      callbacks.onPartRemoved?.(payload.properties as unknown as PartRemovedPayload)
       break
+    case EventTypes.MESSAGE_REMOVED: {
+      // v2 用它撤销一条已入队但未处理的用户消息（session.inbox.cancelled）。
+      // 不处理会留下一条永远不会被 agent 处理的用户消息，且刷新后消失，
+      // 表现为「这条消息发出去了但一直没回应」。
+      const props = payload.properties as { sessionID?: unknown; messageID?: unknown; messageId?: unknown }
+      const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
+      const messageID =
+        typeof props?.messageID === 'string' ? props.messageID : typeof props?.messageId === 'string' ? props.messageId : ''
+      if (sessionID && messageID) callbacks.onMessageRemoved?.({ sessionID, messageID })
+      break
+    }
     case EventTypes.SESSION_UPDATED: {
       callbacks.onSessionUpdated?.(payload.properties.info)
       break
@@ -864,6 +656,19 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     case EventTypes.SERVER_CONNECTED:
       callbacks.onServerConnected?.(normalizeServerConnected(payload.properties))
       break
+    case EventTypes.SESSION_NEXT_TOOL_PROGRESS: {
+      const props = payload.properties as Partial<NextToolProgressPayload> | undefined
+      const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
+      const callID = typeof props?.callID === 'string' ? props.callID : ''
+      if (sessionID && callID) {
+        callbacks.onNextToolProgress?.({
+          sessionID,
+          callID,
+          ...(props?.metadata && typeof props.metadata === 'object' ? { metadata: props.metadata } : {}),
+        })
+      }
+      break
+    }
     case EventTypes.SESSION_NEXT_TOOL_SUCCESS: {
       const settled = normalizeNextToolSettled(payload.properties, 'completed')
       if (settled) callbacks.onNextToolSettled?.(settled)
@@ -899,13 +704,18 @@ function normalizeNextToolSettled(
   if (!sessionID || !callID) return null
 
   if (status === 'error') {
+    // 适配层已把错误归一成字符串；这里兼容 Error 对象（{name,message}）与纯字符串。
     const error = isRecord(properties.error)
       ? typeof properties.error.message === 'string'
         ? properties.error.message
         : typeof properties.error.name === 'string'
           ? properties.error.name
-          : undefined
-      : undefined
+          : typeof properties.error.type === 'string'
+            ? properties.error.type
+            : undefined
+      : typeof properties.error === 'string'
+        ? properties.error
+        : undefined
     return { sessionID, callID, status, error, metadata: settledMetadata(properties) }
   }
 
@@ -981,7 +791,7 @@ export function reconnectServerSSE(serverId: string) {
   if (!conn || conn.subscribers.size === 0) return // 没有订阅者不需要重连
 
   if (import.meta.env.DEV) {
-    console.log(`[SSE] reconnectServerSSE(${serverId}) called, forcing reconnect...`)
+    logger.log(`[SSE] reconnectServerSSE(${serverId}) called, forcing reconnect...`)
   }
 
   // 断开现有连接
@@ -1088,17 +898,8 @@ export function subscribeToServerEvents(serverId: string, callbacks: EventCallba
 
   // 如果是第一个订阅者，启动连接
   if (conn.subscribers.size === 1) {
-    // 版本未知（首次同步的实例）：先探测 API 代次再连。v1 的 /global/event
-    // 在 v2 服务器上同样被 SPA 兜底（text/html），探测完成后 connectServer
-    // 会走 connectViaV2。ensureApiVersion 与首屏数据初始化路径共享健康检查
-    // 在途合并，不会多花一次网络；探测失败不阻塞，按原「未知即 v1」回退。
-    if (serverStore.getApiVersion(serverId)) {
-      connectServer(serverId)
-    } else {
-      void serverStore.ensureApiVersion(serverId).then(() => {
-        if (conn.subscribers.size > 0) connectServer(serverId)
-      })
-    }
+    // 第一个订阅者：建立 v2 事件流订阅。
+    connectServer(serverId)
   }
 
   // 返回取消订阅函数

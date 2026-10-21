@@ -293,6 +293,9 @@ export function useSessionState(sessionId: string | null): SessionStateSnapshot 
       directory: state.directory,
       title: state.title ?? null,
       compactedAt: state.compactedAt,
+      model: state.model,
+      agent: state.agent,
+      lastTurn: state.lastTurn,
     }
 
     cacheSessionSnapshot(sessionId, { version, snapshot })

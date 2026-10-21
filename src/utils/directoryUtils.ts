@@ -72,7 +72,7 @@ function notifyListeners(): void {
 export function getPathMode(): PathMode {
   if (_pathMode === null) {
     try {
-      const saved = serverStorage.get(STORAGE_KEY_PATH_MODE)
+      const saved = serverStorage.get(STORAGE_KEY_PATH_MODE, serverStore.getActiveServerId())
       if (saved === 'unix' || saved === 'windows') {
         _pathMode = saved
       } else {
@@ -91,7 +91,7 @@ export function getPathMode(): PathMode {
 export function setPathMode(mode: PathMode): void {
   _pathMode = mode
   try {
-    serverStorage.set(STORAGE_KEY_PATH_MODE, mode)
+    serverStorage.set(STORAGE_KEY_PATH_MODE, mode, serverStore.getActiveServerId())
   } catch {
     // ignore
   }

@@ -36,6 +36,12 @@ import { SessionChildrenSlot } from './SessionChildrenSlot'
 import { ProjectContextMenu } from './ProjectContextMenu'
 import { buildFolderStatus, type FolderStatus } from './folderStatus'
 import { cn } from '../../../utils/cn'
+import {
+  reconcileExpandedProjectIds,
+  toggleProjectId,
+  useCollapseExpandedIdsOnDrag,
+  useReorderableList,
+} from './useFolderList'
 import { interactive } from '../../../utils/interaction'
 import { hapticTap } from '../../../utils/haptics'
 
@@ -123,252 +129,6 @@ interface PendingDeleteSession {
   removeLocal: () => void
 }
 
-function areProjectIdListsEqual(left: string[], right: string[]) {
-  return left.length === right.length && left.every((id, index) => id === right[index])
-}
-
-/**
- * 只做「剔除已不存在的项目」。
- *
- * 刻意不加「空列表时展开第一个」的兜底：展开状态是跨端同步的，用户把项目全部
- * 收起后 prev 就是空数组，兜底会把它重新展开并写回存储 —— 收起操作永远失效，
- * 且会覆盖其它设备的展开状态。首次进入的默认展开由调用方一次性处理。
- */
-function reconcileExpandedProjectIds(prev: string[], projects: FolderRecentProject[]) {
-  const next = prev.filter(id => projects.some(project => project.id === id))
-  return areProjectIdListsEqual(next, prev) ? prev : next
-}
-
-function toggleProjectId(prev: string[], projectId: string) {
-  return prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId]
-}
-
-function createDirectoryProject(directory: string, sectionKind: FolderRecentProject['sectionKind'] = 'project') {
-  return {
-    id: directory,
-    worktree: directory,
-    name: getDirectoryName(directory) || directory,
-    sectionKind,
-  } satisfies FolderRecentProject
-}
-
-function useCollapseExpandedIdsOnDrag(
-  expandedIds: string[],
-  setExpandedIds: React.Dispatch<React.SetStateAction<string[]>>,
-) {
-  const savedExpandedRef = useRef<string[] | null>(null)
-
-  const handleDragActivated = useCallback(() => {
-    savedExpandedRef.current = expandedIds
-    setExpandedIds([])
-  }, [expandedIds, setExpandedIds])
-
-  const handleDragFinished = useCallback(() => {
-    if (!savedExpandedRef.current) return
-    setExpandedIds(savedExpandedRef.current)
-    savedExpandedRef.current = null
-  }, [setExpandedIds])
-
-  return { handleDragActivated, handleDragFinished }
-}
-
-interface ReorderState {
-  draggedId: string
-  currentOrder: string[]
-}
-
-interface UseReorderableListOptions {
-  ids: string[]
-  canDrag: (id: string) => boolean
-  onCommit: (draggedId: string, targetId: string) => void
-  onDragActivated?: () => void
-  onDragFinished?: () => void
-}
-
-function useReorderableList({ ids, canDrag, onCommit, onDragActivated, onDragFinished }: UseReorderableListOptions) {
-  const refs = useRef<Map<string, HTMLDivElement>>(new Map())
-  const registerRef = useCallback((id: string, element: HTMLDivElement | null) => {
-    if (element) refs.current.set(id, element)
-    else refs.current.delete(id)
-  }, [])
-  const [dragState, setDragState] = useState<ReorderState | null>(null)
-  const dragStartY = useRef(0)
-  const dragActive = useRef(false)
-  const latestOrderRef = useRef<string[]>([])
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const touchMovedRef = useRef(false)
-  const touchStartYRef = useRef(0)
-  const touchDragIdRef = useRef<string | null>(null)
-
-  const displayOrder = dragState?.currentOrder ?? ids
-  const draggedId = dragState?.draggedId ?? null
-
-  const calcNewOrder = useCallback((dragId: string, pointerY: number, baseOrder: string[]) => {
-    const items: { id: string; centerY: number }[] = []
-
-    for (const id of baseOrder) {
-      if (id === dragId) continue
-      const element = refs.current.get(id)
-      if (!element) continue
-      const rect = element.getBoundingClientRect()
-      items.push({ id, centerY: rect.top + rect.height / 2 })
-    }
-
-    let insertIndex = items.length
-    for (let i = 0; i < items.length; i++) {
-      if (pointerY < items[i].centerY) {
-        insertIndex = i
-        break
-      }
-    }
-
-    const withoutDragged = items.map(item => item.id)
-    withoutDragged.splice(insertIndex, 0, dragId)
-    return withoutDragged
-  }, [])
-
-  const finishDrag = useCallback(
-    (draggedId: string, originalOrder: string[]) => {
-      const finalOrder = latestOrderRef.current
-      const originalIdx = originalOrder.indexOf(draggedId)
-      const newIdx = finalOrder.indexOf(draggedId)
-
-      if (originalIdx !== -1 && newIdx !== -1 && originalIdx !== newIdx) {
-        const targetId = originalOrder[newIdx]
-        if (targetId) onCommit(draggedId, targetId)
-      }
-
-      setDragState(null)
-      dragActive.current = false
-      latestOrderRef.current = []
-      onDragFinished?.()
-    },
-    [onCommit, onDragFinished],
-  )
-
-  const handlePointerStart = useCallback(
-    (id: string, event: React.PointerEvent) => {
-      if (!canDrag(id)) return
-
-      event.preventDefault()
-      event.stopPropagation()
-      dragStartY.current = event.clientY
-      dragActive.current = false
-
-      const currentOrder = [...ids]
-
-      const onMove = (moveEvent: PointerEvent) => {
-        const dy = Math.abs(moveEvent.clientY - dragStartY.current)
-
-        if (!dragActive.current) {
-          if (dy < 4) return
-          dragActive.current = true
-          onDragActivated?.()
-          document.body.style.cursor = 'grabbing'
-          document.body.style.userSelect = 'none'
-          setDragState({ draggedId: id, currentOrder })
-        }
-
-        const newOrder = calcNewOrder(id, moveEvent.clientY, currentOrder)
-        latestOrderRef.current = newOrder
-        setDragState(prev => (prev ? { ...prev, currentOrder: newOrder } : null))
-      }
-
-      const onUp = () => {
-        document.removeEventListener('pointermove', onMove)
-        document.removeEventListener('pointerup', onUp)
-        document.removeEventListener('pointercancel', onUp)
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-
-        if (dragActive.current) finishDrag(id, currentOrder)
-
-        dragActive.current = false
-      }
-
-      document.addEventListener('pointermove', onMove)
-      document.addEventListener('pointerup', onUp)
-      document.addEventListener('pointercancel', onUp)
-    },
-    [calcNewOrder, canDrag, finishDrag, ids, onDragActivated],
-  )
-
-  const handleTouchStart = useCallback(
-    (id: string, event: React.TouchEvent) => {
-      if (!canDrag(id)) return
-
-      touchMovedRef.current = false
-      touchStartYRef.current = event.touches[0].clientY
-      touchDragIdRef.current = null
-
-      longPressTimer.current = setTimeout(() => {
-        if (!touchMovedRef.current) {
-          touchDragIdRef.current = id
-          dragActive.current = true
-          onDragActivated?.()
-          const currentOrder = [...ids]
-          latestOrderRef.current = currentOrder
-          setDragState({ draggedId: id, currentOrder })
-        }
-      }, 400)
-    },
-    [canDrag, ids, onDragActivated],
-  )
-
-  const handleTouchMove = useCallback(
-    (event: React.TouchEvent) => {
-      const dy = Math.abs(event.touches[0].clientY - touchStartYRef.current)
-      if (dy > 8) touchMovedRef.current = true
-
-      if (longPressTimer.current && touchMovedRef.current && !touchDragIdRef.current) {
-        clearTimeout(longPressTimer.current)
-        longPressTimer.current = null
-      }
-
-      if (!touchDragIdRef.current) return
-
-      event.stopPropagation()
-      const touchY = event.touches[0].clientY
-      const currentOrder = [...ids]
-      const newOrder = calcNewOrder(touchDragIdRef.current, touchY, currentOrder)
-      latestOrderRef.current = newOrder
-      setDragState(prev => (prev ? { ...prev, currentOrder: newOrder } : null))
-    },
-    [calcNewOrder, ids],
-  )
-
-  const handleTouchEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
-
-    const dragId = touchDragIdRef.current
-    if (dragId) {
-      finishDrag(dragId, [...ids])
-    }
-
-    touchDragIdRef.current = null
-  }, [finishDrag, ids])
-
-  useEffect(() => {
-    return () => {
-      if (longPressTimer.current) clearTimeout(longPressTimer.current)
-    }
-  }, [])
-
-  return {
-    draggedId,
-    isDragging: !!dragState,
-    displayOrder,
-    handlePointerStart,
-    handleTouchStart,
-    handleTouchMove,
-    handleTouchEnd,
-    registerRef,
-  }
-}
-
 export function FolderRecentList({
   projects,
   serverId,
@@ -429,10 +189,8 @@ export function FolderRecentList({
   )
 
   const {
-    draggedId,
-    isDragging,
-    displayOrder,
-    handlePointerStart,
+    dragState,
+    handlePointerDown,
     handleTouchStart,
     handleTouchMove,
     handleTouchEnd,
@@ -450,10 +208,13 @@ export function FolderRecentList({
     onDragActivated: handleDragActivated,
     onDragFinished: handleDragFinished,
   })
+  const draggedId = dragState?.draggedId ?? null
+  const isDragging = dragState !== null
+  const displayOrder = dragState?.currentOrder ?? projects.map(project => project.id)
 
   const handleSelectDirectory = useCallback(
     (directory: string, sectionKind: FolderRecentProject['sectionKind'] = 'project') => {
-      onSelectProject(createDirectoryProject(directory, sectionKind))
+      onSelectProject({ id: directory, worktree: directory, name: getDirectoryName(directory) || directory, sectionKind })
     },
     [onSelectProject],
   )
@@ -594,7 +355,7 @@ export function FolderRecentList({
                   // 拖拽
                   canDrag={!!project.canReorder && !isEditMode}
                   isDragged={draggedId === project.id}
-                  onDragStart={e => handlePointerStart(project.id, e)}
+                  onDragStart={e => handlePointerDown(project.id, e)}
                   onTouchDragStart={e => handleTouchStart(project.id, e)}
                   registerRef={el => registerRef(project.id, el)}
                   // 编辑模式

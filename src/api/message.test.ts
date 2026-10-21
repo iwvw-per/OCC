@@ -1,14 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { messagesMock, messageMock, getSDKClientMock, getApiVersionMock, getActiveServerIdMock, nativeListMessagesMock } =
-  vi.hoisted(() => ({
-    messagesMock: vi.fn(),
-    messageMock: vi.fn(),
-    getSDKClientMock: vi.fn(),
-    getApiVersionMock: vi.fn(),
-    getActiveServerIdMock: vi.fn(),
-    nativeListMessagesMock: vi.fn(),
-  }))
+const { nativeListMessagesMock, adaptPageMock } = vi.hoisted(() => ({
+  adaptPageMock: vi.fn(),
+  nativeListMessagesMock: vi.fn(),
+}))
+
+vi.mock('./v2/message', () => ({
+  adaptMessagePage: (...args: unknown[]) => adaptPageMock(...args),
+}))
 
 vi.mock('./v2NativeMessage', () => ({
   nativeListMessages: (...args: unknown[]) => nativeListMessagesMock(...args),
@@ -16,18 +15,18 @@ vi.mock('./v2NativeMessage', () => ({
 }))
 
 vi.mock('./sdk', () => ({
-  getSDKClient: (...args: unknown[]) => getSDKClientMock(...args),
-  unwrap: (result: { data?: unknown; error?: unknown }) => {
-    if (result.error != null) throw result.error
-    return result.data
-  },
+  buildHeaders: () => ({}),
 }))
 
 vi.mock('../store/serverStore', () => ({
   serverStore: {
-    getApiVersion: (...args: unknown[]) => getApiVersionMock(...args),
-    getActiveServerId: (...args: unknown[]) => getActiveServerIdMock(...args),
+    getActiveServerId: () => 'srv',
+    getServerBaseUrl: (serverId: string) => `https://${serverId}.example.com`,
+    getServerAuth: () => undefined,
+    getActiveAuth: () => undefined,
   },
+  makeAuthHeader: () => ({}),
+  getUnifiedFetch: async () => globalThis.fetch,
 }))
 
 vi.mock('../utils/sessionKey', () => ({
@@ -55,12 +54,6 @@ const { storageMock } = vi.hoisted(() => {
 vi.mock('../utils/perServerStorage', () => ({ serverStorage: storageMock }))
 
 beforeEach(() => {
-  // 版本探测按会话协议分支：默认未知（走 v1），用例内用 mockReturnValueOnce 覆盖，
-  // 避免某个用例设的 'v2' 泄漏到后续用例。
-  getApiVersionMock.mockReset()
-  getApiVersionMock.mockReturnValue(undefined)
-  getActiveServerIdMock.mockReset()
-  getActiveServerIdMock.mockReturnValue('srv')
   nativeListMessagesMock.mockReset()
 })
 
@@ -68,6 +61,7 @@ import {
   getSessionMessagePage,
   getSessionMessages,
   getSessionTurnPage,
+  getSessionFirstScreen,
   encodeMessageCursor,
   decodeMessageCursor,
   encodeV2MessageCursor,
@@ -91,41 +85,28 @@ function envelope(overrides: Partial<AnyMessage> = {}): AnyMessage {
   }
 }
 
-function sdkResult(messages: AnyMessage[], nextCursor?: string) {
-  return {
-    data: messages,
-    response: {
-      headers: {
-        get: (name: string) => (name === 'X-Next-Cursor' ? (nextCursor ?? null) : null),
-      },
-    },
-  }
-}
-
 describe('getSessionMessagePage projection', () => {
   beforeEach(() => {
-    messagesMock.mockReset()
-    messageMock.mockReset()
-    getSDKClientMock.mockReset()
-    getSDKClientMock.mockReturnValue({
-      session: { messages: messagesMock, message: messageMock },
-    })
+    nativeListMessagesMock.mockReset()
   })
 
+  /** nativeListMessages 返回升序消息 + 游标（已是适配后的内部形状）。 */
+  function nativePage(messages: AnyMessage[], nextCursor?: string, compactedAt?: number) {
+    nativeListMessagesMock.mockResolvedValue({ messages, nextCursor, compactedAt })
+  }
+
   it('strips summary.diffs while keeping the rest of summary', async () => {
-    messagesMock.mockResolvedValue(
-      sdkResult([
-        envelope({
-          info: {
-            id: 'msg-1',
-            sessionID: 'ses-1',
-            role: 'user',
-            time: { created: 1 },
-            summary: { title: 'Keep me', diffs: [{ file: 'a.ts', patch: 'x'.repeat(5000) }] },
-          },
-        }),
-      ]),
-    )
+    nativePage([
+      envelope({
+        info: {
+          id: 'msg-1',
+          sessionID: 'ses-1',
+          role: 'user',
+          time: { created: 1 },
+          summary: { title: 'Keep me', diffs: [{ file: 'a.ts', patch: 'x'.repeat(5000) }] },
+        },
+      }),
+    ])
 
     const page = await getSessionMessagePage('ses-1', 50)
 
@@ -135,24 +116,22 @@ describe('getSessionMessagePage projection', () => {
   })
 
   it('strips tool state.attachments but keeps output and error', async () => {
-    messagesMock.mockResolvedValue(
-      sdkResult([
-        envelope({
-          parts: [
-            {
-              id: 'prt-1',
-              type: 'tool',
-              tool: 'read',
-              state: {
-                status: 'completed',
-                output: 'file contents',
-                attachments: [{ id: 'att-1', url: 'data:image/png;base64,' + 'A'.repeat(4000) }],
-              },
+    nativePage([
+      envelope({
+        parts: [
+          {
+            id: 'prt-1',
+            type: 'tool',
+            tool: 'read',
+            state: {
+              status: 'completed',
+              output: 'file contents',
+              attachments: [{ id: 'att-1', url: 'data:image/png;base64,' + 'A'.repeat(4000) }],
             },
-          ],
-        }),
-      ]),
-    )
+          },
+        ],
+      }),
+    ])
 
     const page = await getSessionMessagePage('ses-1', 50)
 
@@ -166,38 +145,37 @@ describe('getSessionMessagePage projection', () => {
     const original = envelope({
       parts: [{ id: 'prt-1', type: 'text', text: 'hello' }],
     })
-    messagesMock.mockResolvedValue(sdkResult([original]))
+    nativePage([original])
 
     const page = await getSessionMessagePage('ses-1', 50)
 
     expect(page.messages[0]).toBe(original)
   })
 
-  it('passes through the cursor from X-Next-Cursor', async () => {
-    messagesMock.mockResolvedValue(sdkResult([envelope()], 'cursor-abc'))
+  it('passes through the cursor from native page', async () => {
+    nativePage([envelope()], 'cursor-abc')
 
     const page = await getSessionMessagePage('ses-1', 50, 'cursor-prev')
 
     expect(page.nextCursor).toBe('cursor-abc')
-    expect(messagesMock).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionID: 'ses-1', limit: 50, before: 'cursor-prev' }),
+    expect(nativeListMessagesMock).toHaveBeenCalledWith(
+      'srv',
+      expect.objectContaining({ sessionID: 'ses-1', limit: 50, cursor: 'cursor-prev' }),
     )
   })
 
   it('skips projection when project:false so summary.diffs survives', async () => {
-    messagesMock.mockResolvedValue(
-      sdkResult([
-        envelope({
-          info: {
-            id: 'msg-1',
-            sessionID: 'ses-1',
-            role: 'user',
-            time: { created: 1 },
-            summary: { title: 'Keep me', diffs: [{ file: 'a.ts', patch: 'diff-body' }] },
-          },
-        }),
-      ]),
-    )
+    nativePage([
+      envelope({
+        info: {
+          id: 'msg-1',
+          sessionID: 'ses-1',
+          role: 'user',
+          time: { created: 1 },
+          summary: { title: 'Keep me', diffs: [{ file: 'a.ts', patch: 'diff-body' }] },
+        },
+      }),
+    ])
 
     const messages = await getSessionMessages('ses-1', 50, undefined, undefined, { project: false })
 
@@ -312,20 +290,8 @@ describe('encodeV2MessageCursor', () => {
   })
 })
 
-describe('encodeBeforeCursor (protocol-aware)', () => {
-  it('uses the v1 {id,time} cursor for v1 servers', () => {
-    getApiVersionMock.mockReturnValue('v1')
-    const message = envelope({
-      info: { id: 'msg-9', sessionID: 'ses-1', role: 'user', time: { created: 1234 } },
-    })
-    expect(decodeCursorJson(encodeBeforeCursor(message as never, 'srv-1'))).toEqual({
-      id: 'msg-9',
-      time: 1234,
-    })
-  })
-
-  it('uses the v2 {id,order,direction} cursor for v2 servers', () => {
-    getApiVersionMock.mockReturnValue('v2')
+describe('encodeBeforeCursor', () => {
+  it('uses the v2 {id,order,direction} cursor', () => {
     const message = envelope({
       info: { id: 'msg-9', sessionID: 'ses-1', role: 'user', time: { created: 1234 } },
     })
@@ -337,34 +303,81 @@ describe('encodeBeforeCursor (protocol-aware)', () => {
   })
 })
 
+describe('getSessionFirstScreen', () => {
+  /**
+   * 首屏必须「先出内容」：用小页拿到第一批就返回，剩余轮次由 rest() 后台补齐。
+   * 大会话一次取 200 条要 536KB，而 3 轮通常只需几十条 —— 这是首屏慢的主因。
+   */
+  it('returns a small first page and exposes rest() when turns are not enough', async () => {
+    // 第一页只有 1 轮（尾部），未达 2 轮目标
+    nativeListMessagesMock
+      .mockResolvedValueOnce({ messages: [userMsg(3), assistantMsg(3)], nextCursor: 'cursor-1' })
+      .mockResolvedValueOnce({ messages: [userMsg(1), assistantMsg(1), userMsg(2), assistantMsg(2)], nextCursor: 'cursor-2' })
+
+    const first = await getSessionFirstScreen('ses-1', 2)
+
+    // 第一段只发一次请求，且用的是小页上限
+    expect(nativeListMessagesMock).toHaveBeenCalledTimes(1)
+    expect(nativeListMessagesMock).toHaveBeenNthCalledWith(
+      1,
+      'srv',
+      expect.objectContaining({ sessionID: 'ses-1', cursor: undefined }),
+    )
+    expect(first.complete).toBe(false)
+    expect(first.messages).toHaveLength(2)
+    expect(typeof first.rest).toBe('function')
+
+    const rest = await first.rest!()
+    // 补齐后按时间升序拼接，且游标以更早那段为准
+    expect(rest.messages.map(m => m.info.id)).toEqual([
+      'user-1',
+      'asst-1',
+      'user-2',
+      'asst-2',
+      'user-3',
+      'asst-3',
+    ])
+    expect(rest.nextCursor).toBe('cursor-2')
+  })
+
+  it('marks the first page complete when the target turns are already covered', async () => {
+    nativeListMessagesMock.mockResolvedValueOnce({
+      messages: [userMsg(1), assistantMsg(1), userMsg(2), assistantMsg(2)],
+      nextCursor: 'cursor-1',
+    })
+
+    const first = await getSessionFirstScreen('ses-1', 2)
+    expect(first.complete).toBe(true)
+    expect(first.rest).toBeUndefined()
+    expect(nativeListMessagesMock).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('getSessionTurnPage', () => {
   beforeEach(() => {
-    messagesMock.mockReset()
-    messageMock.mockReset()
-    getSDKClientMock.mockReset()
-    getSDKClientMock.mockReturnValue({
-      session: { messages: messagesMock, message: messageMock },
-    })
+    nativeListMessagesMock.mockReset()
   })
 
   it('keeps pulling older pages until the target turn count is met', async () => {
     // 第一页：只有 1 个 user（尾部），未达 2 轮 → 继续往前拉
     const page1 = [assistantMsg(1), assistantMsg(2), userMsg(3)]
     const page2 = [userMsg(1), assistantMsg(2), assistantMsg(3)]
-    messagesMock
-      .mockResolvedValueOnce(sdkResult(page1, 'cursor-1'))
-      .mockResolvedValueOnce(sdkResult(page2, 'cursor-2'))
+    nativeListMessagesMock
+      .mockResolvedValueOnce({ messages: page1, nextCursor: 'cursor-1' })
+      .mockResolvedValueOnce({ messages: page2, nextCursor: 'cursor-2' })
 
     const result = await getSessionTurnPage('ses-1', 2)
 
-    expect(messagesMock).toHaveBeenCalledTimes(2)
-    expect(messagesMock).toHaveBeenNthCalledWith(
+    expect(nativeListMessagesMock).toHaveBeenCalledTimes(2)
+    expect(nativeListMessagesMock).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ sessionID: 'ses-1', limit: 30, before: undefined }),
+      'srv',
+      expect.objectContaining({ sessionID: 'ses-1', limit: 200, cursor: undefined }),
     )
-    expect(messagesMock).toHaveBeenNthCalledWith(
+    expect(nativeListMessagesMock).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ sessionID: 'ses-1', limit: 30, before: 'cursor-1' }),
+      'srv',
+      expect.objectContaining({ sessionID: 'ses-1', limit: 200, cursor: 'cursor-1' }),
     )
     // 按时间升序拼接：page2 在 page1 之前
     expect(result.messages.map(m => m.info.id)).toEqual(['user-1', 'asst-2', 'asst-3', 'asst-1', 'asst-2', 'user-3'])
@@ -374,11 +387,11 @@ describe('getSessionTurnPage', () => {
 
   it('stops when the target turn count is already met in one page', async () => {
     const page = [userMsg(1), assistantMsg(1), userMsg(2), assistantMsg(2)]
-    messagesMock.mockResolvedValueOnce(sdkResult(page, 'cursor-1'))
+    nativeListMessagesMock.mockResolvedValueOnce({ messages: page, nextCursor: 'cursor-1' })
 
     const result = await getSessionTurnPage('ses-1', 2)
 
-    expect(messagesMock).toHaveBeenCalledTimes(1)
+    expect(nativeListMessagesMock).toHaveBeenCalledTimes(1)
     expect(result.messages).toHaveLength(4)
     expect(result.nextCursor).toBe('cursor-1')
     expect(result.hasMore).toBe(true)
@@ -386,7 +399,7 @@ describe('getSessionTurnPage', () => {
 
   it('reports no more history when the server omits the cursor on a short page', async () => {
     const page = [userMsg(1), assistantMsg(1)]
-    messagesMock.mockResolvedValueOnce(sdkResult(page, undefined))
+    nativeListMessagesMock.mockResolvedValueOnce({ messages: page, nextCursor: undefined })
 
     const result = await getSessionTurnPage('ses-1', 3)
 
@@ -394,42 +407,28 @@ describe('getSessionTurnPage', () => {
     expect(result.hasMore).toBe(false)
   })
 
-  it('treats a full page without a cursor as possibly having more history (legacy server)', async () => {
-    // 旧版 serve 不给游标但返回满页：无法判定已到最早，按可能还有处理
-    const page = Array.from({ length: 30 }, (_, index) => userMsg(index))
-    messagesMock.mockResolvedValue(sdkResult(page, undefined))
-
-    const result = await getSessionTurnPage('ses-1', 3)
-
-    expect(result.hasMore).toBe(true)
-  })
-
-  it('bounds the number of internal pages for pathologically long turns', async () => {
-    const fullPage = () => Array.from({ length: 30 }, (_, index) => assistantMsg(index))
-    messagesMock.mockResolvedValue(sdkResult(fullPage(), 'cursor-x'))
-
-    const result = await getSessionTurnPage('ses-1', 5)
-
-    // 单轮几千条：最多 TURN_FETCH_MAX_PAGES 页就停，交给上滑继续加载
-    expect(messagesMock).toHaveBeenCalledTimes(4)
-    expect(result.messages).toHaveLength(120)
-    expect(result.hasMore).toBe(true)
-  })
-
-  it('v2: a full page without a next cursor means no more history (no spurious auto-load)', async () => {
-    getApiVersionMock.mockReturnValue('v2')
+  it('a full page without a cursor means no more history', async () => {
     const page = Array.from({ length: 30 }, (_, index) => userMsg(index))
     nativeListMessagesMock.mockResolvedValue({ messages: page, nextCursor: undefined })
 
     const result = await getSessionTurnPage('ses-1', 3)
 
-    // 30 条恰好一满页、但游标已空：v2 的 cursor 权威，判定为已到最早
     expect(result.hasMore).toBe(false)
-    expect(result.nextCursor).toBeUndefined()
   })
 
-  it('v2: an empty page with a residual next cursor stops and clears the cursor', async () => {
-    getApiVersionMock.mockReturnValue('v2')
+  it('bounds the number of internal pages for pathologically long turns', async () => {
+    const fullPage = () => Array.from({ length: 30 }, (_, index) => assistantMsg(index))
+    nativeListMessagesMock.mockResolvedValue({ messages: fullPage(), nextCursor: 'cursor-x' })
+
+    const result = await getSessionTurnPage('ses-1', 5)
+
+    // 单轮几千条：最多 TURN_FETCH_MAX_PAGES 页就停，交给上滑继续加载
+    expect(nativeListMessagesMock).toHaveBeenCalledTimes(4)
+    expect(result.messages).toHaveLength(120)
+    expect(result.hasMore).toBe(true)
+  })
+
+  it('an empty page with a residual next cursor stops and clears the cursor', async () => {
     nativeListMessagesMock
       .mockResolvedValueOnce({ messages: [userMsg(1)], nextCursor: 'c1' })
       .mockResolvedValueOnce({ messages: [], nextCursor: 'c2' })
@@ -445,24 +444,17 @@ describe('getSessionTurnPage', () => {
 
 describe('probeLightweightSupport', () => {
   beforeEach(() => {
-    messagesMock.mockReset()
-    getSDKClientMock.mockReset()
     storageMock.data.clear()
     storageMock.getJSONFor.mockClear()
     storageMock.setJSONFor.mockClear()
     resetLightweightSupportCache()
-    getSDKClientMock.mockReturnValue({ session: { messages: messagesMock, message: messageMock } })
   })
 
-  function resultWithLightweightHeader(value: string | null) {
-    return {
-      data: [],
-      response: { headers: { get: (name: string) => (name === 'X-Lightweight' ? value : null) } },
-    }
-  }
-
   it('persists a positive probe result and reuses it without a network call', async () => {
-    messagesMock.mockResolvedValueOnce(resultWithLightweightHeader('1'))
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('[]', { status: 200, headers: { 'X-Lightweight': '1' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
 
     const first = await probeLightweightSupport('ses-1', '/dir', 'srv-1')
     expect(first).toBe(true)
@@ -470,14 +462,16 @@ describe('probeLightweightSupport', () => {
 
     // 清内存缓存后应从持久化读取，不再发请求
     resetLightweightSupportCache()
-    messagesMock.mockClear()
+    fetchMock.mockClear()
     const second = await probeLightweightSupport('ses-1', '/dir', 'srv-1')
     expect(second).toBe(true)
-    expect(messagesMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
   })
 
   it('does not persist a negative probe result and re-probes after restart', async () => {
-    messagesMock.mockResolvedValueOnce(resultWithLightweightHeader(null))
+    const fetchMock = vi.fn().mockResolvedValue(new Response('[]', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
 
     const first = await probeLightweightSupport('ses-1', '/dir', 'srv-2')
     expect(first).toBe(false)
@@ -485,52 +479,82 @@ describe('probeLightweightSupport', () => {
     expect(storageMock.setJSONFor).not.toHaveBeenCalled()
 
     resetLightweightSupportCache()
-    messagesMock.mockClear()
-    messagesMock.mockResolvedValueOnce(resultWithLightweightHeader('1'))
+    fetchMock.mockClear()
+    fetchMock.mockResolvedValue(new Response('[]', { status: 200, headers: { 'X-Lightweight': '1' } }))
     const second = await probeLightweightSupport('ses-1', '/dir', 'srv-2')
     expect(second).toBe(true)
-    expect(messagesMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
   })
 
   it('does not persist when the probe request fails', async () => {
-    messagesMock.mockRejectedValueOnce(new Error('network down'))
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')))
 
     const result = await probeLightweightSupport('ses-1', '/dir', 'srv-3')
     expect(result).toBe(false)
     expect(storageMock.setJSONFor).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('cancels the response body so the probe never downloads the whole session', async () => {
+    // 主机 Agent 实现轻量投影时**忽略 limit**：任何带 X-Lightweight 的消息
+    // 请求都返回整个会话（实测 4810 条消息 = 25MB）。我们只要一个响应头，
+    // 所以必须立刻 cancel 掉 body，否则「探测支持与否」本身就要下载 25MB。
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    const response = new Response('[]', { status: 200, headers: { 'X-Lightweight': '1' } })
+    Object.defineProperty(response, 'body', { value: { cancel }, configurable: true })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+
+    const supported = await probeLightweightSupport('ses-1', '/dir', 'srv-cancel')
+    expect(supported).toBe(true)
+    expect(cancel).toHaveBeenCalled()
+    vi.unstubAllGlobals()
   })
 })
 
 describe('getSessionLightweightMessages in-flight dedup (StrictMode)', () => {
+  /** 裸 fetch 的响应体交给 adaptMessagePage 适配，这里直接桩掉适配层。 */
+  function v2User() {
+    return { data: [{ id: 'msg-1', sessionID: 'ses-1', type: 'user', text: 'hi', time: { created: 1 } }] }
+  }
+
   beforeEach(() => {
-    messagesMock.mockReset()
-    getSDKClientMock.mockReset()
     storageMock.data.clear()
     resetLightweightInflight()
-    getSDKClientMock.mockReturnValue({ session: { messages: messagesMock, message: messageMock } })
+    adaptPageMock.mockReset()
+    adaptPageMock.mockReturnValue({
+      messages: [{ info: { id: 'msg-1', role: 'user' }, parts: [] }],
+    })
   })
 
   it('sends only one network request for concurrent same-session calls', async () => {
     // React StrictMode 会把 effect 跑两次：同一会话的轻量请求并发发出两次。
     // 单次响应可达 MB 级，必须合并在途请求。
-    messagesMock.mockResolvedValue({ data: [envelope()] })
+    const fetchMock = vi.fn().mockImplementation(
+      () => Promise.resolve(new Response(JSON.stringify([v2User()]), { status: 200 })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
 
     const [a, b] = await Promise.all([
       getSessionLightweightMessages('ses-1', '/dir', 'srv'),
       getSessionLightweightMessages('ses-1', '/dir', 'srv'),
     ])
 
-    expect(messagesMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(a.messages).toHaveLength(1)
     expect(b.messages).toHaveLength(1)
+    vi.unstubAllGlobals()
   })
 
   it('does not share the caller abort signal, so one abort cannot kill the other', async () => {
-    let release!: (value: unknown) => void
-    messagesMock.mockReturnValue(
-      new Promise(resolve => {
-        release = resolve
-      }),
+    let release!: (value: Response) => void
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockReturnValue(
+        new Promise<Response>(resolve => {
+          release = resolve
+        }),
+      ),
     )
 
     const controller = new AbortController()
@@ -541,29 +565,37 @@ describe('getSessionLightweightMessages in-flight dedup (StrictMode)', () => {
     await expect(aborted).rejects.toMatchObject({ name: 'AbortError' })
 
     // 底层共享请求不受影响，另一个调用方仍能拿到数据
-    release({ data: [envelope()] })
+    release(new Response(JSON.stringify([v2User()]), { status: 200 }))
     await expect(survivor).resolves.toMatchObject({ messages: [expect.anything()] })
-    expect(messagesMock).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
   })
 
   it('issues a fresh request after the previous one settles', async () => {
-    messagesMock.mockResolvedValue({ data: [envelope()] })
+    const fetchMock = vi.fn().mockImplementation(
+      () => Promise.resolve(new Response(JSON.stringify([v2User()]), { status: 200 })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
 
     await getSessionLightweightMessages('ses-1', '/dir', 'srv')
     await getSessionLightweightMessages('ses-1', '/dir', 'srv')
 
     // 只合并在途，不做缓存：请求结束后应重新拉取
-    expect(messagesMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    vi.unstubAllGlobals()
   })
 
   it('rejects immediately when the caller signal is already aborted', async () => {
-    messagesMock.mockResolvedValue({ data: [envelope()] })
+    const fetchMock = vi.fn().mockImplementation(
+      () => Promise.resolve(new Response(JSON.stringify([v2User()]), { status: 200 })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
     const controller = new AbortController()
     controller.abort()
 
     await expect(
       getSessionLightweightMessages('ses-1', '/dir', 'srv', { signal: controller.signal }),
     ).rejects.toMatchObject({ name: 'AbortError' })
-    expect(messagesMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
   })
 })

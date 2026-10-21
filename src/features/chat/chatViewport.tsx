@@ -14,7 +14,6 @@ export const CHAT_SPLIT_TOUCH_MIN_WIDTH = 900
 
 const SIDEBAR_STORAGE_KEY = 'sidebar-width'
 const SIDEBAR_RAIL_WIDTH = 49
-const SIDEBAR_DEFAULT_WIDTH = 288
 const SIDEBAR_HARD_MIN_WIDTH = 160
 const SIDEBAR_PREFERRED_MIN_WIDTH = 240
 const SIDEBAR_MAX_WIDTH = 480
@@ -28,17 +27,16 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
 }
 
-function getResponsiveSidebarMaxWidth(viewportWidth: number, preferTouchUi: boolean) {
-  return viewportWidth < SMALL_DESKTOP_BREAKPOINT
-    ? Math.floor(viewportWidth * (preferTouchUi ? 0.46 : 0.4))
-    : SIDEBAR_MAX_WIDTH
-}
-
-function getResponsiveSidebarDefaultWidth(viewportWidth: number, preferTouchUi: boolean) {
-  return viewportWidth < SMALL_DESKTOP_BREAKPOINT
-    ? Math.floor(viewportWidth * (preferTouchUi ? 0.34 : 0.3))
-    : SIDEBAR_DEFAULT_WIDTH
-}
+/**
+ * 侧栏默认宽度：所有形态统一 288px。
+ *
+ * 历史上宽屏（≥1100px）用 288、窄屏按视口比例（30%~34%）收缩，并且触摸设备更宽。
+ * 结果是同一个浏览器窗口在不同设备上宽度不同，网页端和桌面端也不一致——
+ * 用户看到的是「侧栏忽然变窄/变宽」，而不是一个有意的响应式设计。
+ * 侧栏本身内容（项目名 + 会话标题）不需要更多宽度；窗口特别窄时由下面的
+ * min(ChatSurface 下限) 收缩逻辑兜底。
+ */
+const SIDEBAR_DEFAULT_WIDTH = 288
 
 function getResponsiveRightPanelMaxWidth(viewportWidth: number, preferTouchUi: boolean) {
   return viewportWidth < SMALL_DESKTOP_BREAKPOINT
@@ -139,16 +137,11 @@ function computeChatViewport(input: ComputedViewportInput): Omit<ChatViewportVal
   const interactionMode: ChatInteractionMode = overlayPanels ? 'touch' : 'pointer'
   const sidebarMinWidth = sidebarHardMinWidth ?? SIDEBAR_HARD_MIN_WIDTH
 
-  const sidebarMaxWidth = clamp(
-    getResponsiveSidebarMaxWidth(viewportWidth, preferTouchUi),
-    sidebarMinWidth,
-    SIDEBAR_MAX_WIDTH,
-  )
-  const sidebarDefaultWidth = clamp(
-    getResponsiveSidebarDefaultWidth(viewportWidth, preferTouchUi),
-    SIDEBAR_PREFERRED_MIN_WIDTH,
-    sidebarMaxWidth,
-  )
+  // 侧栏宽度不随视口缩放：上限恒为 SIDEBAR_MAX_WIDTH，默认恒为 SIDEBAR_DEFAULT_WIDTH。
+  // 窗口太窄时由下方「保证 ChatSurface 最小宽度」的收缩逻辑处理，而不是提前
+  // 按比例缩小侧栏——那会让同一份内容在不同窗口/设备上宽度不同。
+  const sidebarMaxWidth = clamp(SIDEBAR_MAX_WIDTH, sidebarMinWidth, SIDEBAR_MAX_WIDTH)
+  const sidebarDefaultWidth = clamp(SIDEBAR_DEFAULT_WIDTH, SIDEBAR_PREFERRED_MIN_WIDTH, sidebarMaxWidth)
   const requestedSidebarOpenWidth = sidebarHasCustomWidth
     ? clamp(requestedSidebarWidth, sidebarMinWidth, sidebarMaxWidth)
     : sidebarDefaultWidth
