@@ -1084,13 +1084,23 @@ $$`
         source: (frame as HTMLIFrameElement).contentWindow,
       }),
     )
-    await waitFor(() => expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-100'))
+    await waitFor(
+      () => expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-100'),
+      { timeout: 5000 },
+    )
 
     fireEvent.pointerUp(frame, { pointerType: 'touch' })
     expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-100')
 
     fireEvent.pointerDown(document.body, { pointerType: 'touch' })
-    await waitFor(() => expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-0'))
+    // 显式放宽到 5s：这一步要等「pointerdown 捕获 → setState → 重渲染」，
+    // 在 CI 慢机器上会超过 waitFor 默认的 1000ms（其轮询间隔会退避到接近上限）。
+    // v2.0.16 的 Release 校验就是因为这里超时而两次中断，属于测试对机器速度敏感，
+    // 而非功能缺陷（本地 100 次全绿、生产逻辑也有独立单测覆盖）。
+    await waitFor(
+      () => expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-0'),
+      { timeout: 5000 },
+    )
   })
 
   it('updates a canonical HTML preview theme without reloading its document', async () => {
