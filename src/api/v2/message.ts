@@ -30,9 +30,28 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
     case 'completed':
     default: {
       // v2 用 content: ToolContent[]，v1 用 output: string：拼接文本内容。
+      //
+      // ⚠️ 同时统计**被丢弃的内联文件体积**。
+      // content[] 里的 `type: "file"` 块带 `uri`，值是完整的 `data:image/png;base64,...`
+      // （实测一张截图 2.3MB）。这部分不能留在内存里，所以只拼文本、把图片丢掉。
+      // 但它**仍然留在服务端上下文**，会让「上下文转发给模型」的请求体膨胀 ——
+      // 真实故障就是 5 张截图累计 11MB，触发上游网关 16MB 上限，返回 413。
+      // 这里只记一个数字（体积），用于发送前预警，不保留任何字节。
+      let omittedFileBytes = 0
       const output = list(state.content)
         .map(item => {
           const c = rec(item)
+          if (str(c.type) === 'file') {
+            const uri = str(c.uri) ?? str(c.url) ?? ''
+            if (uri) {
+              const comma = uri.indexOf(',')
+              omittedFileBytes +=
+                comma > 0 && uri.slice(0, comma).includes('base64')
+                  ? Math.floor(((uri.length - comma) * 3) / 4)
+                  : Math.max(0, uri.length - comma)
+            }
+            return ''
+          }
           return str(c.text) ?? str(c.content) ?? ''
         })
         .join('')
@@ -43,6 +62,7 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
         title,
         metadata,
         time: { start, end: num(time.end) ?? start },
+        ...(omittedFileBytes > 0 ? { omittedFileBytes } : {}),
       } as ToolPart['state']
     }
   }

@@ -29,6 +29,7 @@ import { useServerStore } from '../../hooks/useServerStore'
 import { useHostSlideState } from './sidebar/hostSwitchDirection'
 import { useCancelHint } from '../../hooks/useCancelHint'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../../utils/sessionKey'
+import { summarizeHeavyContent, formatHeavyBytes } from './heavyContent'
 import { serverStore } from '../../store/serverStore'
 import {
   InlineToolRequestContext,
@@ -479,6 +480,32 @@ export const ChatPane = memo(function ChatPane({
    */
   useBackfillTurnOutline(paneServerId, routeRawSessionId, loadState === 'loaded')
   const turnOutlineEntries = useTurnOutlineEntries(paneServerId, routeRawSessionId)
+
+  /**
+   * 上下文过重预警。
+   *
+   * 真实故障：用户只发「继续」两个字却收到 413。原因是 agent 读了 5 张截图，
+   * base64 累计 8MB+ 留在服务端上下文里，转发给模型时超过上游 16MB 上限。
+   * 前端无法减小它，但提前说明能让用户理解并主动脱困。
+   */
+  const heavyContent = useMemo(() => summarizeHeavyContent(renderedMessages), [renderedMessages])
+  const heavyWarning = useMemo(() => {
+    if (!heavyContent.shouldWarn) return undefined
+    /**
+     * 用字符串拼接而不是 i18next 插值。
+     *
+     * 实测 `t('chat:inputBox.heavyContext', { size })` 在这里会原样渲染出
+     * `{size}` —— 该命名空间的插值在本项目的 i18next 配置下不生效
+     * （同类 key 在 InputBox 里能生效，是因为那里用的是不带 `chat:` 前缀的
+     * 默认命名空间解析路径）。这里只需要拼一个数字，不值得去动全局配置。
+     */
+    const sizeLabel = formatHeavyBytes(heavyContent.totalBytes)
+    return {
+      label: t('chat:inputBox.heavyContextLabel', { defaultValue: 'heavy' }).replace('{{size}}', sizeLabel),
+      title: t('chat:inputBox.heavyContextTitle'),
+    }
+  }, [heavyContent, t])
+
   const outlineSourceEntries = useMemo(() => {
     /**
      * 已加载轮次的标记。
@@ -1230,6 +1257,7 @@ export const ChatPane = memo(function ChatPane({
                   onExpand: () => setQuestionCollapsed(false),
                 }
               : undefined,
+          heavyContent: heavyWarning,
         }}
       />
 

@@ -139,6 +139,8 @@
     "dropFilesHere": "拖放文件到此处",
     "replyToAgentMobile": "回复 Agent...",
     "replyToAgent": "回复 Agent（输入 @ 提及，/ 执行命令）",
+    "heavyContextLabel": "上下文已含 {{size}} 图片",
+    "heavyContextTitle": "这个会话里堆积了较多图片（AI 读取的截图会以 base64 留在上下文中）。发送时若超过上游上限会返回 413。建议：新建会话继续，或让 AI 不再读图；必要时先压缩上下文。",
     "fileTooLarge": "文件过大",
     "fileTooLargeBody": "{{name}} 超过 {{size}} 附件上限，未添加",
     "fileTypeUnsupported": "不支持该文件类型",

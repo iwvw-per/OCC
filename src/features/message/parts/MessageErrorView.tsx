@@ -1,6 +1,7 @@
 import { memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MessageError } from '../../../types/message'
+import { getErrorInfo } from './errorInfo'
 import { AlertCircleIcon, ChevronDownIcon } from '../../../components/Icons'
 import { useCompositorExpand, useDisclosureScrollLock } from '../../../hooks'
 import { CodeBlock } from '../../../components/CodeBlock'
@@ -122,56 +123,3 @@ export const MessageErrorView = memo(function MessageErrorView({ error, stateKey
   )
 })
 
-/**
- * 解析错误信息
- */
-function getErrorInfo(
-  error: MessageError,
-  t: (key: string, opts?: Record<string, unknown>) => string,
-): {
-  title: string
-  description: string
-  details?: string
-  severity: 'error' | 'warning'
-} {
-  switch (error.name) {
-    case 'ProviderAuthError':
-      return {
-        title: t('errors.authError'),
-        description: t('errors.authErrorDesc', { provider: error.data.providerID, message: error.data.message }),
-        severity: 'error',
-      }
-
-    case 'MessageOutputLengthError':
-      return {
-        title: t('errors.outputTooLong'),
-        description: t('errors.outputTooLongDesc'),
-        severity: 'warning',
-      }
-
-    case 'MessageAbortedError':
-      return {
-        title: t('errors.messageAborted'),
-        description: error.data.message || t('errors.messageAbortedDesc'),
-        severity: 'warning',
-      }
-
-    case 'APIError':
-      return {
-        title: error.data.statusCode
-          ? t('errors.apiErrorWithCode', { code: error.data.statusCode })
-          : t('errors.apiError'),
-        description: error.data.message,
-        details: error.data.responseBody,
-        severity: error.data.isRetryable ? 'warning' : 'error',
-      }
-
-    case 'UnknownError':
-    default:
-      return {
-        title: t('errors.unknownError'),
-        description: error.data?.message || t('errors.unknownErrorDesc'),
-        severity: 'error',
-      }
-  }
-}

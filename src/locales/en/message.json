@@ -175,6 +175,8 @@
     "messageAbortedDesc": "The message generation was interrupted.",
     "apiError": "API Error",
     "apiErrorWithCode": "API Error ({{code}})",
+    "payloadTooLarge": "Conversation context too large (413)",
+    "payloadTooLargeDesc": "The server's request to the model exceeded the upstream size limit. A common cause is the agent reading many screenshots or large files — those stay in the session as base64. To recover: start a new session; or ask the agent to stop reading images; if needed, compact the context from the Session panel and retry.",
     "rawDiagnostics": "View raw diagnostics",
     "unknownError": "Error",
     "unknownErrorDesc": "An unknown error occurred."

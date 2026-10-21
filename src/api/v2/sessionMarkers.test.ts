@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectSessionMarkers, findCompactionMarker } from './message'
+import { adaptMessagePage, collectSessionMarkers, findCompactionMarker } from './message'
 
 /**
  * v2 的消息模型有 11 种类型（packages/schema/src/session-message.ts）：
@@ -122,5 +122,79 @@ describe('collectSessionMarkers', () => {
     ]
     expect(collectSessionMarkers(data).idle).toBeUndefined()
     expect(findCompactionMarker(data)).toBeDefined()
+  })
+})
+
+/**
+ * 工具结果里被丢弃的内联文件体积。
+ *
+ * v2 的 tool content[] 可以带 `type: "file"` 块，`uri` 是完整的
+ * `data:image/png;base64,...`（实测一张截图 2.3MB 字符）。
+ *
+ * 这些字节**不能留在前端内存**（一页几十条消息会吃掉几十 MB 堆），所以
+ * adaptToolState 只把文本拼成 output、图片块丢弃。但它们**仍然留在服务端
+ * 上下文**里，会让「上下文转发给模型」的请求体膨胀 —— 真实故障就是 5 张
+ * 截图累计触发上游 16MB 上限，返回 413。
+ *
+ * 因此丢弃时记一个数字（`state.omittedFileBytes`）供发送前预警使用。
+ */
+describe('tool result inline file accounting', () => {
+  /** base64 的 4 字符表示 3 字节，所以字符数 × 3/4 */
+  const base64Bytes = (chars: number) => Math.floor((chars * 3) / 4)
+
+  it('records the decoded size of an inline base64 file', () => {
+    const payload = 'A'.repeat(4000) // 4000 字符 → 3000 字节
+    const page = adaptMessagePage({
+      data: [
+        {
+          id: 'msg_1',
+          sessionID: 'ses_1',
+          type: 'assistant',
+          time: { created: 1, completed: 2 },
+          content: [
+            {
+              type: 'tool',
+              id: 'call_1',
+              name: 'read',
+              state: {
+                status: 'completed',
+                input: { path: 'a.png' },
+                content: [
+                  { type: 'text', text: 'Image read successfully' },
+                  { type: 'file', uri: `data:image/png;base64,${payload}`, mime: 'image/png', name: 'a.png' },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    })
+    const part = page.messages[0].parts[0] as { state: { omittedFileBytes?: number; output?: string } }
+    expect(part.state.omittedFileBytes).toBe(base64Bytes(payload.length))
+    // 图片字节不进 output，内存里只有那句文本
+    expect(part.state.output).toBe('Image read successfully')
+  })
+
+  it('does not set the field for text-only tool results', () => {
+    const page = adaptMessagePage({
+      data: [
+        {
+          id: 'msg_1',
+          sessionID: 'ses_1',
+          type: 'assistant',
+          time: { created: 1, completed: 2 },
+          content: [
+            {
+              type: 'tool',
+              id: 'call_1',
+              name: 'bash',
+              state: { status: 'completed', input: {}, content: [{ type: 'text', text: 'ok' }] },
+            },
+          ],
+        },
+      ],
+    })
+    const part = page.messages[0].parts[0] as { state: { omittedFileBytes?: number } }
+    expect(part.state.omittedFileBytes).toBeUndefined()
   })
 })

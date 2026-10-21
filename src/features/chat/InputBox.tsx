@@ -190,6 +190,8 @@ export interface InputBoxProps {
   // Collapsed dialog capsules
   collapsedPermission?: CollapsedDialogInfo
   collapsedQuestion?: CollapsedDialogInfo
+  /** 上下文过重提示（见 heavyContent.ts：解释「只发两个字也 413」） */
+  heavyContent?: { label: string; title?: string }
   // 欢迎态（home 空态）隐藏底部 token/统计栏
   hideFooter?: boolean
   // 附加在输入框顶边的角标（如欢迎页项目选择按钮）。
@@ -235,6 +237,7 @@ function InputBoxComponent({
   onScrollToBottom,
   collapsedPermission,
   collapsedQuestion,
+  heavyContent,
   hideFooter = false,
   topAccessory,
 }: InputBoxProps) {
@@ -1633,6 +1636,7 @@ function InputBoxComponent({
                 onRedoAll={onRedoAll}
                 collapsedPermission={collapsedPermission}
                 collapsedQuestion={collapsedQuestion}
+                heavyContent={heavyContent}
               />
             </div>
           </div>
