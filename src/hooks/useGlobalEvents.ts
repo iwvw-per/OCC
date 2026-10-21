@@ -21,6 +21,7 @@ import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
 import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
 import { reportSessionViewed } from '../api/sessionView'
+import { recoverPendingInbox } from '../api/inboxRecovery'
 import { invalidateSessionListCache } from '../api/sessionListCache'
 import { sessionListIndexStore } from '../store/sessionListIndexStore'
 import type { EventCallbacks } from '../types/api/event'
@@ -1223,6 +1224,11 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // pending 与 session meta。
           reconcileServerStatus(serverId)
           fetchAndInitialize(serverId)
+          // 断连期间可能漏掉 `session.inbox.enqueued`（用户消息唯一的实时信号）。
+          // 漏掉就意味着「另一台设备发的消息在这台设备上永远不出现」，直到那一轮
+          // 跑完、消息落进 message.list 为止。用 session.inbox.list 把还没投递的
+          // 入队消息补回来，比等下一轮结束要早得多。
+          void recoverPendingInbox(serverId)
           // 只通知「关心的 session 属于该重连服务器」的消费者。
           // 重连是按 serverId 独立的：某台服务器网络抖动不应让其它服务器的
           // 会话缓存失效、被迫重拉。消费者 sessionId 是复合 key，用它反解 serverId 比对。

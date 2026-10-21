@@ -305,6 +305,22 @@ class MessageStore {
     return this.sessions.get(this.resolveKey(sessionId))
   }
 
+  /**
+   * 列出某台服务器上**已加载进内存**的会话 key（复合 key）。
+   *
+   * 供重连后的纠错路径使用（如补拉未投递的入队消息）：只处理已经存在的会话，
+   * 否则会在 store 里给没打开过的会话建档，侧栏冒出幽灵条目。
+   */
+  getLoadedSessionKeysForServer(serverId: string): string[] {
+    const keys: string[] = []
+    for (const key of this.sessions.keys()) {
+      const separator = key.indexOf('::')
+      if (separator < 0) continue
+      if (key.slice(0, separator) === serverId) keys.push(key)
+    }
+    return keys
+  }
+
   getVisibleMessages(sessionId: string | null): Message[] {
     if (!sessionId) return []
     sessionId = this.resolveKey(sessionId)
@@ -829,6 +845,27 @@ class MessageStore {
     ) {
       return
     }
+    state.usage = { tokens, cost }
+    this.notify([sessionId])
+  }
+
+  /**
+   * 用 `session.context` 汇总出的用量兜底会话累计值。
+   *
+   * 为什么需要兜底：`usage` 的唯一来源是 `session.usage.updated` 事件，而它是
+   * **ephemeral**（不落盘）。断线重连、切设备、刷新页面之后这个事件不会再补发，
+   * 于是侧栏的 token/花费统计会一直停在「按已加载消息累加」的口径上 ——
+   * 而首屏只加载 50 条，真实上下文可能有 300+ 条，数字会小一个数量级。
+   *
+   * `session.context` 返回「最后一次压缩之后」的完整消息，正好覆盖这个缺口。
+   * 已有的事件值优先（它更实时），这里只在缺失时写入。
+   */
+  recordSessionUsageFallback(sessionId: string, tokens: TokenUsage, cost: number) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    // 事件来源更实时：已有值就不覆盖
+    if (state.usage) return
     state.usage = { tokens, cost }
     this.notify([sessionId])
   }

@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { diffLines } from 'diff'
 import { DisclosureRow } from '../../../components/ui/DisclosureRow'
-import { StopIcon, TaskDoneIcon } from '../../../components/Icons'
+import { StopIcon, TaskDoneIcon, ChevronDownIcon } from '../../../components/Icons'
 import { ToolParamChip } from './ToolParamChip'
 import type { ToolPart } from '../../../types/message'
 import { isSubagentToolName, getSubagentSessionId, isBackgroundSubagentOutput } from '../subagentUtils'
@@ -14,7 +14,7 @@ import { childSessionStore, useChildSessionStatus } from '../../../store/childSe
 import { messageStore } from '../../../store/messageStore'
 import { useSessionStatus } from '../../../store/activeSessionStore'
 import { useSessionNavigation } from '../../../contexts/SessionNavigationContext'
-import { abortSession } from '../../../api'
+import { abortSession, backgroundSessionTools } from '../../../api'
 import { makeSessionKey, splitSessionKey } from '../../../utils/sessionKey'
 import { useTheme } from '../../../hooks/useTheme'
 import { formatToolName, formatDuration } from '../../../utils/formatUtils'
@@ -376,19 +376,48 @@ export const ToolPartView = memo(function ToolPartView({
     },
     [currentSessionId],
   )
+
+  /**
+   * 把卡住的工具转入后台（v2 session.background）。
+   *
+   * 比 abortSession 温和得多：工具继续跑，会话立刻可以继续下一轮。
+   * 之前用户面对卡住的工具只有「中止整个会话」一条路，代价是这一轮全废。
+   */
+  const handleBackgroundStuck = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!currentSessionId) return
+      const { serverId } = splitSessionKey(currentSessionId)
+      const state = messageStore.getSessionState(currentSessionId)
+      void backgroundSessionTools(currentSessionId, state?.directory || '', serverId || undefined).catch(() => {})
+    },
+    [currentSessionId],
+  )
   const stuckHint = isStuck ? (
     <span className="flex items-center gap-1 shrink-0 text-[length:var(--fs-xxs)] font-medium text-warning-100">
       {t('toolPart.maybeStuck')}
       {!taskStopButton && (
-        <button
-          type="button"
-          onClick={handleAbortStuck}
-          aria-label={t('toolPart.abortStuck')}
-          title={t('toolPart.abortStuck')}
-          className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
-        >
-          <StopIcon size={10} />
-        </button>
+        <>
+          {/* 转后台：比「中止整个会话」温和得多 —— 工具继续跑，会话可以立刻继续 */}
+          <button
+            type="button"
+            onClick={handleBackgroundStuck}
+            aria-label={t('toolPart.moveToBackground')}
+            title={t('toolPart.moveToBackground')}
+            className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-accent-main-100 hover:bg-accent-main-100/10 active:bg-accent-main-100/20 rounded-sm transition-colors bg-transparent border-none"
+          >
+            <ChevronDownIcon size={10} />
+          </button>
+          <button
+            type="button"
+            onClick={handleAbortStuck}
+            aria-label={t('toolPart.abortStuck')}
+            title={t('toolPart.abortStuck')}
+            className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
+          >
+            <StopIcon size={10} />
+          </button>
+        </>
       )}
     </span>
   ) : null

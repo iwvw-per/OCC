@@ -123,6 +123,16 @@ export async function nativeInterruptSession(serverId: string | undefined, sessi
 }
 
 /**
+ * 原生把前台阻塞工具转入后台（v2 session.background）。
+ *
+ * 空闲会话上是 no-op；有前台阻塞工具时它转后台继续观察，会话得以继续。
+ */
+export async function nativeBackgroundSession(serverId: string | undefined, sessionID: string): Promise<void> {
+  const client = getV2Client(serverId)
+  await client.session.background({ sessionID })
+}
+
+/**
  * 原生回退消息（v2 session.revert.stage）。
  */
 export async function nativeRevertMessage(

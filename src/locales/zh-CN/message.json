@@ -48,6 +48,7 @@
     "interrupted": "已中断",
     "maybeStuck": "可能已卡住",
     "abortStuck": "中止会话",
+    "moveToBackground": "转入后台（继续运行）",
     "toolFailed": "工具执行失败"
   },
   "toolSteps": {

@@ -25,6 +25,7 @@ import {
   type ApiSession,
 } from '../api'
 import { sessionErrorHandler } from '../utils'
+import { backfillSessionUsage } from '../api/contextBackfill'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_TURN_LIMIT, HISTORY_TURN_BATCH_SIZE, RECENT_FULL_TURNS } from '../constants'
 import { estimateHistoryPageSize } from '../constants/pagination'
@@ -504,6 +505,12 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         if (messageStore.getTrimmedCount(sid) > 0) {
           void recoverTrimmedHistoryRef.current?.(sid)
         }
+
+        // 后台补会话累计用量：`session.usage.updated` 是 ephemeral 事件，重连/刷新
+        // 后不会再补发，此时统计会退化成「按已加载消息累加」（首屏仅 50 条，
+        // 真实上下文 300+ 条 → 数字小一个数量级）。`session.context` 能补上这个洞。
+        // 不 await：纯补数据，失败/慢都不该影响首屏。
+        void backfillSessionUsage(sid)
       } catch (error) {
         if (isStale() || abortController.signal.aborted) return
         sessionErrorHandler('load session', error)

@@ -11,6 +11,7 @@ import {
   nativeUpdateSession,
   nativeRemoveSession,
   nativeInterruptSession,
+  nativeBackgroundSession,
   nativeRevertMessage,
   nativeUnrevertSession,
   nativeForkSession,
@@ -331,6 +332,23 @@ export async function deleteSession(sessionId: string, _directory?: string, serv
 export async function abortSession(sessionId: string, _directory?: string, serverId?: string): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
   return nativeInterruptSession(target.serverId, target.sessionId)
+}
+
+/**
+ * 把会话里正在前台阻塞的工具转入后台观察（v2 `session.background`）。
+ *
+ * 场景：某个工具（长命令、大文件搜索）卡住，会话被它占着无法继续。
+ * 之前唯一的出路是「中止整个会话」—— 代价太大，已经跑了的内容全废。
+ * 这个接口让工具转后台继续跑，会话可以立刻继续下一轮；空闲会话上是 no-op。
+ */
+export async function backgroundSessionTools(
+  sessionId: string,
+  _directory?: string,
+  serverId?: string,
+): Promise<boolean> {
+  const target = resolveSessionTarget(sessionId, serverId)
+  await nativeBackgroundSession(target.serverId, target.sessionId)
+  return true
 }
 
 /**

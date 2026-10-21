@@ -8,6 +8,7 @@ import { getV2Client } from './sdkV2'
 import { adaptDataList } from './v2/session'
 import { adaptProviders } from './v2/entities'
 import { rec } from './v2/adapt'
+import { deepMergeConfig } from '../utils/deepMerge'
 import type { ProvidersResponse } from '../types/api/model'
 
 /**
@@ -36,27 +37,9 @@ function flattenConfigEntries(raw: unknown): { config: Record<string, unknown>; 
     if (e.type !== 'document') continue
     const info = rec(e.info)
     if (Object.keys(info).length === 0) continue
-    merged = deepMerge(merged, info)
+    merged = deepMergeConfig(merged, info)
   }
   return { config: merged, sources }
-}
-
-/** 深合并：对象递归合并，数组与标量整体覆盖（与 JSON merge patch 语义一致）。 */
-function deepMerge(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...base }
-  for (const [key, value] of Object.entries(patch)) {
-    const prev = out[key]
-    if (isPlainObject(prev) && isPlainObject(value)) {
-      out[key] = deepMerge(prev, value)
-    } else {
-      out[key] = value
-    }
-  }
-  return out
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 /**
@@ -85,6 +68,61 @@ export async function nativeGetConfigWithSources(
     location: input.directory ? { directory: input.directory } : undefined,
   })
   return flattenConfigEntries(res)
+}
+
+/**
+ * 读取**原始配置条目**（保留每份文档各自的 info，不做合并）。
+ *
+ * 保存时必须用这个而不是合并结果：`config.get` 会把多份配置（全局 + 项目）
+ * 合并成一份「生效配置」。如果把合并结果整体写回某一份文件，就会把低优先级
+ * 文件里的内容复制进高优先级文件 —— 用户之后再改低优先级文件就完全不生效了。
+ */
+export async function nativeGetConfigEntries(
+  serverId: string | undefined,
+  input: { directory?: string },
+): Promise<Array<{ type: 'document' | 'directory'; path?: string; info: Record<string, unknown> }>> {
+  const client = getV2Client(serverId)
+  const res = await client.config.get({
+    location: input.directory ? { directory: input.directory } : undefined,
+  })
+  const entries = Array.isArray(res) ? res : []
+  return entries.map(item => {
+    const e = rec(item)
+    return {
+      type: e.type === 'directory' ? ('directory' as const) : ('document' as const),
+      path: typeof e.path === 'string' ? e.path : undefined,
+      info: rec(e.info),
+    }
+  })
+}
+
+/**
+ * 直接写一个文件到服务端磁盘（v2 `POST /api/experimental/fs/write`）。
+ *
+ * 这是唯一能把配置真正存下去的路径：`config.update` 的 schema 只有 `shell`
+ * 一个字段（见 packages/schema/src/config.ts 的 `Config.Patch`），其余字段
+ * 一律被忽略且返回成功 —— 也就是「保存了但没生效」。
+ *
+ * 目标路径不限于 location 目录（与 fs.read 不同），因此可以写
+ * `~/.config/opencode/opencode.json`。
+ */
+export async function nativeWriteFile(
+  serverId: string | undefined,
+  input: { path: string; content: string },
+): Promise<void> {
+  const client = getV2Client(serverId)
+  await client.file.write({ path: input.path, body: new TextEncoder().encode(input.content) } as never)
+}
+
+/**
+ * 让服务端重新加载所有 location 的配置（v2 `location.reload`）。
+ *
+ * 写盘之后必须调用，否则内存里还是旧配置。注意它会重建所有已加载的 location：
+ * 进行中的权限/表单会被取消，运行中的会话在下一个 step 边界换用新服务。
+ */
+export async function nativeReloadLocations(serverId: string | undefined): Promise<void> {
+  const client = getV2Client(serverId)
+  await client.location.reload()
 }
 
 /**

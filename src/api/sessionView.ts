@@ -18,7 +18,8 @@
 // 3. 静默失败：这是体验优化，失败绝不能让打开会话的流程报错。
 
 import { nativeViewSession } from '../api/v2NativeSession'
-import { sessionKeyToSessionId, sessionKeyToServerId } from '../utils/sessionKey'
+import { rawSessionIdOfKey } from '../store/messagePartMerge'
+import { sessionKeyToServerId } from '../utils/sessionKey'
 import { logger } from '../utils'
 
 /** 已上报过的水位，key 为 `${serverId}::${sessionId}` */
@@ -37,7 +38,7 @@ export function resetViewReportCache(): void {
  */
 export async function reportSessionViewed(sessionKey: string, idle: number | undefined): Promise<void> {
   if (!idle || idle <= 0) return
-  const bareId = sessionKeyToSessionId(sessionKey)
+  const bareId = rawSessionIdOfKey(sessionKey)
   if (!bareId) return
   const serverId = sessionKeyToServerId(sessionKey)
 

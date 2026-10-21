@@ -1,36 +1,38 @@
 // ============================================
-// 轮次大纲（Turn Outline）
+// 分页拉取轮次大纲（session.message?type=user）
 // ============================================
 //
-// 目标：把「这个会话一共有哪些轮次」与「消息有没有加载进内存」解耦。
+// 核心矛盾：大纲只需要每个 user 消息的 id / time / text（合计约 24KB），
+// 但 v2 会把内联附件（截图）以 base64 塞进 `files[].data` 一并返回 ——
+// 实测 150 轮的会话整体响应 **18MB**，其中 13MB 集中在 10 个带截图的轮次。
 //
-// 背景：侧边时间轴原先只从**已加载的消息**里提取 user 轮次，历史没拉完时
-// 轴上就只有最近几轮，用户必须一路往上滚，轴才慢慢补齐。于是「点轴跳转到
-// 更早的轮次」这条路，对未加载的轮次根本不存在 —— 轴上压根没有那个点。
+// 已确认**没有任何参数能省略附件**：
+//   - X-Lightweight / X-Omit-Files / Prefer: return=minimal 均无效；
+//   - `session.export?sanitize=true` 会把正文也脱敏（变成 [redacted:...]），不可用。
 //
-// v2 的 `message.list` 支持 `type` 过滤（packages/protocol/src/groups/message.ts
-// 的 SessionMessagesQuery）。只取 `type=user` 就能一次拿到**全部轮次**的
-// id / 时间 / 文本，无需拉任何 assistant 内容。
-//
-// ⚠️ 一个必须知道的代价（实测，4810 条消息 / 141 轮的会话）：
-//   - 141 个轮次的纯文本只有 **24KB**；
-//   - 但同一次请求的响应体是 **16.9MB** —— 因为 v2 的 User 消息把内联附件
-//     （截图）以 base64 放在 `files[].data` 里，且**没有参数能省略它**
-//     （试过 X-Lightweight / X-Omit-Files / Prefer: return=minimal，均无效）。
-//
-// 所以这条请求**绝不能放在首屏关键路径上**：它只在后台补全大纲时发一次，
-// 结果随即持久化（turnOutlineStore），之后打开同一会话不再请求。
-// 这也解释了为什么 limit 取 200：一次拿完（141 轮一页就够），比翻多页更省。
+// 所以这里的策略是「分页渐进 + 每页立即回调」：
+//   - 从最新一页开始（order=desc），用户最快看到的是最近轮次；
+//   - 单页体积可控（实测首屏 25 轮约 390KB），不必等 18MB；
+//   - 页间让出事件循环，切走时立刻 abort；
+//   - 调用方每页合并一次，轴逐步变长。
 
 import { buildHeaders } from './sdk'
 import { serverStore } from '../store/serverStore'
 
-/** 服务端硬上限 200；轮次通常远少于消息数，一页基本能覆盖整个会话 */
-const OUTLINE_PAGE_LIMIT = 200
+/**
+ * 每页轮次数。
+ *
+ * 实测（150 轮 / 18MB 的会话）按 25 轮分页：首屏 394KB，后续页从几千字节到
+ * 8MB 不等 —— 体积取决于该页是否含截图，无法通过调页大小消除。25 的取舍是
+ * 「首屏足够小」+「总往返不至于太多」（150 轮 = 6 页）。
+ */
+const OUTLINE_PAGE_LIMIT = 25
 /** 最多翻几页：防止病态会话（几千轮）把大纲补全拖成长期后台任务 */
-const OUTLINE_MAX_PAGES = 5
+const OUTLINE_MAX_PAGES = 12
 /** 单请求超时：这是后台任务，卡住就放弃，下次再补 */
 const OUTLINE_TIMEOUT_MS = 20_000
+/** 页间停顿：让出主线程，也给用户切走/取消的机会 */
+const OUTLINE_PAGE_GAP_MS = 60
 
 export interface OutlineTurn {
   messageId: string
@@ -51,15 +53,31 @@ function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+export interface OutlinePageInfo {
+  /** 已完成的页数（从 1 开始） */
+  page: number
+  /** 是否已翻到最早一页 */
+  complete: boolean
+}
+
 /**
- * 拉取会话的**全部**轮次（仅 user 消息，只保留 id/文本/时间）。
+ * 分页拉取会话轮次，**每页到达就回调**。
  *
- * 返回的 `complete` 表示是否已翻到最早一页：false 时调用方可以稍后再补，
- * 但不要立即重试（每页都是昂贵的）。
+ * 从最新一页开始（`order=desc`），因此调用方最快拿到的是最近轮次 ——
+ * 那正是用户最可能点击的部分。
+ *
+ * `onPage` 的 turns **已按时间升序**（页内反转），调用方可以直接 prepend。
+ * 调用方应做增量合并，不要等整个 promise resolve —— 否则渐进式分页就退化成
+ * 一次性等待，失去了「首屏 390KB 就能显示」的意义。
  */
 export async function fetchSessionTurns(
   sessionId: string,
-  options?: { serverId?: string; directory?: string; signal?: AbortSignal; onPage?: (turns: OutlineTurn[]) => void },
+  options?: {
+    serverId?: string
+    directory?: string
+    signal?: AbortSignal
+    onPage?: (turns: OutlineTurn[], info: OutlinePageInfo) => void
+  },
 ): Promise<{ turns: OutlineTurn[]; complete: boolean }> {
   const serverId = options?.serverId ?? serverStore.getActiveServerId()
   const base = serverStore.getServerBaseUrl(serverId).replace(/\/$/, '')
@@ -72,6 +90,23 @@ export async function fetchSessionTurns(
   let complete = false
 
   while (pages < OUTLINE_MAX_PAGES) {
+    // 页间停顿：让出主线程，并给外部 signal 一个生效机会
+    if (pages > 0) {
+      const aborted = await new Promise<boolean>(resolve => {
+        const timer = setTimeout(() => resolve(false), OUTLINE_PAGE_GAP_MS)
+        options?.signal?.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer)
+            resolve(true)
+          },
+          { once: true },
+        )
+      })
+      if (aborted) break
+    }
+    if (options?.signal?.aborted) break
+
     const url = new URL(`${base}/api/session/${encodeURIComponent(sessionId)}/message`)
     url.searchParams.set('limit', String(OUTLINE_PAGE_LIMIT))
     url.searchParams.set('type', 'user')
@@ -106,15 +141,18 @@ export async function fetchSessionTurns(
           createdAt: num(rec(m.time).created) ?? 0,
         })
       }
+      // 服务端按 desc 返回；反转成时间升序，调用方可直接 prepend
+      pageTurns.reverse()
       collected.push(...pageTurns)
-      options?.onPage?.(pageTurns)
       pages += 1
 
       const next = str(rec(root.cursor).next)
       if (!next) {
         complete = true
+        options?.onPage?.(pageTurns, { page: pages, complete: true })
         break
       }
+      options?.onPage?.(pageTurns, { page: pages, complete: false })
       cursor = next
     } finally {
       clearTimeout(timeoutId)
