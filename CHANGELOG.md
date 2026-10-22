@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.0.17] - 2026-10-22
+
+- feat: 骨架分页加速、后台任务面板、最后一轮原样输出 (5980a6d7)
+- test: 触摸控件用例显式放宽 waitFor 超时 (9a7b6935)
+
 ## [v2.0.16] - 2026-10-21
 
 - fix: 消除 contextBackfill 的 unhandled rejection (7dab1ec5)
