@@ -115,6 +115,26 @@ describe('computeSessionTurnStats', () => {
     expect(stats.hasData).toBe(true) // user turn still counts
   })
 
+  it('counts skeleton turn steps from compressedStats instead of message count', () => {
+    // 轮次骨架路径：一整轮的 124 次工具调用被聚合成**一条**助手消息。
+    // 若按消息数计步，统计面板会显示「182 轮 · 0 步」。
+    const skeletonAssistant: Message = {
+      info: {
+        role: 'assistant',
+        time: { created: 1000, completed: 2000 },
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        cost: 0,
+      } as Message['info'],
+      content: [{ type: 'text', text: '改好了。', time: { start: 1100, end: 1900 } } as Part],
+      isCompressed: true,
+      compressedStats: { reasoningCount: 50, stepCount: 124 },
+    }
+    const stats = computeSessionTurnStats([userMessage(0), skeletonAssistant])
+    expect(stats.turns).toBe(1)
+    // 1（助手消息本身）+ 124（骨架带回的工具调用数）
+    expect(stats.steps).toBe(125)
+  })
+
   it('subtracts tool time from model time', () => {
     const stats = computeSessionTurnStats([
       userMessage(0),

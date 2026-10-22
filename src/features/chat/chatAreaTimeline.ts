@@ -13,7 +13,7 @@ import type { ProcessTimelineItem } from './chatPageModel'
 export const ROW_ESTIMATE = 60
 export const PROCESS_SHELL_HEADER = 36
 
-export type ProcessShellChild = { message: Message; processContentScope: 'process' | 'inline' }
+export type ProcessShellChild = { message: Message; processContentScope: 'process' | 'inline' | 'all' }
 
 /** 过程壳 header 统计：工具调用数（折叠时展示，避免展开才知道规模） */
 export function processStepCount(children: ProcessShellChild[]): number {
@@ -49,13 +49,23 @@ export function processReasoningCount(children: ProcessShellChild[]): number {
 export function estimateTimelineItemSize(item: ProcessTimelineItem | undefined): number {
   if (!item) return ROW_ESTIMATE
   if (item.kind === 'message') return ROW_ESTIMATE
-  // 进行中默认展开：header + 壳内消息（空回合至少占 header）
-  if (item.isActive) {
+  /**
+   * 内容原样输出的壳（最后一轮）**始终展开**：它是用户此刻要读的内容，
+   * 折起来就只剩一行「已处理」。用子消息数估算，避免刷新时先按 36px 画再回弹。
+   */
+  const alwaysExpanded = hasRawChildren(item)
+  if (item.isActive || alwaysExpanded) {
     const body = Math.max(item.children.length, 1) * ROW_ESTIMATE
     return PROCESS_SHELL_HEADER + body
   }
   // 结束后默认折叠：只估 header + 壳外 final，避免刷新时 120→36 的假高度再回弹
   return PROCESS_SHELL_HEADER + (item.finalMessage ? ROW_ESTIMATE : 0)
+}
+
+/** 壳内是否有「整条原样渲染」的子消息（最后一轮） */
+export function hasRawChildren(item: ProcessTimelineItem): boolean {
+  if (item.kind !== 'process-shell') return false
+  return item.children.some(child => child.processContentScope === 'all')
 }
 
 /** 会话级渲染缓存的 key（过程壳开关会改变行结构，必须分开缓存） */
@@ -83,7 +93,14 @@ export interface RowComparable {
 
 export function areRowPropsEqual(prev: RowComparable, next: RowComparable): boolean {
   if (prev.virtualIndex !== next.virtualIndex) return false
-  if (prev.virtualStart !== next.virtualStart) return false
+  /**
+   * ⚠️ 刻意不比较 `virtualStart`。
+   *
+   * 行位置由 `transform: translateY(start)` 直接写在 DOM 上（directDomUpdates），
+   * 与 React 渲染无关；而 `start` 在滚动、上方插入、行高重测时**每一行都会变**。
+   * 把它纳入比较等于「滚动一帧 → 所有已挂载行全部重渲染」，长会话里就是主对话
+   * 卡顿的直接原因。行内内容的正确性由 `item` 引用兜住。
+   */
   if (prev.item !== next.item) return false
   if (prev.paddingClass !== next.paddingClass) return false
   if (prev.rowYClass !== next.rowYClass) return false

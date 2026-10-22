@@ -12,10 +12,10 @@ export const WORK_STATUS_SECTION_IDS = [
   'project',
   'turnStats',
   'subagents',
+  'backgroundJobs',
   'todos',
   'mcp',
   'pinnedMessages',
-  'contextSources',
 ] as const
 
 export type WorkStatusSectionId = (typeof WORK_STATUS_SECTION_IDS)[number]

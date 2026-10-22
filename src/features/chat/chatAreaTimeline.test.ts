@@ -48,6 +48,15 @@ describe('areRowPropsEqual', () => {
     expect(areRowPropsEqual(base, { ...base, refs: [1] })).toBe(true)
   })
 
+  it('ignores virtualStart so scrolling does not re-render every mounted row', () => {
+    /**
+     * 回归：`start` 在滚动时每一行都会变。若纳入比较，滚动一帧就会让所有已挂载
+     * 行（一屏十几行 × 每行整棵 Markdown 子树）全部重渲染 —— 长会话卡顿的主因。
+     * 行位置由 directDomUpdates 的 transform 直接改 DOM，不需要 React 参与。
+     */
+    expect(areRowPropsEqual(base, { ...base, virtualStart: 999 })).toBe(true)
+  })
+
   it('detects content and callback changes', () => {
     expect(areRowPropsEqual(base, { ...base, item: {} })).toBe(false)
     expect(areRowPropsEqual(base, { ...base, virtualIndex: 1 })).toBe(false)

@@ -249,7 +249,19 @@ export interface Message {
    */
   isCompressed?: boolean
   /** 压缩前的过程统计，供折叠块 header 在压缩态仍能显示规模 */
-  compressedStats?: { reasoningCount: number; stepCount: number }
+  compressedStats?: {
+    reasoningCount: number
+    stepCount: number
+    /** 轮次总耗时（ms）：骨架路径由主机 Agent 直接给出，无法从消息反推 */
+    durationMs?: number
+  }
+  /**
+   * 本轮改动文件（仅「轮次骨架」路径带回）。
+   *
+   * 骨架里没有 tool part，所以无法从 content 反推改动文件；由主机 Agent 单独
+   * 回填这份最小清单（路径 + 增删行数），供最终回复下的 DiffChips 渲染。
+   */
+  skeletonChangedFiles?: Array<{ path: string; additions?: number; deletions?: number }>
 }
 
 // ============================================

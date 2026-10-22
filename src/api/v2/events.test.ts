@@ -101,14 +101,27 @@ describe('v2 event → GlobalEvent', () => {
     expect(p?.properties).toEqual({ sessionID: 'ses_1', title: '递归定义与示例' })
   })
 
-  it('maps session.retry.scheduled to SESSION_RETRY_SCHEDULED with assistantMessageID', () => {
+  it('maps session.retry.scheduled to SESSION_RETRY_SCHEDULED with attempt/at/error', () => {
+    /**
+     * 回归：重试信息必须带全。
+     *
+     * 上游限流时实测有 24 秒完全没有任何内容事件（只有 retry.scheduled 与
+     * step.started）。若前端只拿到 assistantMessageID，界面就无法说明「正在第
+     * N 次重试、为什么」，用户看到的只是「卡住了、不流式」。
+     */
     const p = payloadOf({
       type: 'session.retry.scheduled',
       data: { sessionID: 'ses_1', assistantMessageID: 'msg_old', attempt: 2, at: 1, error: { type: 'rate_limit', message: 'x' } },
       location: { directory: '/w' },
     })
     expect(p?.type).toBe(EventTypes.SESSION_RETRY_SCHEDULED)
-    expect(p?.properties).toEqual({ sessionID: 'ses_1', assistantMessageID: 'msg_old' })
+    expect(p?.properties).toMatchObject({
+      sessionID: 'ses_1',
+      assistantMessageID: 'msg_old',
+      attempt: 2,
+      at: 1,
+      error: { message: 'x' },
+    })
   })
 
   it('maps execution.succeeded to SESSION_IDLE with the server event time', () => {

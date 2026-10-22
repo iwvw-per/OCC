@@ -155,5 +155,6 @@
     "rawDiagnostics": "查看原始诊断信息",
     "unknownError": "错误",
     "unknownErrorDesc": "发生未知错误。"
-  }
+  },
+  "loadingProcess": "正在加载处理过程…"
 }

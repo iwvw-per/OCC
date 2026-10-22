@@ -224,6 +224,14 @@ export const EventTypes = {
    */
   SESSION_RETRY_SCHEDULED: 'session.retry.scheduled',
 
+  /**
+   * 系统合成消息（v2 `session.synthetic`）：后台任务完成通知。
+   *
+   * 正文是 `<shell id=... state=...>` / `<subagent sessionID=... state=...>`。
+   * 不进对话流，只作为「后台任务已结束」的权威信号被工作状态面板消费。
+   */
+  SESSION_SYNTHETIC: 'session.synthetic',
+
   // Message events
   MESSAGE_UPDATED: 'message.updated',
   MESSAGE_REMOVED: 'message.removed',
@@ -296,6 +304,7 @@ export const EventTypes = {
   | 'session.retry.scheduled'
   | 'session.usage.updated'
   | 'session.inbox.enqueued'
+  | 'session.synthetic'
 >
 
 export type EventType = SDKGlobalEvent['payload']['type']
@@ -318,8 +327,33 @@ export interface EventCallbacks {
   onSessionUpdated?: (session: Session) => void
   /** 会话重命名（v2）：仅有 {sessionID, title}，消费方按 id 更新标题，不做整条替换 */
   onSessionRenamed?: (data: { sessionID: string; title: string }) => void
-  /** v2 重试：后端放弃该 assistant 消息并用新 id 重新生成，消费方移除旧消息避免文本重复 */
-  onSessionRetryScheduled?: (data: { sessionID: string; assistantMessageID: string }) => void
+  /**
+   * v2 重试：后端放弃该 assistant 消息并用新 id 重新生成，消费方移除旧消息避免文本重复。
+   *
+   * `attempt` / `at` / `error` 让界面能显示「第 N 次重试、原因是什么」——
+   * 上游限流时实测有 24 秒完全没有任何内容事件，若不给提示，用户只会觉得
+   * 「卡死了 / 不流式」。
+   */
+  onSessionRetryScheduled?: (data: {
+    sessionID: string
+    assistantMessageID: string
+    attempt?: number
+    /** 计划重试的时间戳（ms） */
+    at?: number
+    error?: Record<string, unknown>
+  }) => void
+  /**
+   * 系统合成消息（v2 `session.synthetic`）。
+   *
+   * 后台任务完成通知走这里：正文是 `<shell id=... state=...>` /
+   * `<subagent sessionID=... state=...>`。不进对话流，只更新后台任务状态。
+   */
+  onSessionSynthetic?: (data: {
+    sessionID: string
+    text: string
+    description?: string
+    createdAt?: number
+  }) => void
   onSessionDeleted?: (sessionId: string) => void
   onSessionIdle?: (data: SessionIdlePayload) => void
   /** 会话压缩结束（v2）：成功/失败都回调，用于提示与刷新消息 */

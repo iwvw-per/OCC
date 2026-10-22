@@ -181,5 +181,6 @@
     "rawDiagnostics": "View raw diagnostics",
     "unknownError": "Error",
     "unknownErrorDesc": "An unknown error occurred."
-  }
+  },
+  "loadingProcess": "Loading processing details…"
 }

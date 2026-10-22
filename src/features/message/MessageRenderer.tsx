@@ -157,6 +157,7 @@ export function ProcessCollapseBlock({
   durationMs,
   startedAt,
   isActive,
+  forceExpanded = false,
   stateKey,
   stepCount = 0,
   reasoningCount = 0,
@@ -166,14 +167,28 @@ export function ProcessCollapseBlock({
   durationMs?: number
   startedAt?: number
   isActive: boolean
+  /**
+   * 强制展开（默认展开、且不参与「结束后自动收起」）。
+   *
+   * 最后一轮用它：内容是服务端此刻正在写的东西，用户要看的就是它原样输出，
+   * 折起来只剩一行「已处理」就本末倒置了。
+   */
+  forceExpanded?: boolean
   stateKey: string
   /** 折叠时在 header 右侧显示的统计（工具调用数 / 思考段数） */
   stepCount?: number
   reasoningCount?: number
-  /** 用户手动展开时触发；用于按需回拉被压缩轮次的完整过程内容 */
-  onExpand?: () => void
+  /**
+   * 用户手动展开时触发；用于按需回拉被压缩轮次的完整过程内容。
+   *
+   * 返回 Promise 时会显示加载占位（骨架屏），直到内容到达 —— 否则展开后是
+   * 一片空白，用户以为没反应。实测经隧道回拉一轮约 1.5s，必须给反馈。
+   */
+  onExpand?: () => void | Promise<void>
 }) {
   const [expanded, setExpanded] = useUiDisclosureState(stateKey, isActive)
+  /** 回拉进行中：展开后先显示占位，避免空白 */
+  const [hydrating, setHydrating] = useState(false)
   // Android expand: 展开时用 max-height 假高度，避免 WebView 在 grid-rows 动画中
   // 把过程壳内容画成空白（滚动中展开/收起时表现为闪一下）。与 ContentBlock、
   // 工具步骤壳同款处理；桌面仍是原 grid-rows 动画。
@@ -189,8 +204,9 @@ export function ProcessCollapseBlock({
   const unlockScrollRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    setExpanded(isActive, { touched: false, respectUser: true })
-  }, [isActive, setExpanded])
+    // forceExpanded：内容原样输出，跟随「是否进行中」强制展开，不受用户折叠记忆影响
+    setExpanded(isActive || forceExpanded, { touched: false, respectUser: !forceExpanded })
+  }, [isActive, forceExpanded, setExpanded])
 
   useEffect(() => {
     return () => {
@@ -204,15 +220,25 @@ export function ProcessCollapseBlock({
     unlockScrollRef.current = lockScrollAroundAnchor(headerRef.current, {
       observe: rootRef.current,
     })
-    // 仅展开时回拉；折叠无需数据
-    if (!expanded) onExpand?.()
+    // 仅展开时回拉；折叠无需数据。
+    // 回拉是异步的（经隧道约 1.5s），期间显示占位，避免展开后一片空白。
+    if (!expanded && onExpand) {
+      const pending = onExpand()
+      if (pending && typeof (pending as Promise<void>).then === 'function') {
+        setHydrating(true)
+        void (pending as Promise<void>)
+          .catch(() => {})
+          .finally(() => setHydrating(false))
+      }
+    }
     setExpanded(!expanded)
   }, [expanded, setExpanded, onExpand])
 
   // 进行中默认展开：不要跑 grid 展开动画（否则每条新消息都带动画高度重排）
   // 用户手动折叠/展开、或结束后自动收起时再开动画
   // 挂载本身不另做入场生长——像普通消息一样直接出现
-  const animateGrid = !isActive || expanded !== isActive
+  const expandedState = isActive || forceExpanded
+  const animateGrid = !expandedState || expanded !== expandedState
 
   return (
     <div ref={rootRef} className="flex flex-col">
@@ -234,11 +260,45 @@ export function ProcessCollapseBlock({
         clip
         innerClassName="min-h-0 min-w-0 overflow-hidden -mx-1.5 px-1.5"
       >
-        {shouldRenderBody && <div className={MSG_SPACING.processBody}>{children}</div>}
+        {shouldRenderBody && (
+          <div className={MSG_SPACING.processBody}>
+            {hydrating ? <ProcessHydratePlaceholder /> : children}
+          </div>
+        )}
       </MessageExpandPanel>
     </div>
   )
 }
+
+/**
+ * 回拉完整过程时的占位。
+ *
+ * 展开「已处理」块后，内容需要从主机回拉（实测经隧道约 1.5s）。期间若什么都不画，
+ * 用户看到的是「点了没反应」；这里给几条骨架行，明确表示正在加载。
+ */
+const ProcessHydratePlaceholder = memo(function ProcessHydratePlaceholder() {
+  const { t } = useTranslation('message')
+  return (
+    <div
+      className="flex flex-col gap-2 py-1"
+      role="status"
+      aria-live="polite"
+      aria-label={t('loadingProcess')}
+    >
+      {[0, 1, 2].map(index => (
+        <div
+          key={index}
+          className="flex items-center gap-2 animate-pulse"
+          style={{ opacity: 1 - index * 0.25 }}
+        >
+          <span className="h-3 w-3 shrink-0 rounded-full bg-bg-300" />
+          <span className="h-2.5 rounded-full bg-bg-300" style={{ width: `${72 - index * 16}%` }} />
+        </div>
+      ))}
+      <span className="sr-only">{t('loadingProcess')}</span>
+    </div>
+  )
+})
 
 // 渲染范围与拆分逻辑已移至 messageRenderLogic.ts
 interface MessageRendererProps {
@@ -347,6 +407,14 @@ function useEntryGrowAnimation(
       finish()
       return
     }
+    /**
+     * ⚠️ 顺序很重要：**先判是否要播，再去读 scrollHeight**。
+     *
+     * `el.scrollHeight` 是强制同步布局（forced reflow）。历史消息本来就不播入场
+     * 动画（超过 ENTRY_GROW_MAX_AGE_MS），但只要把读取放在判断之前，每一条挂载
+     * 的消息都会付一次 reflow —— 长会话滚动时一屏十几行、每行都在测量，主线程
+     * 直接被这个读打满，表现就是「主对话特别长时卡顿」。
+     */
     // 已完成过（虚拟行复用 remount）或消息太旧：不播，直接放行
     if ((completeId && isEntryGrowComplete(completeId)) || !shouldPlayEntryGrow(created)) {
       finish()

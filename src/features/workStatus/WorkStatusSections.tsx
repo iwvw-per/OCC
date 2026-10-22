@@ -18,13 +18,14 @@ import {
   PinIcon,
   PlugIcon,
   StatsIcon,
-  TeachIcon,
+  TerminalIcon,
   UsersIcon,
 } from '../../components/Icons'
 import { Spinner } from '../../components/ui/Spinner'
 import { Switch } from '../../components/ui/Switch'
 import { getDirectoryName } from '../../utils/directoryUtils'
 import { formatCost, formatDuration } from '../../utils/formatUtils'
+import { useMessages } from '../../store/messageStoreHooks'
 import { useTodos } from '../../store/todoStore'
 import { useChildSessions, type ChildSessionInfo } from '../../store/childSessionStore'
 import { pinnedMessagesStore, usePinnedMessages } from '../../store/pinnedMessagesStore'
@@ -32,7 +33,7 @@ import { useSessionStatsFor } from '../../hooks/useSessionStatsFor'
 import { useSessionTurnStats } from '../../hooks/useSessionTurnStats'
 import { useVcsInfo } from '../../hooks/useVcsInfo'
 import { getMcpStatus, connectMcpServer, disconnectMcpServer } from '../../api/mcp'
-import { getSkills } from '../../api/skill'
+import { listLoadedLocations, reclaimIdleLocations } from '../../api/location'
 import {
   WorkStatusCollapsibleSection,
   WorkStatusMeter,
@@ -42,6 +43,8 @@ import {
   WorkStatusSection,
   WorkStatusValue,
 } from './WorkStatusPrimitives'
+import { collectBackgroundJobs, type BackgroundJob } from './backgroundJobs'
+import { useLiveBackgroundJobs } from '../../store/backgroundJobStore'
 import type { MCPStatus } from '../../types/api/mcp'
 
 export interface WorkStatusSectionContext {
@@ -251,6 +254,100 @@ export const WorkStatusSubagentsSection = memo(function WorkStatusSubagentsSecti
   )
 })
 
+// ─── 后台任务 ─────────────────────────────────
+
+/**
+ * 后台任务（shell / subagent）。
+ *
+ * v2 没有查询后台任务的 HTTP 端点，只能从消息流推导（见 backgroundJobs.ts）。
+ * 这里刻意**不**直接用 `useMessages`：流式时 messages 每帧换新数组，而
+ * `collectBackgroundJobs` 要遍历全部消息，长会话里会变成每帧 O(7000)。
+ * 改为先按「消息条数 + 最后一条消息 id」做粗筛，只在条数变化或出现完成通知时重算。
+ */
+export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroundJobsSection({
+  sessionId,
+  onScrollToMessage,
+}: WorkStatusSectionContext) {
+  const { t } = useTranslation('chat')
+  const messages = useMessages(sessionId)
+  const live = useLiveBackgroundJobs(sessionId)
+  /**
+   * 只在「任务集合可能变了」时重算。
+   *
+   * 流式时 messages 每帧换新数组，而 `collectBackgroundJobs` 要遍历全部消息
+   * （长会话实测 7000 条）。用 `{条数, 最后一条 id, 实时表大小}` 作为缓存键：
+   * 条数不变就说明没有新的工具调用、也没有新的完成通知，任务集合必然不变。
+   */
+  const jobsKey = `${messages.length}:${messages[messages.length - 1]?.info.id ?? ''}:${live.size}`
+  const jobs = useMemo(
+    () => collectBackgroundJobs(messages, live),
+    // 只用粗筛键：messages 引用每帧都变，放进依赖等于每帧重算
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [jobsKey],
+  )
+
+  const running = jobs.filter(job => job.status === 'running')
+  const settled = jobs.filter(job => job.status !== 'running')
+
+  if (jobs.length === 0) return null
+
+  const renderRow = (job: BackgroundJob) => (
+    <WorkStatusRow
+      key={job.id}
+      label={
+        <button
+          type="button"
+          onClick={() => onScrollToMessage(job.messageId)}
+          className="min-w-0 truncate text-left hover:text-text-100"
+          title={job.title}
+        >
+          {job.title}
+        </button>
+      }
+      value={
+        job.status === 'running' ? (
+          <WorkStatusValue tone="info">
+            <span className="inline-flex items-center gap-1.5">
+              <Spinner size="xs" tone="current" variant="ring" />
+              {t('workStatus.backgroundJob.running')}
+            </span>
+          </WorkStatusValue>
+        ) : job.status === 'error' ? (
+          <WorkStatusValue tone="error">{t('workStatus.backgroundJob.failed')}</WorkStatusValue>
+        ) : job.status === 'cancelled' ? (
+          <WorkStatusValue tone="muted">{t('workStatus.backgroundJob.cancelled')}</WorkStatusValue>
+        ) : job.status === 'completed' ? (
+          <WorkStatusValue tone="muted">{t('workStatus.backgroundJob.done')}</WorkStatusValue>
+        ) : (
+          <WorkStatusValue tone="muted">{t('workStatus.backgroundJob.unknown')}</WorkStatusValue>
+        )
+      }
+    />
+  )
+
+  return (
+    <WorkStatusCollapsibleSection
+      title={t('workStatus.section.backgroundJobs')}
+      icon={<TerminalIcon size={14} />}
+      id="backgroundJobs"
+      summary={running.length > 0 ? `${running.length}/${jobs.length}` : String(jobs.length)}
+    >
+      <WorkStatusRows className="max-h-56 overflow-y-auto">
+        {running.map(renderRow)}
+        {settled.length > 0 ? (
+          <WorkStatusCollapsibleSection
+            id="backgroundJobs-settled"
+            title={t('workStatus.backgroundJob.settledGroup')}
+            summary={String(settled.length)}
+          >
+            <WorkStatusRows>{settled.map(renderRow)}</WorkStatusRows>
+          </WorkStatusCollapsibleSection>
+        ) : null}
+      </WorkStatusRows>
+    </WorkStatusCollapsibleSection>
+  )
+})
+
 // ─── 任务 ─────────────────────────────────────
 
 const STATUS_RANK: Record<string, number> = { in_progress: 0, pending: 1, completed: 2 }
@@ -317,11 +414,22 @@ export const WorkStatusTasksSection = memo(function WorkStatusTasksSection({
 // ─── MCP ──────────────────────────────────────
 
 export const WorkStatusMcpSection = memo(function WorkStatusMcpSection({
+  sessionId,
   directory,
 }: WorkStatusSectionContext) {
   const { t } = useTranslation('chat')
   const [status, setStatus] = useState<Record<string, MCPStatus> | null>(null)
   const [busyServer, setBusyServer] = useState<string | null>(null)
+  /**
+   * 已加载的 location 数量。
+   *
+   * opencode v2 把 MCP 放在 Location 图里，**每个目录各起一份 MCP 进程**；
+   * 打开过 N 个项目就常驻 N 份（实测 14 个目录 = 28 个 python 进程 ≈ 2.2GB）。
+   * 这里显示实际数量，并在 >1 时提供「回收闲置目录」入口。
+   */
+  const [locationCount, setLocationCount] = useState<number | null>(null)
+  const [reclaiming, setReclaiming] = useState(false)
+  const [reclaimNote, setReclaimNote] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -329,17 +437,57 @@ export const WorkStatusMcpSection = memo(function WorkStatusMcpSection({
     } catch {
       setStatus({})
     }
+    try {
+      const locations = await listLoadedLocations()
+      setLocationCount(locations.length)
+    } catch {
+      // 老版本没有该调试端点：不显示这个入口，而不是报错
+      setLocationCount(null)
+    }
   }, [directory])
 
   useEffect(() => {
+    /**
+     * directory 首帧是空串、随后被会话元数据填上 —— 那会让这个 effect 跑两次，
+     * 白白多发一轮 `/api/mcp` + `/api/debug/location`（实测首屏多 2 个往返）。
+     *
+     * 只有「已经打开会话但目录还没落定」时才等；真的没有会话（全局 scope）
+     * 时 directory 一直是空串，必须照常加载，否则面板永远空白。
+     */
+    if (sessionId && !directory) return
     void load()
-  }, [load])
+  }, [load, directory, sessionId])
 
   const servers = useMemo(
     () => Object.entries(status ?? {}).sort(([left], [right]) => left.localeCompare(right)),
     [status],
   )
   const connectedCount = servers.filter(([, entry]) => entry?.status === 'connected').length
+
+  const handleReclaim = useCallback(async () => {
+    if (reclaiming) return
+    setReclaiming(true)
+    setReclaimNote(null)
+    try {
+      const result = await reclaimIdleLocations(directory)
+      setLocationCount(result.after)
+      // 有残留（被会话占用，服务端拒绝关闭）时如实说明，不要让用户以为按钮没生效
+      setReclaimNote(
+        result.stuck.length > 0
+          ? t('workStatus.mcp.reclaimPartial', {
+              freed: result.evicted.length,
+              left: result.after,
+              stuck: result.stuck.length,
+            })
+          : t('workStatus.mcp.reclaimResult', { freed: result.evicted.length, left: result.after }),
+      )
+    } catch {
+      setReclaimNote(t('workStatus.mcp.reclaimFailed'))
+    } finally {
+      setReclaiming(false)
+      void load()
+    }
+  }, [directory, load, reclaiming, t])
 
   const handleToggle = useCallback(
     async (name: string, next: boolean) => {
@@ -408,6 +556,24 @@ export const WorkStatusMcpSection = memo(function WorkStatusMcpSection({
           )
         })}
       </WorkStatusRows>
+      {/* 已加载目录回收：opencode 每个目录各起一份 MCP 进程，打开过的项目越多，
+          常驻内存越高（实测 14 目录 = 28 个 python ≈ 2.2GB）。这里给出显式入口。 */}
+      {locationCount != null && locationCount > 1 && (
+        <div className="mt-1 flex flex-col gap-1 border-t border-border-200/40 pt-1.5">
+          <WorkStatusRow
+            leading={<span className="inline-flex w-[26px] shrink-0" />}
+            label={t('workStatus.mcp.loadedDirs', { count: locationCount })}
+            value={
+              <WorkStatusRowAction tone="info" disabled={reclaiming} onClick={() => void handleReclaim()}>
+                {reclaiming ? t('workStatus.mcp.reclaiming') : t('workStatus.mcp.reclaim')}
+              </WorkStatusRowAction>
+            }
+          />
+          <p className="px-1 text-[length:var(--fs-xxs)] leading-snug text-text-500">
+            {reclaimNote ?? t('workStatus.mcp.reclaimHint')}
+          </p>
+        </div>
+      )}
     </WorkStatusCollapsibleSection>
   )
 })
@@ -452,72 +618,6 @@ export const WorkStatusPinnedSection = memo(function WorkStatusPinnedSection({
           ariaLabel={t('workStatus.pinned.reveal')}
         />
       ))}
-    </WorkStatusCollapsibleSection>
-  )
-})
-
-// ─── 上下文来源 ───────────────────────────────
-
-export const WorkStatusContextSourcesSection = memo(function WorkStatusContextSourcesSection({
-  directory,
-}: WorkStatusSectionContext) {
-  const { t } = useTranslation('chat')
-  const [skillCount, setSkillCount] = useState<number | null>(null)
-  const [mcpCount, setMcpCount] = useState<number | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      // 这两个请求只为渲染「N 个技能 · N 个 MCP」这行摘要，属于装饰性信息，
-      // 不该挡住首屏。经隧道时 getSkills 响应可达 190KB 且固定约 1.1s，若与
-      // 消息拉取同时发出会抢隧道并发额度，因此推迟到空闲时再拉。
-      await new Promise<void>(resolve => {
-        const idle = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number })
-          .requestIdleCallback
-        if (typeof idle === 'function') idle(() => resolve(), { timeout: 2500 })
-        else globalThis.setTimeout(resolve, 400)
-      })
-      if (cancelled) return
-
-      // 两个请求彼此独立，并行发出；此前串行 await 让两个 1.1s 往返叠加成 ~2.2s
-      const [skillsResult, mcpResult] = await Promise.allSettled([
-        getSkills(directory),
-        getMcpStatus(directory),
-      ])
-      if (cancelled) return
-
-      setSkillCount(skillsResult.status === 'fulfilled' ? skillsResult.value.length : 0)
-      setMcpCount(
-        mcpResult.status === 'fulfilled'
-          ? // 只数已连接的服务器：断开的服务器对上下文没有贡献，
-            // 在这里计入会和上方的 MCP 板块自相矛盾
-            Object.values(mcpResult.value).filter(entry => entry?.status === 'connected').length
-          : 0,
-      )
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [directory])
-
-  const resolvedSkills = skillCount ?? 0
-  const resolvedMcp = mcpCount ?? 0
-  if (skillCount === null && mcpCount === null) return null
-  if (resolvedSkills === 0 && resolvedMcp === 0) return null
-
-  const summaryParts: string[] = []
-  if (resolvedSkills > 0) summaryParts.push(t('workStatus.breakdown.skillCount', { count: resolvedSkills }))
-  if (resolvedMcp > 0) summaryParts.push(t('workStatus.breakdown.mcpCount', { count: resolvedMcp }))
-
-  return (
-    <WorkStatusCollapsibleSection
-      title={t('workStatus.section.contextSources')}
-      icon={<TeachIcon size={14} />}
-      id="contextSources"
-      summary={summaryParts.join(' · ')}
-    >
-      <WorkStatusRow label={t('workStatus.breakdown.skills')} value={String(resolvedSkills)} />
-      <WorkStatusRow label={t('workStatus.breakdown.mcp')} value={String(resolvedMcp)} />
     </WorkStatusCollapsibleSection>
   )
 })

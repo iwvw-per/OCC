@@ -545,11 +545,27 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
   }
   if ((payload.type as string) === EventTypes.SESSION_RETRY_SCHEDULED) {
     const props = (payload as {
-      properties?: { sessionID?: unknown; assistantMessageID?: unknown }
+      properties?: {
+        sessionID?: unknown
+        assistantMessageID?: unknown
+        attempt?: unknown
+        at?: unknown
+        error?: unknown
+      }
     }).properties
     const sessionID = typeof props?.sessionID === 'string' ? props.sessionID : ''
     const assistantMessageID = typeof props?.assistantMessageID === 'string' ? props.assistantMessageID : ''
-    if (sessionID && assistantMessageID) callbacks.onSessionRetryScheduled?.({ sessionID, assistantMessageID })
+    if (sessionID && assistantMessageID) {
+      callbacks.onSessionRetryScheduled?.({
+        sessionID,
+        assistantMessageID,
+        ...(typeof props?.attempt === 'number' ? { attempt: props.attempt } : {}),
+        ...(typeof props?.at === 'number' ? { at: props.at } : {}),
+        ...(props?.error && typeof props.error === 'object'
+          ? { error: props.error as Record<string, unknown> }
+          : {}),
+      })
+    }
     return
   }
   if ((payload.type as string) === EventTypes.SESSION_USAGE_UPDATED) {
@@ -563,6 +579,20 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     const props = (payload as { properties?: InboxEnqueuedPayload }).properties
     if (props && typeof props.sessionID === 'string' && typeof props.inboxID === 'string') {
       callbacks.onInboxEnqueued?.(props)
+    }
+    return
+  }
+  if ((payload.type as string) === EventTypes.SESSION_SYNTHETIC) {
+    const props = (payload as {
+      properties?: { sessionID?: unknown; text?: unknown; description?: unknown; createdAt?: unknown }
+    }).properties
+    if (props && typeof props.sessionID === 'string' && typeof props.text === 'string') {
+      callbacks.onSessionSynthetic?.({
+        sessionID: props.sessionID,
+        text: props.text,
+        ...(typeof props.description === 'string' ? { description: props.description } : {}),
+        ...(typeof props.createdAt === 'number' ? { createdAt: props.createdAt } : {}),
+      })
     }
     return
   }

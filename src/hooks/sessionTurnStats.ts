@@ -147,8 +147,19 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
 
     toolMs += messageToolMs
 
-    if (!created || !completed || completed <= created) continue
-    steps += 1
+    /**
+     * 步数：轮次骨架路径下，一整轮的 N 次工具调用被聚合成一条助手消息，
+     * 消息数不再等于步数。此时用骨架带回的 `compressedStats.stepCount` 还原
+     * （它正是该轮的工具调用总数），否则统计面板会显示「182 轮 · 0 步」。
+     */
+    const skeletonSteps = message.isCompressed ? (message.compressedStats?.stepCount ?? 0) : 0
+
+    if (!created || !completed || completed <= created) {
+      // 未结算：骨架轮次的步数仍然可以计入（它已经是历史事实）
+      if (skeletonSteps > 0) steps += skeletonSteps
+      continue
+    }
+    steps += 1 + skeletonSteps
 
     const messageMs = completed - created
     // 扣除工具时长，还原模型自身耗时；工具时长异常大于消息时长时下限为 0

@@ -217,9 +217,52 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
       ...(lightweight ? { lightweight } : {}),
     }
   }
-  // 只把真正的 user 消息映射为用户消息；idle / model-switched / agent-switched /
-  // synthetic / system / skill / shell / compaction 等系统消息一律丢弃，
-  // 避免它们污染对话流导致用户/助手位置错乱。
+  /**
+   * synthetic：后台任务的完成通知。
+   *
+   * 它的正文是 `<shell id=... state=... command=...>output</shell>` 或
+   * `<subagent sessionID=... state=...>`，是「后台任务跑完了」的唯一权威信号
+   * （v2 没有查询后台任务的 HTTP 端点）。**必须保留**，否则刷新后工作状态面板
+   * 里所有后台任务都只能显示「状态未知」。
+   *
+   * 但它不能进对话流：会以一段 XML 的形式插在用户与助手之间。因此标成
+   * `synthetic` part —— 渲染层会跳过它（见 isVisibleTextContent），而
+   * `collectBackgroundJobs` 专门读它。
+   */
+  if (type === 'synthetic') {
+    const text = str(m.text) ?? ''
+    if (!text.trim()) return null
+    return {
+      info: {
+        id,
+        sessionID,
+        role: 'assistant',
+        parentID: '',
+        modelID: '',
+        providerID: '',
+        mode: '',
+        agent: '',
+        path: { cwd: '', root: '' },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: num(time.created) ?? 0, completed: num(time.created) ?? 0 },
+      } as never,
+      parts: [
+        {
+          id: `${id}-synthetic`,
+          sessionID,
+          messageID: id,
+          type: 'text',
+          text,
+          synthetic: true,
+          time: { start: 0, end: num(time.created) ?? 0 },
+        } as never,
+      ],
+      ...(lightweight ? { lightweight } : {}),
+    }
+  }
+  // 其余系统消息（idle / model-switched / agent-switched / system / skill / shell /
+  // compaction）一律丢弃，避免它们污染对话流导致用户/助手位置错乱。
   if (type !== 'user') return null
   return {
     info: {
@@ -236,13 +279,43 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
 }
 
 /** 归一 lightweight 统计字段；缺失或非法返回 undefined。 */
-function adaptLightweight(raw: unknown): { reasoningCount?: number; stepCount?: number } | undefined {
+function adaptLightweight(raw: unknown):
+  | {
+      reasoningCount?: number
+      stepCount?: number
+      durationMs?: number
+      changedFiles?: Array<{ path: string; additions?: number; deletions?: number }>
+    }
+  | undefined {
   if (raw == null || typeof raw !== 'object') return undefined
   const lw = rec(raw)
   const reasoningCount = num(lw.reasoningCount)
   const stepCount = num(lw.stepCount)
-  if (reasoningCount == null && stepCount == null) return undefined
-  return { reasoningCount, stepCount }
+  const durationMs = num(lw.durationMs)
+
+  // 轮次骨架回填的改动文件清单（骨架里没有 tool part，DiffChips 只能靠它）
+  const changedFiles = list(lw.changedFiles)
+    .map(entry => {
+      const file = rec(entry)
+      const path = str(file.path)
+      if (!path) return null
+      return {
+        path,
+        ...(num(file.additions) != null ? { additions: num(file.additions) } : {}),
+        ...(num(file.deletions) != null ? { deletions: num(file.deletions) } : {}),
+      }
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry != null)
+
+  if (reasoningCount == null && stepCount == null && durationMs == null && changedFiles.length === 0) {
+    return undefined
+  }
+  return {
+    reasoningCount,
+    stepCount,
+    ...(durationMs != null ? { durationMs } : {}),
+    ...(changedFiles.length > 0 ? { changedFiles } : {}),
+  }
 }
 
 /** 轮次结论（来自 `type: "idle"` 消息）。 */
@@ -426,10 +499,12 @@ export function findCompactionMarker(data: unknown[]): CompactionMarker | undefi
     if (marker && created <= marker.at) continue
     marker = {
       at: created,
-      summaryChars: (str(m.summary) ?? '').length,
+      // 轮次骨架路径下，主机 Agent 会把摘要 / 保留消息的**全文**换成字符数
+      // （`summaryChars` / `recentChars`），只留计数以省带宽；两条路径都要支持。
+      summaryChars: num(m.summaryChars) ?? (str(m.summary) ?? '').length,
       // `recent` 是压缩后原样保留的近期消息；没有该字段时按 0 计，
       // 让上界只包含摘要（宁可低估也不虚高）。
-      recentChars: (str(m.recent) ?? '').length,
+      recentChars: num(m.recentChars) ?? (str(m.recent) ?? '').length,
     }
   }
   return marker

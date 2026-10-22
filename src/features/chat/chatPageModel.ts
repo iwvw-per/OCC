@@ -759,7 +759,13 @@ export type ProcessTimelineItem =
       /** 壳内消息（不含壳外 final） */
       children: Array<{
         message: Message
-        processContentScope: 'process' | 'inline'
+        /**
+         * 内容范围：
+         * - `inline` / `process`：只渲染一部分（历史轮次的折叠视图）；
+         * - `all`：整条原样渲染 —— 最后一轮用它，服务端写什么就显示什么，
+         *   不做「哪句是最终回复」的猜测。
+         */
+        processContentScope: 'process' | 'inline' | 'all'
       }>
       /** 壳外最终回答（结束后才有） */
       finalMessage?: Message
@@ -845,6 +851,12 @@ function resolveTurnDurationMs(
   for (const m of [...assistants].reverse()) {
     const mapped = turnDurationMap.get(m.info.id)
     if (mapped != null && mapped > 0) return mapped
+  }
+  // 轮次骨架：过程已被剥掉，消息上只剩「用户创建 → 末条助手完成」的总时长。
+  // 不读它，折叠块 header 就会显示「已处理 0ms」。
+  for (const m of [...assistants].reverse()) {
+    const skeleton = m.compressedStats?.durationMs
+    if (skeleton != null && skeleton > 0) return skeleton
   }
   let latestEnd: number | undefined
   for (const m of assistants) {
@@ -942,6 +954,23 @@ export function buildProcessTimeline(
     // 后面 SSE live → 前面 Worked（须最先判断；前轮 completed 常晚到）
     if (laterHasLive(index)) return true
     if (assistants.some(assistantHasLiveWork)) return false
+    /**
+     * 末尾轮次以「要调工具」收尾 → 整轮还没结束。
+     *
+     * 工具循环里必然有空档：上一条助手消息已 completed（`finish` 是
+     * `tool-calls`），下一步还没开始。此时 `assistantHasLiveWork` 全为 false。
+     *
+     * 判定结果现在只影响**状态标记**（最后一轮已经不再折叠，见下方
+     * `isLastUserTurn` 分支），但仍要准 —— 否则换步间隙会把「Working」闪成
+     * 「Worked」再闪回来。
+     *
+     * 必须叠 `sessionIsStreaming`：被中断/出错而停在 tool-calls 的历史轮次同样
+     * 是这个 finish 值，那种轮次确实已经结束了。
+     */
+    if (sessionIsStreaming && index === userTurns.length - 1 && assistants.length > 0) {
+      const last = assistants[assistants.length - 1]
+      if (last.info.role === 'assistant' && last.info.finish === 'tool-calls') return false
+    }
     if (assistants.length === 0) {
       // 空回合：idle 结束；或后面已有 assistant（被跳过）
       return !sessionIsStreaming || laterHasAssistant(index)
@@ -984,16 +1013,95 @@ export function buildProcessTimeline(
     }
 
     const userId = turn.user.info.id
-    const turnIsActive = activeUserId != null && userId === activeUserId
 
-    const finalAssistant = assistants.length > 0 ? assistants[assistants.length - 1] : null
+    /**
+     * 最后一轮：**原样流式输出**，不做内容拆分。
+     *
+     * 这一轮的内容是「服务端此刻正在写的东西」，顺序与内容都是权威的。任何
+     * 折叠/拆分的尝试都要靠猜「哪一段才是最终回复」，而猜错的代价很难看：
+     *   - 把中间说明当最终回复 → 过程内容泄露到折叠块外（实测一轮 10 分 25 秒
+     *     只露出「18 个测试全部通过。现在构建并部署 agent。」）；
+     *   - 把真正的回复当过程吞掉 → 回复凭空消失。
+     *
+     * 所以这一轮不拆：所有助手消息都用 `processContentScope: 'all'`（整条内容
+     * 原样渲染，reasoning / tool / text 都按服务端顺序出现）。壳本身仍保留，
+     * 用来承载「Working / Worked」状态与展开收起能力。
+     */
+    const isLastUserTurn = userId === userTurns[userTurns.length - 1]?.user.info.id
+
+    /**
+     * 最终回复 = 轮内**最后一条以正文收尾**的助手消息。
+     *
+     * 不能只看末条：工具密集型回合经常以工具调用收尾（实测某会话 2823 条
+     * assistant 消息里有 2698 条如此）。若按末条判定，`messageHasFinal` 为
+     * false → `finalOutside` 为空 → 整轮正文全部落进**默认折叠**的过程块，
+     * 用户只看到一行「已处理 N 分钟」，回复凭空消失（实测 179 轮里 77 轮中招）。
+     *
+     * 末尾那些只含工具调用的消息仍进过程块。折叠态下这点顺序差异不可见，
+     * 展开后内容也齐全，而默认视图正是「用户 + 回复」。
+     */
+    let finalIndex = -1
+    for (let i = assistants.length - 1; i >= 0; i--) {
+      if (messageHasFinal(assistants[i])) {
+        finalIndex = i
+        break
+      }
+    }
+    const finalAssistant = finalIndex >= 0 ? assistants[finalIndex] : null
     const finalId = finalAssistant?.info.id ?? null
     // 缺 time（v2 轻量投影）时保持 undefined：回落成 0 会让「进行中」
     // 计时器从 1970 年起算，界面显示成 Working for 56y…
     const startedAt = turn.user.info.time?.created
-    const durationMs = turnIsActive
-      ? undefined
-      : resolveTurnDurationMs(assistants, startedAt, turnDurationMap)
+
+    /**
+     * 骨架轮次使用 Agent 给出的总时长，**不按 active 丢弃**。
+     *
+     * 骨架的每条助手消息都是「该轮最终回复」，没有真实的流式状态：若按 active
+     * 处理，折叠块会用 `now - startedAt` 现算，而 startedAt 是用户消息的创建时间
+     * （可能是几十小时前），算出来就是「Worked for 0ms」或一个荒唐的巨大值。
+     * 骨架给出的 durationMs 是「首条 user → 末条 assistant 完成」的真实总耗时。
+     *
+     * 例外：**正在流式的那一轮**没有 durationMs（末条还没完成），此时仍走
+     * 实时计时，保持「Working for 3s」逐秒跳动的观感。
+     */
+    const skeletonDuration = assistants.reduce<number | undefined>((found, m) => {
+      if (found != null) return found
+      const value = m.compressedStats?.durationMs
+      return value != null && value > 0 ? value : undefined
+    }, undefined)
+    // 骨架轮次已有确定的时长 → 视为已结束（不再显示 Working / 不再实时计时）
+    const turnIsActive = skeletonDuration == null && activeUserId != null && userId === activeUserId
+    const durationMs =
+      skeletonDuration ?? (turnIsActive ? undefined : resolveTurnDurationMs(assistants, startedAt, turnDurationMap))
+
+    // 最后一轮：内容原样输出（不拆过程/最终），但壳照常承载状态与开合。
+    // 纯文本轮不挂壳：只有一条回复、没有任何过程可折叠，套个壳纯属多一层边框。
+    if (isLastUserTurn) {
+      /** 空回合 + 会话仍在跑 → 需要空壳承载 Working（与历史设计一致） */
+      const needsEmptyWorkingShell = assistants.length === 0 && turnIsActive
+      const needsShell =
+        needsEmptyWorkingShell ||
+        assistants.length > 1 ||
+        turnIsActive ||
+        assistants.some(m => messageHasProcess(m))
+      if (needsShell) {
+        const rawChildren = assistants.map(m => ({ message: m, processContentScope: 'all' as const }))
+        items.push({
+          kind: 'process-shell',
+          key: `process-shell:${userId}`,
+          userMessageId: userId,
+          startedAt,
+          durationMs,
+          isActive: turnIsActive,
+          children: rawChildren,
+        })
+        continue
+      }
+      for (const m of assistants) {
+        items.push({ kind: 'message', key: m.info.id, message: m })
+      }
+      continue
+    }
 
     // 进行中：全部进壳；结束：中间全进 + 末尾仅 process
     const children: Array<{ message: Message; processContentScope: 'process' | 'inline' }> = []

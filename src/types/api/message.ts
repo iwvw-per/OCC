@@ -76,8 +76,17 @@ export interface MessageWithParts {
    * 轻量投影统计：主机 Agent 命中 X-Lightweight 投影时会剥掉 reasoning 与工具
    * 大输出，并在消息上回填过程规模，供折叠块 header 在压缩态仍显示「N 步 / N 段思考」。
    * 存在即表示该消息为压缩投影（前端标记 isCompressed）。
+   *
+   * `changedFiles` 只在「轮次骨架」档出现：骨架里没有 tool part，本轮改动文件
+   * （路径 + 增删行数）由 Agent 单独回填，供最终回复下的 DiffChips 渲染。
    */
-  lightweight?: { reasoningCount?: number; stepCount?: number }
+  lightweight?: {
+    reasoningCount?: number
+    stepCount?: number
+    /** 轮次总耗时（ms）：骨架路径由主机 Agent 直接给出 */
+    durationMs?: number
+    changedFiles?: Array<{ path: string; additions?: number; deletions?: number }>
+  }
 }
 
 export type TextPartInput = SDKTextPartInput

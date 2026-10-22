@@ -24,7 +24,7 @@ import {
   sanitizeWorkStatusSectionOrder,
 } from './sections'
 import {
-  WorkStatusContextSourcesSection,
+  WorkStatusBackgroundJobsSection,
   WorkStatusMcpSection,
   WorkStatusPinnedSection,
   WorkStatusProjectSection,
@@ -154,10 +154,10 @@ export const WorkStatusPanel = memo(function WorkStatusPanel({
     () => ({
       turnStats: <WorkStatusTurnStatsSection {...sectionContext} />,
       subagents: <WorkStatusSubagentsSection {...sectionContext} />,
+      backgroundJobs: <WorkStatusBackgroundJobsSection {...sectionContext} />,
       todos: <WorkStatusTasksSection {...sectionContext} />,
       mcp: <WorkStatusMcpSection {...sectionContext} />,
       pinnedMessages: <WorkStatusPinnedSection {...sectionContext} />,
-      contextSources: <WorkStatusContextSourcesSection {...sectionContext} />,
     }),
     [sectionContext],
   )

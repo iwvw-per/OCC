@@ -392,6 +392,7 @@ export const ChatPane = memo(function ChatPane({
     compactedAt,
     retryStatus,
     effectiveDirectory,
+    sessionLoadedFromSkeleton,
 
     pendingPermissionRequests,
     pendingQuestionRequests,
@@ -477,8 +478,17 @@ export const ChatPane = memo(function ChatPane({
    *
    * 只在会话已加载完成后再触发：这条请求可能十几 MB（见 useTurnOutline 说明），
    * 必须等首屏渲染完、应用空闲时再做，绝不能和首屏抢带宽。
+   *
+   * 走骨架路径时跳过：骨架本身就是整段全部轮次（含用户正文），
+   * `useMergeTurnOutline` 一次就把轴上的点补齐了，再发这条 18MB 请求纯属浪费。
+   * 判定用 `sessionLoadedFromSkeleton`（由 messageStore 记录加载来源），
+   * 比「有没有更早历史」准确 —— 小会话在分页路径下同样没有更早历史。
    */
-  useBackfillTurnOutline(paneServerId, routeRawSessionId, loadState === 'loaded')
+  useBackfillTurnOutline(
+    paneServerId,
+    routeRawSessionId,
+    loadState === 'loaded' && !sessionLoadedFromSkeleton,
+  )
   const turnOutlineEntries = useTurnOutlineEntries(paneServerId, routeRawSessionId)
 
   /**

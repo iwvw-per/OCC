@@ -442,10 +442,10 @@
       "project": "项目",
       "turnStats": "轮次统计",
       "subagents": "子代理",
+      "backgroundJobs": "后台任务",
       "todos": "任务",
       "mcp": "MCP",
-      "pinnedMessages": "已固定的消息",
-      "contextSources": "上下文来源"
+      "pinnedMessages": "已固定的消息"
     },
     "turnStats": {
       "summary": "{{turns}} 轮 · {{steps}} 步",
@@ -464,7 +464,14 @@
     "mcp": {
       "toggle": "切换 {{name}}",
       "needsAuth": "登录",
-      "failed": "失败"
+      "failed": "失败",
+      "loadedDirs": "已加载 {{count}} 个目录",
+      "reclaim": "回收闲置",
+      "reclaiming": "回收中…",
+      "reclaimHint": "每个打开过的项目都会常驻一份 MCP 进程。回收不会影响当前会话。",
+      "reclaimResult": "已回收 {{freed}} 个，剩余 {{left}} 个",
+      "reclaimPartial": "已回收 {{freed}} 个，剩余 {{left}} 个（{{stuck}} 个仍被会话占用，需重启服务端才能释放）",
+      "reclaimFailed": "回收失败，请稍后再试"
     },
     "pinned": {
       "unavailable": "已固定的消息",
@@ -472,12 +479,6 @@
       "reveal": "跳转到该消息",
       "pin": "固定到面板",
       "unpinned": "已取消固定"
-    },
-    "breakdown": {
-      "skills": "技能",
-      "mcp": "MCP 服务器",
-      "skillCount": "{{count}} 个技能",
-      "mcpCount": "{{count}} 个 MCP"
     },
     "sections": {
       "open": "选择板块",
@@ -487,6 +488,14 @@
       "allHidden": "未选择任何板块",
       "showAll": "全部显示",
       "noneWarning": "面板将显示为空。"
+    },
+    "backgroundJob": {
+      "running": "运行中",
+      "done": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "unknown": "状态未知",
+      "settledGroup": "已结束"
     }
   }
 }

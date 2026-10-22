@@ -442,10 +442,10 @@
       "project": "Project",
       "turnStats": "Turn stats",
       "subagents": "Subagents",
+      "backgroundJobs": "Background jobs",
       "todos": "Tasks",
       "mcp": "MCP",
-      "pinnedMessages": "Pinned messages",
-      "contextSources": "Context sources"
+      "pinnedMessages": "Pinned messages"
     },
     "turnStats": {
       "summary": "{{turns}} turns · {{steps}} steps",
@@ -464,7 +464,14 @@
     "mcp": {
       "toggle": "Toggle {{name}}",
       "needsAuth": "Sign in",
-      "failed": "Failed"
+      "failed": "Failed",
+      "loadedDirs": "{{count}} loaded directories",
+      "reclaim": "Reclaim idle",
+      "reclaiming": "Reclaiming…",
+      "reclaimHint": "Every project you opened keeps its own MCP processes alive. Reclaiming won't affect the current session.",
+      "reclaimResult": "Reclaimed {{freed}}, {{left}} left",
+      "reclaimPartial": "Reclaimed {{freed}}, {{left}} left ({{stuck}} still held by sessions; restart the server to release them)",
+      "reclaimFailed": "Reclaim failed, try again later"
     },
     "pinned": {
       "unavailable": "Pinned message",
@@ -472,12 +479,6 @@
       "reveal": "Reveal message",
       "pin": "Pin to panel",
       "unpinned": "Unpinned"
-    },
-    "breakdown": {
-      "skills": "Skills",
-      "mcp": "MCP servers",
-      "skillCount": "{{count}} skills",
-      "mcpCount": "{{count}} MCP"
     },
     "sections": {
       "open": "Choose sections",
@@ -487,6 +488,14 @@
       "allHidden": "No sections selected",
       "showAll": "Show all",
       "noneWarning": "The panel will appear empty."
+    },
+    "backgroundJob": {
+      "running": "Running",
+      "done": "Done",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "unknown": "Unknown",
+      "settledGroup": "Finished"
     }
   }
 }

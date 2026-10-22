@@ -686,6 +686,8 @@ class MessageStore {
       agent?: string
       /** 最近一次轮次结论（消息列表的 idle 记录） */
       lastTurn?: SessionState['lastTurn']
+      /** 轮次骨架统计（改动文件清单等） */
+      turnSkeleton?: SessionState['turnSkeleton']
     },
   ) {
     sessionId = this.resolveKey(sessionId)
@@ -705,7 +707,44 @@ class MessageStore {
     if (options.model !== undefined) state.model = options.model
     if (options.agent !== undefined) state.agent = options.agent
     if (options.lastTurn !== undefined) state.lastTurn = options.lastTurn
+    if (options.turnSkeleton !== undefined) state.turnSkeleton = options.turnSkeleton
 
+    this.notify([sessionId])
+  }
+
+  /**
+   * 写入轮次骨架统计（历史以「轮」为单位拉取时带回的改动文件清单等）。
+   *
+   * 与 updateSessionMetadata 分开是因为它的调用点在 setMessages 之后：
+   * setMessages 会重建 state，先写会被覆盖掉。
+   */
+  setTurnSkeleton(
+    sessionId: string,
+    turns: Map<string, { changedFiles?: Array<{ path: string; additions?: number; deletions?: number }> }>,
+  ): void {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    state.turnSkeleton = turns
+    state.loadedFromSkeleton = true
+    this.notify([sessionId])
+  }
+
+  /**
+   * 合并一批骨架轮次统计（上滑继续加载更早骨架页时调用）。
+   *
+   * 与 `setTurnSkeleton` 的区别：整段加载是覆盖，分页续取是累加 ——
+   * 用覆盖会把先前已加载轮次的改动文件清单全部丢掉。
+   */
+  mergeTurnSkeleton(
+    sessionId: string,
+    turns: Map<string, { changedFiles?: Array<{ path: string; additions?: number; deletions?: number }> }>,
+  ): void {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    state.turnSkeleton = new Map([...(state.turnSkeleton ?? []), ...turns])
+    state.loadedFromSkeleton = true
     this.notify([sessionId])
   }
 
@@ -1179,6 +1218,50 @@ class MessageStore {
       this.notify([sessionId])
     }
     return changed
+  }
+
+  /**
+   * 用「该轮完整消息」替换骨架轮次（展开骨架的「已处理」块时调用）。
+   *
+   * 与 `hydrateMessages` 的区别：
+   * - hydrateMessages 是**原地替换**同 id 的压缩消息（老轮次压缩只是剥字段，消息还在）；
+   * - 骨架路径把一整轮 40 条消息压成了 2 条，回拉时要**整段替换**并补回被丢掉
+   *   的中间消息，否则展开后仍只有「用户 + 回复」。
+   *
+   * 定位方式：用该轮首条 user 消息 id 找到数组中的区间 [start, end)，
+   * 其中 end 是下一条 user 消息（或数组末尾），替换区间内全部消息。
+   */
+  replaceTurnMessages(
+    sessionId: string,
+    turnUserMessageId: string,
+    turnMessages: ApiMessageWithParts[],
+  ): boolean {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state || turnMessages.length === 0) return false
+
+    const messages = state.messages
+    const startIndex = messages.findIndex(m => m.info.id === turnUserMessageId)
+    if (startIndex === -1) return false
+
+    let endIndex = messages.length
+    for (let i = startIndex + 1; i < messages.length; i++) {
+      if (messages[i].info.role === 'user') {
+        endIndex = i
+        break
+      }
+    }
+
+    const previousById = new Map(messages.map(message => [message.info.id, message]))
+    const replacement = turnMessages.map(message => ({
+      ...toUIMessage(message),
+      // 保留区间内原消息的流式标记（历史轮次正常都不在流式）
+      isStreaming: previousById.get(message.info.id)?.isStreaming ?? false,
+    }))
+
+    state.messages = [...messages.slice(0, startIndex), ...replacement, ...messages.slice(endIndex)]
+    this.notify([sessionId])
+    return true
   }
 
   clearAll() {

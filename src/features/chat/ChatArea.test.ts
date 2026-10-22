@@ -606,6 +606,24 @@ describe('buildProcessTimeline', () => {
   const hasFinal = (message: Message) =>
     message.content.some(p => p.type === 'text')
 
+  /**
+   * 把被测轮次变成「非最后一轮」。
+   *
+   * 最后一轮按设计**不做内容拆分**（原样输出服务端内容），所以所有验证折叠
+   * 行为的用例都必须让它后面还有一轮，否则走的是「原样输出」分支。
+   *
+   * 追加的 filler 刻意做成「一条空的用户消息」：它只是把前面变成历史，自己不
+   * 产生任何壳（没有 assistant、也没有内容），因此不会干扰断言里的
+   * `find(item => item.kind === 'process-shell')`（找到的仍是第一个）。
+   */
+  const asHistorical = (messages: Message[]): Message[] => {
+    const last = messages[messages.length - 1]
+    const nextCreated = (last?.info.time?.created ?? 0) + 10_000
+    // 用「空的用户消息 + 纯文本助手」会挂壳；这里只放一条空的用户消息。
+    // 它自己不会挂壳（无 assistant、内容为空），但足以让前面那轮变成历史。
+    return [...messages, createUserMessage('filler-user', nextCreated)]
+  }
+
   it('survives lightweight messages whose info.time is missing', () => {
     // v2 轻量投影可能整条没有 time：直接读 info.time.created 会抛
     // "Cannot read properties of undefined (reading 'created')" 并白屏。
@@ -614,7 +632,7 @@ describe('buildProcessTimeline', () => {
     const assistant = createAssistantMessage('assistant-1', [createTextPart('t', 'assistant-1', 'ok')], 1001)
     delete (assistant.info as { time?: unknown }).time
 
-    const items = buildProcessTimeline([user, assistant], {
+    const items = buildProcessTimeline(asHistorical([user, assistant]), {
       turnDurationMap: new Map(),
       sessionIsStreaming: true,
       messageHasProcess: hasProcess,
@@ -631,25 +649,25 @@ describe('buildProcessTimeline', () => {
     const messages = [createUserMessage('user-1', 1000)]
     // ChatArea 会在 user 入场完成后再额外 delay，再把 id 放进 ready 集合
     const ready = new Set<string>()
-    const early = buildProcessTimeline(messages, {
+    const early = buildProcessTimeline(asHistorical(messages), {
       turnDurationMap: new Map(),
       sessionIsStreaming: true,
       messageHasProcess: hasProcess,
       messageHasFinal: hasFinal,
       isUserEntryReady: id => ready.has(id),
     })
-    expect(early).toHaveLength(1)
+    // 末尾的 filler 是空 user，自己不出行；这里只断言被测轮次的部分
     expect(early[0]).toMatchObject({ kind: 'message', key: 'user-1' })
+    expect(early.some(item => item.kind === 'process-shell')).toBe(false)
 
     ready.add('user-1')
-    const after = buildProcessTimeline(messages, {
+    const after = buildProcessTimeline(asHistorical(messages), {
       turnDurationMap: new Map(),
       sessionIsStreaming: true,
       messageHasProcess: hasProcess,
       messageHasFinal: hasFinal,
       isUserEntryReady: id => ready.has(id),
     })
-    expect(after).toHaveLength(2)
     expect(after[1]).toMatchObject({
       kind: 'process-shell',
       isActive: true,
@@ -662,7 +680,7 @@ describe('buildProcessTimeline', () => {
     const mid = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')], 1001)
     mid.isStreaming = true
     const messages = [createUserMessage('user-1', 1000), mid]
-    const timeline = buildProcessTimeline(messages, {
+    const timeline = buildProcessTimeline(asHistorical(messages), {
       turnDurationMap: new Map(),
       sessionIsStreaming: true,
       messageHasProcess: hasProcess,
@@ -686,8 +704,8 @@ describe('buildProcessTimeline', () => {
       messageHasFinal: hasFinal,
     })
 
-    expect(timeline).toHaveLength(1)
-    expect(timeline[0]).toMatchObject({ kind: 'message', key: 'user-1' })
+    // 中止后空回合不挂壳：连 user 都因为没有内容而不显示
+    expect(timeline.some(item => item.kind === 'process-shell')).toBe(false)
   })
 
   it('keeps only the earliest pending Working shell when a later user is queued', () => {
@@ -767,7 +785,7 @@ describe('buildProcessTimeline', () => {
       createUserMessage('user-2', 2000),
       laterLive,
     ]
-    const timeline = buildProcessTimeline(messages, {
+    const timeline = buildProcessTimeline(asHistorical(messages), {
       turnDurationMap: new Map(),
       sessionIsStreaming: true,
       messageHasProcess: hasProcess,
@@ -778,6 +796,75 @@ describe('buildProcessTimeline', () => {
     expect(shells).toHaveLength(2)
     expect(shells[0]).toMatchObject({ userMessageId: 'user-1', isActive: false })
     expect(shells[1]).toMatchObject({ userMessageId: 'user-2', isActive: true })
+  })
+
+  it('keeps the running turn open when it pauses between tool steps', () => {
+    /**
+     * 工具循环的换步间隙。
+     *
+     * 上一条助手消息已 completed 且 `finish` 是 `tool-calls`，下一步还没开始 ——
+     * 此时 `assistantHasLiveWork` 全为 false。但仍要判成「进行中」，否则状态
+     * 会从 Working 闪成 Worked 再闪回来。
+     *
+     * 这一轮同时也是**最后一轮**，所以内容原样输出（`processContentScope: 'all'`），
+     * 不存在「正文被挪到壳外当最终回复」的问题。
+     */
+    const stepWithText = createAssistantMessage(
+      'assistant-1',
+      [
+        { id: 'text-1', sessionID: 'session-1', messageID: 'assistant-1', type: 'text', text: '先说一句' },
+        createToolPart('tool-1', 'assistant-1'),
+      ],
+      1001,
+      1100,
+    )
+    ;(stepWithText.info as { finish?: string }).finish = 'tool-calls'
+    const messages = [createUserMessage('user-1', 1000), stepWithText]
+
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      // 会话仍在跑（下一步马上开始）
+      sessionIsStreaming: true,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    expect(shell.isActive).toBe(true)
+    // 最后一轮：不拆分，正文留在壳内原样输出
+    expect(shell.finalMessage).toBeUndefined()
+    expect(shell.children).toEqual([
+      { message: stepWithText, processContentScope: 'all' },
+    ])
+  })
+
+  it('settles a turn that ends with tool-calls once the session goes idle', () => {
+    // 被中断/出错而停在 tool-calls 的历史轮次：会话已空闲，正文必须露出来
+    const stepWithText = createAssistantMessage(
+      'assistant-1',
+      [
+        { id: 'text-1', sessionID: 'session-1', messageID: 'assistant-1', type: 'text', text: '做到这里' },
+        createToolPart('tool-1', 'assistant-1'),
+      ],
+      1001,
+      1100,
+    )
+    ;(stepWithText.info as { finish?: string }).finish = 'tool-calls'
+    const messages = [createUserMessage('user-1', 1000), stepWithText]
+
+    const timeline = buildProcessTimeline(asHistorical(messages), {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    expect(shell.isActive).toBe(false)
+    expect(shell.finalMessage?.info.id).toBe('assistant-1')
   })
 
   it('does not reopen a completed turn when session becomes busy before the next user lands', () => {
@@ -798,7 +885,7 @@ describe('buildProcessTimeline', () => {
       1500,
     )
     const messages = [createUserMessage('user-1', 1000), settled]
-    const timeline = buildProcessTimeline(messages, {
+    const timeline = buildProcessTimeline(asHistorical(messages), {
       turnDurationMap: new Map([['assistant-1', 500]]),
       sessionIsStreaming: true,
       messageHasProcess: hasProcess,
@@ -808,6 +895,40 @@ describe('buildProcessTimeline', () => {
       kind: 'process-shell',
       isActive: false,
     })
+  })
+
+  it('uses the skeleton duration instead of deriving "Working" from stale timestamps', () => {
+    /**
+     * 骨架轮次：每条助手消息都是「该轮最终回复」，没有真实流式状态。
+     *
+     * 若按 active 处理，折叠块会用 `now - startedAt` 现算 —— 而 startedAt 是
+     * 用户消息的创建时间（可能几十小时前），界面显示成「Worked for 0ms」。
+     * 骨架的 durationMs 是 Agent 算好的真实总耗时，应当直接采用并视为已结束。
+     */
+    const reply = createAssistantMessage(
+      'assistant-1',
+      [{ id: 'text-1', sessionID: 'session-1', messageID: 'assistant-1', type: 'text', text: 'ok' }],
+      1001,
+      1400,
+    )
+    reply.isCompressed = true
+    reply.compressedStats = { reasoningCount: 0, stepCount: 3, durationMs: 27_504 }
+
+    // sessionIsStreaming=true 会让这一轮成为 active 候选，正是要验证的场景
+    const messages = [createUserMessage('user-1', 1000), reply]
+    const timeline = buildProcessTimeline(asHistorical(messages), {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: true,
+      messageHasProcess: msg => (msg.compressedStats?.stepCount ?? 0) > 0,
+      messageHasFinal: hasFinal,
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    expect(shell.durationMs).toBe(27_504)
+    // 已结束：不能显示「Working」
+    expect(shell.isActive).toBe(false)
   })
 
   it('settles shell with process inside and final answer outside', () => {
@@ -834,7 +955,7 @@ describe('buildProcessTimeline', () => {
     )
     const messages = [createUserMessage('user-1', 1000), processOnly, finalAnswer]
     const durationMap = buildTurnDurationMap(messages, messages)
-    const timeline = buildProcessTimeline(messages, {
+    const timeline = buildProcessTimeline(asHistorical(messages), {
       turnDurationMap: durationMap,
       sessionIsStreaming: false,
       messageHasProcess: hasProcess,
@@ -906,8 +1027,229 @@ describe('buildProcessTimeline', () => {
       messageHasFinal: hasFinal,
     })
 
+    // 纯文本轮（最后一轮）：不拆也不套壳，直接平铺
     expect(timeline.map(item => item.kind)).toEqual(['message', 'message'])
     expect(timeline[1]).toMatchObject({ kind: 'message', key: 'assistant-1' })
+  })
+
+  it('keeps the reply outside the shell when the turn ends with a tool-only message', () => {
+    /**
+     * 回归：工具密集型回合常以工具调用收尾（实测某会话 2823 条 assistant 消息里
+     * 2698 条如此）。若按「末条消息」判定最终回复，`messageHasFinal` 为 false →
+     * 整轮正文全落进**默认折叠**的过程块，用户只看到一行「已处理 N 分钟」，
+     * 回复凭空消失（实测 179 轮里 77 轮中招）。
+     */
+    const withText = createAssistantMessage(
+      'assistant-1',
+      [
+        {
+          id: 'text-1',
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          type: 'text',
+          text: '两个问题都修了。',
+        },
+        createToolPart('tool-1', 'assistant-1'),
+      ],
+      1001,
+      1200,
+    )
+    // 末条：只有工具调用，没有正文
+    const toolOnlyTail = createAssistantMessage(
+      'assistant-2',
+      [createToolPart('tool-2', 'assistant-2')],
+      1201,
+      1400,
+    )
+    const messages = [createUserMessage('user-1', 1000), withText, toolOnlyTail]
+
+    const timeline = buildProcessTimeline(asHistorical(messages), {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+
+    // 回复必须在壳外（默认可见），而不是被折叠块吞掉
+    expect(shell.finalMessage?.info.id).toBe('assistant-1')
+    expect(shell.isActive).toBe(false)
+    // 末尾的纯工具消息仍进过程块
+    expect(shell.children.map(c => c.message.info.id)).toContain('assistant-2')
+  })
+
+  it('falls back to the last assistant message when no message ends with text', () => {
+    // 整轮没有正文（纯工具轮）：不造假回复，全部留在过程块
+    const a1 = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')], 1001, 1100)
+    const a2 = createAssistantMessage('assistant-2', [createToolPart('tool-2', 'assistant-2')], 1101, 1200)
+    const messages = [createUserMessage('user-1', 1000), a1, a2]
+
+    const timeline = buildProcessTimeline(asHistorical(messages), {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    expect(shell.finalMessage).toBeUndefined()
+    expect(shell.children.map(c => c.message.info.id)).toEqual(['assistant-1', 'assistant-2'])
+  })
+
+  /**
+   * 最后一轮：内容原样输出，不猜「哪句是最终回复」。
+   *
+   * 这是「已处理内容泄露成 Agent 最后消息」的根治方案。实测一轮跑了 10 分 25 秒，
+   * 模型在过程里说过「18 个测试全部通过。现在构建并部署 agent。」然后继续调工具，
+   * 旧的「取轮内最后一段正文」逻辑把那句中间说明当成了回复露在折叠块外。
+   *
+   * 现在最后一轮不拆：整条助手消息用 `processContentScope: 'all'` 原样渲染，
+   * 服务端写什么就显示什么，顺序也是服务端的顺序。
+   */
+  it('renders the last turn verbatim instead of guessing the final reply', () => {
+    const narration = createAssistantMessage(
+      'assistant-1',
+      [
+        { id: 'text-1', sessionID: 'session-1', messageID: 'assistant-1', type: 'text', text: '18 个测试全部通过。现在构建并部署 agent。' },
+        createToolPart('tool-1', 'assistant-1'),
+      ],
+      1001,
+      1100,
+    )
+    const messages = [createUserMessage('user-1', 1000), narration]
+
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    // 不拆：中间说明留在壳内（原样输出），不会被当成最终回复挪到壳外
+    expect(shell.finalMessage).toBeUndefined()
+    expect(shell.children).toEqual([
+      { message: narration, processContentScope: 'all' },
+    ])
+  })
+
+  /** 历史轮次仍然遵守既有设计：过程折叠、回复在壳外 */
+  it('still folds historical turns with the reply outside the shell', () => {
+    const processOnly = createAssistantMessage(
+      'assistant-1',
+      [createToolPart('tool-1', 'assistant-1')],
+      1001,
+      1100,
+    )
+    const reply = createAssistantMessage(
+      'assistant-2',
+      [{ id: 'text-1', sessionID: 'session-1', messageID: 'assistant-2', type: 'text', text: '改好了。' }],
+      1101,
+      1200,
+    )
+    const messages = [createUserMessage('user-1', 1000), processOnly, reply]
+
+    const timeline = buildProcessTimeline(asHistorical(messages), {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    // 历史轮：回复露在壳外，过程留在壳内
+    expect(shell.finalMessage?.info.id).toBe('assistant-2')
+    expect(shell.children.map(c => c.message.info.id)).toEqual(['assistant-1'])
+    expect(shell.children[0].processContentScope).toBe('inline')
+  })
+
+  /**
+   * 回归：骨架轮没有正文时，不能整轮消失。
+   *
+   * 实测 197 轮里 85 轮的 `reply` 是 null（纯工具轮，或「说明一句后继续干活」）。
+   * 这类轮次的 `content` 是空数组，被普通可见性规则过滤掉后，用户消息之后就是
+   * 一片空白 —— 既没有回复，也没有「已处理 N 步」的折叠块，整段对话凭空消失。
+   */
+  it('keeps a skeleton turn visible when its body was stripped entirely', () => {
+    const emptyReply = createAssistantMessage('assistant-1', [], 1001, 1400)
+    emptyReply.isCompressed = true
+    emptyReply.compressedStats = { reasoningCount: 3, stepCount: 9, durationMs: 12_000 }
+    const user = createUserMessage('user-1', 1000)
+    user.content = [createTextPart('u1-text', 'user-1', '跑一下')]
+    const messages = [user, emptyReply]
+
+    // 先确认它进得了可见列表（否则下面根本走不到时间线构建）
+    const entries = buildVisibleMessageEntries(messages)
+    expect(entries.map(e => e.message.info.id)).toEqual(['user-1', 'assistant-1'])
+
+    const timeline = buildProcessTimeline(asHistorical(entries.map(e => e.message)), {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: msg => {
+        const stats = msg.compressedStats
+        return !!stats && (stats.stepCount > 0 || stats.reasoningCount > 0)
+      },
+      messageHasFinal: hasFinal,
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    // 没有任何正文 → 没有壳外回复，但壳必须在（承载「已处理 9 步」与展开入口）
+    expect(shell.finalMessage).toBeUndefined()
+    expect(shell.children.map(c => c.message.info.id)).toEqual(['assistant-1'])
+    expect(shell.durationMs).toBe(12_000)
+  })
+
+  it('keeps a process shell for skeleton turns whose body was stripped', () => {    /**
+     * 轮次骨架：过程正文已被主机 Agent 剥掉，助手消息只剩最终回复。
+     * 若不挂折叠块，用户既看不到「已处理 N 步」，也没有展开回拉的入口。
+     */
+    const skeletonReply = createAssistantMessage(
+      'assistant-1',
+      [
+        {
+          id: 'text-1',
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          type: 'text',
+          text: '改好了。',
+        },
+      ],
+      1001,
+      1400,
+    )
+    skeletonReply.isCompressed = true
+    skeletonReply.compressedStats = { reasoningCount: 21, stepCount: 54, durationMs: 21000 }
+    const messages = [createUserMessage('user-1', 1000), skeletonReply]
+
+    const timeline = buildProcessTimeline(asHistorical(messages), {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      // 骨架轮：内容里没有 tool/reasoning，过程规模来自 compressedStats
+      messageHasProcess: msg => {
+        const stats = msg.compressedStats
+        return !!stats && (stats.stepCount > 0 || stats.reasoningCount > 0)
+      },
+      messageHasFinal: hasFinal,
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    // 回复在壳外（默认可见），过程规模由 header 的 compressedStats 表达
+    expect(shell.finalMessage?.info.id).toBe('assistant-1')
+    // 时长从骨架的 compressedStats.durationMs 取（骨架里没有工具时间戳可反推）
+    expect(shell.durationMs).toBe(21000)
   })
 })
 

@@ -173,13 +173,39 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     case 'session.retry.scheduled': {
       const assistantMessageID = str(data.assistantMessageID) ?? ''
       if (!sessionID || !assistantMessageID) return null
+      const attempt = num(data.attempt)
+      const at = num(data.at)
       return globalEvent(directory, EventTypes.SESSION_RETRY_SCHEDULED, {
         sessionID,
         assistantMessageID,
+        ...(attempt != null ? { attempt } : {}),
+        ...(at != null ? { at } : {}),
+        // 失败原因：上游限流 / 超时会走到重试，界面上要说明「为什么卡住了」。
+        ...(data.error != null ? { error: toMessageError(rec(data.error)).data } : {}),
       })
     }
     case 'session.deleted':
       return globalEvent(directory, EventTypes.SESSION_DELETED, { sessionID })
+    /**
+     * 系统合成消息：后台任务完成通知走这里。
+     *
+     * 正文是 `<shell id=... state=completed command=...>output</shell>` 或
+     * `<subagent sessionID=... state=...>`。它**不进对话流**，只作为「后台任务
+     * 已结束」的权威信号被工作状态面板消费（见 workStatus/backgroundJobs.ts）。
+     *
+     * 不映射它的后果：实时期间后台任务永远停在「运行中」。
+     */
+    case 'session.synthetic': {
+      const text = str(data.text) ?? ''
+      if (!sessionID || !text.trim()) return null
+      return globalEvent(directory, EventTypes.SESSION_SYNTHETIC, {
+        sessionID,
+        text,
+        ...(str(data.description) ? { description: str(data.description) } : {}),
+        createdAt: num(e.created) ?? Date.now(),
+      })
+    }
+
     case 'session.idle':
       return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID, timestamp: eventCreated })
     case 'session.status':

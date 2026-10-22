@@ -69,6 +69,10 @@ function outlineKey(serverId: string, sessionId: string): string {
  *   2. **分页渐进**：每页到达立刻合并，轴马上变长，不必等 18MB 全下完；
  *   3. **可取消**：切走会话立刻 abort，不拖着大响应；
  *   4. **失败静默**，不影响任何功能（大纲只是导航辅助）。
+ *
+ * ⭐ 例外：走轮次骨架路径时**不需要**这条补全。
+ * 骨架本身就是「整段全部轮次 + 用户正文」，`useMergeTurnOutline` 一次就能把
+ * 轴上所有点补齐，因此上层会把 `enabled` 置 false，这 18MB 请求根本不会发出。
  */
 export function useBackfillTurnOutline(serverId: string, sessionId: string | null, enabled = true): void {
   useEffect(() => {

@@ -106,6 +106,21 @@ export interface SessionState {
     outcome: 'succeeded' | 'failed' | 'interrupted'
     error?: string
   }
+  /**
+   * 轮次骨架统计（历史记录以「轮」为单位拉取时带回）。
+   *
+   * 骨架路径下每条助手消息只带最终回复正文，过程正文留在服务端；这里的
+   * `changedFiles` 是渲染「本轮改动文件」胶囊所需的最小信息（路径 + 增删行数），
+   * 无法从消息本身还原（工具 metadata 已被剥掉）。
+   */
+  turnSkeleton?: Map<string, { changedFiles?: Array<{ path: string; additions?: number; deletions?: number }> }>
+  /**
+   * 本次加载是否来自「轮次骨架」（整段、含全部轮次）。
+   *
+   * 骨架天然覆盖全部历史，因此侧边轴的轮次大纲不必再发一次全量补全请求
+   * （那条请求在带截图的会话上实测 18MB）。
+   */
+  loadedFromSkeleton?: boolean
 }
 
 export interface SendRollbackSnapshot {
@@ -130,6 +145,8 @@ export interface MessageStoreSnapshot {
   revertedContent: RevertHistoryItem | null
   loadState: SessionState['loadState']
   loadError?: MessageError
+  /** 本次加载是否来自「轮次骨架」（整段覆盖全部历史） */
+  loadedFromSkeleton: boolean
 }
 
 export interface SessionStateSnapshot {
@@ -145,6 +162,8 @@ export interface SessionStateSnapshot {
   hasMoreHistory: boolean
   /** 是否存在因内存预算被裁掉、尚未补回的历史（内存缺口） */
   hasTrimmedHistory: boolean
+  /** 本次加载是否来自「轮次骨架」（整段覆盖全部历史，无需再补全大纲） */
+  loadedFromSkeleton: boolean
   directory: string
   title: string | null
   /** 最近一次已完成压缩的时间戳；有值时消息流末尾展示压缩分隔条 */

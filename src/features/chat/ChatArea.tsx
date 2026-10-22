@@ -257,6 +257,30 @@ const VirtualRow = memo(
       const messages: Message[] = []
       for (const child of item.children) messages.push(child.message)
       if (item.finalMessage) messages.push(item.finalMessage)
+
+      // 轮次骨架路径：工具 part 已被剥离，改动文件由主机 Agent 单独回填。
+      //
+      // ⚠️ 骨架只有「路径 + 增删行数」，没有 diff 正文（hunks 为空）：chip 上的
+      // 数字能正常显示，但预览面板拿不到内容。这是刻意的取舍 —— diff 全文单轮
+      // 可达数百 KB，正是要剥掉的东西。需要看 diff 时展开「已处理」块会回拉完整
+      // tool part，届时 chip 由 collectTurnChangedFiles 重建，预览自然可用。
+      const fromSkeleton: ChangedFile[] = []
+      const seenPaths = new Set<string>()
+      for (const message of messages) {
+        for (const file of message.skeletonChangedFiles ?? []) {
+          if (seenPaths.has(file.path)) continue
+          seenPaths.add(file.path)
+          fromSkeleton.push({
+            path: file.path,
+            additions: file.additions ?? 0,
+            deletions: file.deletions ?? 0,
+            hunks: [],
+            editCount: 1,
+          })
+        }
+      }
+      if (fromSkeleton.length > 0) return fromSkeleton
+
       return collectTurnChangedFiles(messages)
     }, [item])
 
@@ -296,13 +320,12 @@ const VirtualRow = memo(
                   startedAt={item.startedAt}
                   durationMs={item.durationMs}
                   isActive={item.isActive}
+                  forceExpanded={item.children.some(child => child.processContentScope === 'all')}
                   stepCount={processStepCount(item.children)}
                   reasoningCount={processReasoningCount(item.children)}
                   onExpand={
                     item.userMessageId && onHydrateTurn
-                      ? () => {
-                          void onHydrateTurn(item.userMessageId!)
-                        }
+                      ? () => onHydrateTurn(item.userMessageId!)
                       : undefined
                   }
                 >
@@ -349,9 +372,16 @@ const VirtualRow = memo(
   },
   (prev, next) =>
     prev.virtualItem.index === next.virtualItem.index &&
-    // 只比较起点与索引：size 由动态测量在渲染后回写，参与比较会让
-    // 「滚动导致重测」触发整行重渲染；行内内容变化由 item 引用兜住。
-    prev.virtualItem.start === next.virtualItem.start &&
+    /**
+     * ⚠️ 刻意**不比较** `virtualItem.start` / `size`。
+     *
+     * 行位置由 `transform: translateY(start)` 直接写在 DOM 上（directDomUpdates），
+     * 与 React 渲染无关。而 `start` 在滚动/上方插入/行高重测时**每一行都会变**——
+     * 把它放进 memo 比较，等于让「滚动一帧 = 所有已挂载行全部重渲染」，长会话里
+     * 就是主对话卡顿的直接原因（一屏十几行 × 每行整棵 Markdown 子树）。
+     *
+     * 行内内容的正确性由 `item` 引用兜住：store 只在真正变化时换新对象。
+     */
     prev.item === next.item &&
     prev.paddingClass === next.paddingClass &&
     prev.rowYClass === next.rowYClass &&
@@ -480,17 +510,33 @@ export const ChatArea = memo(
         emptyShellGate.isReady,
       ])
 
+      /**
+       * messageId → timeline 行号。
+       *
+       * 流式时 timeline 每帧都会换新数组（最后一行内容变了），但**行结构基本不变**。
+       * 直接全量重建在长会话里是 O(全部消息) 的每帧成本（实测 7000 条消息 →
+       * 每帧遍历 7000 次并写 7000 个 Map 条目）。
+       *
+       * 这里按「行 key 序列」做签名：序列不变就复用上一份映射（行号只由位置决定，
+       * 位置没变时映射必然相同）。
+       */
+      const timelineIndexMapRef = useRef<{ signature: string; map: Map<string, number> } | undefined>(undefined)
       const messageIdToTimelineIndex = useMemo(() => {
+        const signature = timeline.map(item => item.key).join('\u0000')
+        const cached = timelineIndexMapRef.current
+        if (cached && cached.signature === signature) return cached.map
         const map = new Map<string, number>()
-        timeline.forEach((item, index) => {
+        for (let index = 0; index < timeline.length; index++) {
+          const item = timeline[index]
           if (item.kind === 'message') {
             map.set(item.message.info.id, index)
-            return
+            continue
           }
           if (item.userMessageId) map.set(item.userMessageId, index)
           for (const child of item.children) map.set(child.message.info.id, index)
           if (item.finalMessage) map.set(item.finalMessage.info.id, index)
-        })
+        }
+        timelineIndexMapRef.current = { signature, map }
         return map
       }, [timeline])
 
@@ -1240,6 +1286,55 @@ export const ChatArea = memo(
       }, [mountedMessageIdsKey])
 
       // ── 命令式接口 ──
+      /**
+       * 跳到某个虚拟行，并按**真实 DOM** 校正落点。
+       *
+       * `virtualizer.scrollToIndex` 只按「估算 + 已测量」的高度算 offset。长会话里
+       * 目标之前的行绝大多数从未渲染过（只有 60px 估算值），误差会累积到成百上
+       * 千像素 —— 这就是「侧边轴点用户消息，总是定位不准」的根因。
+       *
+       * 校正方式：滚过去 → 等目标行真的挂载 → 用它的实际 offsetTop 减去理想
+       * 位置（居中 / 顶部）再补一次 scrollTop。只补一次，避免和用户滚动抢。
+       */
+      const scrollToTimelineIndex = useCallback(
+        (index: number, align: 'center' | 'start' = 'center') => {
+          if (index < 0 || index >= timeline.length) return
+          const rowKey = timeline[index]?.key
+          autoPause()
+          virtualizer.scrollToIndex(index, { align })
+          if (!rowKey) return
+
+          let frames = 0
+          let settled = 0
+          const step = () => {
+            const root = scrollRef.current
+            if (!root) return
+            const el = root.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(rowKey)}"]`)
+            if (el) {
+              const rootRect = root.getBoundingClientRect()
+              const rowRect = el.getBoundingClientRect()
+              const paddingTop = parseFloat(getComputedStyle(root).paddingTop) || 0
+              const desiredTop =
+                align === 'center'
+                  ? rootRect.top + paddingTop + (root.clientHeight - paddingTop - rowRect.height) / 2
+                  : rootRect.top + paddingTop
+              const delta = rowRect.top - desiredTop
+              // 阈值 2px：小于一像素的抖动不值得再改 scrollTop（会打断平滑滚动）
+              if (Math.abs(delta) > 2) {
+                root.scrollTop += delta
+                settled = 0
+              } else if (++settled >= 2) {
+                return
+              }
+            }
+            // 最多追 30 帧（约 0.5s）：目标行被撑高/图片解码都会改变落点
+            if (++frames < 30) requestAnimationFrame(step)
+          }
+          requestAnimationFrame(step)
+        },
+        [autoPause, timeline, virtualizer],
+      )
+
       useImperativeHandle(
         ref,
         () => ({
@@ -1268,26 +1363,29 @@ export const ChatArea = memo(
             if (index < 0 || index >= visibleMessages.length) return
             const messageId = visibleMessages[index]?.info.id
             const timelineIndex = messageId != null ? (messageIdToTimelineIndex.get(messageId) ?? index) : index
-            if (timelineIndex < 0 || timelineIndex >= timeline.length) return
-            autoPause()
-            virtualizer.scrollToIndex(timelineIndex, { align: 'center' })
+            scrollToTimelineIndex(timelineIndex)
           },
           scrollToMessageId: (messageId: string) => {
             const timelineIndex = messageIdToTimelineIndex.get(messageId)
             if (timelineIndex == null) return
-            autoPause()
-            virtualizer.scrollToIndex(timelineIndex, { align: 'center' })
+            /**
+             * 用户消息锚点用 `start`（对齐到视口顶部）。
+             *
+             * 侧边轴点的就是「这一轮从这里开始」，居中会让用户消息上方那一轮的
+             * 尾部内容占掉半个屏幕，看起来像「点到了上一轮」。
+             */
+            scrollToTimelineIndex(timelineIndex, 'start')
           },
         }),
         [
           autoForceScroll,
-          autoPause,
           autoMarkAuto,
           pinToBottom,
           virtualizer,
           timeline,
           visibleMessages,
           messageIdToTimelineIndex,
+          scrollToTimelineIndex,
           // refs 恒定，入依赖只是满足 lint 且语义不变
           userScrolledRef,
           prevState,

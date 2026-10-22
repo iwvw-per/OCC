@@ -13,6 +13,8 @@ import { logger } from '../utils/logger'
 import i18n from '../i18n'
 import { messageStore, childSessionStore, paneLayoutStore, serverStore } from '../store'
 import { activeSessionStore } from '../store/activeSessionStore'
+import { backgroundJobStore } from '../store/backgroundJobStore'
+import { parseBackgroundNotice } from '../features/workStatus/backgroundJobs'
 import { notificationStore } from '../store/notificationStore'
 import { soundStore } from '../store/soundStore'
 import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
@@ -215,6 +217,52 @@ function drainPending<T>(map: Map<string, PendingRequest<T>[]>, sessionID: strin
 function getScopeKey(directories?: readonly string[]) {
   if (!directories || directories.length === 0) return '__global__'
   return directories.join('|')
+}
+
+/**
+ * 从消息 part 里识别「已转入后台」的任务；不是后台任务返回 null。
+ *
+ * 与 `workStatus/backgroundJobs.ts` 的判定同源：`background=true` 的工具调用
+ * 会立刻返回（工具本身 completed），真正的任务 id 在 `metadata.shellID` 或
+ * 输出回执里。
+ */
+function backgroundJobFromToolPart(part: unknown): { id: string; title: string } | null {
+  if (!part || typeof part !== 'object') return null
+  const record = part as {
+    type?: unknown
+    state?: { metadata?: unknown; content?: unknown; input?: unknown }
+  }
+  if (record.type !== 'tool') return null
+
+  const shellId = extractShellId(record.state)
+  if (!shellId) return null
+
+  const input = record.state?.input
+  const inputRecord = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
+  const rawTitle =
+    (typeof inputRecord.description === 'string' && inputRecord.description) ||
+    (typeof inputRecord.command === 'string' && inputRecord.command) ||
+    shellId
+  return { id: shellId, title: rawTitle.length > 80 ? `${rawTitle.slice(0, 80)}…` : rawTitle }
+}
+
+function extractShellId(state: { metadata?: unknown; content?: unknown } | undefined): string | null {
+  if (!state) return null
+  const metadata = state.metadata
+  if (metadata && typeof metadata === 'object') {
+    const shellID = (metadata as Record<string, unknown>).shellID
+    if (typeof shellID === 'string' && shellID) return shellID
+  }
+  const content = state.content
+  if (Array.isArray(content)) {
+    const text = content
+      .map(item => (item && typeof item === 'object' ? (item as { text?: unknown }).text : undefined))
+      .filter((value): value is string => typeof value === 'string')
+      .join('')
+    const match = text.match(/shell ID:\s*([\w-]+)/)
+    if (match?.[1]) return match[1]
+  }
+  return null
 }
 
 function removePendingByRequestId<T extends { id: string }>(
@@ -749,6 +797,22 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
                 sessionID: scopedId,
               }),
             )
+            /**
+             * 工具一转入后台就立刻标记「运行中」。
+             *
+             * 只靠 synthetic 完成通知是不够的：那是**结束**信号，任务刚开始跑时
+             * 面板上什么都不会出现。这里在工具 part 更新时识别「已转入后台」，
+             * 先落成 running，等完成通知到达再纠正为终态。
+             */
+            const job = backgroundJobFromToolPart(apiPart)
+            if (job) {
+              backgroundJobStore.set(scopedId, {
+                id: job.id,
+                status: 'running',
+                at: Date.now(),
+                title: job.title,
+              })
+            }
             scheduleScroll(scopedId)
           }
         },
@@ -1009,15 +1073,45 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         // 旧消息可能已产生部分文本（限流/超时打断时），不移除会与新消息完整文本
         // 同时渲染 → 同一轮回复里句子重复。这里按 id 移除旧消息；新消息由后续
         // step.started / text.* 事件正常建立。
-        onSessionRetryScheduled: ({ sessionID, assistantMessageID }) => {
+        //
+        // 同时把「正在重试」落成 retry 状态：上游限流时实测有 24 秒完全没有任何
+        // 内容事件（只有这条 + step.started），界面若不给提示，用户只会觉得
+        // 「卡死了、不流式」。重试成功后的 step.started 会把状态推回 busy。
+        onSessionRetryScheduled: ({ sessionID, assistantMessageID, attempt, at, error }) => {
           const scopedId = scope(sessionID)
           if (!messageStore.getSessionState(scopedId)) return
           messageStore.removeMessage(scopedId, assistantMessageID)
+          activeSessionStore.updateStatus(scopedId, {
+            type: 'retry',
+            attempt: attempt ?? 1,
+            // SessionStatus.retry.message 是给人看的一句话；没有 error 时给个中性描述
+            message: typeof error?.message === 'string' ? error.message : 'retrying',
+            ...(at != null ? { next: at } : {}),
+          } as never)
           scheduleScroll?.(scopedId)
         },
 
-        onSessionDeleted: sessionId => {
-          const scopedId = scope(sessionId)
+        /**
+         * 系统合成消息：后台任务完成通知。
+         *
+         * 正文是 `<shell id="sh_x" state="completed" command="...">output</shell>`
+         * 或 `<subagent sessionID="ses_x" state="...">`。只更新后台任务状态表，
+         * **不写进消息流** —— 否则用户会在对话里看到一段 XML。
+         */
+        onSessionSynthetic: ({ sessionID, text, description, createdAt }) => {
+          const notice = parseBackgroundNotice(text)
+          if (!notice) return
+          const scopedId = scope(sessionID)
+          backgroundJobStore.set(scopedId, {
+            id: notice.id,
+            status: notice.status,
+            at: createdAt ?? Date.now(),
+            ...(notice.output ? { output: notice.output } : {}),
+            ...(notice.title || description ? { title: notice.title || description } : {}),
+          })
+        },
+
+        onSessionDeleted: sessionId => {          const scopedId = scope(sessionId)
           // 内部临时会话：不进用户列表，但需清运行时状态；若曾在事件竞态中
           // 进过索引桶，delete 事件也照常从桶中移除并记墓碑。
           if (isEphemeralSession(sessionId)) {

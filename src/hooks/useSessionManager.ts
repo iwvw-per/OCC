@@ -9,18 +9,22 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { logger } from '../utils/logger'
-import { isUserUIMessage, toApiMessageWithParts } from '../utils/messageConversion'
+import { isUserUIMessage, toApiMessageWithParts, toUIMessage } from '../utils/messageConversion'
 import { messageStore, type RevertState, type SessionState } from '../store'
 import { sessionKeyToServerId } from '../utils/sessionKey'
 import {
   getSessionTurnPage,
   getSessionFirstScreen,
   getSessionMessagePage,
+  getSessionLightweightMessages,
+  peekLightweightSupport,
+  probeLightweightSupport,
   encodeBeforeCursor,
   getSession,
   revertMessage,
   unrevertSession,
   extractUserMessageContent,
+  LIGHTWEIGHT_MESSAGE_LIMIT,
   type ApiMessageWithParts,
   type ApiSession,
 } from '../api'
@@ -28,6 +32,10 @@ import { sessionErrorHandler } from '../utils'
 import { backfillSessionUsage } from '../api/contextBackfill'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_TURN_LIMIT, HISTORY_TURN_BATCH_SIZE, RECENT_FULL_TURNS } from '../constants'
+import { extractTurnOutlineEntries } from '../components/outlineIndexModel'
+import { turnOutlineStore } from '../store/turnOutlineStore'
+import { backgroundJobStore } from '../store/backgroundJobStore'
+import type { BackgroundJobStatus } from '../features/workStatus/backgroundJobs'
 import { estimateHistoryPageSize } from '../constants/pagination'
 import i18n from '../i18n'
 import type { MessageError } from '../types/message'
@@ -317,33 +325,178 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         // 首屏或重连时一次 Failed to fetch 就把用户卡在错误页。
         const serverId = sessionKeyToServerId(sid)
         /**
-         * 首屏一律走**按量分页**，不再使用主机 Agent 的「轻量投影」。
+         * 首屏优先走**轮次骨架**，拿不到再退回按量分页。
          *
-         * ⚠️ 这是实测踩到的坑（经网关访问时尤其致命）：
-         * 轻量投影由主机 Agent（agent-rust）实现，它**忽略 limit 参数**，
-         * 任何带 `X-Lightweight: 1` 的消息请求都会返回**整个会话**。
-         * 实测同一个 4810 条消息的会话：
-         *   - 普通分页 limit=30  →  138 KB
-         *   - 带 X-Lightweight    →  25.1 MB（limit=1 也一样）
-         * 于是：
-         *   - 「探测是否支持轻量」这个请求本身就是 25MB 下载；
-         *   - 探测成功后缓存「支持」，之后每次打开会话都走 25MB 的整段拉取。
-         * 这正是「前端各种操作都卡」的根因：浏览器一边做别的事，一边在后台
-         * 拖着一个几十 MB 的响应。
+         * 骨架由主机 Agent（agent-rust）实现：按轮投影成「用户提问 + 最终回复 +
+         * 过程计数」，reasoning 与工具过程留在服务端。实测同一个 168 轮 / 7000 条
+         * 消息的会话：
+         *   - 按量分页（多页 × 数百 KB，加上 18MB 的大纲补全）
+         *   - 骨架（单请求）                 0.39 MB
+         * 而且骨架天然是「整段」的，首屏一次到手，不必上滑补历史。
          *
-         * 轻量投影「一条消息更小」的优势（1.8KB vs 4.9KB）抵不过「无视 limit
-         * 返回全量」的代价 —— 大会话里差两个数量级。
+         * ⚠️ 前置条件是主机 Agent 已升级。旧版 Agent 不认识 `X-Lightweight: skeleton`，
+         * 会把它原样透传给 opencode（不带 X-Lightweight 响应头）——此时请求拿到的是
+         * **单条**普通消息，不是整段，退回分页即可，不会白下载。
          *
-         * 因此首屏只发「刚好够看」的小页（FIRST_SCREEN_PAGE_LIMIT），其余按需分页。
+         * 探测本身很便宜（只要响应头，body 立刻 cancel），因此**首次加载等它一下**
+         * 比「先分页、下次才用骨架」更划算：探测约一个隧道往返，而分页要多拉几 MB。
+         * 已知支持时直接命中缓存，不额外等待。
          */
         const sessionInfoPromise = getSession(sid, dir, serverId).catch(() => null)
 
+        let skeletonSupported = peekLightweightSupport(serverId) === true
+        if (peekLightweightSupport(serverId) === undefined) {
+          skeletonSupported = await probeLightweightSupport(sid, dir, serverId).catch(() => false)
+        }
+        const skeleton = skeletonSupported
+          ? await withLoadRetry(
+              () => getSessionLightweightMessages(sid, dir, serverId, { signal: abortController.signal }),
+              isStale,
+            ).catch(() => null)
+          : null
+
+        if (skeleton && skeleton.messages.length > 0) {
+          const sessionInfo = await sessionInfoPromise
+          if (isStale()) return
+
+          /**
+           * 骨架 + 未定稿轮次补拉（方案 A）。
+           *
+           * 骨架只覆盖**已定稿**的历史轮次。正在生成的那一轮被 Agent 标成
+           * `settled: false` 并从骨架里剔除 —— 因为骨架给的是「此刻的截断快照」，
+           * 而后续 `session.text.delta` 是 ephemeral（不重放、不带 seq），
+           * 前端无法判断新 delta 与快照是否重叠，直接拼会重复或错位。
+           *
+           * 所以这一轮单独用完整消息拉取：轮次规模通常几十条，成本可控，
+           * 而且拿到的是「当前完整正文」，后续 delta 可以安全追加。
+           */
+          let tailMessages: ApiMessageWithParts[] = []
+          if (skeleton.unsettledTurns && skeleton.unsettledTurns.length > 0) {
+            try {
+              const page = await getSessionMessagePage(
+                sid,
+                LIGHTWEIGHT_MESSAGE_LIMIT,
+                undefined,
+                dir,
+                serverId,
+                { signal: abortController.signal },
+              )
+              // 只取未定稿轮次及其之后的内容（游标从最新端开始，天然覆盖尾部）
+              const unsettledSet = new Set(skeleton.unsettledTurns)
+              const firstUnsettledIndex = page.messages.findIndex(
+                m => m.info.role === 'user' && unsettledSet.has(m.info.id),
+              )
+              tailMessages = firstUnsettledIndex >= 0 ? page.messages.slice(firstUnsettledIndex) : []
+            } catch {
+              // 补拉失败不阻断：骨架内容照常可用，只是这一轮暂时不完整，
+              // 后续 SSE 到达后会自然补齐。
+            }
+          }
+
+          const currentState = messageStore.getSessionState(sid)
+          const mergedMessages = mergeWithLocalStreamingMessages(
+            tailMessages.length > 0 ? [...skeleton.messages, ...tailMessages] : skeleton.messages,
+            currentState,
+          )
+
+          const sessionModel = toSessionModelRef(sessionInfo)
+          const sessionAgent = sessionInfo?.agent || undefined
+          const configModel = skeleton.config?.model
+          const configAgent = skeleton.config?.agent
+          const resolvedModel = configModel
+            ? { providerID: configModel.providerID, modelID: configModel.modelID }
+            : sessionModel
+          const resolvedAgent = configAgent?.agent ?? sessionAgent
+          const lastTurn = skeleton.idle
+            ? {
+                at: skeleton.idle.at,
+                outcome: skeleton.idle.outcome,
+                ...(skeleton.idle.error ? { error: skeleton.idle.error } : {}),
+              }
+            : undefined
+
+          messageStore.setMessages(sid, mergedMessages, {
+            directory: sessionInfo?.directory ?? dir ?? '',
+            title: sessionInfo?.title,
+            /**
+             * 骨架首屏只取最近几页（约 0.7s），更早的轮次留待上滑再取。
+             *
+             * `nextCursor` 是主机 Agent 回的 v2 消息游标：带着它再请求一次骨架
+             * 就能拿到更早一段。此前这里写死 `hasMoreHistory: false`，于是
+             * 「一次取全」变成「永远只有最近几页」——上滑到底也拉不到更早的历史。
+             */
+            hasMoreHistory: skeleton.nextCursor != null,
+            historyCursor: skeleton.nextCursor,
+            revertState: sessionInfo?.revert ?? null,
+            shareUrl: sessionInfo?.share?.url,
+            compactedAt: skeleton.compactedAt,
+            compactionMarker: skeleton.compaction,
+          })
+          if (resolvedModel || resolvedAgent || lastTurn) {
+            messageStore.updateSessionMetadata(sid, {
+              ...(resolvedModel ? { model: resolvedModel } : {}),
+              ...(resolvedAgent ? { agent: resolvedAgent } : {}),
+              ...(lastTurn ? { lastTurn } : {}),
+            })
+          }
+          if (skeleton.turns) messageStore.setTurnSkeleton(sid, skeleton.turns)
+          /**
+           * 骨架带回的后台任务。
+           *
+           * 骨架剥掉了工具 part，前端无法自己从消息推导（判据 metadata.shellID
+           * 与被剥掉的回执文本），所以由主机 Agent 单独带回并在这里落到实时表。
+           */
+          for (const job of skeleton.backgroundJobs ?? []) {
+            // 骨架里的状态可能是 unknown（老数据）；unknown 不该覆盖成「状态未知」
+            // 显示——历史任务一律按已结束处理，避免误导「还有东西在跑」。
+            if (job.status === 'unknown') continue
+            backgroundJobStore.set(sid, {
+              id: job.id,
+              status: job.status as BackgroundJobStatus,
+              // 骨架里没有任务时间戳：用会话最后一条消息的时间兜底，
+              // 而不是 Date.now()（否则「已结束」会显示成刚刚结束）
+              at: skeleton.messages[skeleton.messages.length - 1]?.info.time?.created ?? Date.now(),
+              title: job.title,
+            })
+          }
+          onLoadComplete?.()
+
+          /**
+           * 后台把剩余骨架页补全，**只用来补侧边轴大纲**。
+           *
+           * 为什么值得做：骨架全量实测只有 451KB / 186 轮（8.7s），而侧边轴的
+           * 轮次大纲原先要另发一条 18MB 的请求。补全之后轴上就有**全部**轮次，
+           * 点哪轮都能跳，而且不必再发大纲请求（`loadedFromSkeleton` 已跳过它）。
+           *
+           * ⚠️ 刻意**不**把结果 prepend 进消息列表：那会让正在阅读的用户视图
+           * 突然被插入几百条消息，视口跳动。用户点轴跳到某轮时，`loadUntilMessage`
+           * 会按同一游标正常续取，锚点逻辑在那条路径上是完整的。
+           */
+          const tailCursor = skeleton.nextCursor
+          if (tailCursor) {
+            void (async () => {
+              try {
+                const older = await getSessionLightweightMessages(sid, dir, serverId, {
+                  cursor: tailCursor,
+                  pages: 60,
+                })
+                if (isStale() || older.messages.length === 0) return
+                const entries = extractTurnOutlineEntries(older.messages.map(toUIMessage))
+                if (entries.length > 0) turnOutlineStore.merge(serverId, sid, entries)
+              } catch {
+                // 静默：大纲只是导航辅助，点轴时仍会按需续取
+              }
+            })()
+          }
+          return
+        }
+
         /**
-         * 首屏两段式：小页先出内容，剩余轮次在后台补齐。
+         * 退回按量分页（主机 Agent 未升级，或骨架拉取失败）。
          *
+         * 此时首屏只发「刚好够看」的小页（FIRST_SCREEN_PAGE_LIMIT），其余按需分页：
          * 大会话里「一次取够 N 轮」会让首屏等一个大响应（实测 200 条 947KB），
-         * 而用户真正需要先看到的是最近几轮。因此这里先取一小页（12 条，约 79KB），
-         * 拿到就立刻上屏；若轮次不够，再异步补足并原地替换。
+         * 而用户真正需要先看到的是最近几轮。
          */
         const firstScreen = await withLoadRetry(
           () => getSessionFirstScreen(sid, INITIAL_TURN_LIMIT, dir, serverId, { signal: abortController.signal }),
@@ -560,6 +713,32 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       isLoadingMoreRef.current.set(sid, true)
       try {
         const serverId = sessionKeyToServerId(sid)
+
+        /**
+         * 骨架路径：上滑继续取更早的**骨架页**。
+         *
+         * 首屏只翻最近几页（保 0.7s 出内容），更早的轮次在这里按同一游标续取。
+         * 不能退回按量分页 —— 那会把已被剥掉的过程正文重新拉一遍（单页可达
+         * 数百 KB），而用户当前只想看到更早的「用户提问 + 回复」。
+         */
+        if (state.loadedFromSkeleton && before) {
+          const older = await getSessionLightweightMessages(sid, dir, serverId, {
+            cursor: before,
+          })
+          if (isStale()) return
+          const latest = messageStore.getSessionState(sid)
+          if (!latest) return
+          const existing = new Set(latest.messages.map(m => m.info.id))
+          const prepend = older.messages
+            .filter(m => !existing.has(m.info.id))
+            .sort((a, b) => (a.info.time?.created ?? 0) - (b.info.time?.created ?? 0))
+          messageStore.prependMessages(sid, prepend, older.nextCursor != null, older.nextCursor)
+          if (older.turns && older.turns.size > 0) {
+            messageStore.mergeTurnSkeleton(sid, older.turns)
+          }
+          return
+        }
+
         /**
          * 页大小按「本会话实际的每轮消息数」自适应。
          *
@@ -694,9 +873,13 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
   /**
    * 按需回拉某个轮次的完整 parts（展开被压缩的「已处理」折叠块时调用）。
    *
-   * 用内存中已有消息的 {id,time} 构造游标，从「下一轮首条 user 消息」向前取
-   * 本轮的若干条，恰好覆盖该轮，无需单条消息接口。回拉结果经 hydrateMessages
-   * 原地替换压缩投影，清掉 isCompressed 标记。
+   * 两种压缩形态，处理方式不同：
+   *
+   * 1. **压缩态**（老轮次只是被剥字段，消息本身还在）：按 id 原地替换。
+   * 2. **骨架态**（整轮 40 条被压成 2 条，消息已不在内存里）：必须整段替换，
+   *    把中间消息补回来，否则展开后仍只有「用户 + 回复」。
+   *
+   * 两种都用「下一轮首条 user 消息」构造游标向前取，恰好覆盖本轮，无需单条接口。
    */
   const hydrateTurn = useCallback(
     async (turnUserMessageId: string) => {
@@ -731,12 +914,44 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         ? encodeBeforeCursor({ info: nextTurnUser.info, parts: [] } as ApiMessageWithParts, serverId)
         : undefined
 
+      /**
+       * 请求条数。
+       *
+       * 骨架态下 turnMessages 只有 2 条，但真实轮次可能有几十条 —— 用它当 limit
+       * 只会拉回两条，展开后依旧缺内容。骨架轮次无法据此推断规模，因此直接按
+       * 单页上限取（游标本身限定了区间，服务端不会跨轮返回）。
+       *
+       * 骨架轮的判定：该轮助手消息带 `isCompressed` 且**没有 tool part**。
+       * 压缩态（老轮次）剥掉了工具大输出但 tool part 壳还在，两者可以区分。
+       * 纯工具轮（骨架里 reply 为 null）同样符合「没有 tool part」+ 压缩标记。
+       */
+      const assistantOfTurn = turnMessages.filter(m => m.info.role === 'assistant')
+      const isSkeletonTurn =
+        assistantOfTurn.length > 0 &&
+        assistantOfTurn.every(m => m.isCompressed) &&
+        assistantOfTurn.every(m => !m.content.some(part => part.type === 'tool'))
+      const requestLimit = isSkeletonTurn ? LIGHTWEIGHT_MESSAGE_LIMIT : turnMessages.length
+
       const seq = loadSequenceRef.current.get(sessionId)
       try {
-        const page = await getSessionMessagePage(sessionId, turnMessages.length, before, dir, serverId)
+        const page = await getSessionMessagePage(sessionId, requestLimit, before, dir, serverId)
         // 期间切走了 session 则丢弃
         if (loadSequenceRef.current.get(sessionId) !== seq) return
-        messageStore.hydrateMessages(sessionId, page.messages)
+
+        // 只保留属于本轮的条目：请求按条数取，可能跨到更早一轮。
+        const fetched = page.messages.filter(m => {
+          const created = m.info.time?.created ?? 0
+          const turnStart = turnMessages[0].info.time?.created ?? 0
+          const turnEnd = nextTurnUser?.info.time?.created ?? Number.POSITIVE_INFINITY
+          return created >= turnStart && created < turnEnd
+        })
+        if (fetched.length === 0) return
+
+        if (isSkeletonTurn) {
+          messageStore.replaceTurnMessages(sessionId, turnUserMessageId, fetched)
+        } else {
+          messageStore.hydrateMessages(sessionId, fetched)
+        }
       } catch (error) {
         sessionErrorHandler('hydrate turn', error)
       }

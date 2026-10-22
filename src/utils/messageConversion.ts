@@ -128,12 +128,25 @@ export function toUIMessage(apiMessage: ApiMessageEnvelope): Message {
   }
   // 轻量投影响应：主机 Agent 剥掉了 reasoning 与工具大输出，只留对话与元数据壳，
   // 并附上 lightweight 统计。标记为压缩态，展开折叠块时再回拉完整 content。
-  const lightweight = (apiMessage as { lightweight?: { reasoningCount?: number; stepCount?: number } }).lightweight
+  const lightweight = (
+    apiMessage as {
+      lightweight?: {
+        reasoningCount?: number
+        stepCount?: number
+        durationMs?: number
+        changedFiles?: Array<{ path: string; additions?: number; deletions?: number }>
+      }
+    }
+  ).lightweight
   if (lightweight) {
     message.isCompressed = true
     message.compressedStats = {
       reasoningCount: lightweight.reasoningCount ?? 0,
       stepCount: lightweight.stepCount ?? 0,
+      ...(lightweight.durationMs != null ? { durationMs: lightweight.durationMs } : {}),
+    }
+    if (lightweight.changedFiles && lightweight.changedFiles.length > 0) {
+      message.skeletonChangedFiles = lightweight.changedFiles
     }
   }
   return message

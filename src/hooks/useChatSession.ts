@@ -80,6 +80,7 @@ const EMPTY_SESSION_STATE = {
   revertedContent: null,
   hasMoreHistory: false,
   hasTrimmedHistory: false,
+  loadedFromSkeleton: false,
   directory: '',
   title: null,
   compactedAt: undefined as number | undefined,
@@ -178,6 +179,7 @@ export function useChatSession({
   const revertedContent = perSessionState.revertedContent
   const hasMoreHistory = perSessionState.hasMoreHistory
   const hasTrimmedHistory = perSessionState.hasTrimmedHistory
+  const sessionLoadedFromSkeleton = perSessionState.loadedFromSkeleton
   const compactedAt = perSessionState.compactedAt
   const loadState = routeSessionId ? perSessionState.loadState : ('idle' as const)
   const loadError = routeSessionId ? perSessionState.loadError : undefined
@@ -1319,6 +1321,7 @@ export function useChatSession({
     loadError,
     hasMoreHistory,
     hasTrimmedHistory,
+    sessionLoadedFromSkeleton,
     compactedAt,
     retryStatus,
     agents,

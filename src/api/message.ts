@@ -7,6 +7,7 @@ import { buildHeaders } from './sdk'
 import { logger } from '../utils/logger'
 import { nativePrompt, nativeListMessages } from './v2NativeMessage'
 import { adaptMessagePage, type CompactionMarker, type IdleMarker, type SessionConfigMarkers } from './v2/message'
+import { adaptTurnSkeleton, isTurnSkeleton, type SkeletonTurnRecord } from './turnSkeleton'
 import { sanitizeMessageWithParts } from './sanitize'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { peekSessionCache } from './session'
@@ -167,6 +168,17 @@ export const LIGHTWEIGHT_MESSAGE_LIMIT = 200
 /** 轻量投影响应的标记头：主机 Agent 命中投影时回填，用于判定服务端是否支持。 */
 const LIGHTWEIGHT_HEADER = 'X-Lightweight'
 
+/**
+ * 请求「轮次骨架」的档位值。
+ *
+ * - `skeleton`：按轮投影，每轮只返回用户提问 + 最终回复 + 过程计数；
+ * - 旧值 `1`：逐条消息剥大字段（保留工具元数据壳）。
+ *
+ * 主机 Agent 未升级时不识别该值，会退化成普通透传（无 X-Lightweight 响应头），
+ * 由 probeLightweightSupport 判负，调用方回落到分页路径。
+ */
+const LIGHTWEIGHT_SKELETON = 'skeleton'
+
 /** 每个 serverId 是否支持轻量投影的内存缓存（进程内探测一次即可） */
 const lightweightSupportCache = new Map<string, boolean>()
 
@@ -180,11 +192,19 @@ const LIGHTWEIGHT_SUPPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 interface PersistedLightweightSupport {
   supported: true
+  /**
+   * 探测时确认的投影档位。
+   *
+   * 早先只存 `supported: true`，无法区分「支持旧档 `1`」与「支持骨架」。
+   * Agent 升级后旧记录会让前端以为骨架可用，实际请求却回落到旧档 ——
+   * 必须带档位才能正确失效。
+   */
+  projection: string
   at: number
 }
 
 /**
- * 读取持久化的「支持」结果；缺失或过期返回 undefined。
+ * 读取持久化的「支持」结果；缺失、过期或档位不符返回 undefined。
  *
  * 只持久化正结果：负结果不落盘。原因：主机 Agent 升级后能力会从「不支持」变为
  * 「支持」，若把负结果持久化，升级后要等 TTL 过期才重探，用户会持续走旧的分页
@@ -193,12 +213,18 @@ interface PersistedLightweightSupport {
 function readPersistedSupport(serverId: string): boolean | undefined {
   const record = serverStorage.getJSONFor<PersistedLightweightSupport>(LIGHTWEIGHT_SUPPORT_STORAGE_KEY, serverId)
   if (!record || record.supported !== true || typeof record.at !== 'number') return undefined
+  // 档位不匹配（旧版本写入的 `1` 或缺失）→ 视为未知，重新探测。
+  if (record.projection !== LIGHTWEIGHT_SKELETON) return undefined
   if (Date.now() - record.at > LIGHTWEIGHT_SUPPORT_TTL_MS) return undefined
   return true
 }
 
 function writePersistedSupport(serverId: string): void {
-  const record: PersistedLightweightSupport = { supported: true, at: Date.now() }
+  const record: PersistedLightweightSupport = {
+    supported: true,
+    projection: LIGHTWEIGHT_SKELETON,
+    at: Date.now(),
+  }
   serverStorage.setJSONFor(LIGHTWEIGHT_SUPPORT_STORAGE_KEY, record, serverId)
 }
 
@@ -231,6 +257,7 @@ async function fetchV2MessageRaw(
   serverId: string,
   url: string,
   signal?: AbortSignal,
+  lightweight?: string,
 ): Promise<Response> {
   const { getUnifiedFetch } = await import('../store/serverStore')
   const fetchImpl = await getUnifiedFetch()
@@ -243,7 +270,11 @@ async function fetchV2MessageRaw(
 
   try {
     return await fetchImpl(url, {
-      headers: { ...buildHeaders(serverId), Accept: 'application/json', [LIGHTWEIGHT_HEADER]: '1' },
+      headers: {
+        ...buildHeaders(serverId),
+        Accept: 'application/json',
+        [LIGHTWEIGHT_HEADER]: lightweight ?? '1',
+      },
       signal: controller.signal,
     })
   } finally {
@@ -252,51 +283,114 @@ async function fetchV2MessageRaw(
   }
 }
 
-/** v2 轻量能力探测：连本机 Agent 是否对 /api/session/{id}/message 做投影。 */
+/**
+ * v2 轻量能力探测：主机 Agent 是否对 `/api/session/{id}/message` 做投影，
+ * 以及支持哪一档。
+ *
+ * ⚠️ 必须**直接探 skeleton**，不能探 `1`。
+ *
+ * 旧实现发的是 `X-Lightweight: 1`（旧档「逐条剥字段」），拿到 "1" 就认为
+ * 「支持轻量」。但骨架是另一个档位：Agent 升级后仍然认识 `1`，于是探测
+ * 永远停在旧档，骨架路径形同虚设 —— 实测就是这样，前端一直走 11MB 的旧投影。
+ *
+ * 新版 Agent 对 skeleton 请求回 `skeleton`，旧版不认识这个值会**原样透传**
+ * 给 opencode（不带任何 X-Lightweight 响应头），据此判定不支持。
+ */
 async function probeV2LightweightSupport(serverId: string, sessionId: string): Promise<boolean> {
-  const res = await fetchV2MessageRaw(serverId, v2MessageUrl(serverId, sessionId, { limit: '1' }))
+  const res = await fetchV2MessageRaw(
+    serverId,
+    v2MessageUrl(serverId, sessionId, { limit: '1' }),
+    undefined,
+    LIGHTWEIGHT_SKELETON,
+  )
   if (!res.ok) return false
-  const supported = (res.headers.get(LIGHTWEIGHT_HEADER) ?? '') === '1'
+  // 只有明确回 "skeleton" 才算支持骨架。
+  const projection = res.headers.get(LIGHTWEIGHT_HEADER) ?? ''
+  const supported = projection === LIGHTWEIGHT_SKELETON
   // ⚠️ 必须掐断响应体。
   //
   // 主机 Agent 实现轻量投影时会**忽略 limit**，任何带 X-Lightweight 的消息
-  // 请求都返回**整个会话**（实测 4810 条消息 = 25MB）。我们只要一个响应头，
-  // 若把 body 读完/放着不管，等于每次探测都白下载几十 MB。
+  // 请求都返回**整个会话**（实测 7036 条消息 = 11MB；骨架档 400KB）。
+  // 我们只要一个响应头，若把 body 读完/放着不管，等于每次探测都白下载整段。
   // cancel 掉流，传输立刻停止（HTTP/2 下服务端随即收到 RST_STREAM）。
   void res.body?.cancel().catch(() => {})
   return supported
 }
 
 /**
- * v2 一次性轻量拉取整个会话（单请求）。
+ * v2 一次性拉取整个会话的**轮次骨架**（单请求）。
  *
  * v2 服务端把单次 limit 钳到 200，但主机 Agent 会对 `/api/session/{id}/message`
- * 的轻量请求做投影，并在 Agent 侧自行按 cursor 翻页取全（见 aiagent 的 v2 投影），
- * 因此这里只发「一次」大 limit 请求即可拿到整段压缩对话，与 v1 主机的轻量路径
- * 对齐：首屏即完整、无需上滑补历史；展开折叠块时再按轮次回拉完整 parts。
+ * 的骨架请求做投影，并在 Agent 侧自行按 cursor 翻页取全（见 aiagent 的 v2 投影），
+ * 因此这里只发「一次」请求即可拿到整段对话骨架。
  *
- * 若 Agent 未升级（不识别 v2 轻量请求）则不会回填 X-Lightweight 头，
+ * 骨架形态：每轮只有「用户提问 + 最终回复 + 过程计数」，过程正文留在服务端。
+ * 展开折叠块时再按轮次回拉完整 parts（hydrateTurn）。
+ *
+ * 若 Agent 未升级（不识别该请求）则不会回填 X-Lightweight 头，
  * probeLightweightSupport 会判定不支持，调用方不会走到这里。
  */
-async function fetchV2LightweightMessages(
+async function fetchV2SkeletonMessages(
   serverId: string,
   sessionId: string,
   signal?: AbortSignal,
+  cursor?: string,
+  pages?: number,
 ): Promise<LightweightMessages> {
   const res = await fetchV2MessageRaw(
     serverId,
-    v2MessageUrl(serverId, sessionId, { limit: String(LIGHTWEIGHT_MESSAGE_LIMIT) }),
+    v2MessageUrl(serverId, sessionId, {
+      limit: String(LIGHTWEIGHT_MESSAGE_LIMIT),
+      ...(cursor ? { cursor } : {}),
+      ...(pages != null ? { pages: String(pages) } : {}),
+    }),
     signal,
+    LIGHTWEIGHT_SKELETON,
   )
-  if (!res.ok) throw new Error(`v2 lightweight fetch failed: HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`v2 skeleton fetch failed: HTTP ${res.status}`)
   const body: unknown = await res.json()
+
+  // 响应头是权威信号：新版 Agent 回 "skeleton"，旧版（只认识 "1"）会把它当成
+  // 普通轻量请求、回 "1"。不能只看响应体形状 —— 旧档投影出来的消息也带
+  // lightweight，与骨架混在一起难以区分。
+  const projection = res.headers.get(LIGHTWEIGHT_HEADER) ?? ''
+  const root = body && typeof body === 'object' ? (body as { data?: unknown }).data : undefined
+  const data = Array.isArray(root) ? root : []
+
+  // ⚠️ 只有拿到 "skeleton" 且确实是骨架才走骨架路径。
+  //
+  // **绝不能重新发一次请求退回旧路径**：那样每次加载都会多发一个整段请求，
+  // 而且响应体已经被读过（Body is unusable）。这里用同一份响应体在内存里回退。
+  if (projection === LIGHTWEIGHT_SKELETON && isTurnSkeleton(data)) {
+    const { raw, turns, unsettled, backgroundJobs } = adaptTurnSkeleton(data)
+    const page = adaptMessagePage({ data: raw, cursor: {} })
+    // 骨架档默认只翻最近几页（保首屏速度）；带回的 next 游标供客户端继续向更早翻。
+    const envelopeCursor = body && typeof body === 'object' ? (body as { cursor?: { next?: unknown } }).cursor : undefined
+    const nextCursor = typeof envelopeCursor?.next === 'string' ? envelopeCursor.next : undefined
+    return {
+      messages: page.messages,
+      // 有游标 = 还有更早的轮次没取回来（骨架分页）。
+      hasMore: nextCursor != null,
+      compactedAt: page.compactedAt,
+      compaction: page.compaction,
+      idle: page.idle,
+      config: page.config,
+      turns,
+      unsettledTurns: unsettled,
+      backgroundJobs,
+      nextCursor,
+    }
+  }
+
+  // 旧档（逐条剥字段）：Agent 按 desc 累积返回，反转为时间升序。
   const page = adaptMessagePage(body)
-  // Agent 按 desc（最新在前）累积返回，这里反转为时间升序，与前端渲染顺序一致。
   return {
     messages: [...page.messages].reverse(),
     hasMore: false,
     compactedAt: page.compactedAt,
     compaction: page.compaction,
+    idle: page.idle,
+    config: page.config,
   }
 }
 
@@ -381,6 +475,36 @@ export interface LightweightMessages {
   compactedAt?: number
   /** 压缩标记（摘要/近期消息规模）：用于推算压缩后的上下文用量 */
   compaction?: CompactionMarker
+  /** 最近一次轮次结论（骨架路径会带回，供「这轮成功/失败」判定） */
+  idle?: IdleMarker
+  /** 会话配置切换记录（骨架路径会带回，供模型/agent 还原） */
+  config?: SessionConfigMarkers
+  /**
+   * 轮次骨架统计：轮次 id → 过程规模 / 改动文件。
+   *
+   * 只在骨架路径存在。过程计数已随消息的 `lightweight` 一起下发（折叠块 header
+   * 用），这里额外提供改动文件清单，供最终回复下方的 DiffChips 渲染。
+   */
+  turns?: Map<string, SkeletonTurnRecord>
+  /**
+   * 未定稿轮次的用户消息 id（仍在生成）。
+   *
+   * 这些轮次被**排除在骨架之外**，调用方必须用完整消息拉取补齐 —— 骨架只有
+   * 截断快照，而实时 delta 是 ephemeral（不重放、不带 seq），拼接会重复或错位。
+   */
+  unsettledTurns?: string[]
+  /**
+   * 继续向更早翻页的游标（骨架档增量加载用）。
+   *
+   * 骨架默认只取最近几页以保首屏速度；带此游标再请求一次可拿到更早一段。
+   */
+  nextCursor?: string
+  /**
+   * 后台任务（骨架档带回）。
+   *
+   * 骨架剥掉了工具 part，前端无法自己从消息推导，因此由主机 Agent 单独带回。
+   */
+  backgroundJobs?: Array<{ id: string; kind: string; title: string; status: string }>
 }
 
 /**
@@ -401,28 +525,40 @@ export function resetLightweightInflight(): void {
 }
 
 /**
- * 轻量拉取整个会话的消息（一次性，不分页）。
+ * 拉取会话的**轮次骨架**。
  *
- * 需先经 probeLightweightSupport 确认服务端支持；主机 Agent 会把每条消息投影成
- * 「user 文本 + 助手最终文本 + 工具元数据壳 + step-finish」，剥掉 reasoning 与
- * 工具大输出，并附上 lightweight 统计。展开折叠块时再按轮次回拉完整 parts。
+ * 需先经 probeLightweightSupport 确认服务端支持；主机 Agent 会按轮投影成
+ * 「用户提问 + 最终回复 + 过程计数」，reasoning 与工具过程留在服务端。
+ * 展开折叠块时再按轮次回拉完整 parts。
  *
- * 同会话的并发调用（如 StrictMode 双调用）合并在途请求，只发一次网络。
+ * 分页语义由主机 Agent 决定（`pages` 参数）：
+ * - 不传 `pages`：只取最近 3 页，首屏最快（约 0.7s）；
+ * - 传 `pages=60`：一次翻到最早，用于后台补全全部轮次；
+ * - 带 `cursor`：从该游标继续向更早翻，返回新的 `nextCursor`。
+ *
+ * 同会话同参数的并发调用（如 StrictMode 双调用）合并在途请求，只发一次网络。
  */
 export async function getSessionLightweightMessages(
   sessionId: string,
   directory?: string,
   serverId?: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; cursor?: string; pages?: number },
 ): Promise<LightweightMessages> {
   const target = resolveSessionTarget(sessionId, serverId)
-  const key = `lightweight:${target.serverId}:${target.sessionId}:${directoryCacheKey(directory)}`
+  // 带 cursor / pages 的请求语义不同，不能与首屏请求合并。
+  const key = `lightweight:${target.serverId}:${target.sessionId}:${directoryCacheKey(directory)}:${options?.cursor ?? ''}:${options?.pages ?? ''}`
   return sharedInflightRequest(
     key,
     async () => {
-      // 走原生的 /api/session/{id}/message + X-Lightweight，由主机 Agent 内部
-      // 分页取全并投影；v2 SDK 不便于读响应头，这里用裸 fetch。
-      return fetchV2LightweightMessages(target.serverId, target.sessionId, options?.signal)
+      // 走原生的 /api/session/{id}/message + X-Lightweight: skeleton，由主机 Agent
+      // 在主机侧翻页并投影成骨架；v2 SDK 不便于读响应头，这里用裸 fetch。
+      return fetchV2SkeletonMessages(
+        target.serverId,
+        target.sessionId,
+        options?.signal,
+        options?.cursor,
+        options?.pages,
+      )
     },
     options?.signal,
   )

@@ -452,7 +452,7 @@ describe('probeLightweightSupport', () => {
 
   it('persists a positive probe result and reuses it without a network call', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('[]', { status: 200, headers: { 'X-Lightweight': '1' } }),
+      new Response('[]', { status: 200, headers: { 'X-Lightweight': 'skeleton' } }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -480,7 +480,7 @@ describe('probeLightweightSupport', () => {
 
     resetLightweightSupportCache()
     fetchMock.mockClear()
-    fetchMock.mockResolvedValue(new Response('[]', { status: 200, headers: { 'X-Lightweight': '1' } }))
+    fetchMock.mockResolvedValue(new Response('[]', { status: 200, headers: { 'X-Lightweight': 'skeleton' } }))
     const second = await probeLightweightSupport('ses-1', '/dir', 'srv-2')
     expect(second).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -498,16 +498,59 @@ describe('probeLightweightSupport', () => {
 
   it('cancels the response body so the probe never downloads the whole session', async () => {
     // 主机 Agent 实现轻量投影时**忽略 limit**：任何带 X-Lightweight 的消息
-    // 请求都返回整个会话（实测 4810 条消息 = 25MB）。我们只要一个响应头，
+    // 请求都返回整个会话（实测 7036 条消息 = 11MB）。我们只要一个响应头，
     // 所以必须立刻 cancel 掉 body，否则「探测支持与否」本身就要下载 25MB。
     const cancel = vi.fn().mockResolvedValue(undefined)
-    const response = new Response('[]', { status: 200, headers: { 'X-Lightweight': '1' } })
+    const response = new Response('[]', { status: 200, headers: { 'X-Lightweight': 'skeleton' } })
     Object.defineProperty(response, 'body', { value: { cancel }, configurable: true })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
 
     const supported = await probeLightweightSupport('ses-1', '/dir', 'srv-cancel')
     expect(supported).toBe(true)
     expect(cancel).toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('probes with the skeleton tier, not the legacy 1', async () => {
+    /**
+     * 回归：探测曾发 `X-Lightweight: 1`。Agent 升级后仍认识 `1`，于是探测永远
+     * 停在旧档，骨架路径形同虚设（实测前端一直走 11MB 的旧投影）。
+     * 必须直接用 skeleton 探，才能发现「骨架可用」。
+     */
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('[]', { status: 200, headers: { 'X-Lightweight': 'skeleton' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await probeLightweightSupport('ses-1', '/dir', 'srv-skel')
+    const init = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined
+    expect(init?.headers?.['X-Lightweight']).toBe('skeleton')
+    vi.unstubAllGlobals()
+  })
+
+  it('treats a legacy-only agent as unsupported for the skeleton tier', async () => {
+    // 旧 Agent 只回 "1"（它把 skeleton 当成普通轻量请求）→ 不算支持骨架
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('[]', { status: 200, headers: { 'X-Lightweight': '1' } })),
+    )
+    const supported = await probeLightweightSupport('ses-1', '/dir', 'srv-legacy')
+    expect(supported).toBe(false)
+    vi.unstubAllGlobals()
+  })
+
+  it('ignores a persisted result recorded for a different projection tier', async () => {
+    // 旧版本写入的是 `{ supported: true }`（无 projection 字段）→ 必须重新探测，
+    // 否则 Agent 升级后前端仍按旧档处理。
+    storageMock.getJSONFor.mockReturnValue({ supported: true, at: Date.now() })
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('[]', { status: 200, headers: { 'X-Lightweight': 'skeleton' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const supported = await probeLightweightSupport('ses-1', '/dir', 'srv-stale')
+    expect(supported).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     vi.unstubAllGlobals()
   })
 })

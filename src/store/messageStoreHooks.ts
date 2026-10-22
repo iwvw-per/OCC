@@ -77,6 +77,7 @@ function createSnapshot(sessionId: string | null): MessageStoreSnapshot {
     revertedContent: messageStore.getCurrentRevertedContent(sessionId),
     loadState: messageStore.getLoadState(sessionId),
     loadError: messageStore.getSessionState(sessionId ?? '')?.loadError,
+    loadedFromSkeleton: messageStore.getSessionState(sessionId ?? '')?.loadedFromSkeleton === true,
   }
 }
 
@@ -96,7 +97,8 @@ function isSameSnapshot(a: MessageStoreSnapshot, b: MessageStoreSnapshot): boole
     a.redoSteps === b.redoSteps &&
     a.revertedContent === b.revertedContent &&
     a.loadState === b.loadState &&
-    a.loadError === b.loadError
+    a.loadError === b.loadError &&
+    a.loadedFromSkeleton === b.loadedFromSkeleton
   )
 }
 
@@ -290,6 +292,7 @@ export function useSessionState(sessionId: string | null): SessionStateSnapshot 
       revertedContent: state.revertState?.history?.[0] ?? null,
       hasMoreHistory: state.hasMoreHistory,
       hasTrimmedHistory: (state.trimmedCount ?? 0) > 0,
+      loadedFromSkeleton: state.loadedFromSkeleton === true,
       directory: state.directory,
       title: state.title ?? null,
       compactedAt: state.compactedAt,

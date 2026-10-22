@@ -8,6 +8,7 @@ const {
   getSessionTurnPageMock,
   lightweightMessagesMock,
   probeLightweightSupportMock,
+  peekLightweightSupportMock,
   messageStoreMock,
   sessionErrorHandlerMock,
   revertMessageMock,
@@ -17,6 +18,7 @@ const {
   getSessionTurnPageMock: vi.fn(),
   lightweightMessagesMock: vi.fn(),
   probeLightweightSupportMock: vi.fn(async () => false),
+  peekLightweightSupportMock: vi.fn(),
   messageStoreMock: {
     getSessionState: vi.fn(),
     setLoadState: vi.fn(),
@@ -27,6 +29,7 @@ const {
     setRevertState: vi.fn(),
     compressHistoricalTurns: vi.fn(() => false),
     hydrateMessages: vi.fn(() => false),
+    setTurnSkeleton: vi.fn(),
     getTrimmedCount: vi.fn(() => 0),
     settleByAuthoritativeIdle: vi.fn(() => false),
   },
@@ -45,12 +48,11 @@ vi.mock('../api', () => ({
     return { ...page, complete: true }
   },
   getSessionMessagePage: (...args: unknown[]) => getSessionTurnPageMock(...args),
-  // 轻量投影路径已停用：主机 Agent 实现它时会**忽略 limit**、返回整个会话
-  // （实测 4810 条消息 = 25MB），连「探测是否支持」这个请求本身都是 25MB。
-  // 首屏必须只走按量分页。这里保留 mock 以便断言它从不被调用。
+  // 轮次骨架路径：只有 peekLightweightSupport 已确认支持时才会被调用。
+  // 未知时首屏一律走按量分页，绝不为探测付几十 MB 的代价。
   getSessionLightweightMessages: (...args: unknown[]) => lightweightMessagesMock(...args),
   probeLightweightSupport: (...args: unknown[]) => probeLightweightSupportMock(...(args as [])),
-  peekLightweightSupport: vi.fn(() => undefined),
+  peekLightweightSupport: (...args: unknown[]) => peekLightweightSupportMock(...(args as [])),
   revertMessage: (...args: unknown[]) => revertMessageMock(...args),
   unrevertSession: vi.fn(),
   encodeBeforeCursor: (message: unknown) => `cursor:${(message as { info?: { id?: string } }).info?.id ?? ''}`,
@@ -81,6 +83,8 @@ describe('useSessionManager', () => {
     lightweightMessagesMock.mockReset()
     probeLightweightSupportMock.mockReset()
     probeLightweightSupportMock.mockResolvedValue(false)
+    peekLightweightSupportMock.mockReset()
+    peekLightweightSupportMock.mockReturnValue(undefined)
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
@@ -131,11 +135,46 @@ describe('useSessionManager', () => {
     )
   })
 
-  it('never uses the lightweight projection path for the first screen', async () => {
-    // 回归防线：主机 Agent 实现轻量投影时会**忽略 limit**、返回整个会话
-    // （实测 4810 条消息 = 25MB）。连「探测是否支持」的请求本身都带
-    // X-Lightweight 头、同样是 25MB。所以首屏既不能走轻量拉取，也不能探测。
-    // 一旦有人把它接回来，用户打开会话就要等十几秒（实测 14784ms vs 1634ms）。
+  it('probes once on a cold cache, then falls back to paging when unsupported', async () => {
+    /**
+     * 冷缓存（第一次打开）时先探测一次，再决定走骨架还是分页。
+     *
+     * 探测很便宜：只要响应头，body 立刻 cancel。相比「先分页、下次才用骨架」，
+     * 多付一个往返能省下几 MB 的分页拉取，是划算的。
+     *
+     * 关键安全点：**探测判定不支持时绝不发骨架请求**。旧版 Agent 会把
+     * `X-Lightweight: skeleton` 原样透传给 opencode，拿到的是单条普通消息 ——
+     * 若当成整段用，会话就只剩最后一条。
+     */
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+    peekLightweightSupportMock.mockReturnValue(undefined)
+    probeLightweightSupportMock.mockResolvedValue(false)
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'session-1', directory: '/workspace/demo' }),
+    )
+
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    // 冷缓存 → 探测过一次
+    expect(probeLightweightSupportMock).toHaveBeenCalled()
+    // 判定不支持 → 不拉骨架，走分页
+    expect(lightweightMessagesMock).not.toHaveBeenCalled()
+    expect(getSessionTurnPageMock).toHaveBeenCalled()
+  })
+
+  it('uses the turn skeleton path once support is confirmed', async () => {
+    // 缓存确认支持 → 首屏走骨架（整段、每轮只有提问 + 回复），不再分页。
+    peekLightweightSupportMock.mockReturnValue(true)
+    lightweightMessagesMock.mockResolvedValue({
+      messages: [
+        { info: { id: 'user-1', role: 'user', time: { created: 1 } }, parts: [] },
+        { info: { id: 'reply-1', role: 'assistant', time: { created: 1 } }, parts: [] },
+      ],
+      hasMore: false,
+    })
     getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
 
     const { result } = renderHook(() =>
@@ -146,8 +185,9 @@ describe('useSessionManager', () => {
       await result.current.loadSession('session-1')
     })
 
-    expect(lightweightMessagesMock).not.toHaveBeenCalled()
-    expect(probeLightweightSupportMock).not.toHaveBeenCalled()
+    // 骨架路径生效：不再走分页（具体调用次数取决于 effect 是否也触发一次加载）
+    expect(lightweightMessagesMock).toHaveBeenCalled()
+    expect(getSessionTurnPageMock).not.toHaveBeenCalled()
   })
 
   it('loads history by turn batch with the store cursor', async () => {

@@ -621,7 +621,23 @@ class ActiveSessionStore {
    */
   touchSession(sessionId: string) {
     if (this.serverBusySessions.has(sessionId)) return
-    if (!this.state.statusMap[sessionId]) return
+    const current = this.state.statusMap[sessionId]
+    if (!current) return
+    /**
+     * 重试结束、真的开始产出了 → 把 retry 推回 busy。
+     *
+     * v2 的重试是「先 retry.scheduled，成功后再 step.started」。若不在这里收口，
+     * 界面会一直停在「正在重试」——即便内容已经在正常流式输出。
+     */
+    if (current.type === 'retry') {
+      this.state = {
+        ...this.state,
+        statusMap: { ...this.state.statusMap, [sessionId]: { type: 'busy' } },
+      }
+      this.markEvidence(sessionId)
+      this.notify()
+      return
+    }
     this.markEvidence(sessionId)
     this.notify()
   }

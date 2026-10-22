@@ -8,12 +8,29 @@ function messageHasContent(message: Message): boolean {
   if (message.info.role === 'assistant' && 'error' in message.info && message.info.error) {
     return isAbortedMessage(message.info) ? hasRenderable : true
   }
+  /**
+   * 骨架轮：正文已被主机 Agent 剥掉，只剩「过程规模」。
+   *
+   * 这类轮次最常见的形态是**纯工具轮**或「说明一句后继续干活」——`content` 可能
+   * 完全为空。若按普通消息的规则过滤掉，用户消息之后就是一片空白：既没有回复，
+   * 也没有「已处理 N 步」的折叠块（实测 197 轮里 85 轮中招，页面上整段消失）。
+   *
+   * 所以只要有过程规模就让它可见，由过程壳承载 header 与展开入口。
+   */
+  if (message.info.role === 'assistant' && hasSkeletonProcessStats(message)) return true
   if (message.content.length === 0) {
     // 任何角色的空消息都不可见：没有内容可展示
     // content 到达后自动进入可见列表；abort 后永远不会有 content → 永远不可见
     return false
   }
   return hasRenderable
+}
+
+/** 骨架轮是否记录了过程规模（工具步数 / 思考段数） */
+function hasSkeletonProcessStats(message: Message): boolean {
+  const stats = message.compressedStats
+  if (!stats) return false
+  return stats.stepCount > 0 || stats.reasoningCount > 0
 }
 
 function isVisibleThinking(content: Content): boolean {
