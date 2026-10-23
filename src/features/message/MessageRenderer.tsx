@@ -130,7 +130,10 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
   const label = isActive
     ? t('processingWithDuration', { duration: durationLabel })
     : t('processedFor', { duration: durationLabel })
-  const hasBreakdown = !expanded && (stepCount > 0 || reasoningCount > 0)
+  // 折叠时才显示规模统计（展开后内容本身就是答案）；
+  // 但**运行中**例外：即使展开也要显示「此刻在做什么」，
+  // 否则长任务展开后同样看不出进展。
+  const hasBreakdown = (!expanded && (stepCount > 0 || reasoningCount > 0)) || (isActive && !!activeLabel)
 
   return (
     <DisclosureRow
