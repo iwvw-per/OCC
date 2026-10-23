@@ -87,6 +87,7 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
   headerRef,
   stepCount = 0,
   reasoningCount = 0,
+  activeLabel,
 }: {
   isActive: boolean
   startedAt?: number
@@ -96,6 +97,15 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
   headerRef: React.RefObject<HTMLButtonElement | null>
   stepCount?: number
   reasoningCount?: number
+  /**
+   * 运行中时「此刻在做什么」的一句话（如「shell · npx vitest run」）。
+   *
+   * 为什么需要：长任务实测跑过 17 分钟 / 165 步，而这期间整个界面只有一行
+   * 「Working for 17m」在跳秒 —— 用户看不到任何进展，判定为「卡住了」，
+   * 于是反复打断（实测连续 4 轮都被用户手动中断，长命令永远跑不完）。
+   * 把当前步骤显示出来，至少能回答「它还在动吗、在动什么」。
+   */
+  activeLabel?: string
 }) {
   const { t } = useTranslation('message')
   const now = useNow(1000, isActive && startedAt != null)
@@ -137,6 +147,10 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
       meta={
         hasBreakdown ? (
           <span className="flex items-center gap-2 text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+            {/* 运行中优先显示「此刻在做什么」：长任务里它比步数更能说明「还在动」 */}
+            {isActive && activeLabel ? (
+              <span className="min-w-0 max-w-[22rem] truncate font-mono">{activeLabel}</span>
+            ) : null}
             {reasoningCount > 0 && (
               <span className="flex items-center gap-1">
                 <LightbulbIcon size={10} />
@@ -161,6 +175,7 @@ export function ProcessCollapseBlock({
   stateKey,
   stepCount = 0,
   reasoningCount = 0,
+  activeLabel,
   onExpand,
 }: {
   children: ReactNode
@@ -178,6 +193,8 @@ export function ProcessCollapseBlock({
   /** 折叠时在 header 右侧显示的统计（工具调用数 / 思考段数） */
   stepCount?: number
   reasoningCount?: number
+  /** 运行中时「此刻在做什么」，见 ProcessCollapseHeader 的说明 */
+  activeLabel?: string
   /**
    * 用户手动展开时触发；用于按需回拉被压缩轮次的完整过程内容。
    *
@@ -251,6 +268,7 @@ export function ProcessCollapseBlock({
         headerRef={headerRef}
         stepCount={stepCount}
         reasoningCount={reasoningCount}
+        activeLabel={activeLabel}
       />
       <MessageExpandPanel
         open={processLayoutOpen}

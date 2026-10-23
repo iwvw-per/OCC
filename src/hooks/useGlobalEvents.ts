@@ -1013,6 +1013,28 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // session.status 驱动，服务端不保证每次都补推 status——只收到 idle 时
           // 会残留 busy 条目，导致 Working 列表与实况通知数量不下降。
           settleSessionIdle(scopedId, data.sessionID, data.timestamp)
+          /**
+           * 服务端原因导致的中断要给用户一个说法。
+           *
+           * v2 的 `session.execution.interrupted` 带 reason：
+           *   - `user`       用户主动停止（自己按的，不需要提示）
+           *   - `inactivity` 服务端判定空闲/服务重启而中止
+           *   - `shutdown`   服务端关闭
+           *
+           * 实测 `inactivity` / 服务重启会把正在跑的一轮直接打断，界面上只是
+           * 悄悄回到 idle —— 用户什么都没做却发现「卡住了、没反应了」，只能靠
+           * 反复发「继续」来猜测发生了什么。这里明确告知原因。
+           */
+          const reason = data.interruptReason
+          if (reason && reason !== 'user') {
+            notificationStore.toast(
+              'completed',
+              i18n.t('chat:notification.turnInterrupted'),
+              reason === 'inactivity'
+                ? i18n.t('chat:notification.turnInterruptedInactivity')
+                : i18n.t('chat:notification.turnInterruptedShutdown'),
+            )
+          }
           // 子 agent 运行结束：自动关闭其分屏 pane
           paneLayoutStore.closeSubtaskSession(scopedId)
           dispatchToConsumers(scopedId, cb => cb.onSessionIdle?.(scopedId))

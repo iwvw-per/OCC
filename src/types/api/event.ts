@@ -35,6 +35,19 @@ export type SessionIdlePayload = SDKEventSessionIdle['properties'] & {
    * 另一端还亮着」。
    */
   timestamp?: number
+  /** 这一轮是怎么结束的：succeeded / failed / interrupted */
+  outcome?: 'succeeded' | 'failed' | 'interrupted'
+  /**
+   * 中断原因（仅 outcome === 'interrupted'）。
+   *
+   * - `user`       用户主动停止
+   * - `inactivity` 服务端判定空闲/服务重启而中止
+   * - `shutdown`   服务端关闭
+   *
+   * 非 `user` 的中断在界面上必须给出提示：实测服务重启会悄悄打断正在跑的一轮，
+   * 用户什么都没做却发现「卡住了」，只能反复发「继续」来猜测发生了什么。
+   */
+  interruptReason?: string
 }
 
 export interface SessionErrorPayload {

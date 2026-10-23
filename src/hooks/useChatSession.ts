@@ -27,6 +27,7 @@ import {
   sendMessageAsync,
   getSessionMessages,
   abortSession,
+  backgroundSessionTools,
   getSelectableAgents,
   getPendingPermissions,
   getPendingQuestions,
@@ -822,10 +823,23 @@ export function useChatSession({
         // 顺序不能并行：prompt 若先到，服务端会把它排进旧轮次（steer），旧回复仍会
         // 继续写。所以这里必须等 abort 返回。好在 abort 本身很轻（实测 7ms，隧道下
         // 约 1 个往返），而「本地立刻落定」让用户不会看到旧回复继续闪。
+        //
+        // ⚠️ 中止前先把**前台阻塞的工具**转入后台（`session.background`）。
+        // 直接 abort 会把正在跑的命令一起杀掉：实测用户反复打断一个 26 分钟
+        // timeout 的 `cargo test`，四次中断全部把进程杀死，测试永远跑不完，
+        // 用户看到的就是「一直卡住 → 再打断 → 又卡住」的死循环。
+        // 转后台后命令继续跑、结果由完成通知带回，会话也能立刻接受新消息。
+        // 空闲会话上这个调用是 no-op，没有副作用。
         if (input.interruptCurrentTurn) {
           // 本地立刻落定：不等 HTTP 往返，否则用户点了发送后旧回复还会继续闪。
           activeSessionStore.updateStatus(sessionId, { type: 'idle' })
           messageStore.handleSessionIdle(sessionId)
+          try {
+            await backgroundSessionTools(sessionId, input.directory, paneServerId)
+          } catch (error) {
+            // 旧服务端可能没有这个端点：退回「直接 abort」，行为与之前一致
+            logger.warn('[send] move foreground tools to background failed', error)
+          }
           try {
             await abortSession(sessionId, input.directory, paneServerId)
           } catch (error) {

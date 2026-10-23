@@ -46,6 +46,41 @@ export function processReasoningCount(children: ProcessShellChild[]): number {
   return count
 }
 
+/**
+ * 运行中时「此刻在做什么」的一句话。
+ *
+ * 取**最后一个**仍在运行（或刚发起）的工具调用，拼成 `工具名 · 命令摘要`。
+ * 没有在跑的工具时退回「思考中」。
+ *
+ * 为什么要这个：长任务实测跑过 17 分钟 / 165 步，而这期间界面上只有一行
+ * 「Working for 17m」在跳秒 —— 用户看不到任何进展，判定为卡住并反复打断，
+ * 导致 `cargo test` 这类长命令永远跑不完。显示当前步骤至少能回答
+ * 「它还在动吗、在动什么」。
+ */
+export function processActiveLabel(children: ProcessShellChild[]): string | undefined {
+  for (let i = children.length - 1; i >= 0; i--) {
+    const message = children[i].message
+    for (let j = message.content.length - 1; j >= 0; j--) {
+      const part = message.content[j]
+      if (part.type !== 'tool') continue
+      const state = part.state
+      // 只报「正在跑」的工具：已完成的会一直换，显示意义不大
+      if (state?.status !== 'running' && state?.status !== 'pending') continue
+      const input = state.input && typeof state.input === 'object' ? (state.input as Record<string, unknown>) : {}
+      const summary =
+        (typeof input.description === 'string' && input.description.trim()) ||
+        (typeof input.command === 'string' && input.command.trim()) ||
+        (typeof input.filePath === 'string' && input.filePath.trim()) ||
+        (typeof input.path === 'string' && input.path.trim()) ||
+        ''
+      const label = summary ? `${part.tool} · ${summary}` : part.tool
+      // 单行显示，过长由 CSS 截断；这里先按字符收敛，避免把整条命令塞进 DOM
+      return label.length > 120 ? `${label.slice(0, 120)}…` : label
+    }
+  }
+  return undefined
+}
+
 export function estimateTimelineItemSize(item: ProcessTimelineItem | undefined): number {
   if (!item) return ROW_ESTIMATE
   if (item.kind === 'message') return ROW_ESTIMATE

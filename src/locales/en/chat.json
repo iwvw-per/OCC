@@ -375,7 +375,10 @@
     "compactionFailedHint": "There is nothing to compact yet",
     "compactionDone": "History compacted",
     "permissionTitle": "{{session}} — Permission",
-    "questionTitle": "{{session}} — Question"
+    "questionTitle": "{{session}} — Question",
+    "turnInterrupted": "Turn interrupted",
+    "turnInterruptedInactivity": "The server idled out or restarted, so the running turn was stopped. Send your message again to continue.",
+    "turnInterruptedShutdown": "The server shut down, so the running turn was stopped. Send your message again to continue."
   },
   "contextDetails": {
     "context": "Context",

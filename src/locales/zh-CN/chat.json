@@ -375,7 +375,10 @@
     "compactionFailedHint": "当前没有可压缩的内容",
     "compactionDone": "历史已压缩",
     "permissionTitle": "{{session}} — 权限",
-    "questionTitle": "{{session}} — 提问"
+    "questionTitle": "{{session}} — 提问",
+    "turnInterrupted": "本轮被中断",
+    "turnInterruptedInactivity": "服务端判定会话空闲或服务重启，正在跑的这一轮已中止。可以重新发送继续。",
+    "turnInterruptedShutdown": "服务端已关闭，正在跑的这一轮已中止。可以重新发送继续。"
   },
   "contextDetails": {
     "context": "上下文",

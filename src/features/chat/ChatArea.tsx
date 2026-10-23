@@ -55,7 +55,7 @@ import { useTheme } from '../../hooks/useTheme'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
 import { computePrependRestoreScrollTop } from './chatPageModel'
-import { estimateTimelineItemSize, processReasoningCount, processStepCount, sessionCacheKey } from './chatAreaTimeline'
+import { estimateTimelineItemSize, processActiveLabel, processReasoningCount, processStepCount, sessionCacheKey } from './chatAreaTimeline'
 import { chatContentMaxWidthStyle, getContentPaddingClass } from './contentWidth'
 import { getChatWidthDragging, subscribeChatWidthDrag } from './chatWidthDrag'
 import { getChatMorphing, subscribeChatMorphing } from './chatMorph'
@@ -323,6 +323,7 @@ const VirtualRow = memo(
                   forceExpanded={item.children.some(child => child.processContentScope === 'all')}
                   stepCount={processStepCount(item.children)}
                   reasoningCount={processReasoningCount(item.children)}
+                  activeLabel={item.isActive ? processActiveLabel(item.children) : undefined}
                   onExpand={
                     item.userMessageId && onHydrateTurn
                       ? () => onHydrateTurn(item.userMessageId!)
