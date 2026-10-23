@@ -504,7 +504,7 @@ export interface LightweightMessages {
    *
    * 骨架剥掉了工具 part，前端无法自己从消息推导，因此由主机 Agent 单独带回。
    */
-  backgroundJobs?: Array<{ id: string; kind: string; title: string; status: string }>
+  backgroundJobs?: Array<{ id: string; kind: string; title: string; status: string; messageId?: string }>
 }
 
 /**

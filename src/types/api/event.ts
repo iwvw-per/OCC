@@ -296,6 +296,9 @@ export const EventTypes = {
   PTY_UPDATED: 'pty.updated',
   PTY_EXITED: 'pty.exited',
   PTY_DELETED: 'pty.deleted',
+  /** 后台 shell 生命周期：工作状态面板「后台任务」的权威状态来源 */
+  SHELL_CREATED: 'shell.created',
+  SHELL_EXITED: 'shell.exited',
 } as const satisfies Record<
   string,
   // 前端自有的补充事件名：SDK 的类型联合里没有，但内部事件总线需要承载。
@@ -305,6 +308,8 @@ export const EventTypes = {
   | 'session.usage.updated'
   | 'session.inbox.enqueued'
   | 'session.synthetic'
+  | 'shell.created'
+  | 'shell.exited'
 >
 
 export type EventType = SDKGlobalEvent['payload']['type']
@@ -354,6 +359,23 @@ export interface EventCallbacks {
     description?: string
     createdAt?: number
   }) => void
+  /**
+   * 后台 shell 启动（v2 `shell.created`）。
+   *
+   * 这是「后台任务正在跑」的权威信号；不带这个信号时，面板只能从历史消息
+   * 推导，而历史只能证明「曾经启动过」，于是所有任务都显示成已结束。
+   * `sessionID` 取自 shell 的 metadata，能精确归属到发起它的会话。
+   */
+  onShellCreated?: (data: {
+    id: string
+    status: string
+    command: string
+    cwd: string
+    sessionID?: string
+    startedAt: number
+  }) => void
+  /** 后台 shell 退出（v2 `shell.exited`）：终态与退出码 */
+  onShellExited?: (data: { id: string; status: string; exit?: number; endedAt: number }) => void
   onSessionDeleted?: (sessionId: string) => void
   onSessionIdle?: (data: SessionIdlePayload) => void
   /** 会话压缩结束（v2）：成功/失败都回调，用于提示与刷新消息 */

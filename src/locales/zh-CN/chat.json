@@ -491,11 +491,28 @@
     },
     "backgroundJob": {
       "running": "运行中",
+      "runningGroup": "进行中",
       "done": "已完成",
       "failed": "失败",
       "cancelled": "已取消",
       "unknown": "状态未知",
-      "settledGroup": "已结束"
+      "settledGroup": "已结束",
+      "openDetail": "查看 {{title}} 的详情",
+      "dialogTitle": "后台任务详情",
+      "detailKind": "类型",
+      "detailStatus": "状态",
+      "detailExit": "退出码 {{code}}",
+      "detailStarted": "开始",
+      "detailDuration": "耗时",
+      "detailId": "任务 ID",
+      "detailCommand": "命令",
+      "detailOutput": "输出",
+      "noOutput": "暂无输出",
+      "outputUnavailable": "无法读取输出（任务可能已被清理，或这是子代理任务）",
+      "outputTruncated": "输出较长，仅显示末尾部分",
+      "jumpToMessage": "跳到对话位置",
+      "kindShell": "Shell 命令",
+      "kindSubagent": "子代理"
     }
   }
 }

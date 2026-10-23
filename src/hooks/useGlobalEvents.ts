@@ -1108,7 +1108,58 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             at: createdAt ?? Date.now(),
             ...(notice.output ? { output: notice.output } : {}),
             ...(notice.title || description ? { title: notice.title || description } : {}),
+            // 完成通知是权威终态：可以纠正历史推导出来的「已完成」
+            authoritative: true,
           })
+        },
+
+        /**
+         * 后台 shell 启动：立刻落成「运行中」。
+         *
+         * 这是面板上「还有东西在跑」的唯一可靠来源 —— 消息流里的回执只能
+         * 证明「曾经启动过」，无法区分现在是否还在跑。
+         *
+         * ⚠️ shell 的 `metadata.sessionID` 是**原始会话 id**（`ses_x`），
+         * 而 store 的键是**复合 key**（`serverId::ses_x`）。必须补上服务器前缀，
+         * 否则状态写进了另一个 key，面板永远看不到。
+         */
+        onShellCreated: ({ id, command, sessionID, startedAt }) => {
+          const scoped = sessionID ? scope(sessionID) : ''
+          if (!scoped) return
+          backgroundJobStore.set(scoped, {
+            id,
+            status: 'running',
+            at: startedAt,
+            ...(command ? { title: command.slice(0, 80) } : {}),
+            authoritative: true,
+          })
+        },
+
+        /** 后台 shell 退出：落成终态（超时/被杀也算） */
+        onShellExited: ({ id, status, exit, endedAt }) => {
+          /**
+           * `shell.exited` 只带 shell id、不带 sessionID，因此按 id 反查归属会话。
+           * 归属在 `shell.created` 时已登记，这里只投递给登记过它的会话。
+           */
+          const jobStatus =
+            status === 'exited'
+              ? exit != null && exit !== 0
+                ? 'error'
+                : 'completed'
+              : status === 'timeout'
+                ? 'error'
+                : status === 'killed'
+                  ? 'cancelled'
+                  : 'completed'
+          for (const sessionId of backgroundJobStore.sessionIdsFor(id)) {
+            backgroundJobStore.set(sessionId, {
+              id,
+              status: jobStatus,
+              at: endedAt,
+              ...(exit != null ? { exit } : {}),
+              authoritative: true,
+            })
+          }
         },
 
         onSessionDeleted: sessionId => {          const scopedId = scope(sessionId)

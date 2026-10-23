@@ -40,6 +40,16 @@ export interface BackgroundJob {
   finishedAt?: number
   /** 输出摘要（仅完成通知里带） */
   output?: string
+  /**
+   * 这个状态是否有权威依据。
+   *
+   * 历史推导（工具回执）只能证明「曾经启动过」，所以它给出的 completed 是
+   * **推测**，标记为 false；实时事件 / 完成通知 / shell.list 校正给的是 true。
+   * 面板据此区分「确实结束了」与「没有证据说它还在跑」。
+   */
+  authoritative?: boolean
+  /** 退出码（shell 终态才有） */
+  exit?: number
 }
 
 /** 工具输出里「已转入后台」的回执（v2 shell 工具固定文案） */
@@ -152,7 +162,18 @@ function backgroundJobIdOfTool(part: {
  */
 export function collectBackgroundJobs(
   messages: Message[],
-  live?: Map<string, { status: BackgroundJobStatus; at: number; output?: string; title?: string }>,
+  live?: Map<
+    string,
+    {
+      status: BackgroundJobStatus
+      at: number
+      output?: string
+      title?: string
+      exit?: number
+      authoritative?: boolean
+      messageId?: string
+    }
+  >,
 ): BackgroundJob[] {
   const byId = new Map<string, BackgroundJob>()
 
@@ -170,6 +191,8 @@ export function collectBackgroundJobs(
         title: job.title || existing.title,
         ...(job.finishedAt != null ? { finishedAt: job.finishedAt } : {}),
         ...(job.output ? { output: job.output } : {}),
+        ...(job.authoritative ? { authoritative: true } : {}),
+        ...(job.exit != null ? { exit: job.exit } : {}),
       })
     }
   }
@@ -190,6 +213,8 @@ export function collectBackgroundJobs(
         startedAt: message.info.time?.created ?? 0,
         finishedAt: message.info.time?.created ?? 0,
         ...(notice.output ? { output: notice.output } : {}),
+        // 完成通知是权威终态
+        authoritative: true,
       })
     }
 
@@ -199,14 +224,14 @@ export function collectBackgroundJobs(
       const job = backgroundJobIdOfTool(part)
       if (!job) continue
       /**
-       * 状态：默认「已完成」。
+       * 状态：默认「已完成」，但**标记为非权威**。
        *
        * ⚠️ 不能用工具 part 的 status 判断任务是否还在跑：`background=true` 的调用
-       * 会**立即返回**（工具本身是 completed），任务继续在后台跑。实测按工具状态
-       * 判定会让所有历史任务都变成「状态未知」。
+       * 会**立即返回**（工具本身是 completed），任务继续在后台跑。
        *
-       * 历史消息里能读到的轮次都已经结束，所以没有完成通知时按已完成处理；
-       * 真正"正在跑"的任务由实时事件维护（backgroundJobStore）。
+       * 之前这里把推测出的 completed 当成事实，再叠加 store 的「终态不可回退」，
+       * 就导致真正在跑的任务永远显示成已结束。现在推测值只作为兜底显示，
+       * 一旦实时事件或 shell.list 带来权威状态就立刻让位。
        */
       touch({
         id: job.id,
@@ -215,6 +240,7 @@ export function collectBackgroundJobs(
         status: part.state.status === 'error' ? 'error' : 'completed',
         messageId: message.info.id,
         startedAt: message.info.time?.created ?? 0,
+        authoritative: false,
       })
     }
   }
@@ -229,7 +255,10 @@ export function collectBackgroundJobs(
           status: state.status,
           ...(state.output ? { output: state.output } : {}),
           ...(state.title ? { title: state.title } : {}),
+          ...(state.messageId ? { messageId: state.messageId } : {}),
           ...(state.status !== 'running' ? { finishedAt: state.at } : {}),
+          ...(state.exit != null ? { exit: state.exit } : {}),
+          ...(state.authoritative ? { authoritative: true } : {}),
         })
         continue
       }
@@ -239,10 +268,13 @@ export function collectBackgroundJobs(
         kind: 'shell',
         title: state.title ?? id,
         status: state.status,
-        messageId: '',
+        // 归属消息：骨架路径只有轮次 id，但那是可跳转的锚点，比空串强
+        messageId: state.messageId ?? '',
         startedAt: state.at,
         ...(state.output ? { output: state.output } : {}),
         ...(state.status !== 'running' ? { finishedAt: state.at } : {}),
+        ...(state.exit != null ? { exit: state.exit } : {}),
+        ...(state.authoritative ? { authoritative: true } : {}),
       })
     }
   }

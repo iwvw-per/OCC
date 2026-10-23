@@ -491,11 +491,28 @@
     },
     "backgroundJob": {
       "running": "Running",
+      "runningGroup": "Running",
       "done": "Done",
       "failed": "Failed",
       "cancelled": "Cancelled",
       "unknown": "Unknown",
-      "settledGroup": "Finished"
+      "settledGroup": "Finished",
+      "openDetail": "View details for {{title}}",
+      "dialogTitle": "Background job details",
+      "detailKind": "Type",
+      "detailStatus": "Status",
+      "detailExit": "exit code {{code}}",
+      "detailStarted": "Started",
+      "detailDuration": "Duration",
+      "detailId": "Job ID",
+      "detailCommand": "Command",
+      "detailOutput": "Output",
+      "noOutput": "No output yet",
+      "outputUnavailable": "Output unavailable (the job may have been cleaned up, or this is a subagent job)",
+      "outputTruncated": "Output is long; only the tail is shown",
+      "jumpToMessage": "Jump to message",
+      "kindShell": "Shell command",
+      "kindSubagent": "Subagent"
     }
   }
 }

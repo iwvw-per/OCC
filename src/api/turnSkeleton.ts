@@ -42,7 +42,7 @@ export interface SkeletonTurnRaw {
    * （`metadata.shellID` 与「Command moved to the background」回执）全在被剥掉的
    * 字段里。主机 Agent 因此单独带回这份最小信息，否则工作状态面板看不到后台任务。
    */
-  backgroundJobs?: Array<{ id: string; kind: string; title: string; status: string }>
+  backgroundJobs?: Array<{ id: string; kind: string; title: string; status: string; messageId?: string }>
 }
 
 /** 骨架响应 → v2 原生消息序列 + 轮次记录 */
@@ -59,7 +59,7 @@ export interface SkeletonAdaptResult {
    */
   unsettled: string[]
   /** 全部轮次的后台任务（去重后） */
-  backgroundJobs: Array<{ id: string; kind: string; title: string; status: string }>
+  backgroundJobs: Array<{ id: string; kind: string; title: string; status: string; messageId?: string }>
 }
 
 export interface SkeletonTurnRecord {
@@ -117,7 +117,10 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
   /** 未定稿轮次的用户消息 id（调用方据此改用完整消息拉取） */
   const unsettled: string[] = []
   /** 全部轮次的后台任务（按 id 去重） */
-  const backgroundJobs = new Map<string, { id: string; kind: string; title: string; status: string }>()
+  const backgroundJobs = new Map<
+    string,
+    { id: string; kind: string; title: string; status: string; messageId?: string }
+  >()
 
   for (const [index, entry] of data.entries()) {
     const item = rec(entry)
@@ -158,6 +161,9 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
         kind: str(job.kind) ?? 'shell',
         title: str(job.title) ?? jobId,
         status: str(job.status) ?? 'unknown',
+        // 归属轮次：面板点条目要能跳回对话。骨架里任务只挂轮次上，
+        // 没有具体消息 id，用轮次 id（= 用户消息 id）作为跳转锚点。
+        messageId: userId,
       })
     }
 

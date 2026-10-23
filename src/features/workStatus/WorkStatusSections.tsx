@@ -44,6 +44,7 @@ import {
   WorkStatusValue,
 } from './WorkStatusPrimitives'
 import { collectBackgroundJobs, type BackgroundJob } from './backgroundJobs'
+import { BackgroundJobDialog } from './BackgroundJobDialog'
 import { useLiveBackgroundJobs } from '../../store/backgroundJobStore'
 import type { MCPStatus } from '../../types/api/mcp'
 
@@ -266,25 +267,50 @@ export const WorkStatusSubagentsSection = memo(function WorkStatusSubagentsSecti
  */
 export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroundJobsSection({
   sessionId,
+  directory,
+  serverId,
   onScrollToMessage,
 }: WorkStatusSectionContext) {
   const { t } = useTranslation('chat')
   const messages = useMessages(sessionId)
   const live = useLiveBackgroundJobs(sessionId)
+  /** 正在查看详情的任务；null = 弹窗关闭 */
+  const [detailJob, setDetailJob] = useState<BackgroundJob | null>(null)
   /**
    * 只在「任务集合可能变了」时重算。
    *
    * 流式时 messages 每帧换新数组，而 `collectBackgroundJobs` 要遍历全部消息
    * （长会话实测 7000 条）。用 `{条数, 最后一条 id, 实时表大小}` 作为缓存键：
-   * 条数不变就说明没有新的工具调用、也没有新的完成通知，任务集合必然不变。
+   * 条数不变就说明没有新的工具调用、也没有新的完成通知。
+   *
+   * ⚠️ 实时表的大小不够：同一个任务从 running 变 completed 时大小不变，
+   * 状态却变了。把「状态序列」也压进键里，状态变化才不会被缓存吞掉。
    */
-  const jobsKey = `${messages.length}:${messages[messages.length - 1]?.info.id ?? ''}:${live.size}`
+  const liveSignature = useMemo(() => {
+    if (live.size === 0) return ''
+    const parts: string[] = []
+    for (const [id, job] of live) parts.push(`${id}:${job.status}`)
+    return parts.join(',')
+  }, [live])
+  const jobsKey = `${messages.length}:${messages[messages.length - 1]?.info.id ?? ''}:${liveSignature}`
   const jobs = useMemo(
     () => collectBackgroundJobs(messages, live),
     // 只用粗筛键：messages 引用每帧都变，放进依赖等于每帧重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jobsKey],
   )
+
+  /**
+   * 弹窗里的任务跟随 jobs 的最新状态刷新，而不是保留打开那一刻的快照 ——
+   * 运行中的任务在弹窗开着时会结束，状态与输出都要跟着变。
+   */
+  const activeDetail = detailJob ? jobs.find(job => job.id === detailJob.id) ?? detailJob : null
+
+  const closeDetail = useCallback(() => setDetailJob(null), [])
+
+  const handleRowClick = useCallback((job: BackgroundJob) => {
+    setDetailJob(job)
+  }, [])
 
   const running = jobs.filter(job => job.status === 'running')
   const settled = jobs.filter(job => job.status !== 'running')
@@ -294,15 +320,12 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
   const renderRow = (job: BackgroundJob) => (
     <WorkStatusRow
       key={job.id}
+      onClick={() => handleRowClick(job)}
+      ariaLabel={t('workStatus.backgroundJob.openDetail', { title: job.title })}
       label={
-        <button
-          type="button"
-          onClick={() => onScrollToMessage(job.messageId)}
-          className="min-w-0 truncate text-left hover:text-text-100"
-          title={job.title}
-        >
+        <span className="min-w-0 truncate text-left" title={job.title}>
           {job.title}
-        </button>
+        </span>
       }
       value={
         job.status === 'running' ? (
@@ -326,25 +349,43 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
   )
 
   return (
-    <WorkStatusCollapsibleSection
-      title={t('workStatus.section.backgroundJobs')}
-      icon={<TerminalIcon size={14} />}
-      id="backgroundJobs"
-      summary={running.length > 0 ? `${running.length}/${jobs.length}` : String(jobs.length)}
-    >
-      <WorkStatusRows className="max-h-56 overflow-y-auto">
-        {running.map(renderRow)}
-        {settled.length > 0 ? (
-          <WorkStatusCollapsibleSection
-            id="backgroundJobs-settled"
-            title={t('workStatus.backgroundJob.settledGroup')}
-            summary={String(settled.length)}
-          >
-            <WorkStatusRows>{settled.map(renderRow)}</WorkStatusRows>
-          </WorkStatusCollapsibleSection>
-        ) : null}
-      </WorkStatusRows>
-    </WorkStatusCollapsibleSection>
+    <>
+      <WorkStatusCollapsibleSection
+        title={t('workStatus.section.backgroundJobs')}
+        icon={<TerminalIcon size={14} />}
+        id="backgroundJobs"
+        summary={running.length > 0 ? `${running.length}/${jobs.length}` : String(jobs.length)}
+      >
+        <WorkStatusRows className="max-h-56 overflow-y-auto">
+          {running.length > 0 ? (
+            <WorkStatusCollapsibleSection
+              id="backgroundJobs-running"
+              title={t('workStatus.backgroundJob.runningGroup')}
+              summary={String(running.length)}
+            >
+              <WorkStatusRows>{running.map(renderRow)}</WorkStatusRows>
+            </WorkStatusCollapsibleSection>
+          ) : null}
+          {settled.length > 0 ? (
+            <WorkStatusCollapsibleSection
+              id="backgroundJobs-settled"
+              title={t('workStatus.backgroundJob.settledGroup')}
+              summary={String(settled.length)}
+            >
+              <WorkStatusRows>{settled.map(renderRow)}</WorkStatusRows>
+            </WorkStatusCollapsibleSection>
+          ) : null}
+        </WorkStatusRows>
+      </WorkStatusCollapsibleSection>
+
+      <BackgroundJobDialog
+        job={activeDetail}
+        directory={directory}
+        serverId={serverId}
+        onClose={closeDetail}
+        onScrollToMessage={onScrollToMessage}
+      />
+    </>
   )
 })
 

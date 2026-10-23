@@ -445,6 +445,12 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
            *
            * 骨架剥掉了工具 part，前端无法自己从消息推导（判据 metadata.shellID
            * 与被剥掉的回执文本），所以由主机 Agent 单独带回并在这里落到实时表。
+           *
+           * ⚠️ 这些状态是**主机 Agent 从历史消息推导**出来的，只能证明任务曾经
+           * 启动过，不能证明它已经结束。因此标记为非权威：随后 `shell.list`
+           * 校正或 `shell.created` 事件可以立刻把它纠正成 running。
+           * 之前这里没做这个区分，叠加 store 的「终态不可回退」，
+           * 真正在跑的后台任务就被永久钉在「已完成」上。
            */
           for (const job of skeleton.backgroundJobs ?? []) {
             // 骨架里的状态可能是 unknown（老数据）；unknown 不该覆盖成「状态未知」
@@ -457,6 +463,10 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
               // 而不是 Date.now()（否则「已结束」会显示成刚刚结束）
               at: skeleton.messages[skeleton.messages.length - 1]?.info.time?.created ?? Date.now(),
               title: job.title,
+              // 骨架里任务挂在轮次上：用轮次 id 当跳转锚点（此前为空，
+              // 于是面板点条目毫无反应）
+              ...(job.messageId ? { messageId: job.messageId } : {}),
+              authoritative: false,
             })
           }
           onLoadComplete?.()

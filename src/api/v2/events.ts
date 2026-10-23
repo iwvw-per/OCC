@@ -206,6 +206,40 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       })
     }
 
+    /**
+     * 后台 shell 的生命周期。这是「后台任务还在不在跑」的**权威信号**：
+     * `shell.created` 带完整 info（含 metadata.sessionID 与命令行），
+     * `shell.exited` 带终态与 exit code。
+     *
+     * 未映射它时，后台任务只能靠消息流的历史推导 —— 那只能证明「曾经启动过」，
+     * 于是面板上所有任务都显示成已结束（用户报的正是这个问题）。
+     */
+    case 'shell.created': {
+      const info = rec(data.info)
+      const id = str(info.id)
+      if (!id) return null
+      const metadata = rec(info.metadata)
+      const time = rec(info.time)
+      return globalEvent(directory, EventTypes.SHELL_CREATED, {
+        id,
+        status: str(info.status) ?? 'running',
+        command: str(info.command) ?? '',
+        cwd: str(info.cwd) ?? '',
+        ...(str(metadata.sessionID) ? { sessionID: str(metadata.sessionID) } : {}),
+        startedAt: num(time.started) ?? eventCreated ?? Date.now(),
+      })
+    }
+    case 'shell.exited': {
+      const id = str(data.id)
+      if (!id) return null
+      return globalEvent(directory, EventTypes.SHELL_EXITED, {
+        id,
+        status: str(data.status) ?? 'exited',
+        ...(num(data.exit) != null ? { exit: num(data.exit) } : {}),
+        endedAt: eventCreated ?? Date.now(),
+      })
+    }
+
     case 'session.idle':
       return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID, timestamp: eventCreated })
     case 'session.status':

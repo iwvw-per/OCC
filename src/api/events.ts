@@ -596,6 +596,43 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     }
     return
   }
+  if ((payload.type as string) === EventTypes.SHELL_CREATED) {
+    const props = (payload as {
+      properties?: {
+        id?: unknown
+        status?: unknown
+        command?: unknown
+        cwd?: unknown
+        sessionID?: unknown
+        startedAt?: unknown
+      }
+    }).properties
+    if (props && typeof props.id === 'string') {
+      callbacks.onShellCreated?.({
+        id: props.id,
+        status: typeof props.status === 'string' ? props.status : 'running',
+        command: typeof props.command === 'string' ? props.command : '',
+        cwd: typeof props.cwd === 'string' ? props.cwd : '',
+        ...(typeof props.sessionID === 'string' ? { sessionID: props.sessionID } : {}),
+        startedAt: typeof props.startedAt === 'number' ? props.startedAt : Date.now(),
+      })
+    }
+    return
+  }
+  if ((payload.type as string) === EventTypes.SHELL_EXITED) {
+    const props = (payload as {
+      properties?: { id?: unknown; status?: unknown; exit?: unknown; endedAt?: unknown }
+    }).properties
+    if (props && typeof props.id === 'string') {
+      callbacks.onShellExited?.({
+        id: props.id,
+        status: typeof props.status === 'string' ? props.status : 'exited',
+        ...(typeof props.exit === 'number' ? { exit: props.exit } : {}),
+        endedAt: typeof props.endedAt === 'number' ? props.endedAt : Date.now(),
+      })
+    }
+    return
+  }
   switch (payload.type) {
     case EventTypes.MESSAGE_UPDATED: {
       const message = getMessageInfo(payload.properties)
