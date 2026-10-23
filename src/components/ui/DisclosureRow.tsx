@@ -101,7 +101,16 @@ export const DisclosureRow = forwardRef<HTMLButtonElement, DisclosureRowProps>(
         {label}
       </span>
 
-      {meta != null && <span className="ml-auto flex shrink-0 items-center gap-2">{meta}</span>}
+      {meta != null && (
+        /**
+         * `min-w-0` + `flex-shrink` 是移动端不溢出的关键。
+         *
+         * 之前这里是 `shrink-0`：meta 里的内容（如运行中的命令摘要）再长也不收缩，
+         * 而它右边还有 chevron 占位 —— 窄屏上整行被挤出去，文字直接顶到屏幕外。
+         * 现在允许收缩，并由调用方给具体文本加 `truncate` 与 `max-w` 上限。
+         */
+        <span className="ml-auto flex min-w-0 shrink items-center gap-2 overflow-hidden">{meta}</span>
+      )}
 
       {(showChevron || reserveChevronSpace) && (
         <span

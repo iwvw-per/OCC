@@ -149,18 +149,20 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
       icon={isActive ? <Spinner size="sm" tone="accent" variant="pixel" /> : <LayersIcon size={13} className="text-text-500" />}
       meta={
         hasBreakdown ? (
-          <span className="flex items-center gap-2 text-[length:var(--fs-xxs)] tabular-nums text-text-500">
-            {/* 运行中优先显示「此刻在做什么」：长任务里它比步数更能说明「还在动」 */}
+          <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+            {/* 运行中优先显示「此刻在做什么」：长任务里它比步数更能说明「还在动」。
+                宽度跟容器走（min-w-0 + truncate），不写死 max-w —— 写死 22rem 在
+                窄屏上会比可用宽度还大，命令文本会顶出屏幕右边缘。 */}
             {isActive && activeLabel ? (
-              <span className="min-w-0 max-w-[22rem] truncate font-mono">{activeLabel}</span>
+              <span className="min-w-0 max-w-full truncate font-mono">{activeLabel}</span>
             ) : null}
             {reasoningCount > 0 && (
-              <span className="flex items-center gap-1">
+              <span className="flex shrink-0 items-center gap-1">
                 <LightbulbIcon size={10} />
                 {reasoningCount}
               </span>
             )}
-            {stepCount > 0 && <span>{t('thinkingStepCount', { count: stepCount })}</span>}
+            {stepCount > 0 && <span className="shrink-0">{t('thinkingStepCount', { count: stepCount })}</span>}
           </span>
         ) : undefined
       }

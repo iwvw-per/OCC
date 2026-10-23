@@ -5,6 +5,7 @@ import { ChevronDownIcon, PaperclipIcon, AgentIcon, ThinkingIcon } from '../../.
 import { DropdownMenu, MenuItem, IconButton, AnimatedPresence } from '../../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from '../ModelSelector'
 import { useChatViewport } from '../chatViewport'
+import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
 import { isTauri, isTauriMobile, extToMime } from '../../../utils/tauri'
 import type { ApiAgent } from '../../../api/client'
 import type { ModelInfo, FileCapabilities } from '../../../api'
@@ -54,6 +55,7 @@ export function InputToolbar({
   const { t } = useTranslation(['chat', 'common'])
   const { presentation } = useChatViewport()
   const isCompact = presentation.isCompact
+  const { preferTouchUi } = useInputCapabilities()
   const useBrowserFileInput = !isTauri() || isTauriMobile()
 
   // 根据模型能力计算支持的文件类型
@@ -118,9 +120,19 @@ export function InputToolbar({
   const closeMenuToComposer = useCallback(
     (close: () => void) => {
       close()
+      /**
+       * 触摸端不主动回焦输入框。
+       *
+       * 桌面端这么做是对的：用键盘选完「对话模式 / 思考强度」，手接着就能打字。
+       * 但在触摸端，`focus()` 会**立刻拉起软键盘**，把刚关掉的菜单区域整块顶走，
+       * 用户只是选了个模式却被打断输入节奏（实测在手机上切一次模式就弹一次键盘）。
+       *
+       * 焦点因此留在触发按钮上：既不会弹键盘，屏幕阅读器的落点也仍然明确。
+       */
+      if (preferTouchUi) return
       window.setTimeout(focusComposerInput, 0)
     },
-    [focusComposerInput],
+    [focusComposerInput, preferTouchUi],
   )
 
   const focusMenuItem = useCallback((menu: HTMLDivElement | null, mode: 'selected' | 'first' | 'last') => {

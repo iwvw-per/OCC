@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDownIcon, CheckIcon, CloseIcon, FolderIcon, GlobeIcon, PlusIcon, SearchIcon } from '../../../components/Icons'
 import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui'
 import { useDelayedRender } from '../../../hooks'
+import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
 import { useDirectory } from '../../../contexts/useDirectory'
 import type { SavedDirectory } from '../../../contexts/DirectoryContext.shared'
 import { getDirectoryName, isSameDirectory } from '../../../utils/directoryUtils'
@@ -118,6 +119,7 @@ export function WelcomeProjectPill({
 }: WelcomeProjectPillProps) {
   const { t } = useTranslation('chat')
   const { savedDirectories } = useDirectory()
+  const { preferTouchUi } = useInputCapabilities()
   const shouldRender = useDelayedRender(active, PILL_EXIT_MS)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -168,11 +170,31 @@ export function WelcomeProjectPill({
         </button>
       </PopoverTrigger>
 
-      <PopoverContent align="start" side="top" className="w-64 p-0">
+      <PopoverContent
+        align="start"
+        side="top"
+        className="w-64 p-0"
+        /**
+         * 触摸端不让 Radix 自动把焦点交给内容里的第一个可聚焦元素。
+         *
+         * Radix Popover 默认会 focus 容器内首个可聚焦节点（这里就是搜索框），
+         * 单靠 input 的 `autoFocus={false}` 拦不住它 —— 实测仍会聚焦并弹起软键盘，
+         * 把项目列表整块遮住。直接取消这次自动聚焦，焦点留在触发按钮上。
+         */
+        onOpenAutoFocus={event => {
+          if (preferTouchUi) event.preventDefault()
+        }}
+      >
         <div className="flex items-center gap-2 border-b border-border-200 px-2.5 py-1.5">
           <SearchIcon className="size-3.5 shrink-0 text-text-400" />
           <input
-            autoFocus
+            /**
+             * 触摸端不自动聚焦。
+             *
+             * 移动端聚焦会立刻弹出软键盘，把项目列表整个遮住 —— 用户点这里是想
+             * 切项目，不是想打字。桌面端保持「打开即可输入筛选」。
+             */
+            autoFocus={!preferTouchUi}
             value={query}
             onChange={event => setQuery(event.target.value)}
             placeholder={t('emptyState.searchProjects')}

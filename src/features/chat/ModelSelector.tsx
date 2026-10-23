@@ -557,6 +557,14 @@ export const ModelSelector = memo(
 
     useEffect(() => {
       if (!isOpen) return
+      /**
+       * 触摸端不自动聚焦搜索框。
+       *
+       * 移动端聚焦输入框会立刻弹出软键盘，把弹层下半截（模型列表）整个遮住 ——
+       * 用户点开模型选择是为了**选**，不是为了打字，键盘先弹出来反而要多一步收起。
+       * 桌面端保持原来的「打开即可输入筛选」体验。
+       */
+      if (preferTouchUi) return
       const timerId = window.setTimeout(() => {
         if (openFocusTargetRef.current === 'list') {
           focusItemAtInteractiveIndex(openHighlightedIndexRef.current)
@@ -566,7 +574,7 @@ export const ModelSelector = memo(
       }, 50)
 
       return () => clearTimeout(timerId)
-    }, [isOpen, focusItemAtInteractiveIndex])
+    }, [isOpen, preferTouchUi, focusItemAtInteractiveIndex])
 
     useEffect(() => {
       if (!isOpen) return
