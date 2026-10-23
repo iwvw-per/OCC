@@ -1127,17 +1127,80 @@ describe('buildProcessTimeline', () => {
       turnDurationMap: new Map(),
       sessionIsStreaming: false,
       messageHasProcess: hasProcess,
+      /**
+       * 用与生产一致的判定：以工具收尾的消息**不算回复**。
+       *
+       * 本用例的助手消息是「正文 + 工具调用」，正好属于这种情形。
+       */
+      messageHasFinal: message => {
+        const content = message.content
+        const last = content[content.length - 1]
+        return last?.type === 'text'
+      },
+    })
+
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    expect(shell).toBeTruthy()
+    if (shell?.kind !== 'process-shell') return
+    /**
+     * 轮次已结束 → 按最终回复拆分（与历史轮次一致）。
+     *
+     * 这条消息以工具调用收尾，整条都是过程：正文「18 个测试全部通过。
+     * 现在构建并部署 agent。」留在壳内，**不会被当成回复挪到壳外**
+     * ——这正是「已处理内容泄露成 Agent 最后消息」的根治方式。
+     */
+    expect(shell.finalMessage).toBeUndefined()
+    expect(shell.children).toEqual([
+      { message: narration, processContentScope: 'inline' },
+    ])
+  })
+
+  /**
+   * 已结束的最后一轮必须能收起：回复要在壳外。
+   *
+   * 用户实测「查看 @cloudflare/kumo@2.15.0 更新内容」那个会话：收起折叠块后
+   * 2.5KB 的回复全部消失，只剩一行「Worked for 34s」——因为旧实现把最后一轮
+   * 的所有内容都塞进壳里，连回复也一起藏起来了。
+   *
+   * 生成中不拆分（避免猜错哪段是回复），**结束后**必须回到与历史轮次相同的
+   * 规则：过程折叠、回复在壳外。
+   */
+  it('keeps the last turn reply outside the shell once it has finished', () => {
+    const processOnly = createAssistantMessage(
+      'assistant-1',
+      [createToolPart('tool-1', 'assistant-1')],
+      1001,
+      1100,
+    )
+    const reply = createAssistantMessage(
+      'assistant-2',
+      [
+        {
+          id: 'text-1',
+          sessionID: 'session-1',
+          messageID: 'assistant-2',
+          type: 'text',
+          text: 'kumo 2.15.0 的新内容如下…',
+        },
+      ],
+      1101,
+      1200,
+    )
+    const messages = [createUserMessage('user-1', 1000), processOnly, reply]
+
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
       messageHasFinal: hasFinal,
     })
 
     const shell = timeline.find(item => item.kind === 'process-shell')
     expect(shell).toBeTruthy()
     if (shell?.kind !== 'process-shell') return
-    // 不拆：中间说明留在壳内（原样输出），不会被当成最终回复挪到壳外
-    expect(shell.finalMessage).toBeUndefined()
-    expect(shell.children).toEqual([
-      { message: narration, processContentScope: 'all' },
-    ])
+    // 回复露在壳外 → 收起折叠块后仍然可见
+    expect(shell.finalMessage?.info.id).toBe('assistant-2')
+    expect(shell.children.map(c => c.message.info.id)).toEqual(['assistant-1'])
   })
 
   /** 历史轮次仍然遵守既有设计：过程折叠、回复在壳外 */

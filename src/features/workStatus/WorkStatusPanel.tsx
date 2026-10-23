@@ -34,7 +34,6 @@ import {
   WorkStatusTurnStatsSection,
 } from './WorkStatusSections'
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog'
-import { useReconcileRunningShells } from '../../hooks/useReconcileRunningShells'
 
 /**
  * 固定面板宽度。面板不可由用户拖拽调整：它是对话里的一个对象，
@@ -88,14 +87,6 @@ export const WorkStatusPanel = memo(function WorkStatusPanel({
   const frameRef = useRef<number | null>(null)
 
   const sectionOrder = useMemo(() => sanitizeWorkStatusSectionOrder(state.order), [state.order])
-  /**
-   * 用 `shell.list` 校正一次后台任务状态。
-   *
-   * 实时事件覆盖「页面开着」的情况；断线重连、后台标签页、先开页面后启动的
-   * 任务都可能错过退出事件。这个校正只在挂载/切会话/回到前台时各跑一次，
-   * 不轮询。
-   */
-  useReconcileRunningShells(sessionId, directory, serverId)
   const sectionVisible = useCallback(
     (id: Parameters<typeof isWorkStatusSectionVisible>[1]) => isWorkStatusSectionVisible(state.hidden, id),
     [state.hidden],

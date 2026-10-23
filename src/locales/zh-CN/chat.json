@@ -512,7 +512,8 @@
       "outputTruncated": "输出较长，仅显示末尾部分",
       "jumpToMessage": "跳到对话位置",
       "kindShell": "Shell 命令",
-      "kindSubagent": "子代理"
+      "kindSubagent": "子代理",
+      "outputExpired": "输出已被服务端清理（任务结束后不再保留）"
     }
   }
 }

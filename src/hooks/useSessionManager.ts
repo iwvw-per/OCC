@@ -453,12 +453,20 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
            * 真正在跑的后台任务就被永久钉在「已完成」上。
            */
           for (const job of skeleton.backgroundJobs ?? []) {
-            // 骨架里的状态可能是 unknown（老数据）；unknown 不该覆盖成「状态未知」
-            // 显示——历史任务一律按已结束处理，避免误导「还有东西在跑」。
-            if (job.status === 'unknown') continue
+            /**
+             * 状态交给 `shell.list` 校正，这里只放一个**非权威**占位。
+             *
+             * 主机 Agent 对「轮次已定稿但没收到完成通知」的后台任务写 unknown
+             * —— 它从历史消息无法判断任务是否还在跑。这里先按已完成占位
+             * （历史任务绝大多数确实已结束），随后 `useReconcileRunningShells`
+             * 会用 `shell.list` 把真正还在跑的改成 running。
+             *
+             * ⚠️ 不能把 unknown 当成 running 占位：那样面板会在没有任何任务
+             * 运行时显示一大片「运行中」（实测出现 13/30 的误报）。
+             */
             backgroundJobStore.set(sid, {
               id: job.id,
-              status: job.status as BackgroundJobStatus,
+              status: job.status === 'unknown' ? 'completed' : (job.status as BackgroundJobStatus),
               // 骨架里没有任务时间戳：用会话最后一条消息的时间兜底，
               // 而不是 Date.now()（否则「已结束」会显示成刚刚结束）
               at: skeleton.messages[skeleton.messages.length - 1]?.info.time?.created ?? Date.now(),
@@ -466,6 +474,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
               // 骨架里任务挂在轮次上：用轮次 id 当跳转锚点（此前为空，
               // 于是面板点条目毫无反应）
               ...(job.messageId ? { messageId: job.messageId } : {}),
+              // 推导出来的状态：允许被实时事件 / shell.list 校正
               authoritative: false,
             })
           }

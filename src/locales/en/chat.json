@@ -512,7 +512,8 @@
       "outputTruncated": "Output is long; only the tail is shown",
       "jumpToMessage": "Jump to message",
       "kindShell": "Shell command",
-      "kindSubagent": "Subagent"
+      "kindSubagent": "Subagent",
+      "outputExpired": "Output was cleaned up by the server after the job finished"
     }
   }
 }

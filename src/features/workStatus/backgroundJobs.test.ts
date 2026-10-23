@@ -165,16 +165,50 @@ describe('collectBackgroundJobs', () => {
     expect(jobs[0].startedAt).toBe(1001)
   })
 
-  it('uses metadata.shellID instead of parsing the output text', () => {
+  it('uses metadata.shellID when the call is genuinely backgrounded', () => {
     const messages = [
       toolMessage('a1', 1001, {
         tool: 'bash',
         status: 'running',
         metadata: { shellID: 'sh_meta' },
-        input: { command: 'sleep 100' },
+        input: { command: 'sleep 100', background: true },
       }),
     ]
     expect(collectBackgroundJobs(messages)[0]).toMatchObject({ id: 'sh_meta', kind: 'shell' })
+  })
+
+  /**
+   * 前台命令不是后台任务。
+   *
+   * opencode 的 shell 工具会给**所有** shell 都写 `metadata.shellID`，
+   * 只认它就会把每条正在执行的前台命令都列进面板（实测 `sleep 12; ...`
+   * 会一直占着「运行中」）。
+   */
+  it('ignores foreground shell calls that merely carry metadata.shellID', () => {
+    const messages = [
+      toolMessage('a1', 1001, {
+        tool: 'bash',
+        status: 'completed',
+        metadata: { shellID: 'sh_fg' },
+        input: { command: 'ls' },
+        output: 'a.txt',
+      }),
+    ]
+    expect(collectBackgroundJobs(messages)).toEqual([])
+  })
+
+  /** 前台调用被用户转后台时会补发回执，此时应识别为后台任务。 */
+  it('detects a shell that was backgrounded mid-flight', () => {
+    const messages = [
+      toolMessage('a1', 1001, {
+        tool: 'bash',
+        status: 'completed',
+        metadata: { shellID: 'sh_moved' },
+        input: { command: 'sleep 600' },
+        output: 'Command moved to the background (shell ID: sh_moved).',
+      }),
+    ]
+    expect(collectBackgroundJobs(messages)[0]).toMatchObject({ id: 'sh_moved', kind: 'shell' })
   })
 
   it('detects a backgrounded subagent', () => {

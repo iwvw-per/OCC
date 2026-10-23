@@ -120,15 +120,16 @@ export function parseBackgroundNotice(
 /** 工具 part 是否是「已转入后台」的调用；是则返回其 job id */
 function backgroundJobIdOfTool(part: {
   tool: string
-  state: { metadata?: unknown; output?: unknown }
+  state: { metadata?: unknown; output?: unknown; input?: unknown; content?: unknown }
 }): { id: string; kind: BackgroundJobKind } | null {
+  /**
+   * 子代理优先判定：它的元数据是 `metadata.sessionID`，且工具名就是子代理工具。
+   * 放在 shell 前面是因为子代理调用里也可能带 shellID（内部起了 shell），
+   * 那种情况下真正的任务 id 是子会话。
+   */
   const metadata = part.state.metadata
   if (metadata && typeof metadata === 'object') {
     const meta = metadata as Record<string, unknown>
-    // shell：metadata.shellID；子代理：metadata.sessionID
-    if (typeof meta.shellID === 'string' && meta.shellID) {
-      return { id: meta.shellID, kind: 'shell' }
-    }
     /**
      * 子代理：`metadata.sessionID` 是子会话 id。
      *
@@ -140,15 +141,63 @@ function backgroundJobIdOfTool(part: {
     if (typeof meta.sessionID === 'string' && meta.sessionID && isSubagentToolName(part.tool)) {
       return { id: meta.sessionID, kind: 'subagent' }
     }
+    /**
+     * shell：`metadata.shellID` **只有在确实转入后台时**才算。
+     *
+     * ⚠️ opencode 会给所有 shell（含前台阻塞执行的）都写这个字段。
+     * 只认它会把每条前台命令都列成后台任务 —— 实测 `sleep 12; ...`
+     * 这类调用会占满整个面板。判据见 isBackgroundedShell。
+     */
+    if (typeof meta.shellID === 'string' && meta.shellID && isBackgroundedShell(part)) {
+      return { id: meta.shellID, kind: 'shell' }
+    }
   }
   const output = part.state.output
   if (typeof output === 'string') {
     const shellMatch = output.match(BACKGROUND_SHELL_OUTPUT_RE)
-    if (shellMatch?.[1]) return { id: shellMatch[1], kind: 'shell' }
+    // 回执文本本身就是最直接的证据，但仍校验 id 格式
+    if (shellMatch?.[1] && isShellId(shellMatch[1])) return { id: shellMatch[1], kind: 'shell' }
     const subagentMatch = output.match(BACKGROUND_SUBAGENT_OUTPUT_RE)
     if (subagentMatch?.[1]) return { id: subagentMatch[1], kind: 'subagent' }
   }
   return null
+}
+
+/** shell id 形如 `sh_xxx`（挡掉命令正文里误捕到的模板字符串） */
+function isShellId(value: string): boolean {
+  return /^sh_[A-Za-z0-9]+$/.test(value)
+}
+
+/** 后台回执文案（v2 shell 工具固定措辞） */
+const BACKGROUND_RECEIPT_RE = /moved to the background/i
+
+/**
+ * 这个 shell 工具调用是否**真的转入了后台**。
+ *
+ * 判据（任一）：
+ *   - 输入显式 `background: true`；
+ *   - 输出里有「Command moved to the background」回执（前台调用被用户
+ *     转后台时也会补发）。
+ *
+ * 不能只看 `metadata.shellID`：前台命令同样有它。
+ */
+function isBackgroundedShell(part: {
+  state: { input?: unknown; content?: unknown; output?: unknown }
+}): boolean {
+  const input = part.state.input
+  if (input && typeof input === 'object' && (input as Record<string, unknown>).background === true) {
+    return true
+  }
+  if (typeof part.state.output === 'string' && BACKGROUND_RECEIPT_RE.test(part.state.output)) return true
+  const content = part.state.content
+  if (Array.isArray(content)) {
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue
+      const text = (item as { text?: unknown }).text
+      if (typeof text === 'string' && BACKGROUND_RECEIPT_RE.test(text)) return true
+    }
+  }
+  return false
 }
 
 /**

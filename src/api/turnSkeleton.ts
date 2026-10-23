@@ -133,14 +133,38 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
     }
 
     /**
-     * 未定稿的轮次（仍在生成）**不进骨架**。
+     * 未定稿的轮次（仍在生成）**正文不进骨架**。
      *
      * 骨架给的是「此刻的截断快照」，而后续 `session.text.delta` 是 ephemeral
      * （不重放、不带 seq），前端无法判断新 delta 与快照是否重叠 —— 直接拼会
-     * 重复或错位。因此这类轮次交给调用方用完整消息拉取（方案 A）。
+     * 重复或错位。因此正文交给调用方用完整消息拉取（方案 A）。
+     *
+     * ⚠️ 但它的**后台任务必须收下**：正在跑的后台任务几乎都挂在未定稿轮次上，
+     * 丢掉它等于把「运行中」的唯一线索扔掉 —— 面板随后只能看到一堆历史任务，
+     * 用户看到的就是「后台任务始终是已结束」。
      */
     if (item.settled === false) {
-      unsettled.push(str(item.id) ?? `skeleton-turn-${index}`)
+      const turnId = str(item.id) ?? `skeleton-turn-${index}`
+      unsettled.push(turnId)
+      for (const entry of list(item.backgroundJobs)) {
+        const job = rec(entry)
+        const jobId = str(job.id)
+        if (!jobId) continue
+        const rawStatus = str(job.status)
+        backgroundJobs.set(jobId, {
+          id: jobId,
+          kind: str(job.kind) ?? 'shell',
+          title: str(job.title) ?? jobId,
+          /**
+           * 未定稿轮次 = 这一轮还在生成，它的后台任务几乎必然仍在跑。
+           * Agent 报 unknown 时按 running 处理：随后 `shell.list` 校正会把它
+           * 修正成真实状态（跑完就变已完成），但先按 running 才不会被误显示
+           * 成「已结束」——那正是用户报的问题。
+           */
+          status: rawStatus && rawStatus !== 'unknown' ? rawStatus : 'running',
+          messageId: turnId,
+        })
+      }
       continue
     }
 

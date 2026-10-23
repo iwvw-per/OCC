@@ -226,6 +226,46 @@ function getScopeKey(directories?: readonly string[]) {
  * 会立刻返回（工具本身 completed），真正的任务 id 在 `metadata.shellID` 或
  * 输出回执里。
  */
+/**
+ * `shell.created` 见到、但尚未被工具 part 认领的 shell。
+ *
+ * 用途：启动事件能给出真实开始时刻与归属会话，但**单凭它无法区分前后台**
+ * （前台命令也会触发）。所以这里只暂存，等工具 part 带来
+ * `background: true` 或后台回执时再认领入表。未认领的候选不显示。
+ *
+ * 有界：按 id 覆盖写入，并在认领时删除；长期不认领的条目由容量上限兜底。
+ */
+const pendingShellCandidates = new Map<
+  string,
+  { sessionId: string; startedAt: number; command?: string }
+>()
+
+/** 候选上限：防止极端情况下无限增长（正常只有个位数） */
+const PENDING_SHELL_CANDIDATE_LIMIT = 50
+
+function rememberPendingShell(
+  id: string,
+  value: { sessionId: string; startedAt: number; command?: string },
+): void {
+  if (pendingShellCandidates.size >= PENDING_SHELL_CANDIDATE_LIMIT) {
+    const oldest = pendingShellCandidates.keys().next()
+    if (!oldest.done) pendingShellCandidates.delete(oldest.value)
+  }
+  pendingShellCandidates.set(id, value)
+}
+
+/**
+ * 工具 part 是否「已转入后台」。
+ *
+ * ⚠️ 不能只看 `metadata.shellID`：opencode 的 shell 工具会给**所有** shell
+ * （包括前台阻塞执行的）都写这个字段。只认它就会把正在跑的前台命令
+ * （例如 `sleep 12; ...`）也列成后台任务 —— 实测如此。
+ *
+ * 真正的判据是**后台回执**：
+ *   - 输入显式 `background: true`；或
+ *   - 输出正文里有「Command moved to the background (shell ID: ...)」。
+ *     前台调用即使中途被用户转后台，也会补发这条回执。
+ */
 function backgroundJobFromToolPart(part: unknown): { id: string; title: string } | null {
   if (!part || typeof part !== 'object') return null
   const record = part as {
@@ -239,11 +279,29 @@ function backgroundJobFromToolPart(part: unknown): { id: string; title: string }
 
   const input = record.state?.input
   const inputRecord = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
+  if (!isBackgroundedCall(inputRecord, record.state?.content)) return null
+
   const rawTitle =
     (typeof inputRecord.description === 'string' && inputRecord.description) ||
     (typeof inputRecord.command === 'string' && inputRecord.command) ||
     shellId
   return { id: shellId, title: rawTitle.length > 80 ? `${rawTitle.slice(0, 80)}…` : rawTitle }
+}
+
+/** 后台回执文案（v2 shell 工具固定措辞） */
+const BACKGROUND_RECEIPT_RE = /moved to the background/i
+
+function isBackgroundedCall(
+  input: Record<string, unknown>,
+  content: unknown,
+): boolean {
+  if (input.background === true) return true
+  if (!Array.isArray(content)) return false
+  const text = content
+    .map(item => (item && typeof item === 'object' ? (item as { text?: unknown }).text : undefined))
+    .filter((value): value is string => typeof value === 'string')
+    .join('')
+  return BACKGROUND_RECEIPT_RE.test(text)
 }
 
 function extractShellId(state: { metadata?: unknown; content?: unknown } | undefined): string | null {
@@ -803,15 +861,36 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
              * 只靠 synthetic 完成通知是不够的：那是**结束**信号，任务刚开始跑时
              * 面板上什么都不会出现。这里在工具 part 更新时识别「已转入后台」，
              * 先落成 running，等完成通知到达再纠正为终态。
+             *
+             * 这是任务进入 store 的**主登记路径** —— 骨架只覆盖已定稿轮次，
+             * 正在跑的这一轮不在骨架里，`shell.created` 又可能早于本次
+             * part.updated 到达，所以必须在这里登记。
              */
             const job = backgroundJobFromToolPart(apiPart)
             if (job) {
-              backgroundJobStore.set(scopedId, {
-                id: job.id,
-                status: 'running',
-                at: Date.now(),
-                title: job.title,
-              })
+              /**
+               * 认领启动事件留下的候选：它能提供**真实开始时刻**（比
+               * part.updated 的到达时间准确），也确认了归属会话。
+               */
+              const candidate = pendingShellCandidates.get(job.id)
+              if (candidate) {
+                pendingShellCandidates.delete(job.id)
+                backgroundJobStore.set(scopedId, {
+                  id: job.id,
+                  status: 'running',
+                  at: candidate.startedAt,
+                  title: job.title,
+                  authoritative: true,
+                })
+              } else {
+                backgroundJobStore.set(scopedId, {
+                  id: job.id,
+                  status: 'running',
+                  at: Date.now(),
+                  title: job.title,
+                  authoritative: true,
+                })
+              }
             }
             scheduleScroll(scopedId)
           }
@@ -1114,24 +1193,37 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         },
 
         /**
-         * 后台 shell 启动：立刻落成「运行中」。
+         * 后台 shell 启动。
          *
-         * 这是面板上「还有东西在跑」的唯一可靠来源 —— 消息流里的回执只能
-         * 证明「曾经启动过」，无法区分现在是否还在跑。
+         * ⚠️ 不能无条件新建条目：前台工具调用同样会产生 shell 与
+         * `shell.created` 事件，那样会把正在执行的前台命令也列成后台任务
+         * （实测 `sleep 12; ...` 会占满面板）。
          *
-         * ⚠️ shell 的 `metadata.sessionID` 是**原始会话 id**（`ses_x`），
-         * 而 store 的键是**复合 key**（`serverId::ses_x`）。必须补上服务器前缀，
-         * 否则状态写进了另一个 key，面板永远看不到。
+         * 但也不能只认「已登记」：后台任务可能在页面打开前就已启动，
+         * 此时 store 里还没有它，只认登记就会漏掉。
+         *
+         * 折中：**已登记 → 刷新为运行中；未登记 → 先记下候选**，等工具 part
+         * 到达（带 `background: true` 或回执）时再由主登记路径确认。
+         * 候选不直接进 store，所以前台命令不会因此出现在面板上。
          */
         onShellCreated: ({ id, command, sessionID, startedAt }) => {
           const scoped = sessionID ? scope(sessionID) : ''
           if (!scoped) return
-          backgroundJobStore.set(scoped, {
-            id,
-            status: 'running',
-            at: startedAt,
-            ...(command ? { title: command.slice(0, 80) } : {}),
-            authoritative: true,
+          if (backgroundJobStore.has(scoped, id)) {
+            backgroundJobStore.set(scoped, {
+              id,
+              status: 'running',
+              at: startedAt,
+              ...(command ? { title: command.slice(0, 80) } : {}),
+              authoritative: true,
+            })
+            return
+          }
+          // 未登记：只留一份候选，供随后的工具 part 认领
+          rememberPendingShell(id, {
+            sessionId: scoped,
+            startedAt,
+            ...(command ? { command } : {}),
           })
         },
 

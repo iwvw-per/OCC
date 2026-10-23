@@ -44,7 +44,8 @@ function toolMessage(id: string, created: number, shellID: string, command: stri
         tool: 'bash',
         state: {
           status: 'completed',
-          input: { command },
+          // 后台调用：metadata.shellID 只有配合 background 语义才算后台任务
+          input: { command, background: true },
           metadata: { shellID },
           time: { start: created, end: created + 1 },
         },
@@ -171,5 +172,15 @@ describe('后台任务状态：权威来源可以纠正历史推导', () => {
     const jobs = collectBackgroundJobs([], backgroundJobStore.getSnapshot(SID))
     expect(jobs).toHaveLength(1)
     expect(jobs[0].messageId).toBe('msg_user_turn')
+  })
+
+  it('distinguishes registered jobs from arbitrary shells (has guard)', () => {
+    backgroundJobStore.set(SID, { id: 'sh_bg', status: 'running', at: 1000 })
+
+    // 已登记的后台任务
+    expect(backgroundJobStore.has(SID, 'sh_bg')).toBe(true)
+    // 前台命令的 shell：没有登记，不能被 shell.created 凭空加成后台任务
+    expect(backgroundJobStore.has(SID, 'sh_foreground')).toBe(false)
+    expect(backgroundJobStore.has('ses_other', 'sh_bg')).toBe(false)
   })
 })

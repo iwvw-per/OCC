@@ -82,17 +82,31 @@ export const BackgroundJobDialog = memo(function BackgroundJobDialog({
       })
       if (requestId !== requestIdRef.current) return
       if (!chunk) {
-        // 子代理任务或已被清理的 shell 没有输出文件；这不是错误
-        setError(t('chat:workStatus.backgroundJob.outputUnavailable'))
-      } else {
-        setOutput(chunk.output)
-        if (chunk.truncated) {
-          setError(t('chat:workStatus.backgroundJob.outputTruncated'))
-        }
+        /**
+         * shell 已被清理（任务结束后 v2 会删掉它），读不到输出文件。
+         *
+         * 但完成通知里带着**完整输出正文**，`job.output` 就是它（见
+         * backgroundJobs.ts 的 parseBackgroundNotice）。有它就显示，
+         * 比「无法读取输出」有用得多。子代理任务也走这条路径。
+         */
+        setError(null)
+        setLoading(false)
+        return
+      }
+      setOutput(chunk.output)
+      if (chunk.truncated) {
+        setError(t('chat:workStatus.backgroundJob.outputTruncated'))
       }
       setLoading(false)
     })()
   }, [jobId, directory, serverId, t])
+
+  /**
+   * 最终展示的输出：优先 shell.output 的实时/分页结果，
+   * 其次完成通知里带回的正文（任务结束后唯一还留着的证据）。
+   */
+  const displayOutput = output || job?.output || ''
+  const hasOutput = displayOutput.length > 0
 
   const handleJump = useCallback(() => {
     if (!job?.messageId) return
@@ -194,10 +208,17 @@ export const BackgroundJobDialog = memo(function BackgroundJobDialog({
               {loading ? <Spinner size="xs" tone="muted" /> : null}
             </div>
             <pre className="max-h-[45vh] overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-[length:var(--fs-xxs)] text-text-200 custom-scrollbar">
-              {output || (loading ? '' : t('chat:workStatus.backgroundJob.noOutput'))}
+              {hasOutput ? displayOutput : loading ? '' : t('chat:workStatus.backgroundJob.noOutput')}
             </pre>
             {error ? (
               <span className="text-[length:var(--fs-xxs)] text-text-500">{error}</span>
+            ) : null}
+            {/* 只有「加载完成且确实没有输出」时才提示。
+                运行中的任务输出可能还没产生（或刚被读取），不该断言已被清理。 */}
+            {!hasOutput && !loading && job.kind === 'shell' && job.status !== 'running' ? (
+              <span className="text-[length:var(--fs-xxs)] text-text-500">
+                {t('chat:workStatus.backgroundJob.outputExpired')}
+              </span>
             ) : null}
           </div>
 

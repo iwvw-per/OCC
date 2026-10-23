@@ -1015,7 +1015,7 @@ export function buildProcessTimeline(
     const userId = turn.user.info.id
 
     /**
-     * 最后一轮：**原样流式输出**，不做内容拆分。
+     * 最后一轮：**流式进行中**时原样输出，不做内容拆分。
      *
      * 这一轮的内容是「服务端此刻正在写的东西」，顺序与内容都是权威的。任何
      * 折叠/拆分的尝试都要靠猜「哪一段才是最终回复」，而猜错的代价很难看：
@@ -1023,9 +1023,14 @@ export function buildProcessTimeline(
      *     只露出「18 个测试全部通过。现在构建并部署 agent。」）；
      *   - 把真正的回复当过程吞掉 → 回复凭空消失。
      *
-     * 所以这一轮不拆：所有助手消息都用 `processContentScope: 'all'`（整条内容
-     * 原样渲染，reasoning / tool / text 都按服务端顺序出现）。壳本身仍保留，
-     * 用来承载「Working / Worked」状态与展开收起能力。
+     * ⚠️ 但**轮次结束后**必须回到与历史轮次相同的拆分规则：用户要的是
+     * 「提问 + 回复」，过程收进折叠块。若结束后仍把全部内容塞进壳里，
+     * 收起折叠块时**整轮的回复会一起消失**，只剩一行「Worked for 34s」
+     * ——实测「查看 @cloudflare/kumo@2.15.0 更新内容」那个会话就是这样：
+     * 收起后 2.5KB 的回复内容全部不见。
+     *
+     * 两者的边界是「这一轮是否还在生成」：生成中不拆（避免猜错），
+     * 生成结束就按最终回复拆分。
      */
     const isLastUserTurn = userId === userTurns[userTurns.length - 1]?.user.info.id
 
@@ -1074,9 +1079,17 @@ export function buildProcessTimeline(
     const durationMs =
       skeletonDuration ?? (turnIsActive ? undefined : resolveTurnDurationMs(assistants, startedAt, turnDurationMap))
 
-    // 最后一轮：内容原样输出（不拆过程/最终），但壳照常承载状态与开合。
+    /**
+     * 最后一轮**且仍在生成** → 原样输出，不拆过程/最终。
+     *
+     * 结束后（`turnIsActive === false`）走下面与历史轮次相同的拆分规则，
+     * 否则收起折叠块会把整轮回复一起藏起来。
+     */
+    const lastTurnStillStreaming = isLastUserTurn && turnIsActive
+
+    // 最后一轮且仍在生成：内容原样输出（不拆过程/最终），壳照常承载状态与开合。
     // 纯文本轮不挂壳：只有一条回复、没有任何过程可折叠，套个壳纯属多一层边框。
-    if (isLastUserTurn) {
+    if (lastTurnStillStreaming) {
       /** 空回合 + 会话仍在跑 → 需要空壳承载 Working（与历史设计一致） */
       const needsEmptyWorkingShell = assistants.length === 0 && turnIsActive
       const needsShell =
@@ -1126,6 +1139,7 @@ export function buildProcessTimeline(
 
     const finalOutside =
       !turnIsActive && finalAssistant && messageHasFinal(finalAssistant) ? finalAssistant : undefined
+
 
     // 进行中或有过程内容 → 挂壳
     // 更晚的空 pending 回合：turnIsActive=false 且无 children → 不挂壳（只显示 user）

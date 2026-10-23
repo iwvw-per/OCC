@@ -46,6 +46,7 @@ import {
 import { collectBackgroundJobs, type BackgroundJob } from './backgroundJobs'
 import { BackgroundJobDialog } from './BackgroundJobDialog'
 import { useLiveBackgroundJobs } from '../../store/backgroundJobStore'
+import { useReconcileRunningShells } from '../../hooks/useReconcileRunningShells'
 import type { MCPStatus } from '../../types/api/mcp'
 
 export interface WorkStatusSectionContext {
@@ -299,6 +300,15 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jobsKey],
   )
+
+  /**
+   * 消息流能证明是后台任务的 id。
+   *
+   * 校正时必须用它做白名单：`shell.list` 分不出前后台，直接拿来建条目会把
+   * 正在执行的前台命令也列进面板（实测 `sleep 12; ...` 会占满面板）。
+   */
+  const derivedJobIds = useMemo(() => new Set(jobs.map(job => job.id)), [jobs])
+  useReconcileRunningShells(sessionId, directory, serverId, derivedJobIds)
 
   /**
    * 弹窗里的任务跟随 jobs 的最新状态刷新，而不是保留打开那一刻的快照 ——
