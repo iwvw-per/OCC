@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { CopyIcon, CheckIcon } from '../Icons'
 import { clsx } from 'clsx'
 import { clipboardErrorHandler, copyTextToClipboard } from '../../utils'
-import { touchTarget } from '../../utils/interaction'
 
 interface CopyButtonProps {
   text: string
@@ -54,8 +53,6 @@ export function CopyButton({ text, className, position = 'absolute', groupName }
       className={clsx(
         'inline-flex items-center justify-center',
         'h-7 w-7 p-1.5 rounded-md',
-        // 触控优先设备放大到 40px：28px 见方的手指很难点准
-        touchTarget.iconButton,
         'transition-colors duration-150',
         // State styles
         copied ? 'text-success-100' : 'text-text-400 hover:text-text-200',

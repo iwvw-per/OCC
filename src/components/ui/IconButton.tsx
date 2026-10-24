@@ -16,14 +16,9 @@ const sizeStyles: Record<IconButtonSize, string> = {
   // 圆角按规范刻度：size-5/6 为紧凑控件取 rounded-sm(4px)，
   // size-8 取 rounded-md(6px)。原先 xs 用 rounded(4px 的旧别名)、
   // sm 用 rounded-md，两者对 size-5/size-6 而言占比偏大且刻度不统一。
-  //
-  // `pointer-coarse:` 是触控优先设备的手指尺寸补偿：桌面为鼠标设计的 32px
-  // 在手机上点不准（实测顶部工具栏一排 32×32，用户反馈「按钮太小」）。
-  // 只放大 `md` 与 `sm`：`xs` 多用于行内微型操作，放大反而会撑乱布局；
-  // `lg` 本身已是 40px，够用。
   xs: 'size-5 rounded-sm',
-  sm: 'size-6 rounded-sm pointer-coarse:size-9',
-  md: 'size-8 rounded-md pointer-coarse:size-10',
+  sm: 'size-6 rounded-sm',
+  md: 'size-8 rounded-md',
   lg: 'size-10 rounded-md',
 }
 

@@ -1022,21 +1022,6 @@ h6 {
   }
 
   /*
-   * 触控优先设备再抬到 40px。
-   *
-   * 上面那条 32px 在 utilities 之后声明，会盖掉 `pointer-coarse:min-h-10`
-   * 这类工具类（实测胶囊选择器仍是 32px）。这里用同一媒体查询叠加更具体的
-   * 条件，把手指尺寸一次定到 40px —— 与 IconButton / 消息操作按钮一致。
-   *
-   * 排除项与上一条相同，避免把 tab / switch / 紧凑组件撑变形。
-   */
-  @media (pointer: coarse) {
-    button:not(.touch-target-sm):not([role='tab']):not([role='switch']):not([data-compact]) {
-      min-height: 40px;
-    }
-  }
-
-  /*
    * 侧栏内的图标按钮在小屏上放大到 36×36：原 size-6(24px) 的按钮相邻
    * 只隔 2px，手指很容易点错。只作用于侧栏，避免影响其他密集工具栏。
    */
@@ -1662,20 +1647,6 @@ html[data-chat-width-dragging] .glass-alt {
   --chat-fab-collapsed-size: 36px;
   --chat-fab-expanded-size: 30px;
   --chat-fab-gap: 8px;
-}
-
-/**
- * 触控优先设备：放大发送按钮。
- *
- * 展开态只有 30px，手指点上去偏小（实测用户反馈「按钮太小」）。抬到 40px
- * 与其它触控控件一致。收起态 36px 本已够用，一并抬到 40 保持两种状态同尺寸，
- * 避免变形过程中尺寸跳变。
- */
-@media (pointer: coarse) {
-  :root {
-    --chat-fab-collapsed-size: 40px;
-    --chat-fab-expanded-size: 40px;
-  }
 }
 
 /* 收起/展开是同一个元素的几何变形：输入框本体从圆角矩形「长」成药丸，

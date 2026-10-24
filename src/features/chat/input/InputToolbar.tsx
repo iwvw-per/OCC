@@ -6,7 +6,6 @@ import { DropdownMenu, MenuItem, IconButton, AnimatedPresence } from '../../../c
 import { ModelSelector, type ModelSelectorHandle } from '../ModelSelector'
 import { useChatViewport } from '../chatViewport'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
-import { touchTarget } from '../../../utils/interaction'
 import { isTauri, isTauriMobile, extToMime } from '../../../utils/tauri'
 import type { ApiAgent } from '../../../api/client'
 import type { ModelInfo, FileCapabilities } from '../../../api'
@@ -342,7 +341,7 @@ export function InputToolbar({
               aria-haspopup="menu"
               aria-expanded={agentMenuOpen}
               aria-controls={agentMenuOpen ? agentMenuId : undefined}
-              className={`flex items-center gap-1.5 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden ${isCompact ? 'max-w-[6rem]' : 'w-full'} ${touchTarget.chip}`}
+              className={`flex items-center gap-1.5 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden ${isCompact ? 'max-w-[6rem]' : 'w-full'}`}
               title={
                 currentAgent
                   ? `${currentAgent.name}${currentAgent.description ? ': ' + currentAgent.description : ''}`
@@ -448,7 +447,7 @@ export function InputToolbar({
               aria-haspopup="menu"
               aria-expanded={variantMenuOpen}
               aria-controls={variantMenuOpen ? variantMenuId : undefined}
-              className={`flex items-center gap-1.5 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden ${isCompact ? 'max-w-[5.5rem]' : 'w-full'} ${touchTarget.chip}`}
+              className={`flex items-center gap-1.5 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden ${isCompact ? 'max-w-[5.5rem]' : 'w-full'}`}
               title={
                 selectedVariant
                   ? selectedVariant.charAt(0).toUpperCase() + selectedVariant.slice(1)

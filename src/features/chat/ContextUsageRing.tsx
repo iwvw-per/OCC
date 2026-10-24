@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { CircularProgress } from '../../components/CircularProgress'
 import { formatCost, formatTokens, useSessionStats } from '../../hooks'
 import { cn } from '../../utils/cn'
-import { interactive, touchTarget } from '../../utils/interaction'
+import { interactive } from '../../utils/interaction'
 
 interface ContextUsageRingProps {
   contextLimit: number
@@ -44,8 +44,6 @@ export function ContextUsageRing({ contextLimit, onOpenDetails, className }: Con
       aria-label={t('sidebar.contextUsage')}
       className={cn(
         'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-text-300 hover:text-text-100',
-        // 触控端放大点击热区（图标本身尺寸不变，只扩容器）
-        touchTarget.iconButton,
         interactive.subtle,
         className,
       )}
