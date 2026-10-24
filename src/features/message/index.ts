@@ -1,4 +1,5 @@
 export { MessageRenderer, ProcessCollapseBlock } from './MessageRenderer'
+export { TodoList } from './tools'
 export {
   messageHasProcessContent,
   messageHasFinalContent,

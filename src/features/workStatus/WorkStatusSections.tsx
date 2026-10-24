@@ -33,7 +33,6 @@ import { useSessionStatsFor } from '../../hooks/useSessionStatsFor'
 import { useSessionTurnStats } from '../../hooks/useSessionTurnStats'
 import { useVcsInfo } from '../../hooks/useVcsInfo'
 import { getMcpStatus, connectMcpServer, disconnectMcpServer } from '../../api/mcp'
-import { listLoadedLocations, reclaimIdleLocations } from '../../api/location'
 import {
   WorkStatusCollapsibleSection,
   WorkStatusMeter,
@@ -471,29 +470,12 @@ export const WorkStatusMcpSection = memo(function WorkStatusMcpSection({
   const { t } = useTranslation('chat')
   const [status, setStatus] = useState<Record<string, MCPStatus> | null>(null)
   const [busyServer, setBusyServer] = useState<string | null>(null)
-  /**
-   * 已加载的 location 数量。
-   *
-   * opencode v2 把 MCP 放在 Location 图里，**每个目录各起一份 MCP 进程**；
-   * 打开过 N 个项目就常驻 N 份（实测 14 个目录 = 28 个 python 进程 ≈ 2.2GB）。
-   * 这里显示实际数量，并在 >1 时提供「回收闲置目录」入口。
-   */
-  const [locationCount, setLocationCount] = useState<number | null>(null)
-  const [reclaiming, setReclaiming] = useState(false)
-  const [reclaimNote, setReclaimNote] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
       setStatus(await getMcpStatus(directory))
     } catch {
       setStatus({})
-    }
-    try {
-      const locations = await listLoadedLocations()
-      setLocationCount(locations.length)
-    } catch {
-      // 老版本没有该调试端点：不显示这个入口，而不是报错
-      setLocationCount(null)
     }
   }, [directory])
 
@@ -514,31 +496,6 @@ export const WorkStatusMcpSection = memo(function WorkStatusMcpSection({
     [status],
   )
   const connectedCount = servers.filter(([, entry]) => entry?.status === 'connected').length
-
-  const handleReclaim = useCallback(async () => {
-    if (reclaiming) return
-    setReclaiming(true)
-    setReclaimNote(null)
-    try {
-      const result = await reclaimIdleLocations(directory)
-      setLocationCount(result.after)
-      // 有残留（被会话占用，服务端拒绝关闭）时如实说明，不要让用户以为按钮没生效
-      setReclaimNote(
-        result.stuck.length > 0
-          ? t('workStatus.mcp.reclaimPartial', {
-              freed: result.evicted.length,
-              left: result.after,
-              stuck: result.stuck.length,
-            })
-          : t('workStatus.mcp.reclaimResult', { freed: result.evicted.length, left: result.after }),
-      )
-    } catch {
-      setReclaimNote(t('workStatus.mcp.reclaimFailed'))
-    } finally {
-      setReclaiming(false)
-      void load()
-    }
-  }, [directory, load, reclaiming, t])
 
   const handleToggle = useCallback(
     async (name: string, next: boolean) => {
@@ -607,24 +564,6 @@ export const WorkStatusMcpSection = memo(function WorkStatusMcpSection({
           )
         })}
       </WorkStatusRows>
-      {/* 已加载目录回收：opencode 每个目录各起一份 MCP 进程，打开过的项目越多，
-          常驻内存越高（实测 14 目录 = 28 个 python ≈ 2.2GB）。这里给出显式入口。 */}
-      {locationCount != null && locationCount > 1 && (
-        <div className="mt-1 flex flex-col gap-1 border-t border-border-200/40 pt-1.5">
-          <WorkStatusRow
-            leading={<span className="inline-flex w-[26px] shrink-0" />}
-            label={t('workStatus.mcp.loadedDirs', { count: locationCount })}
-            value={
-              <WorkStatusRowAction tone="info" disabled={reclaiming} onClick={() => void handleReclaim()}>
-                {reclaiming ? t('workStatus.mcp.reclaiming') : t('workStatus.mcp.reclaim')}
-              </WorkStatusRowAction>
-            }
-          />
-          <p className="px-1 text-[length:var(--fs-xxs)] leading-snug text-text-500">
-            {reclaimNote ?? t('workStatus.mcp.reclaimHint')}
-          </p>
-        </div>
-      )}
     </WorkStatusCollapsibleSection>
   )
 })

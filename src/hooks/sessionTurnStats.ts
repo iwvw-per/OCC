@@ -22,6 +22,7 @@
 
 import type { Message, Part } from '../types/message'
 import { messageCompletedAt } from '../store/messagePartMerge'
+import { mergeIntervalMs as mergeIntervals, stepGenerationWindow } from './stepThroughput'
 
 export interface SessionTurnStats {
   /** 轮数：用户消息数（与 DeepSeek 的 turn 计数口径一致） */
@@ -75,22 +76,7 @@ function partTimeWindow(part: Part): { start: number; end: number } | null {
 
 /** 合并重叠区间，返回总时长（ms）。生成被工具调用打断时会产生多段窗口 */
 export function mergeIntervalMs(intervals: { start: number; end: number }[]): number {
-  if (intervals.length === 0) return 0
-  const sorted = [...intervals].sort((a, b) => a.start - b.start)
-  let total = 0
-  let segStart = sorted[0].start
-  let segEnd = sorted[0].end
-  for (let i = 1; i < sorted.length; i++) {
-    const current = sorted[i]
-    if (current.start <= segEnd) {
-      segEnd = Math.max(segEnd, current.end)
-    } else {
-      total += segEnd - segStart
-      segStart = current.start
-      segEnd = current.end
-    }
-  }
-  return total + (segEnd - segStart)
+  return mergeIntervals(intervals)
 }
 
 /**
@@ -107,6 +93,7 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
   let ttftSum = 0
   let ttftSamples = 0
   let decodeMs = 0
+  let throughputTokens = 0
   let outputTokens = 0
   let cacheReadTokens = 0
   let inputTokens = 0
@@ -179,9 +166,14 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
     inputTokens += (tokens?.input ?? 0) + cached + written
     outputTokens += tokens?.output ?? 0
 
-    // 输出速度分母：文本 part 合并窗口；缺时间窗口时退回整条消息时长
-    const textMs = mergeIntervalMs(textIntervals)
-    decodeMs += textMs > 0 ? textMs : messageMs
+    // 输出速度分母：按官方口径取「生成窗口」
+    // （streamed−created 优先，其次 text part 窗口，最后才是整条消息时长）。
+    // 分子用 output+reasoning，与官方 turnTokensPerSecond 一致。
+    const window = stepGenerationWindow(message)
+    if (window.durationMs > 0) {
+      decodeMs += window.durationMs
+      throughputTokens += (tokens?.output ?? 0) + (tokens?.reasoning ?? 0)
+    }
   }
 
   const cacheDenominator = inputTokens
@@ -191,7 +183,7 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
     modelMs,
     toolMs,
     ttftMs: ttftSamples > 0 ? ttftSum / ttftSamples : null,
-    tokensPerSec: decodeMs > 0 && outputTokens > 0 ? outputTokens / (decodeMs / 1000) : null,
+    tokensPerSec: decodeMs > 0 && throughputTokens > 0 ? throughputTokens / (decodeMs / 1000) : null,
     outputTokens,
     cacheReadTokens,
     inputTokens,

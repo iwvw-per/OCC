@@ -43,6 +43,34 @@ describe('v2 message adapter', () => {
     expect(tool.state.output).toBe('ok')
   })
 
+  it('preserves time.streamed from the assistant message', () => {
+    /**
+     * streamed 是官方 tok/s 的分母来源（streamed − created）。
+     * 之前适配层只搬 created/completed，这个字段被整条丢弃，
+     * 导致前端只能退回整条消息时长，速度偏低。
+     */
+    const msg = adaptMessage({
+      id: 'msg_1',
+      sessionID: 'ses_1',
+      type: 'assistant',
+      time: { created: 1000, streamed: 3000, completed: 5000 },
+      content: [{ type: 'text', text: 'hi' }],
+    })!
+    expect(msg.info.time).toMatchObject({ created: 1000, streamed: 3000, completed: 5000 })
+  })
+
+  it('omits streamed when the server did not provide it', () => {
+    const msg = adaptMessage({
+      id: 'msg_1',
+      sessionID: 'ses_1',
+      type: 'assistant',
+      time: { created: 1000, completed: 5000 },
+      content: [{ type: 'text', text: 'hi' }],
+    })!
+    expect(msg.info.time?.created).toBe(1000)
+    expect(msg.info.time).not.toHaveProperty('streamed')
+  })
+
   it('maps user text to a single text part', () => {
     const msg = adaptMessage({ id: 'u1', sessionID: 's', type: 'user', time: { created: 1 }, text: 'hi' })!
     expect(msg.info.role).toBe('user')

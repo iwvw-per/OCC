@@ -16,4 +16,4 @@ export {
 export * from './icons'
 
 // Renderers
-export { DefaultRenderer, TodoRenderer, TaskRenderer, TaskHeader, TaskBody, TaskAgentBadge, hasTodos } from './renderers'
+export { DefaultRenderer, TodoRenderer, TodoList, TaskRenderer, TaskHeader, TaskBody, TaskAgentBadge, hasTodos } from './renderers'

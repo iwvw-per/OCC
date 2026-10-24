@@ -68,6 +68,22 @@ export interface SessionState {
    */
   compactionUsage?: { tokens: TokenUsage; cost?: number; at: number }
   /**
+   * 上下文占用快照（来自 `session.context` 里最后一条带 tokens 的 assistant）。
+   *
+   * 为什么需要它：走 aiagent 网关时首屏是「轮次骨架」投影，每轮只留提问 +
+   * 最终回复 + 过程计数，**不带 tokens**。于是进入会话后没有任何一条消息能
+   * 提供实测值，圆环只能按字符估算 —— 表现为「刚进去用量不对，发一条消息后
+   * 才正常」（发消息会拉完整消息）。
+   *
+   * 口径与官方一致：input + output + reasoning + cache.read + cache.write，
+   * 取「最后一次压缩之后、最后一条带 tokens 的 assistant」
+   * （见 opencode `client/src/solid/usage.ts` 的 lastAssistantWithUsage）。
+   *
+   * 只在该快照**不早于**最近一次带 tokens 的消息时采用：之后若真的拿到了
+   * 消息级实测值，以消息为准（它更实时）。
+   */
+  contextUsage?: { tokens: TokenUsage; cost: number; at: number }
+  /**
    * 来自 `message.list` 的压缩标记（事件可能不发，消息列表才是权威来源）。
    *
    * 该条目的 tokens 是**压缩前**用量，不能直接用；这里保留摘要与近期消息的

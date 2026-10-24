@@ -15,7 +15,7 @@ vi.mock('../store', () => ({
 const getVisibleMessagesMock = vi.mocked(messageStore.getVisibleMessages)
 const subscribeSessionMock = vi.mocked(messageStore.subscribeSession)
 
-// 真实时间戳是毫秒级 epoch；hook 用 !created 判断字段是否存在，0 会被当成缺失
+// 真实时间戳是毫秒级 epoch；避免 0 被当成「缺失」的歧义
 const BASE = 1_700_000_000_000
 
 interface PartSpec {
@@ -24,25 +24,42 @@ interface PartSpec {
   end?: number
 }
 
-/** 只填 hook 实际读取的字段，其余用断言补齐（与 messageStore.test.ts 的写法一致） */
+/**
+ * 构造一条 assistant 消息。
+ *
+ * 口径对齐官方 turnTokensPerSecond：
+ *   速度 = Σ(output + reasoning) / Σ(streamed − created)
+ */
 function makeAssistantMessage(options: {
+  id?: string
   createdOffset: number
-  completedOffset: number
+  /** 流式结束时刻；不填则退回 completed / part 窗口 */
+  streamedOffset?: number
+  completedOffset?: number
   output: number
-  reasoning: number
-  parts: PartSpec[]
+  reasoning?: number
+  parts?: PartSpec[]
 }): Message {
   return {
     info: {
-      id: 'msg-1',
+      id: options.id ?? 'msg-1',
       role: 'assistant',
-      time: { created: BASE + options.createdOffset, completed: BASE + options.completedOffset },
-      tokens: { input: 10, output: options.output, reasoning: options.reasoning, cache: { read: 0, write: 0 } },
+      time: {
+        created: BASE + options.createdOffset,
+        ...(options.streamedOffset !== undefined ? { streamed: BASE + options.streamedOffset } : {}),
+        ...(options.completedOffset !== undefined ? { completed: BASE + options.completedOffset } : {}),
+      },
+      tokens: {
+        input: 10,
+        output: options.output,
+        reasoning: options.reasoning ?? 0,
+        cache: { read: 0, write: 0 },
+      },
     },
-    content: options.parts.map((part, index) => ({
+    content: (options.parts ?? []).map((part, index) => ({
       id: `part-${index}`,
       sessionID: 'session-1',
-      messageID: 'msg-1',
+      messageID: options.id ?? 'msg-1',
       type: part.type,
       text: 'x',
       time:
@@ -53,7 +70,14 @@ function makeAssistantMessage(options: {
   } as unknown as Message
 }
 
-/** 只有 created、没有 completed 的流式中消息 */
+function makeUserMessage(createdOffset: number): Message {
+  return {
+    info: { id: `u-${createdOffset}`, role: 'user', time: { created: BASE + createdOffset }, text: 'hi' },
+    content: [],
+  } as unknown as Message
+}
+
+/** 只有 created、没有 streamed/completed 的流式中消息 */
 function makeStreamingMessage(): Message {
   return {
     info: {
@@ -83,17 +107,12 @@ describe('useTokenRate', () => {
     expect(result.current).toEqual({ tokensPerSec: 0, hasData: false })
   })
 
-  it('counts only output tokens, excluding reasoning', () => {
-    // 文本生成窗口 1000ms；output=100、reasoning=900
-    // 只算输出应为 100 tok/s；若把 reasoning 也算进去会是 1000 tok/s
+  it('uses streamed-created as the denominator (official口径)', () => {
+    // streamed−created = 1000ms → 100 / 1s = 100 tok/s。
+    // 若错用 completed−created（2000ms）会得到 50。
     getVisibleMessagesMock.mockReturnValue([
-      makeAssistantMessage({
-        createdOffset: 0,
-        completedOffset: 2000,
-        output: 100,
-        reasoning: 900,
-        parts: [{ type: 'text', start: 0, end: 1000 }],
-      }),
+      makeUserMessage(0),
+      makeAssistantMessage({ createdOffset: 0, streamedOffset: 1000, completedOffset: 2000, output: 100 }),
     ])
 
     const { result } = renderHook(() => useTokenRate('session-1'))
@@ -102,95 +121,71 @@ describe('useTokenRate', () => {
     expect(result.current.hasData).toBe(true)
   })
 
-  it('excludes reasoning parts from the generation window', () => {
-    // 文本 0-500ms，推理 500-2000ms；output=50
-    // 只按文本窗口算 = 50 / 0.5s = 100 tok/s
+  it('counts reasoning tokens in the numerator (official口径)', () => {
+    // 官方用 output+reasoning：(100+900) / 1s = 1000
     getVisibleMessagesMock.mockReturnValue([
+      makeUserMessage(0),
       makeAssistantMessage({
         createdOffset: 0,
-        completedOffset: 2000,
-        output: 50,
-        reasoning: 500,
-        parts: [
-          { type: 'text', start: 0, end: 500 },
-          { type: 'reasoning', start: 500, end: 2000 },
-        ],
-      }),
-    ])
-
-    const { result } = renderHook(() => useTokenRate('session-1'))
-
-    expect(result.current.tokensPerSec).toBe(100)
-  })
-
-  it('excludes tool-call gaps by merging text windows', () => {
-    // 两段文本 0-1000 与 3000-4000，中间是工具调用等待
-    // 合并后 2000ms，output=200 → 100 tok/s（按整条 4000ms 会算成 50）
-    getVisibleMessagesMock.mockReturnValue([
-      makeAssistantMessage({
-        createdOffset: 0,
-        completedOffset: 4000,
-        output: 200,
-        reasoning: 0,
-        parts: [
-          { type: 'text', start: 0, end: 1000 },
-          { type: 'tool', start: 1000, end: 3000 },
-          { type: 'text', start: 3000, end: 4000 },
-        ],
-      }),
-    ])
-
-    const { result } = renderHook(() => useTokenRate('session-1'))
-
-    expect(result.current.tokensPerSec).toBe(100)
-  })
-
-  it('merges overlapping text windows instead of double counting', () => {
-    // 重叠窗口 0-1000 与 500-1500 → 合并为 1500ms，output=150 → 100 tok/s
-    getVisibleMessagesMock.mockReturnValue([
-      makeAssistantMessage({
-        createdOffset: 0,
-        completedOffset: 1500,
-        output: 150,
-        reasoning: 0,
-        parts: [
-          { type: 'text', start: 0, end: 1000 },
-          { type: 'text', start: 500, end: 1500 },
-        ],
-      }),
-    ])
-
-    const { result } = renderHook(() => useTokenRate('session-1'))
-
-    expect(result.current.tokensPerSec).toBe(100)
-  })
-
-  it('falls back to whole-message duration when parts have no time window', () => {
-    getVisibleMessagesMock.mockReturnValue([
-      makeAssistantMessage({
-        createdOffset: 0,
+        streamedOffset: 1000,
         completedOffset: 2000,
         output: 100,
-        reasoning: 500,
-        parts: [{ type: 'text' }],
+        reasoning: 900,
       }),
     ])
 
     const { result } = renderHook(() => useTokenRate('session-1'))
 
-    // 2000ms 窗口，仍只用 output：100 / 2s = 50 tok/s
+    expect(result.current.tokensPerSec).toBe(1000)
+  })
+
+  it('falls back to completed when streamed is absent', () => {
+    getVisibleMessagesMock.mockReturnValue([
+      makeUserMessage(0),
+      makeAssistantMessage({ createdOffset: 0, completedOffset: 2000, output: 100 }),
+    ])
+
+    const { result } = renderHook(() => useTokenRate('session-1'))
+
+    // 兜底口径：2000ms，output+reasoning = 100 → 50 tok/s
     expect(result.current.tokensPerSec).toBe(50)
   })
 
-  it('skips the streaming message and uses the last completed one', () => {
+  it('aggregates every step in the turn, weighted by its own window', () => {
+    // 一轮两步：1s/100tok + 3s/300tok → 400 / 4s = 100 tok/s
+    // 只看最后一步会得到 300/3s = 100（碰巧相同），所以再验证 token 总量口径
+    // 关键差别在「前面几步的 token 不再被丢弃」。
     getVisibleMessagesMock.mockReturnValue([
-      makeAssistantMessage({
-        createdOffset: 0,
-        completedOffset: 1000,
-        output: 100,
-        reasoning: 0,
-        parts: [{ type: 'text', start: 0, end: 1000 }],
-      }),
+      makeUserMessage(0),
+      makeAssistantMessage({ id: 'msg-step1', createdOffset: 0, streamedOffset: 1000, output: 100 }),
+      makeAssistantMessage({ id: 'msg-step2', createdOffset: 1000, streamedOffset: 4000, output: 300 }),
+    ])
+
+    const { result } = renderHook(() => useTokenRate('session-1'))
+
+    expect(result.current.tokensPerSec).toBe(100)
+  })
+
+  it('weights long steps more than short ones', () => {
+    // 100tok/1s + 100tok/4s → 200 / 5s = 40 tok/s
+    // 若各步平均会得到 (100+25)/2 = 62.5，说明必须按时间加权累加
+    getVisibleMessagesMock.mockReturnValue([
+      makeUserMessage(0),
+      makeAssistantMessage({ id: 's1', createdOffset: 0, streamedOffset: 1000, output: 100 }),
+      makeAssistantMessage({ id: 's2', createdOffset: 1000, streamedOffset: 5000, output: 100 }),
+    ])
+
+    const { result } = renderHook(() => useTokenRate('session-1'))
+
+    expect(result.current.tokensPerSec).toBe(40)
+  })
+
+  it('skips the streaming message and uses the previous settled turn', () => {
+    getVisibleMessagesMock.mockReturnValue([
+      makeUserMessage(0),
+      makeAssistantMessage({ createdOffset: 0, streamedOffset: 1000, output: 100 }),
+      // 新一轮：用户发问 + 尚在流式的回复
+      makeUserMessage(2000),
       makeStreamingMessage(),
     ])
 
@@ -199,13 +194,16 @@ describe('useTokenRate', () => {
     expect(result.current.tokensPerSec).toBe(100)
   })
 
+  it('reports no data when the only turn is still streaming', () => {
+    getVisibleMessagesMock.mockReturnValue([makeUserMessage(0), makeStreamingMessage()])
+
+    const { result } = renderHook(() => useTokenRate('session-1'))
+
+    expect(result.current).toEqual({ tokensPerSec: 0, hasData: false })
+  })
+
   it('reports no data when only user messages exist', () => {
-    getVisibleMessagesMock.mockReturnValue([
-      {
-        info: { id: 'u1', role: 'user', time: { created: BASE } },
-        parts: [],
-      } as unknown as Message,
-    ])
+    getVisibleMessagesMock.mockReturnValue([makeUserMessage(0)])
 
     const { result } = renderHook(() => useTokenRate('session-1'))
 

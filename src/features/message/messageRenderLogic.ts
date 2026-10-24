@@ -40,6 +40,41 @@ export type ProcessSplit = {
 }
 
 /**
+ * 是否为「常显」内容（不进过程折叠块）。
+ *
+ * 目前只有 todowrite：待办是用户要一直看的进度信息，不是需要折叠的执行细节。
+ * 收进「已处理 N 步」会让用户以为待办丢了（实测）。
+ *
+ * 用 `tool` 字段而非 `name`：前端领域模型里工具名就在 `tool` 上（适配层已归一）。
+ */
+export function isPinnedTodoContent(content: Content): boolean {
+  if (content.type !== 'tool') return false
+  const name = (content as ToolContent).tool?.toLowerCase() ?? ''
+  return name === 'todowrite' || name === 'todo_write'
+}
+
+/**
+ * 从 render items 里剔除待办项。
+ *
+ * 待办改由 ChatArea 在过程折叠块**外面**统一渲染（TurnTodoCards），
+ * 过程壳内若仍渲染同一份，每个条目会出现两次（实测）。
+ */
+export function stripTodoItems(items: RenderItem[]): RenderItem[] {
+  const result: RenderItem[] = []
+  for (const item of items) {
+    if (item.type === 'tool-group') {
+      const kept = item.contents.filter(content => !isPinnedTodoContent(content))
+      if (kept.length === 0) continue
+      result.push(kept.length === item.contents.length ? item : { type: 'tool-group', contents: kept })
+      continue
+    }
+    if (isPinnedTodoContent(item.content)) continue
+    result.push(item)
+  }
+  return result
+}
+
+/**
  * `groupContentsForRender` 的结果缓存。
  *
  * 同一个 `content` 数组在一次渲染里会被问很多次：`messageHasProcessContent`、

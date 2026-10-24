@@ -262,6 +262,7 @@ export function computeSessionStats(
   compactionUsage?: CompactionUsageHint,
   sessionUsage?: { tokens: TokenUsage; cost: number },
   compactionMarker?: CompactionMarker,
+  contextUsageSnapshot?: { tokens: TokenUsage; cost: number; at: number },
 ): SessionStats {
   // v2 的 assistant 消息在流式/出错时 tokens 可能缺省（undefined）；防御性读取，
   // 否则 tokenTotal → tokens.input 抛出 "Cannot read properties of undefined"。
@@ -333,6 +334,23 @@ export function computeSessionStats(
     lastAssistantWithTokensIndex,
     lastAssistantWithTokens,
   )
+  /**
+   * 上下文快照（`session.context`）的可用性。
+   *
+   * 只在「消息里完全没有实测值」时启用 —— 这正是走网关骨架投影的典型情况：
+   * 首屏每轮只留提问 + 最终回复，不带 tokens，于是 lastAssistantWithTokens
+   * 为 null、contextEstimated 为 true，圆环退化成按字符估算。
+   *
+   * 一旦消息里出现实测值（用户发过消息 → 拉到完整消息），就让它让位：
+   * 消息级值一定比快照新。
+   */
+  const snapshotContext =
+    contextUsageSnapshot && !lastAssistantWithTokens
+      ? (() => {
+          const total = tokenUsageTotal(contextUsageSnapshot.tokens)
+          return total > 0 ? total : null
+        })()
+      : null
   // 实测值 + 之后尚未被处理的用户输入：末尾多一条 user 消息时，上下文
   // 只增加了这条输入的长度，不该整轮退回字符估算。
   const measuredContext = lastAssistantWithTokens
@@ -341,9 +359,11 @@ export function computeSessionStats(
   const contextUsed =
     compactionContext !== null
       ? compactionContext
-      : contextEstimated
-        ? estimatedContextUsed
-        : (measuredContext ?? estimatedContextUsed)
+      : snapshotContext !== null
+        ? snapshotContext
+        : contextEstimated
+          ? estimatedContextUsed
+          : (measuredContext ?? estimatedContextUsed)
   const contextPercent = contextLimit > 0 ? Math.min(100, (contextUsed / contextLimit) * 100) : 0
 
   return {
@@ -358,7 +378,12 @@ export function computeSessionStats(
     contextLimit,
     contextPercent,
     // 服务端实测快照 → 非估算；marker 推算（字符数换算）仍是估算，如实标注。
-    contextEstimated: measuredCompaction !== null ? false : markerCompaction !== null ? true : contextEstimated,
+    contextEstimated:
+      measuredCompaction !== null || snapshotContext !== null
+        ? false
+        : markerCompaction !== null
+          ? true
+          : contextEstimated,
   }
 }
 
@@ -393,6 +418,7 @@ const sessionStatsMemo = new WeakMap<
     contextLimit: number
     compactionAt?: number
     markerAt?: number
+    snapshotKey?: string
     usageKey?: string
     stats: SessionStats
   }
@@ -404,9 +430,13 @@ export function computeSessionStatsCached(
   compactionUsage?: CompactionUsageHint,
   sessionUsage?: { tokens: TokenUsage; cost: number },
   compactionMarker?: CompactionMarker,
+  contextUsageSnapshot?: { tokens: TokenUsage; cost: number; at: number },
 ): SessionStats {
   const usageKey = sessionUsage
     ? `${sessionUsage.tokens.input}:${sessionUsage.tokens.output}:${sessionUsage.tokens.reasoning}:${sessionUsage.tokens.cache?.read ?? 0}:${sessionUsage.tokens.cache?.write ?? 0}:${sessionUsage.cost}`
+    : undefined
+  const snapshotKey = contextUsageSnapshot
+    ? `${contextUsageSnapshot.at}:${contextUsageSnapshot.tokens.input}:${contextUsageSnapshot.tokens.output}:${contextUsageSnapshot.tokens.reasoning}:${contextUsageSnapshot.tokens.cache?.read ?? 0}:${contextUsageSnapshot.tokens.cache?.write ?? 0}`
     : undefined
   const cached = sessionStatsMemo.get(messages)
   if (
@@ -416,15 +446,26 @@ export function computeSessionStatsCached(
     // 压缩标记的 `at` 单独参与缓存键：v2 的压缩只更新标记（不发事件），
     // 若只比 compactionUsage.at，marker 变化永远不会让缓存失效。
     cached.markerAt === compactionMarker?.at &&
+    // 上下文快照在后到达（backfill 是异步的）：不参与缓存键的话，
+    // 快照落地后圆环会一直停在字符估算值上。
+    cached.snapshotKey === snapshotKey &&
     cached.usageKey === usageKey
   ) {
     return cached.stats
   }
-  const stats = computeSessionStats(messages, contextLimit, compactionUsage, sessionUsage, compactionMarker)
+  const stats = computeSessionStats(
+    messages,
+    contextLimit,
+    compactionUsage,
+    sessionUsage,
+    compactionMarker,
+    contextUsageSnapshot,
+  )
   sessionStatsMemo.set(messages, {
     contextLimit,
     compactionAt: compactionUsage?.at,
     markerAt: compactionMarker?.at,
+    snapshotKey,
     usageKey,
     stats,
   })

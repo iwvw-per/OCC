@@ -319,6 +319,7 @@ export const EventTypes = {
   | 'session.renamed'
   | 'session.retry.scheduled'
   | 'session.usage.updated'
+  | 'session.step.streamed'
   | 'session.inbox.enqueued'
   | 'session.synthetic'
   | 'shell.created'

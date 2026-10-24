@@ -11,6 +11,11 @@ function userMessage(created: number): Message {
 
 interface AssistantOptions {
   created: number
+  /**
+   * 流式结束时刻（官方 tok/s 的分母来源）。
+   * 不填则退回 text part 窗口 / 整条消息时长。
+   */
+  streamed?: number
   completed?: number
   input?: number
   output?: number
@@ -22,7 +27,7 @@ interface AssistantOptions {
 }
 
 function assistantMessage(options: AssistantOptions): Message {
-  const { created, completed, textWindows = [], tools = [] } = options
+  const { created, completed, streamed, textWindows = [], tools = [] } = options
   const content: Content[] = []
 
   for (const window of textWindows) {
@@ -40,7 +45,11 @@ function assistantMessage(options: AssistantOptions): Message {
   return {
     info: {
       role: 'assistant',
-      time: completed === undefined ? { created } : { created, completed },
+      time: {
+        created,
+        ...(streamed !== undefined ? { streamed } : {}),
+        ...(completed !== undefined ? { completed } : {}),
+      },
       tokens: {
         input: options.input ?? 0,
         output: options.output ?? 0,
@@ -205,7 +214,36 @@ describe('computeSessionTurnStats', () => {
     expect(stats.ttftMs).toBe(200)
   })
 
-  it('computes tokens per second from merged text windows only', () => {
+  it('computes tokens per second from the streamed window (official口径)', () => {
+    const stats = computeSessionTurnStats([
+      userMessage(0),
+      assistantMessage({
+        created: 1000,
+        // 官方口径：分母是 streamed-created = 2000ms，不含其后 8s 的工具等待与收尾
+        streamed: 3000,
+        completed: 11_000,
+        output: 200,
+      }),
+    ])
+    expect(stats.tokensPerSec).toBe(100)
+  })
+
+  it('prefers streamed over text part windows', () => {
+    const stats = computeSessionTurnStats([
+      userMessage(0),
+      assistantMessage({
+        created: 1000,
+        streamed: 3000, // 2000ms → 200/2s = 100
+        completed: 11_000,
+        output: 200,
+        // part 窗口若被采用会得到 200/1s = 200，验证优先级
+        textWindows: [{ start: 1000, end: 2000 }],
+      }),
+    ])
+    expect(stats.tokensPerSec).toBe(100)
+  })
+
+  it('falls back to text part windows when streamed is absent', () => {
     const stats = computeSessionTurnStats([
       userMessage(0),
       assistantMessage({
@@ -222,7 +260,7 @@ describe('computeSessionTurnStats', () => {
     expect(stats.tokensPerSec).toBe(100)
   })
 
-  it('falls back to whole message duration when parts carry no timing', () => {
+  it('falls back to whole message duration when nothing carries timing', () => {
     const stats = computeSessionTurnStats([
       userMessage(0),
       assistantMessage({ created: 1000, completed: 3000, output: 100 }),
@@ -230,18 +268,21 @@ describe('computeSessionTurnStats', () => {
     expect(stats.tokensPerSec).toBe(50)
   })
 
-  it('excludes reasoning tokens from the speed numerator', () => {
+  it('counts reasoning tokens in the speed numerator (official口径)', () => {
+    // 官方 turnTokensPerSecond 用 output+reasoning：
+    // (100+900) / 1s = 1000 tok/s，只算 output 会得到 100
     const stats = computeSessionTurnStats([
       userMessage(0),
       assistantMessage({
         created: 1000,
+        streamed: 2000,
         completed: 3000,
         output: 100,
         reasoning: 900,
-        textWindows: [{ start: 1000, end: 2000 }],
       }),
     ])
-    expect(stats.tokensPerSec).toBe(100)
+    expect(stats.tokensPerSec).toBe(1000)
+    // outputTokens（口径为「输出 token 总数」）仍然只统计 output
     expect(stats.outputTokens).toBe(100)
   })
 

@@ -910,6 +910,27 @@ class MessageStore {
   }
 
   /**
+   * 记录上下文占用快照（`session.context` 里最后一条带 tokens 的 assistant）。
+   *
+   * 用于补「骨架投影不带 tokens」的洞：进入会话时消息里没有实测用量，
+   * 圆环只能按字符估算，看起来「只有发一条消息后才对」。
+   *
+   * 覆盖策略：只在还没有快照时写，或新快照更新时覆盖。消息级实测值
+   * 永远优先（见 computeSessionStats 的取值顺序），所以这里不需要与
+   * `usage` / `compactionUsage` 争优先级。
+   */
+  recordContextUsageSnapshot(sessionId: string, tokens: TokenUsage, cost: number, at?: number) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    const nextAt = at ?? Date.now()
+    // 已有更新的快照就不回退（乱序/重复补数据）
+    if (state.contextUsage && state.contextUsage.at > nextAt) return
+    state.contextUsage = { tokens, cost, at: nextAt }
+    this.notify([sessionId])
+  }
+
+  /**
    * 记录压缩完成后的上下文规模。
    *
    * 圆环能在压缩后立刻掉下来的关键。v2 的压缩事件里 `tokens` 是**压缩前**用量，
@@ -952,6 +973,11 @@ class MessageStore {
   getCompactionMarker(sessionId: string | null): SessionState['compactionMarker'] {
     if (!sessionId) return undefined
     return this.sessions.get(this.resolveKey(sessionId))?.compactionMarker
+  }
+
+  getContextUsageSnapshot(sessionId: string | null): SessionState['contextUsage'] {
+    if (!sessionId) return undefined
+    return this.sessions.get(this.resolveKey(sessionId))?.contextUsage
   }
 
   markAllSessionsStale() {
@@ -1359,9 +1385,23 @@ class MessageStore {
       if (apiMsg.role === 'user') this.optimisticMessageIds.delete(apiMsg.id)
       // 合并而非整体替换：v2 的 step.ended/step.failed 只带部分字段（tokens/cost/error），
       // 若整体替换会把 step.started 落下的 modelID/providerID/agent 清空。
+      //
+      // time 单独做深合并：v2 把一条 assistant 消息的时间拆成多个事件发
+      // （step.started→created、step.streamed→streamed、step.ended→completed）。
+      // 浅合并会用后来的 `{streamed}` / `{completed}` 把 created 整个顶掉，
+      // 于是速度统计拿不到起点、分母退化成 0。
+      const incomingInfo = toUIMessageInfo(apiMsg)
+      const mergedTime =
+        oldMessage.info.time || incomingInfo.time
+          ? { ...oldMessage.info.time, ...incomingInfo.time }
+          : undefined
       const newMessage: Message = {
         ...oldMessage,
-        info: { ...oldMessage.info, ...toUIMessageInfo(apiMsg) } as Message['info'],
+        info: {
+          ...oldMessage.info,
+          ...incomingInfo,
+          ...(mergedTime ? { time: mergedTime } : {}),
+        } as Message['info'],
       }
       state.messages = [
         ...state.messages.slice(0, existingIndex),

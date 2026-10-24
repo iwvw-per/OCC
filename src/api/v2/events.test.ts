@@ -91,6 +91,38 @@ describe('v2 event → GlobalEvent', () => {
     expect(info?.agent).toBe('build')
   })
 
+  it('maps step.streamed to MESSAGE_UPDATED carrying time.streamed', () => {
+    /**
+     * 官方 tok/s 的分母是 `streamed - created`（opencode TUI 的
+     * turnTokensPerSecond）。这个事件若不映射，前端永远拿不到 streamed，
+     * 只能退回整条消息时长，速度会被 TTFT 与工具等待摊薄。
+     */
+    const p = payloadOf({
+      type: 'session.step.streamed',
+      created: 1792863274494,
+      data: { sessionID: 's', assistantMessageID: 'm' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.MESSAGE_UPDATED)
+    const info = p?.properties.info as { id: string; role: string; time: { streamed?: number } }
+    expect(info?.id).toBe('m')
+    expect(info?.role).toBe('assistant')
+    expect(info?.time.streamed).toBe(1792863274494)
+    // 只带变更字段：不能把 created / completed / model 一起覆盖掉
+    expect(info?.time as Record<string, unknown>).not.toHaveProperty('created')
+    expect(info?.time as Record<string, unknown>).not.toHaveProperty('completed')
+  })
+
+  it('drops step.streamed without assistantMessageID', () => {
+    const p = payloadOf({
+      type: 'session.step.streamed',
+      created: 1,
+      data: { sessionID: 's' },
+      location: { directory: '/w' },
+    })
+    expect(p).toBeNull()
+  })
+
   it('maps session.renamed to SESSION_RENAMED with sessionID + title (not full session)', () => {
     const p = payloadOf({
       type: 'session.renamed',

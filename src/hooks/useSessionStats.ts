@@ -28,6 +28,7 @@ export function useSessionStats(contextLimit: number = 200000): SessionStats {
       messageStore.getCompactionUsage(sessionId),
       messageStore.getSessionUsage(sessionId),
       messageStore.getCompactionMarker(sessionId),
+      messageStore.getContextUsageSnapshot(sessionId),
     )
     const prev = cacheRef.current
     if (prev && isSameSessionStats(prev, next)) return prev

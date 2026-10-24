@@ -28,11 +28,25 @@ interface TodoItem {
 
 export function TodoRenderer({ part }: ToolRendererProps) {
   const { currentSessionId } = useSessionNavigation()
-  // 实时状态以 todoStore 为准（由 utils/todoSyncBridge 从消息流的 todowrite
-  // 投影进来 —— v2 没有 todo.updated 事件）；卡片自带的 input 快照作为
-  // store 尚未收到数据时的兜底（如刚打开的历史消息）。
   const storeTodos = useTodos(currentSessionId ?? null)
-  const todos: TodoItem[] = storeTodos.length > 0 ? storeTodos : extractTodos(part)
+  // ============================================
+  // 渲染哪一份待办
+  // ============================================
+  //
+  // 每个 todowrite part 携带的是**这一次调用**的完整快照，卡片必须只显示它自己
+  // 那份 —— 那是这一轮真实发生的事，是历史记录。
+  //
+  // 之前的写法是「store 有数据就用 store」，看着能让流式中的卡片实时更新，
+  // 实际有个严重后果：store 里只有「最后一次」的状态，而一个会话可能调用过
+  // 多次 todowrite（实测一条会话有 2 次，5 条 → 7 条）。于是所有历史卡片都被
+  // 替换成最新那 7 条，早期轮次的待办在消息流里彻底消失，用户以为「待办丢了」。
+  //
+  // 现在的取法：
+  //   1. 优先用 part 自带的 input.todos（历史卡片 → 各显示各的）
+  //   2. part 还没拿到 input 时（流式早期、或骨架投影剥掉了过程），退回 store
+  // 面板（Tasks）仍然只显示最新一份，那是「当前进度」的正确语义。
+  const ownTodos = extractTodos(part)
+  const todos: TodoItem[] = ownTodos.length > 0 ? ownTodos : storeTodos
 
   if (todos.length === 0) {
     return null
@@ -45,7 +59,7 @@ export function TodoRenderer({ part }: ToolRendererProps) {
 // TodoList Component
 // ============================================
 
-function TodoList({ todos, stateKey }: { todos: TodoItem[]; stateKey: string }) {
+export function TodoList({ todos, stateKey }: { todos: TodoItem[]; stateKey: string }) {
   const { t } = useTranslation('message')
   const [collapsed, setCollapsed] = useUiDisclosureState(stateKey, false)
   // Android expand: 展开用 max-height 假高度，避免 WebView 在 grid-rows 动画中

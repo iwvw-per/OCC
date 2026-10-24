@@ -13,10 +13,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const getContext = vi.fn()
 const recordFallback = vi.fn()
+const recordSnapshot = vi.fn()
 
 vi.mock('./v2NativeSession', () => ({ nativeGetSessionContext: getContext }))
 vi.mock('../store/messageStore', () => ({
-  messageStore: { recordSessionUsageFallback: recordFallback },
+  messageStore: {
+    recordSessionUsageFallback: recordFallback,
+    recordContextUsageSnapshot: recordSnapshot,
+  },
 }))
 vi.mock('../utils/sessionKey', () => ({
   sessionKeyToServerId: (key: string) => key.slice(0, key.indexOf('::')),
@@ -104,5 +108,46 @@ describe('backfillSessionUsage', () => {
     getContext.mockResolvedValue([assistant({ input: 1 })])
     await backfillSessionUsage('aiagent:inst_9::ses_abc')
     expect(getContext).toHaveBeenCalledWith('aiagent:inst_9', 'ses_abc')
+  })
+
+  describe('上下文占用快照', () => {
+    it('取最后一条带 tokens 的 assistant 作为快照', async () => {
+      // 走网关骨架投影时消息不带 tokens，圆环只能靠这份快照。
+      // 官方口径取「最后一条带 tokens 的 assistant」，不是累加。
+      getContext.mockResolvedValue([
+        { type: 'user', text: 'hi' },
+        assistant({ input: 100, output: 10, reasoning: 0, cache: { read: 1000, write: 0 } }, 0.1),
+        assistant({ input: 200, output: 20, reasoning: 5, cache: { read: 2000, write: 0 } }, 0.2),
+      ])
+
+      await backfillSessionUsage(KEY)
+
+      expect(recordSnapshot).toHaveBeenCalledWith(
+        KEY,
+        { input: 200, output: 20, reasoning: 5, cache: { read: 2000, write: 0 } },
+        0.2,
+      )
+    })
+
+    it('跳过全 0 的 assistant（尚未结算）', async () => {
+      getContext.mockResolvedValue([
+        assistant({ input: 300, output: 30, reasoning: 0, cache: { read: 0, write: 0 } }),
+        assistant({ input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }),
+      ])
+
+      await backfillSessionUsage(KEY)
+
+      expect(recordSnapshot).toHaveBeenCalledWith(
+        KEY,
+        { input: 300, output: 30, reasoning: 0, cache: { read: 0, write: 0 } },
+        0,
+      )
+    })
+
+    it('没有任何有效 tokens 时不写快照', async () => {
+      getContext.mockResolvedValue([assistant({ input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })])
+      await backfillSessionUsage(KEY)
+      expect(recordSnapshot).not.toHaveBeenCalled()
+    })
   })
 })

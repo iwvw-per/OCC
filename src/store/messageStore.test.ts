@@ -80,6 +80,26 @@ describe('messageStore', () => {
     messageStore.clearAll()
   })
 
+  it('deep-merges info.time so streamed does not wipe created', () => {
+    /**
+     * 回归：v2 把一条 assistant 消息的时间拆成多个事件发
+     * （step.started→created、step.streamed→streamed、step.ended→completed）。
+     * 早先 info 是浅合并，后来的 `time:{streamed}` 会把 created 整个顶掉，
+     * 速度统计的分母随之失效（created 缺失 → 窗口算不出来）。
+     */
+    messageStore.handleMessageUpdated({
+      ...createAssistantMessage('message-1'),
+      time: { created: 1000 },
+    })
+    messageStore.handleMessageUpdated({
+      ...createAssistantMessage('message-1'),
+      time: { streamed: 3000 },
+    } as never)
+
+    const time = messageStore.getSessionState('session-1')?.messages[0].info.time
+    expect(time).toMatchObject({ created: 1000, streamed: 3000 })
+  })
+
   it('applies a part update when the message already exists', () => {
     messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
     messageStore.handlePartUpdated(createTextPart('part-1', 'message-1', 'hello'))

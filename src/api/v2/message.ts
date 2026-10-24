@@ -197,7 +197,12 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
         id,
         sessionID,
         role: 'assistant',
-        time: { created: num(time.created) ?? 0, completed: num(time.completed) },
+        time: {
+          created: num(time.created) ?? 0,
+          // 流式结束时刻：官方 tok/s 的分母来源（见 MessageTime.streamed）
+          ...(num(time.streamed) != null ? { streamed: num(time.streamed) } : {}),
+          completed: num(time.completed),
+        },
         parentID: str(m.parentID) ?? '',
         modelID: str(model.id) ?? str(m.modelID) ?? '',
         providerID: str(model.providerID) ?? str(m.providerID) ?? '',

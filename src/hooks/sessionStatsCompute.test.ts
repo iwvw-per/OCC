@@ -53,6 +53,89 @@ function compactionMessage(id: string, at: number): Message {
   } as unknown as Message
 }
 
+describe('context usage snapshot（骨架投影不带 tokens 的兜底）', () => {
+  /** 骨架投影里的 assistant：只有正文，没有任何 tokens */
+  function skeletonAssistant(id: string, at: number): Message {
+    return {
+      info: {
+        id,
+        role: 'assistant',
+        sessionID: 's',
+        time: { created: BASE + at, completed: BASE + at + 10 },
+        parentID: 'u1',
+        modelID: 'm',
+        providerID: 'p',
+        mode: 'chat',
+        agent: 'default',
+        path: { cwd: '/', root: '/' },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      content: [{ type: 'text', text: '很短的回复', id: `${id}-p`, sessionID: 's', messageID: id }],
+    } as unknown as Message
+  }
+
+  it('uses the snapshot when no message carries tokens', () => {
+    // 典型场景：走网关骨架投影进入会话，消息里没有 tokens。
+    // 没有快照只能按字符估算（这里只有十几个字 → 极小值）。
+    const messages = [userMessage('u1', '问题', 0), skeletonAssistant('a1', 5)]
+    const estimated = computeSessionStats(messages, 200000)
+    const withSnapshot = computeSessionStats(messages, 200000, undefined, undefined, undefined, {
+      at: BASE,
+      tokens: { input: 8000, output: 300, reasoning: 200, cache: { read: 4000, write: 0 } },
+      cost: 0,
+    })
+
+    expect(estimated.contextEstimated).toBe(true)
+    expect(estimated.contextUsed).toBeLessThan(100)
+
+    // 官方口径：input + output + reasoning + cache.read + cache.write
+    expect(withSnapshot.contextUsed).toBe(12500)
+    expect(withSnapshot.contextEstimated).toBe(false)
+  })
+
+  it('ignores the snapshot once a message carries measured tokens', () => {
+    // 用户发过消息 → 拉到完整消息，消息级实测值一定比快照新
+    const messages = [
+      userMessage('u1', '问题', 0),
+      assistantMessage('a1', 5, { input: 1000, output: 50, reasoning: 0, cache: { read: 500, write: 0 } }),
+    ]
+    const stats = computeSessionStats(messages, 200000, undefined, undefined, undefined, {
+      at: BASE,
+      tokens: { input: 9999, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: 0,
+    })
+
+    expect(stats.contextUsed).toBe(1550)
+    expect(stats.contextEstimated).toBe(false)
+  })
+
+  it('still prefers the compaction snapshot over the backfill snapshot', () => {
+    const messages = [userMessage('u1', '问题', 0), skeletonAssistant('a1', 5)]
+    const stats = computeSessionStats(
+      messages,
+      200000,
+      { at: BASE, tokens: { input: 3000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+      undefined,
+      undefined,
+      { at: BASE, tokens: { input: 9999, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 },
+    )
+
+    expect(stats.contextUsed).toBe(3000)
+  })
+
+  it('falls back to estimation when the snapshot is empty', () => {
+    const messages = [userMessage('u1', '问题', 0), skeletonAssistant('a1', 5)]
+    const stats = computeSessionStats(messages, 200000, undefined, undefined, undefined, {
+      at: BASE,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: 0,
+    })
+
+    expect(stats.contextEstimated).toBe(true)
+  })
+})
+
 describe('computeSessionStats', () => {
   it('switches to estimated context after a compaction turn', () => {
     const stats = computeSessionStats(
@@ -213,6 +296,23 @@ describe('computeSessionStatsCached', () => {
     })
     expect(after).not.toBe(before)
     expect(after.contextUsed).toBe(9500)
+  })
+
+  it('recomputes when only the context usage snapshot arrives', () => {
+    /**
+     * backfill 是异步的：快照落地时 messages 引用没变。
+     * 若快照不参与缓存键，圆环会一直停在字符估算值上 ——
+     * 这正是「进入会话用量不对」的表现。
+     */
+    const messages: Parameters<typeof computeSessionStats>[0] = []
+    const before = computeSessionStatsCached(messages, 200000)
+    const after = computeSessionStatsCached(messages, 200000, undefined, undefined, undefined, {
+      at: BASE,
+      tokens: { input: 8000, output: 300, reasoning: 200, cache: { read: 4000, write: 0 } },
+      cost: 0,
+    })
+    expect(after).not.toBe(before)
+    expect(after.contextUsed).toBe(12500)
   })
 
   it('recomputes when the server cumulative usage changes', () => {

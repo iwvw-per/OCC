@@ -50,6 +50,7 @@ import {
   groupContentsForRender,
   messageStillStreamingProcess,
   splitProcessRenderItems,
+  stripTodoItems,
   type ProcessContentScope,
   type RenderItem,
 } from './messageRenderLogic'
@@ -965,15 +966,19 @@ const AssistantMessageView = memo(function AssistantMessageView({
   // 收集连续的 tool content 合并渲染；过程折叠时按 scope 拆分
   const renderItems = useMemo(() => {
     const items = groupContentsForRender(content)
-    if (processContentScope === 'all' || processContentScope === 'inline') return items
-    // 流式未完成：整袋当 process，不拆 final
+    // 'all' 表示「不拆过程/最终」，但待办仍要剔掉 —— 它由 ChatArea 在折叠块外
+    // 统一渲染（TurnTodoCards），这里保留会重复。
+    if (processContentScope === 'all') return stripTodoItems(items)
+    // 流式未完成：整袋当 process，不拆 final；但待办已由 ChatArea 在折叠块外
+    // 统一渲染（TurnTodoCards），这里一律剔除，避免同一条待办出现两次。
     if (messageStillStreamingProcess(message)) {
-      return processContentScope === 'process' ? items : []
+      return processContentScope === 'process' ? stripTodoItems(items) : []
     }
     const split = splitProcessRenderItems(items)
-    if (processContentScope === 'process') return split.processItems
+    if (processContentScope === 'process') return stripTodoItems(split.processItems)
     if (processContentScope === 'final') return split.finalItems
-    return items
+    // inline：同属过程壳，剔除待办
+    return stripTodoItems(items)
   }, [content, processContentScope, message])
 
   // 判断哪些 reasoning content 已经结束（后面出现了任何非空 content）

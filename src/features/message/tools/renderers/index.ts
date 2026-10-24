@@ -1,6 +1,6 @@
 export { DefaultRenderer } from './DefaultRenderer'
 export { BashRenderer } from './BashRenderer'
 export { QuestionRenderer } from './QuestionRenderer'
-export { TodoRenderer } from './TodoRenderer'
+export { TodoRenderer, TodoList } from './TodoRenderer'
 export { hasTodos } from './todoUtils'
 export { TaskRenderer, TaskHeader, TaskBody, TaskAgentBadge } from './TaskRenderer'

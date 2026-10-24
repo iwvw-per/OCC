@@ -366,6 +366,24 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       })
     }
 
+    // 流式输出结束：记下 streamed 时刻。官方 TUI 的 tok/s 分母就是
+    // `streamed - created`（见 opencode packages/tui/.../rows.ts 的 turnTokensPerSecond），
+    // 它精确圈出「模型吐字的窗口」，把 TTFT、工具执行、step 间等待都排除在外。
+    // 不映射这个事件 → 前端只能退回整条消息时长，速度被系统性摊薄。
+    case 'session.step.streamed': {
+      const messageID = str(data.assistantMessageID) ?? ''
+      if (!messageID) return null
+      const streamed = num(e.created) ?? Date.now()
+      return globalEvent(directory, EventTypes.MESSAGE_UPDATED, {
+        info: {
+          id: messageID,
+          sessionID,
+          role: 'assistant',
+          time: { streamed },
+        },
+      })
+    }
+
     case 'session.text.started': {
       const messageID = str(data.assistantMessageID) ?? ''
       const ordinal = num(data.ordinal) ?? 0

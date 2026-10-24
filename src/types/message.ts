@@ -20,6 +20,18 @@ export interface MessageTime {
    * 并被 ErrorBoundary 兜成整页「OCC ran into a problem」。
    */
   created?: number
+  /**
+   * 流式输出结束时刻（`session.step.streamed`）。
+   *
+   * 语义：**该步模型把内容吐完的时刻**，不是首 token 时刻。
+   * 官方 TUI 的 tok/s 就用它做分母（`streamed - created`），
+   * 见 opencode `packages/tui/src/routes/session/rows.ts` 的 `turnTokensPerSecond`。
+   *
+   * 为什么必须单独有这个字段：v2 的 text part **完全没有 time**，
+   * 只有 reasoning / tool 有；用 part 时间算速度永远拿不到样本，
+   * 只能退回「整条消息时长」，把 TTFT 与工具执行也算进生成时间。
+   */
+  streamed?: number
   completed?: number
 }
 
