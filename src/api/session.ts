@@ -205,8 +205,14 @@ export async function getSessions(
 
 /**
  * 获取已归档的 session 列表（按归档时间倒序）
+ *
+ * `skipCache` 透传给 getSessions：归档面板读的是「服务端真值」，不接受
+ * 30s 列表缓存——跨端归档不会通知本端，读缓存会拿到归档前的快照。
  */
-export async function getArchivedSessions(params: SessionListParams = {}, serverId?: string): Promise<ApiSession[]> {
+export async function getArchivedSessions(
+  params: SessionListParams & { skipCache?: boolean } = {},
+  serverId?: string,
+): Promise<ApiSession[]> {
   const sessions = await getSessions({ ...params, archivedOnly: true }, serverId)
   return [...sessions].sort((a, b) => (b.time?.archived ?? 0) - (a.time?.archived ?? 0))
 }

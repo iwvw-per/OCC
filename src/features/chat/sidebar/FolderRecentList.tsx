@@ -30,6 +30,7 @@ import { makeSessionKey, splitSessionKey } from '../../../utils/sessionKey'
 import { notificationStore, useNotifications } from '../../../store/notificationStore'
 import { pinnedSessionsStore, type PinnedSessionEntry } from '../../../store/pinnedSessionsStore'
 import { serverStore } from '../../../store/serverStore'
+import { sessionListIndexStore } from '../../../store/sessionListIndexStore'
 import { SessionListItem } from '../../sessions'
 import { getSelectionRoundClass } from '../../sessions/selectionRound'
 import { SessionChildrenSlot } from './SessionChildrenSlot'
@@ -841,6 +842,9 @@ function FolderRecentSection({
         // 项目行/会话行一直显示运行中。
         activeSessionStore.removeSession(makeSessionKey(serverId ?? serverStore.getActiveServerId(), sessionId))
         removeLocalSession(sessionId)
+        // 让归档视图过期：否则「已归档」面板会继续显示归档前的快照，
+        // 用户必须刷新页面才看得到刚归档的会话。
+        sessionListIndexStore.invalidateArchivedView(serverId ?? serverStore.getActiveServerId())
         // 本地移除不会收敛分页上限：归档掉最后一条「多取的探针行」后，
         // hasMore 会停在 true，导致只剩 5 条也显示加载更多。重新拉取校准。
         await refresh()

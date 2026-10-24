@@ -1145,6 +1145,11 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             // 否则「归档前正在跑」的会话会永久留在 busy 集合，项目行一直显示运行中。
             activeSessionStore.removeSession(scopedId)
           }
+          // 归档态变化（本端或其它客户端）都要让归档视图过期：
+          // applySessionChanged 只往「已存在」的归档桶里写，而桶一旦加载过就会
+          // 一直用旧快照（30s TTL 内甚至不重拉），归档后必须刷新页面才看得到。
+          // 这里只标新鲜度失效，不清条目——重开面板仍能首帧上屏，再静默补齐。
+          sessionListIndexStore.invalidateArchivedView(serverId)
           // 更新 session meta 供 active tab 使用
           activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
           if (session.parentID) {

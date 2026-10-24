@@ -232,6 +232,45 @@ class SessionListIndexStore {
     return this.buckets.get(bucketId(key))?.fetchedAt ?? 0
   }
 
+  /**
+   * 标记桶内容过期：**保留现有条目**（重开时首帧仍能立即上屏），
+   * 但把 fetchedAt 归零，让读取侧下一次挂载判定为陈旧并静默重拉。
+   *
+   * 与 replace(bucket, []) 的区别：后者会清空列表，用户会看到闪一下空白。
+   * 这里只让「新鲜度」失效，不清内容。
+   */
+  invalidate(key: SessionListBucketKey): void {
+    const bucket = this.buckets.get(bucketId(key))
+    if (!bucket || !bucket.loaded || bucket.fetchedAt === 0) return
+    bucket.fetchedAt = 0
+    bucket.touchedAt = Date.now()
+    this.emit()
+  }
+
+  /**
+   * 让某台服务器的「归档视图」桶全部过期。
+   *
+   * 归档动作只把会话从活跃桶摘掉，归档桶若此前已加载过就会一直是旧快照
+   * （30s TTL 内甚至完全不重拉），表现为「归档后必须刷新页面才能在已归档
+   * 面板看到」。归档态一变就让归档桶失效，下次打开面板静默重拉即可。
+   *
+   * 按 serverId + view 匹配而不是构造精确 key：归档桶可能由不同 scope 的
+   * 消费方创建，逐个覆盖才不会漏。
+   */
+  invalidateArchivedView(serverId: string): void {
+    let changed = false
+    const now = Date.now()
+    for (const bucket of this.buckets.values()) {
+      if (bucket.key.serverId !== serverId) continue
+      if (bucket.key.view !== 'archived') continue
+      if (!bucket.loaded || bucket.fetchedAt === 0) continue
+      bucket.fetchedAt = 0
+      bucket.touchedAt = now
+      changed = true
+    }
+    if (changed) this.emit()
+  }
+
   /** 当前桶成员版本（发请求前取，回包时校验） */
   getMembershipRevision(key: SessionListBucketKey): number {
     return this.buckets.get(bucketId(key))?.membershipRevision ?? 0

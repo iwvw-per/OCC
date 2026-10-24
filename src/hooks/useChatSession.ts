@@ -53,6 +53,7 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { serverStorage } from '../utils/perServerStorage'
 import { sessionKeyToServerId, splitSessionKey, makeSessionKey } from '../utils/sessionKey'
 import { serverStore } from '../store/serverStore'
+import { sessionListIndexStore } from '../store/sessionListIndexStore'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
 import type { ChatAreaHandle } from '../features/chat'
 import { followupQueueStore } from '../store/followupQueueStore'
@@ -1236,6 +1237,10 @@ export function useChatSession({
       // 「运行中」标识或未读点（归档前正在跑的会话会永久留在 busy 集合）。
       activeSessionStore.removeSession(routeSessionId)
       notificationStore.removeSessionNotifications(routeSessionId)
+      // 让归档视图过期：本端动作不等 SSE 回环，下次打开面板就能看到这条。
+      sessionListIndexStore.invalidateArchivedView(
+        paneServerId ?? serverStore.getActiveServerId(),
+      )
       navigateHome()
       handleNewChat()
     } catch (error) {

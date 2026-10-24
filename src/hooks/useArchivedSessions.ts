@@ -88,7 +88,11 @@ export function useArchivedSessions(options: UseArchivedSessionsOptions = {}): U
       }
       try {
         const expectedMembership = sessionListIndexStore.getMembershipRevision(bucket)
-        const data = await getArchivedSessions({ roots: false, limit }, serverId)
+        // skipCache：绕过 sessionListCache 的 30s 列表缓存。归档动作发生在
+        // 「另一台主机 / 另一个标签页」时，本端不会收到失效通知，读缓存就会
+        // 拿到归档前的快照（表现为归档后看不到、刷新才出现）。
+        // 归档面板打开频率低，这里始终读服务端真值。
+        const data = await getArchivedSessions({ roots: false, limit, skipCache: true }, serverId)
         if (requestId !== requestIdRef.current) return
         sessionListIndexStore.replace(bucket, data, {
           limit: data.length,
@@ -113,10 +117,16 @@ export function useArchivedSessions(options: UseArchivedSessionsOptions = {}): U
 
   useEffect(() => {
     if (!enabled) return
-    // 索引有内容：先上屏，陈旧才后台刷新
+    // 有缓存：先上屏（不转圈），同时静默重拉一次。
+    //
+    // 为什么不是「TTL 内直接跳过」：归档动作可能由其它客户端、其它标签页或
+    // 另一台主机发起，本端 SSE 失效并不可靠；只要跳过重拉，就会表现为
+    // 「归档后必须刷新页面才能在已归档面板看到」。面板一次只开一个、
+    // 打开频率低，重拉一次的代价远小于看到旧列表。
+    // 极短窗口（REOPEN_TTL）只为挡住 StrictMode / 快速开关造成的重复请求。
     if (sessionListIndexStore.has(bucket)) {
       const age = Date.now() - sessionListIndexStore.getFetchedAt(bucket)
-      if (age > ARCHIVED_TTL_MS) void fetchArchived({ silent: true })
+      if (age > ARCHIVED_REOPEN_TTL_MS) void fetchArchived({ silent: true })
       return
     }
     void fetchArchived()
@@ -215,5 +225,10 @@ export function useArchivedSessions(options: UseArchivedSessionsOptions = {}): U
   return { sessions, isLoading, error, refresh, restore, remove, removeMany }
 }
 
-/** 归档索引 TTL：超过此时长重开会触发一次后台静默刷新 */
-const ARCHIVED_TTL_MS = 30_000
+/**
+ * 重开面板时的静默重拉窗口。
+ *
+ * 只挡 StrictMode 双挂载与「开关→立刻再开」这类重复请求，不承担「缓存多久
+ * 算新鲜」的职责：归档面板一次只开一个，每次打开都重新校准一次是值得的。
+ */
+const ARCHIVED_REOPEN_TTL_MS = 2_000

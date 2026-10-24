@@ -1016,8 +1016,17 @@ h6 {
  */
 
 @media (max-width: 768px) {
-  /* 移动端触摸目标最小尺寸 - 只对独立按钮生效，不影响紧凑组件内部 */
-  button:not(.touch-target-sm):not([role='tab']):not([role='switch']):not([data-compact]) {
+  /*
+   * 移动端触摸目标最小尺寸 - 只对独立按钮生效，不影响紧凑组件内部。
+   *
+   * 必须排除 checkbox / radio：Radix 把它们渲染成 `<button role="checkbox">`，
+   * 尺寸由自身 `size-4` 决定。只加 min-height 会把它从 16×16 拉成 16×32，
+   * 得到一个竖长的选框（归档面板、工作状态面板都受影响）。
+   * 选择类控件的可点区域应由外层 label/行提供，不该靠拉伸控件本身。
+   */
+  button:not(.touch-target-sm):not([role='tab']):not([role='switch']):not([role='checkbox']):not(
+      [role='radio']
+    ):not([role='menuitemcheckbox']):not([role='menuitemradio']):not([data-compact]) {
     min-height: 32px;
   }
 
