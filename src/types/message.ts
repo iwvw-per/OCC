@@ -105,6 +105,13 @@ export interface UserMessageInfo {
   agent: string
   model: ModelRef
   summary?: MessageSummary
+  /**
+   * 用户输入的正文。
+   *
+   * v2 的 user 消息**不带 content[]**，正文就在这个字段（实测 `{id,time,text,type}`）；
+   * content 只在带工具/附件时才出现。上下文估算必须读它，否则用户输入全被算成 0。
+   */
+  text?: string
   /** 用户消息附带的文件 / agent 引用（v2 user message 的 files[]/agents[]，或 v1 file/agent part 折叠） */
   attachments?: Attachment[]
 }

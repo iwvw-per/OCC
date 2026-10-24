@@ -264,6 +264,10 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
   // 其余系统消息（idle / model-switched / agent-switched / system / skill / shell /
   // compaction）一律丢弃，避免它们污染对话流导致用户/助手位置错乱。
   if (type !== 'user') return null
+  // 正文同时挂到 info.text：v2 的 user 消息正文在顶层 `text`，而前端领域模型
+  // 以 content[] 为主。上下文估算等「只要体积、不渲染」的路径读 info.text
+  // 比遍历 content 更直接，也避免与 content 里的同一段正文重复计数。
+  const userText = str(m.text)
   return {
     info: {
       id,
@@ -272,6 +276,7 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
       time: { created: num(time.created) ?? 0 },
       agent: str(m.agent) ?? '',
       model: { providerID: '', modelID: '' },
+      ...(userText !== undefined ? { text: userText } : {}),
     } as never,
     parts: adaptUserParts(m),
     ...(lightweight ? { lightweight } : {}),

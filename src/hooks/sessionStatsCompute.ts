@@ -1,31 +1,124 @@
-import type { AssistantMessageInfo, Content, Message, TokenUsage } from '../types/message'
+import type { AssistantMessageInfo, Content, Message, TokenUsage, UserMessageInfo } from '../types/message'
 import type { SessionStats } from './sessionStatsTypes'
 import type { CompactionMarker } from '../api/v2/message'
 
 const COMPACTED_TOOL_PLACEHOLDER = '[Old tool result content cleared]'
 
-function estimateTokens(chars: number): number {
-  return Math.ceil(chars / 4)
+/**
+ * 字符 → token 的粗略换算。
+ *
+ * 官方口径大致是「英文约 4 字符 1 token」，但**中文/日文/韩文等 CJK 字符
+ * 约 1 字 1 token**，直接 /4 会把中文内容低估 3～4 倍。会话里中文占一成时，
+ * 估算就已经明显偏小了，所以这里按字符类别分别折算。
+ *
+ * 这只是兜底路径（正常情况用服务端实测 tokens），精度要求不高，但
+ * 「系统性低估」会让用户在压缩前完全看不出快满了，因此必须按类别折算。
+ */
+const CJK_RE = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/
+
+/** 累计器：分别记 CJK 与非 CJK 字符数，避免把大段文本重复拼成字符串再遍历。 */
+interface CharTally {
+  cjk: number
+  rest: number
 }
 
-function charsFromUserContent(content: Content): number {
-  if (content.type === 'text') return content.text.length
-  return 0
+function emptyTally(): CharTally {
+  return { cjk: 0, rest: 0 }
 }
 
-function charsFromAssistantContent(content: Content): { assistant: number; tool: number } {
-  if (content.type === 'text') return { assistant: content.text.length, tool: 0 }
-  if (content.type === 'reasoning') return { assistant: content.text.length, tool: 0 }
-  if (content.type !== 'tool') return { assistant: 0, tool: 0 }
-
-  const inputSize = Object.keys(content.state.input ?? {}).length * 16
-  if (content.state.status === 'pending') return { assistant: 0, tool: inputSize + (content.state.raw?.length ?? 0) }
-  if (content.state.status === 'completed') {
-    const outputText = content.state.time?.compacted ? COMPACTED_TOOL_PLACEHOLDER : (content.state.output ?? '')
-    return { assistant: 0, tool: inputSize + outputText.length }
+function addText(tally: CharTally, text: string | undefined): void {
+  if (!text) return
+  let cjk = 0
+  for (let i = 0; i < text.length; i++) {
+    if (CJK_RE.test(text[i])) cjk++
   }
-  if (content.state.status === 'error') return { assistant: 0, tool: inputSize + (content.state.error?.length ?? 0) }
-  return { assistant: 0, tool: inputSize }
+  tally.cjk += cjk
+  tally.rest += text.length - cjk
+}
+
+function addChars(tally: CharTally, chars: number): void {
+  // 只有长度、没有原文时（如已压缩的工具输出占位符）按纯英文折算。
+  if (chars > 0) tally.rest += chars
+}
+
+function tallyTokens(tally: CharTally): number {
+  return Math.ceil(tally.cjk + tally.rest / 4)
+}
+
+export function estimateTokensFromText(text: string): number {
+  const tally = emptyTally()
+  addText(tally, text)
+  return tallyTokens(tally)
+}
+
+/**
+ * 用户消息的正文。
+ *
+ * v2 的 user 消息**没有 content[]**，正文在 `info.text`（实测 `{id,time,text,type}`），
+ * 只有工具/附件才走 content。此前只遍历 content，导致所有用户输入都被算成
+ * 0 字符 —— 长会话里用户粘贴的大段代码/日志完全不计入估算。
+ *
+ * 两条路径可能同时存在（v1 折叠路径会同时填 text 与 content），因此以
+ * `info.text` 为准，content 只补它没覆盖到的部分，避免同一段正文算两遍。
+ */
+function addUserMessage(tally: CharTally, message: Message & { info: UserMessageInfo }): void {
+  const infoText = typeof message.info.text === 'string' ? message.info.text : ''
+  addText(tally, infoText || undefined)
+
+  for (const content of message.content ?? []) {
+    if (content.type !== 'text') continue
+    // text 已计入正文：跳过与之相同的 content 副本
+    if (infoText && content.text === infoText) continue
+    addText(tally, content.text)
+  }
+  for (const attachment of message.info.attachments ?? []) {
+    addChars(tally, attachment.displayName?.length ?? 0)
+  }
+}
+
+/**
+ * 工具调用输入。
+ *
+ * 旧实现用「顶层键个数 × 16」，与真实体积完全脱钩：实测 209 次工具调用的
+ * 输入 JSON 有 77,417 字符，旧算法只算出 7,232（低估 10.7 倍）。写文件、
+ * 打补丁这类调用输入就是整个文件内容，是最容易撑爆上下文的来源，
+ * 恰恰被算得最轻。改为按实际序列化长度计。
+ */
+function toolInputText(input: unknown): string {
+  if (input === undefined || input === null) return ''
+  if (typeof input === 'string') return input
+  try {
+    return JSON.stringify(input) ?? ''
+  } catch {
+    // 循环引用等异常：退回键数估算，绝不让估算路径抛错
+    return ''
+  }
+}
+
+function safeText(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function addAssistantContent(tally: CharTally, content: Content): void {
+  if (content.type === 'text' || content.type === 'reasoning') {
+    addText(tally, content.text)
+    return
+  }
+  if (content.type !== 'tool') return
+
+  addText(tally, toolInputText(content.state.input))
+  if (content.state.status === 'pending') {
+    addText(tally, safeText(content.state.raw))
+    return
+  }
+  if (content.state.status === 'completed') {
+    if (content.state.time?.compacted) addChars(tally, COMPACTED_TOOL_PLACEHOLDER.length)
+    else addText(tally, safeText(content.state.output))
+    return
+  }
+  // 错误态的 error 不保证是字符串（v2 实测有 undefined）：直接读 .length 会得到
+  // undefined，整个估算变成 NaN，圆环与百分比全部失效。
+  if (content.state.status === 'error') addText(tally, safeText(content.state.error))
 }
 
 function estimateCurrentContext(messages: Message[]): number {
@@ -34,35 +127,36 @@ function estimateCurrentContext(messages: Message[]): number {
     .find((msg): msg is Message & { info: { system?: string } } => {
       return msg.info.role === 'user' && typeof (msg.info as { system?: string }).system === 'string'
     })
-  const systemChars = system ? (((system.info as { system?: string }).system ?? '').trim().length || 0) : 0
+  const systemText = system ? (((system.info as { system?: string }).system ?? '').trim() || undefined) : undefined
 
-  let userChars = 0
-  let assistantChars = 0
-  let toolChars = 0
+  const tally = emptyTally()
+  addText(tally, systemText)
 
   for (const message of messages) {
     if (message.info.role === 'user') {
-      for (const content of message.content) userChars += charsFromUserContent(content)
-      for (const attachment of message.info.attachments ?? []) userChars += attachment.displayName?.length ?? 0
+      addUserMessage(tally, message as Message & { info: UserMessageInfo })
       continue
     }
-
     if (message.info.role !== 'assistant') continue
-    for (const content of message.content) {
-      const next = charsFromAssistantContent(content)
-      assistantChars += next.assistant
-      toolChars += next.tool
-    }
+    for (const content of message.content) addAssistantContent(tally, content)
   }
 
-  return (
-    estimateTokens(systemChars) +
-    estimateTokens(userChars) +
-    estimateTokens(assistantChars) +
-    estimateTokens(toolChars)
-  )
+  // 按字符类别折算，而不是统一 /4：CJK 约 1 字 1 token，统一 /4 会低估数倍。
+  return tallyTokens(tally)
 }
 
+/**
+ * 是否必须改用「按字符估算」。
+ *
+ * 只有在**实测值已经不代表当前上下文**时才该估算：
+ *   1. 一条带 tokens 的 assistant 都没有（新会话）；
+ *   2. 最后一条带 tokens 的消息本身是压缩摘要（摘要不是真实 prompt）；
+ *   3. 它之后出现了新的压缩摘要（历史已被替换）。
+ *
+ * 注意**不包含**「它之后还有消息」这种情形：末尾多一条尚未回复的 user 消息
+ * 并不会改变已发送的上下文规模，实测值仍然有效。此前一律估算，实测一台机器
+ * 上 201k 的会话被显示成 293.8k（高估 46%），用户会误以为快满了。
+ */
 function shouldUseEstimatedContext(
   messages: Message[],
   lastAssistantWithTokensIndex: number,
@@ -78,6 +172,22 @@ function shouldUseEstimatedContext(
   }
 
   return false
+}
+
+/**
+ * 最后一条实测消息之后「新增的用户输入」token 数。
+ *
+ * 上下文占用 = 上一次请求的 prompt + 之后用户新输入但尚未被处理的部分。
+ * 只算 user 正文：assistant 内容必然已包含在那次请求的 tokens 里。
+ */
+function pendingUserTokens(messages: Message[], afterIndex: number): number {
+  const tally = emptyTally()
+  for (let i = Math.max(0, afterIndex + 1); i < messages.length; i++) {
+    const msg = messages[i]
+    if (msg.info.role !== 'user') continue
+    addUserMessage(tally, msg as Message & { info: UserMessageInfo })
+  }
+  return tallyTokens(tally)
 }
 
 /**
@@ -141,7 +251,9 @@ function contextFromCompactionMarker(
   if (typeof lastCreated === 'number' && lastCreated > marker.at) return null
   const chars = marker.summaryChars + marker.recentChars
   if (chars <= 0) return null
-  return estimateTokens(chars)
+  // 只有长度、没有原文：按纯英文折算（压缩摘要多为中英混排，这里取保守下界，
+  // 避免高估后圆环虚满）。真实值由后续轮次的 tokens 覆盖。
+  return Math.ceil(chars / 4)
 }
 
 export function computeSessionStats(
@@ -221,14 +333,17 @@ export function computeSessionStats(
     lastAssistantWithTokensIndex,
     lastAssistantWithTokens,
   )
+  // 实测值 + 之后尚未被处理的用户输入：末尾多一条 user 消息时，上下文
+  // 只增加了这条输入的长度，不该整轮退回字符估算。
+  const measuredContext = lastAssistantWithTokens
+    ? tokenTotal(lastAssistantWithTokens.tokens) + pendingUserTokens(messages, lastAssistantWithTokensIndex)
+    : null
   const contextUsed =
     compactionContext !== null
       ? compactionContext
       : contextEstimated
         ? estimatedContextUsed
-        : lastAssistantWithTokens
-          ? tokenTotal(lastAssistantWithTokens.tokens)
-          : estimatedContextUsed
+        : (measuredContext ?? estimatedContextUsed)
   const contextPercent = contextLimit > 0 ? Math.min(100, (contextUsed / contextLimit) * 100) : 0
 
   return {

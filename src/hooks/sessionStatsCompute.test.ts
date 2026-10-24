@@ -162,8 +162,10 @@ describe('computeSessionStats', () => {
       { at: 1500, tokens: { input: 900, output: 100, reasoning: 0, cache: { read: 0, write: 0 } } },
     )
 
-    // 回到最近一条带 tokens 的消息口径，而不是那条过期的 1000
-    expect(stats.contextUsed).toBe(31000)
+    // 回到最近一条带 tokens 的消息口径（31000），再加上末尾尚未处理的用户输入
+    // 'next turn'（9 字符 → 3 token）。此前末尾多一条 user 消息会让整轮退回字符
+    // 估算，把实测值丢掉 —— 实测高估过 46%。
+    expect(stats.contextUsed).toBe(31003)
   })
 
   it('prefers server cumulative usage over summing visible messages', () => {
