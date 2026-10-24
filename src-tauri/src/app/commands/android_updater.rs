@@ -12,7 +12,7 @@
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 
@@ -28,7 +28,9 @@ pub enum DownloadEvent {
     Finished,
 }
 
-#[derive(Clone, Serialize)]
+/// 下载选项（由前端传入，因此需要 Deserialize）。
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DownloadOptions {
     /// 超时毫秒数（整次下载）
     pub timeout: Option<u64>,
