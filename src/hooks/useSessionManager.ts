@@ -521,6 +521,18 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
               }
             })()
           }
+
+          /**
+           * 骨架路径**必须**也补用量 —— 它是唯一需要补的路径。
+           *
+           * 骨架投影每轮只留「提问 + 最终回复 + 过程计数」，assistant 消息
+           * 不带 tokens。于是 `lastAssistantWithTokens` 为 null，圆环只能按
+           * 字符估算、轮次统计全是「—」、TPS 为 0 —— 正是用户看到的
+           * 「上下文 0%、发一条消息后才对」（发消息会拉完整消息）。
+           *
+           * 这条分支下面直接 `return` 了，所以不能指望末尾那个统一调用。
+           */
+          void backfillSessionUsage(sid)
           return
         }
 

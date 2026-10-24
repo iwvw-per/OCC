@@ -262,7 +262,10 @@ function InputBoxComponent({
       },
     [fileCapabilitiesProp, supportsImages],
   )
-  const { externalFileDropMode, showInputStatusBar } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
+  const { externalFileDropMode, showInputStatusBar, inputStatusBarFields } = useSyncExternalStore(
+    themeStore.subscribe,
+    themeStore.getSnapshot,
+  )
 
   // 是否有任何文件附件能力
   const supportsAnyFile = fileCaps.image || fileCaps.pdf || fileCaps.audio || fileCaps.video
@@ -1869,7 +1872,12 @@ function InputBoxComponent({
           aria-hidden={isCollapsed || undefined}
         >
           {!hideFooter && showInputStatusBar && (
-            <InputFooter paneId={paneId} sessionId={sessionId} inputContainerRef={inputContainerRef} />
+            <InputFooter
+              paneId={paneId}
+              sessionId={sessionId}
+              inputContainerRef={inputContainerRef}
+              fields={inputStatusBarFields}
+            />
           )}
         </div>
       </div>

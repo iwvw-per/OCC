@@ -365,6 +365,8 @@ export function useTheme() {
     // 输入框下方信息栏
     showInputStatusBar: state.showInputStatusBar,
     setShowInputStatusBar,
+    inputStatusBarFields: state.inputStatusBarFields,
+    setInputStatusBarFields: themeStore.setInputStatusBarFields.bind(themeStore),
 
     // 过程折叠
     processCollapseEnabled: state.processCollapseEnabled,

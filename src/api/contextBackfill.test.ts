@@ -14,12 +14,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const getContext = vi.fn()
 const recordFallback = vi.fn()
 const recordSnapshot = vi.fn()
+const applyUsageBackfill = vi.fn()
 
 vi.mock('./v2NativeSession', () => ({ nativeGetSessionContext: getContext }))
 vi.mock('../store/messageStore', () => ({
   messageStore: {
     recordSessionUsageFallback: recordFallback,
     recordContextUsageSnapshot: recordSnapshot,
+    applyUsageBackfill,
   },
 }))
 vi.mock('../utils/sessionKey', () => ({
@@ -108,6 +110,54 @@ describe('backfillSessionUsage', () => {
     getContext.mockResolvedValue([assistant({ input: 1 })])
     await backfillSessionUsage('aiagent:inst_9::ses_abc')
     expect(getContext).toHaveBeenCalledWith('aiagent:inst_9', 'ses_abc')
+  })
+
+  describe('按 id 回填骨架消息', () => {
+    it('把每条 assistant 的 tokens/时间按 id 收集起来', () => {
+      /**
+       * 骨架投影把 tokens / time.streamed / model 整段剥掉，
+       * 轮次统计与 TPS 因此全空。这两者无法从前端可见数据反推，
+       * 只能由 session.context 按消息 id 回填。
+       */
+      getContext.mockResolvedValue([
+        {
+          id: 'msg_a',
+          type: 'assistant',
+          tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 1000, write: 0 } },
+          cost: 0.1,
+          time: { created: 1000, streamed: 5000, completed: 5100 },
+        },
+        {
+          id: 'msg_b',
+          type: 'assistant',
+          tokens: { input: 200, output: 30, reasoning: 0, cache: { read: 2000, write: 0 } },
+          cost: 0.2,
+          time: { created: 6000 },
+        },
+      ])
+
+      return backfillSessionUsage(KEY).then(() => {
+        const arg = applyUsageBackfill.mock.calls[0][1] as Map<string, unknown>
+        expect(arg.size).toBe(2)
+        expect(arg.get('msg_a')).toMatchObject({
+          tokens: { input: 100, output: 20, reasoning: 5 },
+          cost: 0.1,
+          created: 1000,
+          streamed: 5000,
+          completed: 5100,
+        })
+        expect(arg.get('msg_b')).toMatchObject({ created: 6000 })
+      })
+    })
+
+    it('缺少 id 的记录不回填', async () => {
+      getContext.mockResolvedValue([
+        { type: 'assistant', tokens: { input: 1, output: 0, reasoning: 0, cache: {} } },
+      ])
+      await backfillSessionUsage(KEY)
+      const arg = applyUsageBackfill.mock.calls[0][1] as Map<string, unknown>
+      expect(arg.size).toBe(0)
+    })
   })
 
   describe('上下文占用快照', () => {

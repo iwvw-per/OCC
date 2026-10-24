@@ -1153,6 +1153,80 @@ describe('settleByAuthoritativeIdle', () => {
  *
  * 它是 ephemeral、不落库，且可能与 tool.success 乱序到达。
  */
+describe('applyUsageBackfill（骨架投影缺 tokens 的兜底）', () => {
+  const ZERO = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+  const SNAPSHOT = {
+    tokens: { input: 400, output: 418, reasoning: 97, cache: { read: 9088, write: 0 } },
+    cost: 0.12,
+    created: 1000,
+    streamed: 6000,
+    completed: 6100,
+  }
+
+  /** 骨架投影产出的 assistant：tokens 全 0、created===completed（轮次时间） */
+  function skeletonAssistant(id: string) {
+    return {
+      info: {
+        ...createAssistantMessage(id),
+        time: { created: 1000, completed: 1000 },
+        tokens: ZERO,
+        cost: 0,
+      },
+      content: [],
+      isCompressed: true,
+    }
+  }
+
+  beforeEach(() => {
+    messageStore.clearAll()
+  })
+
+  /** 取第一条消息的 assistant info（测试里都是 assistant，收窄避免联合类型报错） */
+  function assistantInfoOf(sessionKey: string) {
+    const info = messageStore.getSessionState(sessionKey)!.messages[0].info
+    return info as Extract<typeof info, { role: 'assistant' }>
+  }
+
+  it('fills tokens and authoritative time for skeleton messages', () => {
+    messageStore.setMessages('session-1', [skeletonAssistant('reply-1')] as never)
+    messageStore.applyUsageBackfill('session-1', new Map([['reply-1', SNAPSHOT]]))
+
+    const info = assistantInfoOf('session-1')
+    expect(info.tokens).toMatchObject({ input: 400, output: 418, reasoning: 97 })
+    expect(info.tokens.cache.read).toBe(9088)
+    // created===completed 会让统计判定「未结算」而整条跳过，必须换成权威时间
+    expect(info.time).toMatchObject({ created: 1000, streamed: 6000, completed: 6100 })
+  })
+
+  it('never overwrites messages that already carry measured tokens', () => {
+    const measured = {
+      info: {
+        ...createAssistantMessage('reply-1'),
+        time: { created: 2000, streamed: 3000, completed: 3500 },
+        tokens: { input: 111, output: 22, reasoning: 0, cache: { read: 33, write: 0 } },
+      },
+      content: [],
+    }
+    messageStore.setMessages('session-1', [measured] as never)
+    messageStore.applyUsageBackfill('session-1', new Map([['reply-1', SNAPSHOT]]))
+
+    const info = assistantInfoOf('session-1')
+    expect(info.tokens).toMatchObject({ input: 111, output: 22 })
+    expect(info.time?.streamed).toBe(3000)
+  })
+
+  it('leaves messages without a matching snapshot untouched', () => {
+    messageStore.setMessages('session-1', [skeletonAssistant('reply-unknown')] as never)
+    messageStore.applyUsageBackfill('session-1', new Map([['reply-1', SNAPSHOT]]))
+
+    expect(assistantInfoOf('session-1').tokens).toMatchObject(ZERO)
+  })
+
+  it('is a no-op for an unknown session', () => {
+    expect(() => messageStore.applyUsageBackfill('missing', new Map([['a', SNAPSHOT]]))).not.toThrow()
+  })
+})
+
 describe('applyToolProgress', () => {
   beforeEach(() => {
     vi.restoreAllMocks()

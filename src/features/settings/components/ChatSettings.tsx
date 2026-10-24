@@ -23,6 +23,18 @@ const STEP_FINISH_FIELDS = [
   { key: 'completedAt', label: 'chat.completedAt', desc: 'chat.showCompletedAt' },
 ] as const
 
+/**
+ * 输入框信息栏的三项内容，各自独立开关。
+ *
+ * 分开的理由：用户可能只关心 TPS（不想被任务名占位），也可能只想要任务进度。
+ * 全关时整条信息栏会自动让位（不留空白行）。
+ */
+const INPUT_STATUS_BAR_FIELDS = [
+  { key: 'autoApprove', label: 'chat.statusBarAutoApprove', desc: 'chat.statusBarAutoApproveDesc' },
+  { key: 'sessionStats', label: 'chat.statusBarSessionStats', desc: 'chat.statusBarSessionStatsDesc' },
+  { key: 'taskProgress', label: 'chat.statusBarTaskProgress', desc: 'chat.statusBarTaskProgressDesc' },
+] as const
+
 export function ChatSettings() {
   const { t } = useTranslation(['settings'])
   const { pathMode, setPathMode, effectiveStyle, detectedStyle, isAutoMode } = usePathMode()
@@ -37,6 +49,8 @@ export function ChatSettings() {
     setDesktopCollapsedInputDock,
     showInputStatusBar,
     setShowInputStatusBar,
+    inputStatusBarFields,
+    setInputStatusBarFields,
     renderUserMarkdown,
     setRenderUserMarkdown,
   } = useTheme()
@@ -159,6 +173,22 @@ export function ChatSettings() {
         >
           <Toggle enabled={showInputStatusBar} onChange={() => setShowInputStatusBar(!showInputStatusBar)} />
         </SettingRow>
+
+        {/* 信息栏内容：三项独立开关。关闭整条信息栏时这些选项没有意义，直接隐藏 */}
+        {showInputStatusBar &&
+          INPUT_STATUS_BAR_FIELDS.map(({ key, label, desc }) => (
+            <SettingRow
+              key={key}
+              label={t(label)}
+              description={t(desc)}
+              onClick={() => setInputStatusBarFields({ [key]: !inputStatusBarFields[key] })}
+            >
+              <Toggle
+                enabled={inputStatusBarFields[key]}
+                onChange={() => setInputStatusBarFields({ [key]: !inputStatusBarFields[key] })}
+              />
+            </SettingRow>
+          ))}
 
         <SettingRow label={t('chat.sendMode')} description={t('chat.sendModeDesc')}>
             <SegmentedControl

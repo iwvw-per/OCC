@@ -9,9 +9,11 @@ import { subscribeToServerEvents } from '../../../api/events'
 import { sessionKeyToServerId } from '../../../utils/sessionKey'
 import { useTokenRate } from '../../../hooks/useTokenRate'
 import { useSessionTurnStats } from '../../../hooks/useSessionTurnStats'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 import { SessionStatsPopover } from './SessionStatsPopover'
 import { autoApproveStore, type FullAutoMode } from '../../../store/autoApproveStore'
 import type { TodoItem } from '../../../types/api/event'
+import type { InputStatusBarFields } from '../../../store/themeStore'
 
 // ============================================
 // Full Auto 状态 hook
@@ -34,14 +36,21 @@ interface InputFooterProps {
   paneId: string
   sessionId?: string | null
   inputContainerRef?: RefObject<HTMLDivElement | null>
+  /** 展示哪几项；缺省全开（与旧行为一致） */
+  fields?: InputStatusBarFields
 }
 
 export const InputFooter = memo(function InputFooter({
   paneId,
   sessionId,
   inputContainerRef,
+  fields,
 }: InputFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
+  const isMobile = useIsMobile()
+  const showAutoApprove = fields?.autoApprove ?? true
+  const showSessionStats = fields?.sessionStats ?? true
+  const showTaskProgress = fields?.taskProgress ?? true
   const todos = useTodos(sessionId ?? null)
   const stats = useTodoStats(sessionId ?? null)
   const currentTask = useCurrentTask(sessionId ?? null)
@@ -223,59 +232,78 @@ export const InputFooter = memo(function InputFooter({
     }
   }, [clearPanelTimers, inputContainerRef])
 
+  /**
+   * 移动端只显示「走到哪」：进度圆环 + 完成计数。
+   *
+   * 屏幕窄时任务名会被截成几个字（实测只剩「确认任务…」），既读不出信息，
+   * 又把 TPS 挤没了。详情仍可点开面板查看（面板本身宽度自适应，不受影响）。
+   */
+  const showTaskLabel = showTaskProgress && hasTodos && !isMobile
+  const hasAnyField = showAutoApprove || showSessionStats || showTaskProgress
+
   return (
     <div
       className="relative flex h-full w-full items-center justify-center gap-2 px-3 text-[length:var(--fs-xs)] leading-none text-text-300"
       ref={popoverRef}
     >
       {/* Full Auto 三态切换: off -> session -> global -> off */}
-      <button
-        onClick={() => autoApproveStore.cyclePaneFullAutoMode(paneId)}
-        className="shrink-0 flex items-center justify-center hover:text-text-100 transition-colors"
-        title={
-          fullAutoMode === 'off'
-            ? t('inputFooter.autoApproveOff')
-            : fullAutoMode === 'session'
-              ? t('inputFooter.autoApproveSession')
-              : t('inputFooter.autoApproveGlobal')
-        }
-      >
-        <FastForwardIcon
-          size={11}
-          className={`transition-colors ${
-            fullAutoMode === 'global'
-              ? 'text-danger-100 drop-shadow-[0_0_4px_var(--color-danger-100)]'
+      {showAutoApprove && (
+        <button
+          onClick={() => autoApproveStore.cyclePaneFullAutoMode(paneId)}
+          className="shrink-0 flex items-center justify-center hover:text-text-100 transition-colors"
+          title={
+            fullAutoMode === 'off'
+              ? t('inputFooter.autoApproveOff')
               : fullAutoMode === 'session'
-                ? 'text-warning-100 drop-shadow-[0_0_4px_var(--color-warning-100)]'
-                : ''
-          }`}
-        />
-      </button>
+                ? t('inputFooter.autoApproveSession')
+                : t('inputFooter.autoApproveGlobal')
+          }
+        >
+          <FastForwardIcon
+            size={11}
+            className={`transition-colors ${
+              fullAutoMode === 'global'
+                ? 'text-danger-100 drop-shadow-[0_0_4px_var(--color-danger-100)]'
+                : fullAutoMode === 'session'
+                  ? 'text-warning-100 drop-shadow-[0_0_4px_var(--color-warning-100)]'
+                  : ''
+            }`}
+          />
+        </button>
+      )}
 
-      <span className="text-text-400/70 shrink-0">·</span>
+      {showAutoApprove && showSessionStats && <span className="text-text-400/70 shrink-0">·</span>}
 
       {/* 会话统计：点击弹出模型用时 / 工具用时 / TTFT / TPS 等累计指标 */}
-      <SessionStatsPopover stats={turnStats} tokensPerSec={tokensPerSec} />
+      {showSessionStats && <SessionStatsPopover stats={turnStats} tokensPerSec={tokensPerSec} />}
 
-      {/* 待办进度：整组保持居中，任务名按可用宽度自动截断 */}
-      {hasTodos && (
+      {/* 待办进度：整组保持居中，任务名按可用宽度自动截断（移动端不显示任务名） */}
+      {showTaskProgress && hasTodos && (
         <>
-          <span className="text-text-400/70 shrink-0">·</span>
+          {(showAutoApprove || showSessionStats) && <span className="text-text-400/70 shrink-0">·</span>}
           <button
             onClick={togglePanel}
             className={`flex items-center gap-1.5 min-w-0 border border-transparent px-1 rounded-md hover:bg-bg-200 hover:border-border-200 transition-colors ${
               panelOpen ? 'text-text-100' : ''
             }`}
+            title={showTaskLabel ? undefined : taskLabel}
           >
             <MiniProgress size={11} progress={progress} done={isAllDone} />
             <span className="tabular-nums shrink-0">
               {stats.completed}/{stats.total}
             </span>
-            <span className="text-text-400/60 shrink-0">·</span>
-            <span className="truncate text-left">{taskLabel}</span>
+            {showTaskLabel && (
+              <>
+                <span className="text-text-400/60 shrink-0">·</span>
+                <span className="truncate text-left">{taskLabel}</span>
+              </>
+            )}
           </button>
         </>
       )}
+
+      {/* 三项全关：不留一条空白栏，直接不渲染 */}
+      {!hasAnyField && <span className="sr-only">{t('inputFooter.tokenRate')}</span>}
 
       {/* Todo Swap Panel */}
       {panelState !== 'closed' && (

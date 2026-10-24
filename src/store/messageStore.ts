@@ -980,6 +980,88 @@ class MessageStore {
     return this.sessions.get(this.resolveKey(sessionId))?.contextUsage
   }
 
+  /**
+   * 按消息 id 回填权威用量（来自 `session.context`）。
+   *
+   * 为什么需要它：走 aiagent 网关时首屏是「轮次骨架」投影，assistant 消息上的
+   * `tokens` / `time.streamed` / `model` 被整段剥掉。后果是三处同时失效：
+   *
+   *   - 上下文圆环按字符估算（偏小数倍）
+   *   - 轮次统计的输出 token / 缓存命中率 / TPS 全是「—」或 0
+   *   - 底部 TPS 算不出生成窗口
+   *
+   * 这些值无法从任何前端可见数据反推（字符数估不出 token，part 没有时间戳），
+   * 只能由 `session.context` 按 id 回填。骨架里回复用的是真实消息 id，所以能对上。
+   *
+   * 保守策略：只补**缺失或为 0** 的字段，绝不覆盖已有的非零实测值 ——
+   * 完整拉取到的消息本身是权威的，回填数据（可能稍旧）不得覆盖它。
+   */
+  applyUsageBackfill(
+    sessionId: string,
+    snapshots: Map<string, { tokens: TokenUsage; cost: number; created?: number; streamed?: number; completed?: number }>,
+  ) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state || snapshots.size === 0) return
+
+    let changed = false
+    const messages = state.messages.map(message => {
+      const snapshot = snapshots.get(message.info.id)
+      if (!snapshot || message.info.role !== 'assistant') return message
+
+      const current = message.info.tokens
+      const currentTotal =
+        (current?.input ?? 0) +
+        (current?.output ?? 0) +
+        (current?.reasoning ?? 0) +
+        (current?.cache?.read ?? 0) +
+        (current?.cache?.write ?? 0)
+      // 已有实测值：完整消息比回填数据权威，不动
+      if (currentTotal > 0) return message
+
+      const time = message.info.time ?? {}
+      /**
+       * 判断时间是否是「轮次时间」而非这条消息自己的时间。
+       *
+       * 骨架投影把 created 与 completed 都写成轮次起点（两者相等），streamed
+       * 则完全缺失。这个等号会让统计代码判定为「尚未结算」并整条跳过 —— 于是
+       * 即使 tokens 补上了，输出 token / 缓存命中率 / TPS 依然是空。
+       *
+       * 用 `created === completed` 而不是 `isCompressed` 判断：后者依赖
+       * lightweight 标记，经过 store 往返可能丢失，而时间关系是数据本身的特征。
+       */
+      const isSyntheticTime =
+        typeof time.created === 'number' &&
+        typeof time.completed === 'number' &&
+        time.completed <= time.created
+      const nextTime = isSyntheticTime
+        ? {
+            created: snapshot.created ?? time.created,
+            ...(snapshot.streamed != null ? { streamed: snapshot.streamed } : {}),
+            ...(snapshot.completed != null ? { completed: snapshot.completed } : {}),
+          }
+        : {
+            ...time,
+            ...(time.streamed == null && snapshot.streamed != null ? { streamed: snapshot.streamed } : {}),
+            ...(time.completed == null && snapshot.completed != null ? { completed: snapshot.completed } : {}),
+          }
+      changed = true
+      return {
+        ...message,
+        info: {
+          ...message.info,
+          tokens: snapshot.tokens,
+          cost: snapshot.cost || message.info.cost,
+          time: nextTime,
+        },
+      } as typeof message
+    })
+
+    if (!changed) return
+    state.messages = messages
+    this.notify([sessionId])
+  }
+
   markAllSessionsStale() {
     let updated = false
     for (const state of this.sessions.values()) {

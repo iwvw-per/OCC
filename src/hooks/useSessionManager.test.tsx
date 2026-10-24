@@ -13,6 +13,7 @@ const {
   sessionErrorHandlerMock,
   revertMessageMock,
   extractUserMessageContentMock,
+  backfillSessionUsageMock,
 } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   getSessionTurnPageMock: vi.fn(),
@@ -36,6 +37,7 @@ const {
   sessionErrorHandlerMock: vi.fn(),
   revertMessageMock: vi.fn(),
   extractUserMessageContentMock: vi.fn((_message: unknown) => ({ text: 'hello', attachments: [] })),
+  backfillSessionUsageMock: vi.fn(async () => {}),
 }))
 
 vi.mock('../api', () => ({
@@ -67,7 +69,7 @@ vi.mock('../store', () => ({
 // 它由 loadSession 通过 `void` 调用，若让真实实现跑起来，失败路径会变成
 // unhandled rejection —— 表现为「断言全过但退出码非 0」。
 vi.mock('../api/contextBackfill', () => ({
-  backfillSessionUsage: vi.fn(async () => {}),
+  backfillSessionUsage: (...args: unknown[]) => backfillSessionUsageMock(...(args as [])),
   resetContextBackfill: vi.fn(),
 }))
 
@@ -188,6 +190,35 @@ describe('useSessionManager', () => {
     // 骨架路径生效：不再走分页（具体调用次数取决于 effect 是否也触发一次加载）
     expect(lightweightMessagesMock).toHaveBeenCalled()
     expect(getSessionTurnPageMock).not.toHaveBeenCalled()
+  })
+
+  it('backfills usage on the skeleton path (it returns early, before the shared tail call)', async () => {
+    /**
+     * 回归：骨架路径在补完大纲后直接 `return`，走不到末尾的统一
+     * `backfillSessionUsage` 调用。于是「进入会话」时 tokens 全部缺失：
+     * 上下文圆环按字符估算、轮次统计全是「—」、TPS 为 0 ——
+     * 只有发一条消息（走完整拉取）后才突然正常。
+     */
+    peekLightweightSupportMock.mockReturnValue(true)
+    lightweightMessagesMock.mockResolvedValue({
+      messages: [
+        { info: { id: 'user-1', role: 'user', time: { created: 1 } }, parts: [] },
+        { info: { id: 'reply-1', role: 'assistant', time: { created: 1 } }, parts: [] },
+      ],
+      hasMore: false,
+    })
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+    backfillSessionUsageMock.mockClear()
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'session-1', directory: '/workspace/demo' }),
+    )
+
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    expect(backfillSessionUsageMock).toHaveBeenCalled()
   })
 
   it('loads history by turn batch with the store cursor', async () => {

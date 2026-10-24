@@ -148,6 +148,44 @@ const DEFAULT_ACTIONS_ON_LATEST_ASSISTANT_ONLY = true
 const DEFAULT_DESKTOP_COLLAPSED_INPUT_DOCK = true
 /** 输入框下方信息栏（自动放行 / 会话统计 / 任务进度）默认隐藏 */
 const DEFAULT_SHOW_INPUT_STATUS_BAR = false
+
+/** 读取信息栏字段配置；损坏或缺失时回落默认（三项全开） */
+function readInputStatusBarFields(): InputStatusBarFields {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_INPUT_STATUS_BAR_FIELDS)
+    if (!raw) return { ...DEFAULT_INPUT_STATUS_BAR_FIELDS }
+    const parsed = JSON.parse(raw) as Partial<InputStatusBarFields> | null
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_INPUT_STATUS_BAR_FIELDS }
+    return {
+      autoApprove: typeof parsed.autoApprove === 'boolean' ? parsed.autoApprove : true,
+      sessionStats: typeof parsed.sessionStats === 'boolean' ? parsed.sessionStats : true,
+      taskProgress: typeof parsed.taskProgress === 'boolean' ? parsed.taskProgress : true,
+    }
+  } catch {
+    return { ...DEFAULT_INPUT_STATUS_BAR_FIELDS }
+  }
+}
+
+/**
+ * 输入框信息栏展示哪些内容。
+ *
+ * 三项各自独立：用户可能只想看 TPS、不想看任务进度（或反之）。
+ * 默认与旧行为一致（三项全开），避免升级后信息栏突然变空。
+ */
+export interface InputStatusBarFields {
+  /** 自动放行（Full Auto）三态按钮 */
+  autoApprove: boolean
+  /** 会话统计：TPS 角标 + 点击弹出的累计指标 */
+  sessionStats: boolean
+  /** 任务进度：待办圆环 + 当前任务名（移动端只显示圆环与计数） */
+  taskProgress: boolean
+}
+
+const DEFAULT_INPUT_STATUS_BAR_FIELDS: InputStatusBarFields = {
+  autoApprove: true,
+  sessionStats: true,
+  taskProgress: true,
+}
 /**
  * 过程折叠：按用户消息把中间过程收成计时折叠块。
  *
@@ -211,6 +249,8 @@ export interface ThemeState {
   desktopCollapsedInputDock: boolean
   /** 是否显示输入框下方的信息栏（自动放行 / 会话统计 / 任务进度） */
   showInputStatusBar: boolean
+  /** 信息栏里具体展示哪几项（三项独立开关） */
+  inputStatusBarFields: InputStatusBarFields
   /** 过程折叠：用户发送后显示 Working 计时，结束后收成折叠块，最终回答留在外面 */
   processCollapseEnabled: boolean
   /** 代码块语法高亮主题（亮色模式），Shiki theme id */
@@ -252,6 +292,7 @@ const STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT = 'outline-current-highlight'
 const STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY = 'actions-on-latest-assistant-only'
 const STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK = 'desktop-collapsed-input-dock'
 const STORAGE_KEY_SHOW_INPUT_STATUS_BAR = 'show-input-status-bar'
+const STORAGE_KEY_INPUT_STATUS_BAR_FIELDS = 'input-status-bar-fields'
 const STORAGE_KEY_PROCESS_COLLAPSE_ENABLED = 'process-collapse-enabled'
 const STORAGE_KEY_CODE_BLOCK_THEME_LIGHT = 'code-block-theme-light'
 const STORAGE_KEY_CODE_BLOCK_THEME_DARK = 'code-block-theme-dark'
@@ -397,6 +438,8 @@ class ThemeStore {
     const showInputStatusBar =
       savedShowInputStatusBar === null ? DEFAULT_SHOW_INPUT_STATUS_BAR : savedShowInputStatusBar === 'true'
 
+    const inputStatusBarFields = readInputStatusBarFields()
+
     const savedProcessCollapseEnabled = localStorage.getItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED)
     const processCollapseEnabled =
       savedProcessCollapseEnabled === null
@@ -440,6 +483,7 @@ class ThemeStore {
       actionsOnLatestAssistantOnly,
       desktopCollapsedInputDock,
       showInputStatusBar,
+      inputStatusBarFields,
       processCollapseEnabled,
       codeBlockThemeLight,
       codeBlockThemeDark,
@@ -535,6 +579,23 @@ class ThemeStore {
 
   get showInputStatusBar() {
     return this.state.showInputStatusBar
+  }
+
+  get inputStatusBarFields() {
+    return this.state.inputStatusBarFields
+  }
+
+  /** 更新信息栏字段（部分更新）；全关时自动收起整条信息栏，避免留一条空白 */
+  setInputStatusBarFields(fields: Partial<InputStatusBarFields>) {
+    const next: InputStatusBarFields = { ...this.state.inputStatusBarFields, ...fields }
+    const same =
+      next.autoApprove === this.state.inputStatusBarFields.autoApprove &&
+      next.sessionStats === this.state.inputStatusBarFields.sessionStats &&
+      next.taskProgress === this.state.inputStatusBarFields.taskProgress
+    if (same) return
+    this.state = { ...this.state, inputStatusBarFields: next }
+    localStorage.setItem(STORAGE_KEY_INPUT_STATUS_BAR_FIELDS, JSON.stringify(next))
+    this.emit()
   }
 
   get processCollapseEnabled() {
@@ -1125,6 +1186,16 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
         : DEFAULT_DESKTOP_COLLAPSED_INPUT_DOCK,
     showInputStatusBar:
       typeof parsed?.showInputStatusBar === 'boolean' ? parsed.showInputStatusBar : DEFAULT_SHOW_INPUT_STATUS_BAR,
+    inputStatusBarFields: (() => {
+      const raw = parsed?.inputStatusBarFields
+      if (!raw || typeof raw !== 'object') return { ...DEFAULT_INPUT_STATUS_BAR_FIELDS }
+      const fields = raw as Partial<InputStatusBarFields>
+      return {
+        autoApprove: typeof fields.autoApprove === 'boolean' ? fields.autoApprove : true,
+        sessionStats: typeof fields.sessionStats === 'boolean' ? fields.sessionStats : true,
+        taskProgress: typeof fields.taskProgress === 'boolean' ? fields.taskProgress : true,
+      }
+    })(),
     processCollapseEnabled:
       typeof parsed?.processCollapseEnabled === 'boolean'
         ? parsed.processCollapseEnabled
@@ -1189,6 +1260,7 @@ export function importThemeBackup(raw: unknown): void {
   )
   localStorage.setItem(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(backup.desktopCollapsedInputDock))
   localStorage.setItem(STORAGE_KEY_SHOW_INPUT_STATUS_BAR, String(backup.showInputStatusBar))
+  localStorage.setItem(STORAGE_KEY_INPUT_STATUS_BAR_FIELDS, JSON.stringify(backup.inputStatusBarFields))
   localStorage.setItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(backup.processCollapseEnabled))
   localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, backup.codeBlockThemeLight)
   localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_DARK, backup.codeBlockThemeDark)

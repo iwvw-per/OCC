@@ -72,7 +72,9 @@ export function stepGenerationWindow(message: Message): { durationMs: number; au
   const created = message.info.time?.created
   const streamed = message.info.time?.streamed
 
-  // ① 官方口径
+  // ① 官方 `time.streamed`：容器里 text part 不带时间，但消息级 streamed 有。
+  //    逐字核对官方 turnTokensPerSecond：它只用 time.streamed，不用 part 时间，
+  //    所以这里的 streamed 是「结束时刻」，与 created 求差即生成窗口。
   if (typeof created === 'number' && typeof streamed === 'number' && streamed > created) {
     return { durationMs: streamed - created, authoritative: true }
   }
