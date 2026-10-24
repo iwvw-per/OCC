@@ -509,6 +509,8 @@ pub fn run() {
         commands::bridge::bridge_connect,
         commands::bridge::bridge_send,
         commands::bridge::bridge_disconnect,
+        commands::android_updater::device_target_arch,
+        commands::android_updater::android_download_apk,
     ]);
 
     // build + run 分开调用，以支持 macOS RunEvent::Opened

@@ -1,4 +1,6 @@
 pub mod bridge;
+#[cfg(target_os = "android")]
+pub mod android_updater;
 #[cfg(desktop)]
 pub mod credentials;
 #[cfg(not(target_os = "android"))]

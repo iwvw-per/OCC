@@ -4,6 +4,7 @@ import { Button } from '../../../components/ui/Button'
 import { DownloadIcon, ExternalLinkIcon, RetryIcon, UploadIcon } from '../../../components/Icons'
 import { hasUpdateAvailable, updateStore, useUpdateStore, getReleaseManifestUrl, RELEASES_PAGE_URL } from '../../../store/updateStore'
 import { desktopUpdater, isDesktopUpdaterAvailable, type UpdaterProgress } from '../../../utils/desktopUpdater'
+import { androidUpdater, isAndroidUpdaterAvailable, type AndroidUpdateProgress } from '../../../utils/androidUpdater'
 import { saveData } from '../../../utils/downloadUtils'
 import { exportSettingsBackup, importSettingsBackup, previewBackupMeta } from '../../../utils/settingsBackup'
 import { isTauri } from '../../../utils/tauri'
@@ -11,6 +12,14 @@ import { SettingsSection } from './SettingsUI'
 
 function useUpdaterProgress(): UpdaterProgress {
   return useSyncExternalStore(desktopUpdater.subscribe, desktopUpdater.getSnapshot, desktopUpdater.getSnapshot)
+}
+
+function useAndroidUpdaterProgress(): AndroidUpdateProgress {
+  return useSyncExternalStore(
+    androidUpdater.subscribe,
+    androidUpdater.getSnapshot,
+    androidUpdater.getSnapshot,
+  )
 }
 
 async function openExternalUrl(url: string): Promise<void> {
@@ -28,6 +37,7 @@ export function AboutSettings() {
   const { t } = useTranslation(['settings'])
   const updateState = useUpdateStore()
   const updaterProgress = useUpdaterProgress()
+  const androidProgress = useAndroidUpdaterProgress()
   const hasUpdate = hasUpdateAvailable(updateState)
   const latestRelease = updateState.latestRelease
   const latestVersion = latestRelease?.tagName || t('about.unknownVersion')
@@ -37,10 +47,13 @@ export function AboutSettings() {
   const [backupError, setBackupError] = useState<string | null>(null)
 
   const canAutoUpdate = isDesktopUpdaterAvailable()
+  const canAndroidUpdate = isAndroidUpdaterAvailable()
   const updaterBusy =
     updaterProgress.phase === 'checking' ||
     updaterProgress.phase === 'downloading' ||
     updaterProgress.phase === 'installing'
+  const androidBusy =
+    androidProgress.phase === 'downloading' || androidProgress.phase === 'installing'
 
   const handleCheckUpdates = useCallback(() => {
     void updateStore.checkForUpdates({ force: true })
@@ -50,6 +63,11 @@ export function AboutSettings() {
     // 把该 release 自己的 latest.json 传给 Rust：canary 清单在其 tag 路径下，
     // 静态 endpoint（releases/latest）解析不到。
     void desktopUpdater.installLatest(latestRelease ? getReleaseManifestUrl(latestRelease) : undefined)
+  }, [latestRelease])
+
+  const handleAndroidUpdate = useCallback(() => {
+    if (!latestRelease) return
+    void androidUpdater.installLatest(latestRelease)
   }, [latestRelease])
 
   const handleRelaunch = useCallback(() => {
@@ -114,10 +132,21 @@ export function AboutSettings() {
   let statusText = t('about.statusIdle')
   if (updaterProgress.phase === 'error') {
     statusText = t('about.autoUpdateError', { error: updaterProgress.error ?? '' })
+  } else if (androidProgress.phase === 'error') {
+    statusText = t('about.autoUpdateError', { error: androidProgress.error ?? '' })
   } else if (updaterProgress.phase === 'ready') {
     statusText = t('about.autoUpdateReady')
+  } else if (androidProgress.phase === 'installing') {
+    // Android 下载完成：系统安装界面已弹出，等用户确认
+    statusText = t('about.androidInstalling')
   } else if (updaterProgress.phase === 'installing') {
     statusText = t('about.autoUpdateInstalling')
+  } else if (androidProgress.phase === 'downloading') {
+    statusText = t('about.autoUpdateDownloading', {
+      percent: androidProgress.totalBytes
+        ? Math.floor((androidProgress.downloadedBytes / androidProgress.totalBytes) * 100)
+        : null,
+    })
   } else if (updaterProgress.phase === 'downloading') {
     statusText = t('about.autoUpdateDownloading', {
       percent: updaterProgress.totalBytes
@@ -172,6 +201,13 @@ export function AboutSettings() {
             <Button size="sm" variant="primary" onClick={handleRelaunch}>
               <RetryIcon size={12} />
               {t('about.autoUpdateRestart')}
+            </Button>
+          )}
+          {/* Android：下载 APK 后交给系统安装器（应用内无法静默安装） */}
+          {canAndroidUpdate && hasUpdate && (
+            <Button size="sm" variant="primary" isLoading={androidBusy} onClick={handleAndroidUpdate}>
+              {!androidBusy && <DownloadIcon size={12} />}
+              {t('about.autoUpdateNow')}
             </Button>
           )}
           <Button size="sm" variant="secondary" isLoading={updateState.checking} onClick={handleCheckUpdates}>

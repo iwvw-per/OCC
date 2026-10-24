@@ -499,7 +499,9 @@
     "autoUpdateInstalling": "正在安装更新...",
     "autoUpdateReady": "更新已就绪，重启后生效。",
     "autoUpdateRestart": "重启应用",
-    "autoUpdateError": "自动更新失败：{{error}}"
+    "autoUpdateError": "自动更新失败：{{error}}",
+    "androidInstalling": "安装包已下载，请在系统弹出的安装界面中确认。",
+    "androidNoApk": "该版本没有找到匹配当前设备的安装包。"
   },
   "scheduledTasks": {
     "title": "定时任务",
