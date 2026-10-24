@@ -48,6 +48,7 @@ import { autoApproveStore } from '../../store/autoApproveStore'
 import { messageStore, paneControllerStore, useHiddenModelKeys } from '../../store'
 import { restoreModelSelection } from '../../utils/sessionHelpers'
 import { findModelByKey, getModelKey } from '../../utils/modelUtils'
+import { attachTodoBridge, detachTodoBridge } from '../../utils/todoSyncBridge'
 import { useTheme } from '../../hooks/useTheme'
 import { useWorkStatus } from '../../store/workStatusStore'
 import { WorkStatusPanel } from '../workStatus/WorkStatusPanel'
@@ -608,6 +609,18 @@ export const ChatPane = memo(function ChatPane({
         messageStore.unprotectSession(routeSessionId)
       }
     }
+  }, [routeSessionId])
+
+  // ============================================
+  // Todo 投影桥
+  // ============================================
+  // v2 没有 todo 的数据通道（无 todo.updated 事件、无查询端点），todo 只存在于
+  // agent 的 todowrite 工具调用里。这里订阅该会话的消息流，把「最后一条
+  // todowrite」投影进 todoStore —— 历史加载完成与流式增量都走这条路径。
+  useEffect(() => {
+    if (!routeSessionId) return
+    attachTodoBridge(routeSessionId)
+    return () => detachTodoBridge(routeSessionId)
   }, [routeSessionId])
 
   // ============================================

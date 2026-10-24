@@ -28,8 +28,9 @@ interface TodoItem {
 
 export function TodoRenderer({ part }: ToolRendererProps) {
   const { currentSessionId } = useSessionNavigation()
-  // 实时状态以 todoStore 为准（SSE todo.updated 推送，按作用域复合 key 存储）；
-  // 卡片自带的 metadata/input 快照只作为 store 尚未收到数据时的兜底（如历史消息）。
+  // 实时状态以 todoStore 为准（由 utils/todoSyncBridge 从消息流的 todowrite
+  // 投影进来 —— v2 没有 todo.updated 事件）；卡片自带的 input 快照作为
+  // store 尚未收到数据时的兜底（如刚打开的历史消息）。
   const storeTodos = useTodos(currentSessionId ?? null)
   const todos: TodoItem[] = storeTodos.length > 0 ? storeTodos : extractTodos(part)
 

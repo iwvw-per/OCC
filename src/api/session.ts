@@ -445,13 +445,18 @@ export async function getSessionChildren(
 export type ApiTodo = TodoItem
 
 /**
- * 获取 session 的 todo 列表
- * SDK 的 Todo 没有 id 字段，用 index+content+status 合成
+ * 获取 session 的 todo 列表。
+ *
+ * v2 **没有** todo 查询端点（实测 `GET /api/session/{id}/todo` 返回 404），
+ * 也没有 `todo.updated` 事件。todo 只存在于 agent 的 `todowrite` 工具调用里，
+ * 由 `utils/todoSource` 从消息流投影进 todoStore（见 `utils/todoSyncBridge`）。
+ *
+ * 保留这个函数是为了不破坏既有调用点，但调用方应知道它恒返回空数组，
+ * 真正的数据源是 todoStore。
  */
 export async function getSessionTodos(sessionId: string, directory?: string, serverId?: string): Promise<ApiTodo[]> {
   void sessionId
   void directory
   void serverId
-  // v2 无 session.todo 主动拉取端点，todo 由 SSE 事件（session.todo）驱动，返回空
   return []
 }
