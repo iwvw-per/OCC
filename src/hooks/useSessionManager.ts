@@ -170,7 +170,13 @@ function mergePartsForReload(
   })
 }
 
-function mergeWithLocalStreamingMessages(
+/**
+ * 把服务端快照与本地消息合并。
+ *
+ * 导出仅为可测试：这是「切后台再回前台后对话变空」这类问题的关键路径，
+ * 需要能直接构造「本地有历史 + 快照只有一窗口」的场景来回归。
+ */
+export function mergeWithLocalStreamingMessages(
   apiMessages: ApiMessageWithParts[],
   localState?: SessionState,
 ): ApiMessageWithParts[] {
@@ -195,10 +201,18 @@ function mergeWithLocalStreamingMessages(
   // D6：本地独有消息（服务端快照未包含）的保留判定，不再只依赖 isStreaming。
   // setMessages 会按最后一条重算 isStreaming，completed→idle 之间可能已为 false，
   // 此时若只按 isStreaming 判定，本地刚流式完成、快照页尚未包含的消息会被整体覆盖丢失。
-  // 放宽为「流式中 或 未定稿」：已定稿且不在快照里的，交给服务端；其余保留。
+  //
+  // ⚠️ 已定稿且不在快照里的消息**也必须保留**，不能「交给服务端」。
+  //
+  // 快照天然只覆盖一段窗口（v2 单次 limit 上限 200；骨架首屏更是只有最近几页）。
+  // 移动端切后台再回前台会触发 network 重连 → force 重载，若只保留「流式中/未定稿」
+  // 的消息，窗口之外的历史会被整段丢掉 —— 实测表现为助手消息全部消失、只剩用户
+  // 消息（用户看到的就是「切回来后对话空了一半」）。
+  //
+  // 服务端快照仍是权威：**在快照里**的消息一律用服务端版本（见上面的 mergedApi），
+  // 这里只在「本地有、快照没有」时保留本地副本，属于补集而非覆盖。
   const localOnly = localState.messages
     .filter(m => !apiIds.has(m.info.id))
-    .filter(m => localState.isStreaming || messageTimeIncomplete(m.info.time))
     .map(toApiMessageWithParts)
 
   if (localOnly.length === 0) return mergedApi

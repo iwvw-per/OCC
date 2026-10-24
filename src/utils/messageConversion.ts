@@ -160,11 +160,41 @@ export function toUIPart(apiPart: ApiPart): Content | null {
   return foldPartToContent(apiPart)
 }
 
+/**
+ * UI 消息 → API 信封（用于把本地消息合并回服务端快照）。
+ *
+ * ⚠️ 必须带上 `lightweight`，否则骨架轮会「越刷新越空」。
+ *
+ * 骨架轮的可见性完全依赖压缩统计（`chatAreaVisibility` 的
+ * `hasSkeletonProcessStats`）：正文已被主机 Agent 剥掉，`content` 常常为空，
+ * 只有 `stats.stepCount / reasoningCount` 能让它挂上一个「已处理 N 步」的折叠壳。
+ *
+ * 而 `toUIMessage` 是**从 `lightweight` 反推出** `compressedStats` 的。先前这里
+ * 只搬了 `info` + `parts`，`lightweight` 在往返中丢失 —— 消息一旦经过
+ * `mergeWithLocalStreamingMessages` 的 localOnly 分支（切后台再回前台、
+ * 重连后 force 重载都会走到），折叠壳就消失，整轮 assistant 变成不可见，
+ * 界面上只剩用户消息（实测移动端切后台再切回就是这个现象）。
+ */
 export function toApiMessageWithParts(message: Pick<Message, 'info' | 'content'>): ApiMessageWithParts {
-  return {
+  const envelope: ApiMessageWithParts & { lightweight?: unknown } = {
     info: message.info as ApiMessageWithParts['info'],
     parts: message.content as unknown as ApiMessageWithParts['parts'],
   }
+  // 从 UI 侧的压缩统计还原 lightweight，保证往返不丢
+  const stats = (message as { compressedStats?: Message['compressedStats'] }).compressedStats
+  if (stats) {
+    envelope.lightweight = {
+      reasoningCount: stats.reasoningCount,
+      stepCount: stats.stepCount,
+      ...(stats.durationMs != null ? { durationMs: stats.durationMs } : {}),
+      ...(() => {
+        const changedFiles = (message as { skeletonChangedFiles?: Message['skeletonChangedFiles'] })
+          .skeletonChangedFiles
+        return changedFiles && changedFiles.length > 0 ? { changedFiles } : {}
+      })(),
+    }
+  }
+  return envelope
 }
 
 export function isUserUIMessage(message: Message): message is Message & { info: UserMessageInfo } {
