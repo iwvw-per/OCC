@@ -12,6 +12,7 @@ import { DropdownMenu } from '../../components/ui'
 import type { ModelInfo } from '../../api'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { hapticTap } from '../../utils/haptics'
+import { touchTarget } from '../../utils/interaction'
 import {
   getModelKey,
   groupModelsByProvider,
@@ -824,7 +825,7 @@ export const ModelSelector = memo(
           }}
           disabled={disabled || isLoading}
           aria-expanded={isOpen}
-          className="flex items-center gap-1 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden w-full"
+          className={`flex items-center gap-1 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden w-full ${touchTarget.chip}`}
           title={selectedModel?.name || t('modelSelector.selectModel')}
         >
           <span className="text-[length:var(--fs-sm)] text-text-300 truncate">{displayName}</span>

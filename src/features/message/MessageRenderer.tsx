@@ -74,6 +74,7 @@ import {
 } from '../../utils/formatUtils'
 import { lockScrollAroundAnchor } from '../../utils/scrollUtils'
 import { useUiDisclosureState } from '../../utils/uiDisclosureState'
+import { touchTarget } from '../../utils/interaction'
 
 /**
  * 过程折叠 header：进行中自己走表，只有这一行因计时更新；children 不跟时钟走。
@@ -619,7 +620,7 @@ const ForkActionButton = memo(function ForkActionButton({ message, onFork, forkM
     <button
       onClick={() => void handleFork()}
       disabled={isForking}
-      className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500"
+      className={`p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500 ${touchTarget.iconButton}`}
       title={isForking ? t('forkingFromHere') : t('forkFromHere')}
       aria-label={isForking ? t('forkingFromHere') : t('forkFromHere')}
     >
@@ -663,7 +664,7 @@ const PinActionButton = memo(function PinActionButton({ message, sessionId }: Pi
       onClick={handleToggle}
       className={`p-1.5 rounded-md transition-colors duration-150 ${
         pinned ? 'text-accent-main-100' : 'text-text-400 hover:text-text-200'
-      }`}
+      } ${touchTarget.iconButton}`}
       title={pinned ? t('workStatus.pinned.unpin') : t('workStatus.pinned.pin')}
       aria-label={pinned ? t('workStatus.pinned.unpin') : t('workStatus.pinned.pin')}
       aria-pressed={pinned}
@@ -710,7 +711,7 @@ const ExportImageActionButton = memo(function ExportImageActionButton({
       ref={buttonRef}
       onClick={() => void handleExport()}
       disabled={isExporting}
-      className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500"
+      className={`p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500 ${touchTarget.iconButton}`}
       title={isExporting ? t('exportingImage') : t('exportImage')}
       aria-label={isExporting ? t('exportingImage') : t('exportImage')}
     >
@@ -736,7 +737,8 @@ interface UserMessageViewProps {
 function useMessageActionBarClass() {
   const { preferTouchUi } = useInputCapabilities()
   return preferTouchUi
-    ? 'flex items-center gap-1 transition-opacity'
+    ? // 触控：始终可见，并略微拉开间距（按钮放大后热区变宽，贴太近会互相误触）
+      `flex items-center ${touchTarget.actionRowGap} transition-opacity`
     : 'flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto focus-within:pointer-events-auto transition-opacity'
 }
 

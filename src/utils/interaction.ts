@@ -164,4 +164,43 @@ export const interactive = {
    * 但文字保持中性主色而非强调色，用于菜单触发器等不需要强调色的场景。
    */
   toggleActiveNeutral: 'bg-bg-200 text-text-100 border border-border-200',
+}
+
+/**
+ * 触控目标尺寸。
+ *
+ * 移动端手指的接触面约 8–10mm，对应屏幕上的 44–48px。而桌面为鼠标设计的
+ * 图标按钮普遍是 28px 见方（`h-7 w-7`）—— 在手机上点它需要精确到像素级，
+ * 实测「复制 / 导出 / 分支 / 固定」这一排只有 28×32，四个按钮挤在 140px 内，
+ * 用户反馈「点不准」。
+ *
+ * 用法：给**已有的** `h-7 w-7` 叠加对应尺寸类，只在触控优先设备生效，
+ * 桌面保持原尺寸不动。
+ *
+ *     className={cn('h-7 w-7', touchTarget.iconButton)}
+ *
+ * 采用 `pointer-coarse:` 变体而不是 JS 判断：尺寸属于纯视觉表现，交给 CSS
+ * 可以在旋转、外接鼠标等能力变化时自动跟随，不会有一帧错位。
+ */
+export const touchTarget = {
+  /**
+   * 单行图标按钮（复制/导出/分支/固定等）：
+   * 桌面 28px → 触控 40px。40 而不是 44，是因为这一排常有 4 个按钮，
+   * 44px 在 390px 宽的机型上会换行；40 已明显好点且仍能一行放下。
+   */
+  iconButton: 'pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:p-2',
+
+  /**
+   * 消息操作栏的行间距：触控时略微拉开，避免相邻按钮的点击热区重叠。
+   */
+  actionRowGap: 'pointer-coarse:gap-1.5',
+
+  /**
+   * 底部工具栏的选择器胶囊（对话模式 / 思考强度 / 模型）。
+   *
+   * 桌面高 32px 正好，手指按上去偏窄；触控端抬到 40px。
+   * 用 `min-h` 而不是固定 `h`：这些胶囊里的文字会换行/截断，
+   * 固定高度会把两行文本裁掉。
+   */
+  chip: 'pointer-coarse:min-h-10',
 } as const
