@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { useEffect } from 'react'
 import { CheckIcon, ClockIcon, CloseIcon, CircleIcon, ManageSessionsIcon } from '../../../../components/Icons'
 import { DisclosureRow } from '../../../../components/ui/DisclosureRow'
 import { ProgressBar } from '../../../../components/ui/ProgressBar'
@@ -52,16 +53,55 @@ export function TodoRenderer({ part }: ToolRendererProps) {
     return null
   }
 
-  return <TodoList todos={todos} stateKey={`message:${part.messageID}:tool:${part.id}:todo-list`} />
+  /**
+   * 默认折叠。
+   *
+   * 这张卡片渲染在过程折叠壳里（历史轮次），属于回顾性内容；默认展开会在
+   * 对话结尾堆一大块列表。需要看时点一行标题即可，进度条本身仍然可见。
+   */
+  return (
+    <TodoList
+      todos={todos}
+      stateKey={`message:${part.messageID}:tool:${part.id}:todo-list`}
+      defaultCollapsed
+    />
+  )
 }
 
 // ============================================
 // TodoList Component
 // ============================================
 
-export function TodoList({ todos, stateKey }: { todos: TodoItem[]; stateKey: string }) {
+export function TodoList({
+  todos,
+  stateKey,
+  defaultCollapsed = false,
+  /**
+   * 是否遵循「已结束则默认收起」。
+   *
+   * 传 true 时：用户还没手动动过这张卡片的话，按 `defaultCollapsed` 决定；
+   * 一旦用户点过，就完全按用户的选择，不再被自动收起覆盖。
+   */
+  autoCollapse = false,
+}: {
+  todos: TodoItem[]
+  stateKey: string
+  defaultCollapsed?: boolean
+  autoCollapse?: boolean
+}) {
   const { t } = useTranslation('message')
-  const [collapsed, setCollapsed] = useUiDisclosureState(stateKey, false)
+  const [collapsed, setCollapsed, touched] = useUiDisclosureState(stateKey, defaultCollapsed)
+  /**
+   * 会话跑完之后把待办卡片收起来。
+   *
+   * 待办的价值在「正在做什么」，轮次结束后它已变成历史记录 —— 常驻展开会在
+   * 对话结尾留下一大块列表，把真正的回复推远。但用户手动点开过的卡片要尊重
+   * 其选择（`touched`），否则每帧同步都会把用户刚点开的又收回去。
+   */
+  useEffect(() => {
+    if (!autoCollapse || touched) return
+    setCollapsed(defaultCollapsed, { touched: false })
+  }, [autoCollapse, defaultCollapsed, setCollapsed, touched])
   // Android expand: 展开用 max-height 假高度，避免 WebView 在 grid-rows 动画中
   // 把任务列表画成空白（滚动中展开时闪一下）。
   const {

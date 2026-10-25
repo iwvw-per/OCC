@@ -145,8 +145,17 @@ export type ChatAreaHandle = {
  *
  * 本轮可能有多次 todowrite（每次都是全量快照），只渲染最后一次：
  * 那才代表这一轮结束时的进度，全渲染会重复刷屏。
+ *
+ * 默认展开策略：本轮**还在进行**时展开（用户此刻想看「还剩什么」），
+ * 跑完后收起成一行进度条（对话结尾留一大块待办会把真正的回复推远）。
  */
-const TurnTodoCards = memo(function TurnTodoCards({ messages }: { messages: Message[] }) {
+const TurnTodoCards = memo(function TurnTodoCards({
+  messages,
+  isActive = false,
+}: {
+  messages: Message[]
+  isActive?: boolean
+}) {
   const latest = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const content = messages[i].content
@@ -171,7 +180,12 @@ const TurnTodoCards = memo(function TurnTodoCards({ messages }: { messages: Mess
 
   return (
     <div className="flex flex-col gap-2" data-turn-todos>
-      <TodoList todos={latest.todos} stateKey={`turn-todo:${latest.partId}`} />
+      <TodoList
+        todos={latest.todos}
+        stateKey={`turn-todo:${latest.partId}`}
+        defaultCollapsed={!isActive}
+        autoCollapse
+      />
     </div>
   )
 })
@@ -355,8 +369,12 @@ const VirtualRow = memo(
                 sessionId={sessionId}
               />
               {/* 不套折叠壳的轮次同样要把待办露出来：MessageRenderer 的 'all'
-                  分支已剔除 todowrite，不在这里补渲染就会彻底看不到。 */}
-              <TurnTodoCards messages={[item.message]} />
+                  分支已剔除 todowrite，不在这里补渲染就会彻底看不到。
+                  这类行本身没有折叠壳，用「是否最新」判断它还在生成。 */}
+              <TurnTodoCards
+                messages={[item.message]}
+                isActive={item.message.isStreaming || turnLatestAssistantIds.has(item.message.info.id)}
+              />
             </div>
           ) : (
             <div className="flex justify-start">
@@ -401,7 +419,7 @@ const VirtualRow = memo(
                   * 用户看不到待办，会以为「刷新后丢了」。
                   * 只取这一轮里最后一次 todowrite，避免同一轮多次调用时重复刷屏。
                   */}
-                <TurnTodoCards messages={item.children.map(child => child.message)} />
+                <TurnTodoCards messages={item.children.map(child => child.message)} isActive={item.isActive} />
                 {/* shell 的 gap-2 只服务 process 壳 ↔ final 文本，子消息间距由 processBody 管 */}
                 {item.finalMessage && (
                   <MessageBody
