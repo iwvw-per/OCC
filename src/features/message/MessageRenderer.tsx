@@ -210,8 +210,16 @@ export function ProcessCollapseBlock({
   onExpand?: () => void | Promise<void>
 }) {
   const [expanded, setExpanded] = useUiDisclosureState(stateKey, isActive)
+  const { t } = useTranslation('message')
   /** 回拉进行中：展开后先显示占位，避免空白 */
   const [hydrating, setHydrating] = useState(false)
+  /**
+   * 展开后是否真的没有内容。
+   *
+   * `children` 里的子消息可能全部返回 null（骨架轮的消息被压缩成纯统计、
+   * 或回拉落空），此时展开只剩空白。用它决定要不要给「无过程内容」提示。
+   */
+  const isEmpty = !children || (Array.isArray(children) && children.flat().filter(Boolean).length === 0)
   // Android expand: 展开时用 max-height 假高度，避免 WebView 在 grid-rows 动画中
   // 把过程壳内容画成空白（滚动中展开/收起时表现为闪一下）。与 ContentBlock、
   // 工具步骤壳同款处理；桌面仍是原 grid-rows 动画。
@@ -286,7 +294,22 @@ export function ProcessCollapseBlock({
       >
         {shouldRenderBody && (
           <div className={MSG_SPACING.processBody}>
-            {hydrating ? <ProcessHydratePlaceholder /> : children}
+            {hydrating ? (
+              <ProcessHydratePlaceholder />
+            ) : isEmpty && expanded ? (
+              /**
+               * 展开后仍然没有内容。
+               *
+               * 这可能是：该轮确实只有统计（骨架里 stepCount > 0 但没有可回的正文），
+               * 或者本次回拉没取到数据。两种情况都不该给一片死白 ——
+               * 用户会以为卡住了，然后反复折叠/刷新。
+               */
+              <p className="px-1 py-2 text-[length:var(--fs-xs)] text-text-400">
+                {t('process.emptyAfterExpand')}
+              </p>
+            ) : (
+              children
+            )}
           </div>
         )}
       </MessageExpandPanel>

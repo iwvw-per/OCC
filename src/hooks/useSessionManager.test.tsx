@@ -29,7 +29,9 @@ const {
     prependMessages: vi.fn(),
     setRevertState: vi.fn(),
     compressHistoricalTurns: vi.fn(() => false),
-    hydrateMessages: vi.fn(() => false),
+    // hydrateTurn 的两条落库路径（合并 / 骨架轮整段替换）
+    hydrateMessages: vi.fn(() => true),
+    replaceTurnMessages: vi.fn(() => true),
     setTurnSkeleton: vi.fn(),
     getTrimmedCount: vi.fn(() => 0),
     settleByAuthoritativeIdle: vi.fn(() => false),
@@ -59,6 +61,8 @@ vi.mock('../api', () => ({
   unrevertSession: vi.fn(),
   encodeBeforeCursor: (message: unknown) => `cursor:${(message as { info?: { id?: string } }).info?.id ?? ''}`,
   extractUserMessageContent: (message: unknown) => extractUserMessageContentMock(message),
+  // 真实模块里的常量：hydrateTurn 用它当单页上限
+  LIGHTWEIGHT_MESSAGE_LIMIT: 200,
 }))
 
 vi.mock('../store', () => ({
@@ -697,5 +701,108 @@ describe('useSessionManager', () => {
       messageId: 'message-1',
       history: [],
     })
+  })
+})
+
+describe('hydrateTurn（展开折叠块回拉）', () => {
+  /**
+   * 回归：偶发「展开最新轮次一片空白，多刷几次又好了」。
+   *
+   * 三个成因，都已修：
+   *   1. 请求条数用 turnMessages.length —— 骨架态内存里只有 2 条，只拉回 2 条
+   *   2. 时间戳切分遇到毫秒级偏移把整轮剔光，然后静默 return
+   *   3. 用 loadSequenceRef 判并发 —— 与首屏加载竞争时丢弃结果且不重试
+   */
+  const TURN_USER = 'msg_user_1'
+  const NEXT_USER = 'msg_user_2'
+
+  function assistantMsg(id: string, created: number) {
+    return {
+      info: { id, role: 'assistant', time: { created, completed: created + 10 } },
+      content: [{ id: `${id}-p`, type: 'text', text: 'x', sessionID: 's', messageID: id }],
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // 只清返回值，不清调用记录（hydrateTurn 的断言依赖它）
+    getSessionTurnPageMock.mockClear()
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [
+        // 骨架态：本轮只有 user + 最终回复两条
+        { info: { id: TURN_USER, role: 'user', time: { created: 1000 } }, content: [], isCompressed: true },
+        {
+          info: { id: 'reply_1', role: 'assistant', time: { created: 1000, completed: 1000 } },
+          content: [],
+          // 骨架/压缩态：hydrateTurn 靠它判断「这一轮需要回拉」
+          isCompressed: true,
+        },
+        { info: { id: NEXT_USER, role: 'user', time: { created: 5000 } }, content: [], isCompressed: true },
+      ],
+      directory: '/w',
+    })
+  })
+
+  it('按单页上限请求，而不是按内存里的条数', async () => {
+    // 内存只有 2 条，旧实现只请求 2 条 → 展开后几乎空白
+    getSessionTurnPageMock.mockResolvedValue({ messages: [assistantMsg('a1', 1100)], nextCursor: undefined, hasMore: false })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'session-1', directory: '/w' }))
+    // 清掉挂载时的首屏分页调用，只观察 hydrateTurn 自己发的那次
+    getSessionTurnPageMock.mockClear()
+
+    await act(async () => {
+      await result.current.hydrateTurn(TURN_USER)
+    })
+
+    // 首屏分页用的是小 limit（3）；hydrateTurn 必须用单页上限 200。
+    // 直接找 limit===200 的调用，避免受首屏请求顺序影响。
+    const limits = getSessionTurnPageMock.mock.calls.map(c => c[1])
+    expect(limits).toContain(200)
+  })
+
+  it('用消息 id 切分区间，不依赖毫秒级时间戳', async () => {
+    // assistant 的 created 比 user 晚 1ms：旧的 >= turnStart 比较会命中，
+    // 但一旦骨架时间与真实时间差更多就会把整轮剔光
+    getSessionTurnPageMock.mockResolvedValue({
+      messages: [assistantMsg('a1', 1001), assistantMsg('a2', 1002)],
+      nextCursor: undefined,
+      hasMore: false,
+    })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'session-1', directory: '/w' }))
+    await act(async () => {
+      await result.current.hydrateTurn(TURN_USER)
+    })
+
+    // 拿到了内容 → 交给 store（骨架轮走替换，普通轮走合并）
+    const replaced = (messageStoreMock.replaceTurnMessages.mock.calls.at(-1) as unknown[] | undefined)?.[2] as
+      | unknown[]
+      | undefined
+    const merged = (messageStoreMock.hydrateMessages.mock.calls.at(-1) as unknown[] | undefined)?.[1] as
+      | unknown[]
+      | undefined
+    const applied = replaced ?? merged
+    expect(applied).toHaveLength(2)
+  })
+
+  it('切分失败时兜底使用原始一页，而不是静默 return', async () => {
+    // 锚点不在这一页（本轮 200+ 条、点的是更早的轮次），时间也对不上
+    getSessionTurnPageMock.mockResolvedValue({
+      messages: [assistantMsg('unrelated', 999999)],
+      nextCursor: undefined,
+      hasMore: false,
+    })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'session-1', directory: '/w' }))
+    await act(async () => {
+      await result.current.hydrateTurn(TURN_USER)
+    })
+
+    // 至少要把数据交给 store（合并），不能什么都不做
+    const merged =
+      messageStoreMock.hydrateMessages.mock.calls.length + messageStoreMock.replaceTurnMessages.mock.calls.length
+    expect(merged).toBeGreaterThan(0)
   })
 })

@@ -182,5 +182,8 @@
     "unknownError": "Error",
     "unknownErrorDesc": "An unknown error occurred."
   },
-  "loadingProcess": "Loading processing details…"
+  "loadingProcess": "Loading processing details…",
+  "process": {
+    "emptyAfterExpand": "No process content to expand for this turn (only stats were recorded)."
+  }
 }

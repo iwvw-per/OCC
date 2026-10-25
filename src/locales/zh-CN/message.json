@@ -156,5 +156,8 @@
     "unknownError": "错误",
     "unknownErrorDesc": "发生未知错误。"
   },
-  "loadingProcess": "正在加载处理过程…"
+  "loadingProcess": "正在加载处理过程…",
+  "process": {
+    "emptyAfterExpand": "这一轮没有可展开的过程内容（可能只有统计信息）。"
+  }
 }

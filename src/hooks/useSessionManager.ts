@@ -975,27 +975,102 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         assistantOfTurn.length > 0 &&
         assistantOfTurn.every(m => m.isCompressed) &&
         assistantOfTurn.every(m => !m.content.some(part => part.type === 'tool'))
-      const requestLimit = isSkeletonTurn ? LIGHTWEIGHT_MESSAGE_LIMIT : turnMessages.length
+      /**
+       * 请求条数。
+       *
+       * ⚠️ 不能用 `turnMessages.length` 当 limit：骨架/压缩态下本轮在内存里只有
+       * 两条（user + 最终回复），而真实轮次可能有几十上百条 —— 只拉 2 条回来，
+       * 展开后依旧几乎空白，且因为不报错，表现为「偶发加载不出来」
+       * （取决于内存里恰好留了几条）。
+       *
+       * 统一按单页上限取：游标（`before`）本身已经限定了区间，服务端不会跨轮
+       * 返回，多取的部分在下面的时间过滤里会被剔掉。
+       */
+      /**
+       * 请求条数统一按单页上限。
+       *
+       * ⚠️ 不能用 `turnMessages.length`：骨架/压缩态下本轮在内存里只有两条
+       * （user + 最终回复），而真实轮次可能有几十上百条 —— 只拉 2 条回来，
+       * 展开后依旧几乎空白，而且不报错，表现为「偶发加载不出来」
+       * （取决于内存里恰好留了几条）。
+       *
+       * 游标（`before`）本身已限定区间，服务端不会跨轮返回，多取的部分
+       * 由下面的区间切分剔除。
+       */
+      const requestLimit = LIGHTWEIGHT_MESSAGE_LIMIT
 
-      const seq = loadSequenceRef.current.get(sessionId)
       try {
         const page = await getSessionMessagePage(sessionId, requestLimit, before, dir, serverId)
-        // 期间切走了 session 则丢弃
-        if (loadSequenceRef.current.get(sessionId) !== seq) return
 
-        // 只保留属于本轮的条目：请求按条数取，可能跨到更早一轮。
-        const fetched = page.messages.filter(m => {
-          const created = m.info.time?.created ?? 0
+        /**
+         * 并发保护。
+         *
+         * ⚠️ 这里刻意**不**比对 loadSequenceRef：那个序号在每次 loadSession /
+         * loadMoreHistory 时都会 +1，而刷新后展开折叠块（配合布局恢复、
+         * 视口滚动触发补页）极易与首屏加载并发。原实现一比就丢弃结果且不重试
+         * —— 这正是「偶发加载不出来，多刷几次就好了」。
+         *
+         * 同会话内一律允许写入：hydrateMessages 按 id 合并，
+         * replaceTurnMessages 按区间替换，重复都是幂等的。
+         * 切走会话时 store 里已无对应 state，写入自然落空，无需额外判断。
+         */
+
+        /**
+         * 切出本轮区间：用**消息 id 锚点**，不依赖时间戳。
+         *
+         * 时间比较（`created >= turnStart && created < turnEnd`）在这里不可靠：
+         * 骨架的 `time.created` 是轮次起点，真实消息的 `created` 可能与之相差
+         * 几毫秒，严格比较会把整轮剔光；随后 `fetched.length === 0` 静默返回，
+         * 用户看到的就是「展开后一片空白」。
+         */
+        const anchorId = turnMessages[0].info.id
+        const nextTurnId = nextTurnUser?.info.id
+
+        let fetched = page.messages
+        const anchorIndex = fetched.findIndex(m => m.info.id === anchorId)
+        if (anchorIndex >= 0) {
+          const nextIndex = nextTurnId ? fetched.findIndex(m => m.info.id === nextTurnId) : -1
+          fetched = nextIndex > anchorIndex ? fetched.slice(anchorIndex, nextIndex) : fetched.slice(anchorIndex)
+        } else {
+          // 锚点不在这一页（本轮有 200+ 条、且用户点的是更早的轮次）：
+          // 退化为时间过滤，但边界取两侧最近值，不苛求精确相等。
           const turnStart = turnMessages[0].info.time?.created ?? 0
           const turnEnd = nextTurnUser?.info.time?.created ?? Number.POSITIVE_INFINITY
-          return created >= turnStart && created < turnEnd
-        })
-        if (fetched.length === 0) return
+          fetched = fetched.filter(m => {
+            const created = m.info.time?.created ?? 0
+            return created >= turnStart && created < turnEnd
+          })
+        }
+
+        /**
+         * 空结果不再静默返回。
+         *
+         * 原本这里是 `if (fetched.length === 0) return`，任何一次切分失配都会
+         * 变成「点了展开没反应」且无重试。兜底地把服务端返回的原始一页交给
+         * store（按 id 合并，重复不会重复渲染），好过让折叠块永远空着。
+         */
+        const usable = fetched.length > 0 ? fetched : page.messages
+        if (usable.length === 0) return
 
         if (isSkeletonTurn) {
-          messageStore.replaceTurnMessages(sessionId, turnUserMessageId, fetched)
+          /**
+           * 骨架轮：整段替换。
+           *
+           * 但必须先确认这批数据**真的属于本轮** —— 替换是破坏性的，
+           * 若因锚点/游标错位拿到相邻轮次的内容，会把本轮彻底换掉，
+           * 表现为「展开后显示的是别的内容」或「一片空白」。
+           *
+           * 判据：本轮 user 消息 id 必须在这批数据开头附近出现；
+           * 不满足就退回合并（不删原有内容）。
+           */
+          const containsAnchor = usable.some(m => m.info.id === turnUserMessageId)
+          if (containsAnchor) {
+            messageStore.replaceTurnMessages(sessionId, turnUserMessageId, usable)
+          } else {
+            messageStore.hydrateMessages(sessionId, usable)
+          }
         } else {
-          messageStore.hydrateMessages(sessionId, fetched)
+          messageStore.hydrateMessages(sessionId, usable)
         }
       } catch (error) {
         sessionErrorHandler('hydrate turn', error)
