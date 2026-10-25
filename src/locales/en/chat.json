@@ -462,7 +462,22 @@
       "working": "Working",
       "done": "Done",
       "failed": "Failed",
-      "completedGroup": "Completed"
+      "completedGroup": "Completed",
+      "openDetail": "View details for \"{{title}}\"",
+      "dialogTitle": "Subagent details",
+      "detailStatus": "Status",
+      "detailAgent": "Agent",
+      "detailStarted": "Created",
+      "detailDuration": "Elapsed",
+      "detailScale": "Scale",
+      "detailScaleValue": "{{turns}} turns · {{steps}} steps",
+      "detailId": "Session ID",
+      "detailPrompt": "Task",
+      "detailReply": "Result",
+      "detailNoReply": "This subagent has not produced any text yet (it may still be working, or only called tools).",
+      "detailLoadFailed": "Failed to read the subagent content. Use \"Open session\" to inspect the full run.",
+      "jumpToMessage": "Locate call",
+      "openSession": "Open session"
     },
     "mcp": {
       "toggle": "Toggle {{name}}",
@@ -516,7 +531,9 @@
       "jumpToMessage": "Jump to message",
       "kindShell": "Shell command",
       "kindSubagent": "Subagent",
-      "outputExpired": "Output was cleaned up by the server after the job finished"
+      "outputExpired": "Output was cleaned up by the server after the job finished",
+      "clearSettled": "Clear finished background jobs",
+      "clearSettledShort": "Clear finished"
     }
   }
 }

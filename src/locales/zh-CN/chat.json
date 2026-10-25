@@ -462,7 +462,22 @@
       "working": "正在工作",
       "done": "已完成",
       "failed": "失败",
-      "completedGroup": "已完成"
+      "completedGroup": "已完成",
+      "openDetail": "查看「{{title}}」详情",
+      "dialogTitle": "子代理详情",
+      "detailStatus": "状态",
+      "detailAgent": "Agent",
+      "detailStarted": "创建于",
+      "detailDuration": "已运行",
+      "detailScale": "规模",
+      "detailScaleValue": "{{turns}} 轮 · {{steps}} 步",
+      "detailId": "会话 ID",
+      "detailPrompt": "任务",
+      "detailReply": "结论",
+      "detailNoReply": "这个子代理还没有产出正文（可能仍在工作，或只调用了工具）。",
+      "detailLoadFailed": "读取子代理内容失败，可点「打开会话」查看完整过程。",
+      "jumpToMessage": "定位调用位置",
+      "openSession": "打开会话"
     },
     "mcp": {
       "toggle": "切换 {{name}}",
@@ -516,7 +531,9 @@
       "jumpToMessage": "跳到对话位置",
       "kindShell": "Shell 命令",
       "kindSubagent": "子代理",
-      "outputExpired": "输出已被服务端清理（任务结束后不再保留）"
+      "outputExpired": "输出已被服务端清理（任务结束后不再保留）",
+      "clearSettled": "清除已结束的后台任务",
+      "clearSettledShort": "清除已结束"
     }
   }
 }

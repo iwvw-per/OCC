@@ -223,6 +223,11 @@ export function collectBackgroundJobs(
       messageId?: string
     }
   >,
+  /**
+   * 用户已清除的 job id。这些任务在消息流里仍有历史回执（推导层还能看见），
+   * 但用户明确清掉了，不该再出现在面板上。
+   */
+  dismissed?: ReadonlySet<string>,
 ): BackgroundJob[] {
   const byId = new Map<string, BackgroundJob>()
 
@@ -336,7 +341,8 @@ export function collectBackgroundJobs(
     cancelled: 3,
     completed: 4,
   }
-  return [...byId.values()].sort(
+  const collected = [...byId.values()].filter(job => !dismissed?.has(job.id))
+  return collected.sort(
     (a, b) => rank[a.status] - rank[b.status] || b.startedAt - a.startedAt,
   )
 }

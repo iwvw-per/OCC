@@ -33,10 +33,8 @@ import {
   extractToolData,
   getToolConfig,
   DefaultRenderer,
-  TodoRenderer,
   TaskRenderer,
   TaskAgentBadge,
-  hasTodos,
 } from '../tools'
 import { MSG_SPACING } from '../messageSpacing'
 import { MessageExpandPanel } from '../messageExpand'
@@ -761,8 +759,18 @@ const ToolBody = memo(function ToolBody({
     return <TaskRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
   }
 
-  if (lowerTool.includes('todo') && hasTodos(part)) {
-    return <TodoRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+  /**
+   * todowrite 不在对话里渲染。
+   *
+   * 待办列表已经在两个更合适的位置常驻：输入框下方的信息栏（一行进度 + 可展开
+   * 明细）与右侧工作状态面板（Tasks 板块，完整视图）。在对话流里再画一张卡片
+   * 属于第三份重复，而且会把正文推远。
+   *
+   * 返回 null 而不是走 DefaultRenderer：默认渲染器会画成一张工具调用卡片
+   * （图标 + 「Updated tasks」+ 折叠箭头），仍然是同一份信息。
+   */
+  if (lowerTool.includes('todo')) {
+    return null
   }
 
   const config = getToolConfig(tool)

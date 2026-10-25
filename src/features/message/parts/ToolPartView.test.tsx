@@ -315,3 +315,43 @@ describe('ToolPartView background subagent', () => {
     expect(screen.queryByText('task.backgroundRunning')).not.toBeInTheDocument()
   })
 })
+
+describe('ToolPartView todowrite', () => {
+  it('不渲染待办卡片（待办只在信息栏与工作面板展示）', () => {
+    /**
+     * 对话流里再画一张待办卡片是第三份重复：输入框下方信息栏有一行进度 +
+     * 可展开明细，右侧工作状态面板有完整的 Tasks 板块。
+     */
+    const part: ToolPart = {
+      id: 'tool-todo',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-todo',
+      tool: 'todowrite',
+      state: {
+        status: 'completed',
+        input: {
+          todos: [
+            { id: 't1', content: '第一步', status: 'pending', priority: 'medium' },
+            { id: 't2', content: '第二步', status: 'in_progress', priority: 'medium' },
+          ],
+        },
+        output: 'Todos updated',
+        time: { start: 1, end: 2 },
+      },
+    }
+
+    render(<ToolPartView part={part} />)
+
+    /**
+     * 外层工具行（图标 + 名称 + 时长）仍由 ToolPartView 提供，但**正文为空**：
+     * 不再渲染任何待办条目。真实对话里这一整条也会被 MessageRenderer 的
+     * stripTodoItems 剔除，不会出现在消息流中。
+     */
+    expect(screen.queryByText('第一步')).not.toBeInTheDocument()
+    expect(screen.queryByText('第二步')).not.toBeInTheDocument()
+    // 不再是待办卡片：没有「已完成 / 总数」进度
+    expect(screen.queryByText(/\d+\/\d+/)).not.toBeInTheDocument()
+  })
+})

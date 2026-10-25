@@ -52,10 +52,31 @@ class BackgroundJobStore {
    * 会把刚校正好的 running 打回 completed，用户又看到「已结束」。
    */
   private lastRunningIds = new Map<string, Set<string>>()
+  /**
+   * sessionId → 用户手动「清除已结束」时忽略掉的 job id。
+   *
+   * 大部分已结束任务**不在** `bySession` 里 —— 它们是 `collectBackgroundJobs`
+   * 从消息流推导出来的（历史回执），没有实时记录。所以「清除」不能只删 store
+   * 条目，必须记住一份忽略名单，让推导层也跳过它们。
+   *
+   * 只允许忽略已结束的任务：正在跑的如果被忽略，后续 `shell.exited` 找不到
+   * 归属，面板会永远停在「运行中」。
+   */
+  private dismissed = new Map<string, Set<string>>()
 
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** 该 job 是否已被用户清除（推导层据此跳过） */
+  isDismissed(sessionId: string, jobId: string): boolean {
+    return this.dismissed.get(sessionId)?.has(jobId) ?? false
+  }
+
+  /** 该会话被清除的 job id 集合（推导层批量过滤用） */
+  getDismissed(sessionId: string): ReadonlySet<string> {
+    return this.dismissed.get(sessionId) ?? EMPTY_DISMISSED
   }
 
   /**
@@ -211,6 +232,41 @@ class BackgroundJobStore {
   }
 
   /**
+   * 清掉该会话里**已结束**的后台任务（保留仍在跑的）。
+   *
+   * 面板上的已结束任务会随会话不断堆积，挤占进行中的位置。
+   *
+   * 关键：已结束任务大多**不在** `bySession` 里（它们是消息流推导出来的），
+   * 所以必须同时登记忽略名单，让 `collectBackgroundJobs` 跳过它们。
+   * 只删 store 条目的话，下一帧推导又会把它们变回来。
+   *
+   * `settledIds` 由调用方给出（它才知道当前面板上哪些已结束）。
+   * 返回实际清除的条数。
+   */
+  clearSettled(sessionId: string, settledIds: Iterable<string> = []): number {
+    const jobs = this.bySession.get(sessionId)
+    const dismissed = this.dismissed.get(sessionId) ?? new Set<string>()
+    let removed = 0
+
+    for (const id of settledIds) {
+      // 正在跑的任务绝不能忽略：删了之后 shell.exited 找不到归属，
+      // 面板会永远停在「运行中」。
+      const live = jobs?.get(id)
+      if (live && live.status === 'running') continue
+      if (!dismissed.has(id)) {
+        dismissed.add(id)
+        removed += 1
+      }
+      // store 里若有这条记录，一并删掉
+      if (live) jobs?.delete(id)
+    }
+
+    if (dismissed.size > 0) this.dismissed.set(sessionId, dismissed)
+    if (removed > 0) this.invalidate(sessionId)
+    return removed
+  }
+
+  /**
    * 找出登记了某个 job 的会话。
    *
    * `shell.exited` 事件只带 shell id、不带 sessionID，而任务的归属只在
@@ -251,6 +307,8 @@ class BackgroundJobStore {
 }
 
 const EMPTY_JOBS = new Map<string, LiveBackgroundJob>()
+/** 空忽略集合：避免每次 getDismissed 都新建一个 Set */
+const EMPTY_DISMISSED: ReadonlySet<string> = new Set()
 
 export const backgroundJobStore = new BackgroundJobStore()
 

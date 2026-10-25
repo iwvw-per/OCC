@@ -6,7 +6,7 @@
 //
 // 数据全部复用既有 store / hook：不新增轮询，MCP 与 Skills 走一次性懒加载。
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   CheckIcon,
@@ -44,7 +44,9 @@ import {
 } from './WorkStatusPrimitives'
 import { collectBackgroundJobs, type BackgroundJob } from './backgroundJobs'
 import { BackgroundJobDialog } from './BackgroundJobDialog'
-import { useLiveBackgroundJobs } from '../../store/backgroundJobStore'
+import { SubagentDialog } from './SubagentDialog'
+import { useSessionNavigation } from '../../contexts/SessionNavigationContext'
+import { backgroundJobStore, useLiveBackgroundJobs } from '../../store/backgroundJobStore'
 import { useReconcileRunningShells } from '../../hooks/useReconcileRunningShells'
 import type { MCPStatus } from '../../types/api/mcp'
 
@@ -190,9 +192,15 @@ export const WorkStatusTurnStatsSection = memo(function WorkStatusTurnStatsSecti
 
 export const WorkStatusSubagentsSection = memo(function WorkStatusSubagentsSection({
   sessionId,
+  directory,
+  serverId,
+  onScrollToMessage,
 }: WorkStatusSectionContext) {
   const { t } = useTranslation('chat')
   const children = useChildSessions(sessionId)
+  /** 正在查看详情的子代理；null = 弹窗关闭 */
+  const [detailChild, setDetailChild] = useState<ChildSessionInfo | null>(null)
+  const { navigateToSession, openSessionInSplit } = useSessionNavigation()
 
   // 已完成（idle）折叠成一组：跑完的子代理会不断堆积，平铺会把进行中的挤下去。
   // error 留在进行中组：失败是需要被看见的，不藏进收起的组里。
@@ -206,14 +214,43 @@ export const WorkStatusSubagentsSection = memo(function WorkStatusSubagentsSecti
     return { active, completed }
   }, [children])
 
+  /**
+   * 打开子会话。
+   *
+   * 必须在早退之前声明：`children.length === 0` 时组件返回 null，
+   * 若把 hook 放在早退之后，有子代理和没有子代理的两次渲染 hook 数量不同，
+   * React 会直接抛错（rules-of-hooks）。
+   */
+  const handleOpenSession = useCallback(
+    (childId: string) => {
+      // 优先分屏（保留当前会话在视野里）；分屏不可用时退回主区域跳转
+      if (!openSessionInSplit?.(childId, directory)) navigateToSession(childId, directory)
+    },
+    [directory, navigateToSession, openSessionInSplit],
+  )
+
   if (children.length === 0) return null
 
   const runningCount = active.filter(child => child.status === 'running').length
 
+  /**
+   * 弹窗里的子代理跟随最新状态刷新，而不是保留打开那一刻的快照 ——
+   * 打开时还在跑的子代理会结束，状态要跟着变。
+   */
+  const activeDetail = detailChild
+    ? children.find(child => child.id === detailChild.id) ?? detailChild
+    : null
+
   const renderRow = (child: ChildSessionInfo) => (
     <WorkStatusRow
       key={child.id}
-      label={child.title}
+      onClick={() => setDetailChild(child)}
+      ariaLabel={t('workStatus.subagent.openDetail', { title: child.title })}
+      label={
+        <span className="min-w-0 truncate text-left" title={child.title}>
+          {child.title}
+        </span>
+      }
       value={
         child.status === 'running' ? (
           <WorkStatusValue tone="info">
@@ -232,26 +269,37 @@ export const WorkStatusSubagentsSection = memo(function WorkStatusSubagentsSecti
   )
 
   return (
-    <WorkStatusCollapsibleSection
-      title={t('workStatus.section.subagents')}
-      icon={<UsersIcon size={14} />}
-      id="subagents"
-      summary={runningCount > 0 ? `${runningCount}/${children.length}` : String(children.length)}
-    >
-      <WorkStatusRows className="max-h-56 overflow-y-auto">
-        {active.map(renderRow)}
-        {completed.length > 0 ? (
-          // 默认收起（workStatusStore 对未登记的 id 缺省为 false），展开态照常持久化
-          <WorkStatusCollapsibleSection
-            id="subagents-completed"
-            title={t('workStatus.subagent.completedGroup')}
-            summary={String(completed.length)}
-          >
-            <WorkStatusRows>{completed.map(renderRow)}</WorkStatusRows>
-          </WorkStatusCollapsibleSection>
-        ) : null}
-      </WorkStatusRows>
-    </WorkStatusCollapsibleSection>
+    <>
+      <WorkStatusCollapsibleSection
+        title={t('workStatus.section.subagents')}
+        icon={<UsersIcon size={14} />}
+        id="subagents"
+        summary={runningCount > 0 ? `${runningCount}/${children.length}` : String(children.length)}
+      >
+        <WorkStatusRows className="max-h-56 overflow-y-auto">
+          {active.map(renderRow)}
+          {completed.length > 0 ? (
+            // 默认收起（workStatusStore 对未登记的 id 缺省为 false），展开态照常持久化
+            <WorkStatusCollapsibleSection
+              id="subagents-completed"
+              title={t('workStatus.subagent.completedGroup')}
+              summary={String(completed.length)}
+            >
+              <WorkStatusRows>{completed.map(renderRow)}</WorkStatusRows>
+            </WorkStatusCollapsibleSection>
+          ) : null}
+        </WorkStatusRows>
+      </WorkStatusCollapsibleSection>
+
+      <SubagentDialog
+        child={activeDetail}
+        directory={directory}
+        serverId={serverId}
+        onClose={() => setDetailChild(null)}
+        onScrollToMessage={onScrollToMessage}
+        onOpenSession={handleOpenSession}
+      />
+    </>
   )
 })
 
@@ -292,9 +340,21 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
     for (const [id, job] of live) parts.push(`${id}:${job.status}`)
     return parts.join(',')
   }, [live])
-  const jobsKey = `${messages.length}:${messages[messages.length - 1]?.info.id ?? ''}:${liveSignature}`
+  /**
+   * 用户已清除的任务 id。
+   *
+   * 用 useSyncExternalStore 订阅 store：清除后必须立刻重算 jobs，
+   * 否则面板要等下一次消息变化才更新（点了「清除」没反应）。
+   */
+  const dismissed = useSyncExternalStore(
+    backgroundJobStore.subscribe,
+    () => backgroundJobStore.getDismissed(sessionId ?? ''),
+    () => backgroundJobStore.getDismissed(sessionId ?? ''),
+  )
+  const dismissedKey = useMemo(() => [...dismissed].sort().join(','), [dismissed])
+  const jobsKey = `${messages.length}:${messages[messages.length - 1]?.info.id ?? ''}:${liveSignature}:${dismissedKey}`
   const jobs = useMemo(
-    () => collectBackgroundJobs(messages, live),
+    () => collectBackgroundJobs(messages, live, dismissed),
     // 只用粗筛键：messages 引用每帧都变，放进依赖等于每帧重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jobsKey],
@@ -364,6 +424,17 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
         icon={<TerminalIcon size={14} />}
         id="backgroundJobs"
         summary={running.length > 0 ? `${running.length}/${jobs.length}` : String(jobs.length)}
+        action={
+          settled.length > 0 ? (
+            <WorkStatusRowAction
+              tone="default"
+              onClick={() => backgroundJobStore.clearSettled(sessionId ?? '', settled.map(job => job.id))}
+              ariaLabel={t('workStatus.backgroundJob.clearSettled')}
+            >
+              {t('workStatus.backgroundJob.clearSettledShort')}
+            </WorkStatusRowAction>
+          ) : undefined
+        }
       >
         <WorkStatusRows className="max-h-56 overflow-y-auto">
           {running.length > 0 ? (

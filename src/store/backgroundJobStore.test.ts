@@ -183,4 +183,46 @@ describe('后台任务状态：权威来源可以纠正历史推导', () => {
     expect(backgroundJobStore.has(SID, 'sh_foreground')).toBe(false)
     expect(backgroundJobStore.has('ses_other', 'sh_bg')).toBe(false)
   })
+
+  describe('clearSettled', () => {
+    it('dismisses finished jobs so the derived list stops showing them', () => {
+      /**
+       * 关键：已结束任务大多**不在** bySession 里（它们由消息流推导）。
+       * 所以「清除」必须登记忽略名单，否则下一帧推导又把它们变回来。
+       */
+      backgroundJobStore.clearSettled(SID, ['sh_done', 'sh_fail'])
+
+      expect(backgroundJobStore.isDismissed(SID, 'sh_done')).toBe(true)
+      expect(backgroundJobStore.isDismissed(SID, 'sh_fail')).toBe(true)
+      expect(backgroundJobStore.isDismissed(SID, 'sh_run')).toBe(false)
+    })
+
+    it('never dismisses a running job', () => {
+      // 正在跑的如果被忽略，后续 shell.exited 找不到归属，面板会永远停在「运行中」
+      backgroundJobStore.set(SID, { id: 'sh_run', status: 'running', at: 1000, authoritative: true })
+
+      backgroundJobStore.clearSettled(SID, ['sh_run'])
+
+      expect(backgroundJobStore.isDismissed(SID, 'sh_run')).toBe(false)
+      expect(backgroundJobStore.getSnapshot(SID).has('sh_run')).toBe(true)
+    })
+
+    it('removes settled entries from the live store too', () => {
+      backgroundJobStore.set(SID, { id: 'sh_done', status: 'completed', at: 2000 })
+
+      backgroundJobStore.clearSettled(SID, ['sh_done'])
+
+      expect(backgroundJobStore.getSnapshot(SID).has('sh_done')).toBe(false)
+    })
+
+    it('counts only newly dismissed ids', () => {
+      expect(backgroundJobStore.clearSettled(SID, ['sh_a'])).toBe(1)
+      // 重复清除同一批：不再计数
+      expect(backgroundJobStore.clearSettled(SID, ['sh_a'])).toBe(0)
+    })
+
+    it('is a no-op for an unknown session with no ids', () => {
+      expect(backgroundJobStore.clearSettled('ses_missing')).toBe(0)
+    })
+  })
 })

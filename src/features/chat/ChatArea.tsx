@@ -29,11 +29,10 @@ import {
   type Virtualizer,
 } from '@tanstack/react-virtual'
 import { useTranslation } from 'react-i18next'
-import { MessageRenderer, ProcessCollapseBlock, TodoList, messageHasFinalContent, messageHasProcessContent } from '../message'
+import { MessageRenderer, ProcessCollapseBlock, messageHasFinalContent, messageHasProcessContent } from '../message'
 import { MessageErrorView } from '../message/parts'
 import type { ChangedFile } from '../message/parts/changedFiles'
 import type { Message, MessageError } from '../../types/message'
-import { normalizeTodos } from '../../utils/todoSource'
 import { RetryStatusInline, type RetryStatusInlineData } from './RetryStatusInline'
 import { InlineQuestion } from './InlineQuestion'
 import {
@@ -135,60 +134,6 @@ export type ChatAreaHandle = {
 }
 
 // ─── 虚拟行 ──────────────────────────────────────────────────
-
-/**
- * 本轮待办卡片（常显在过程折叠块外面）。
- *
- * todowrite 是 agent 用来同步进度的信号，不是需要折叠的执行细节。此前它作为
- * 普通 tool part 被收进「Worked for 22s」折叠块（默认收起），用户看不到待办，
- * 会以为「刷新后丢了」——其实数据一直在，只是藏进了折叠块。
- *
- * 本轮可能有多次 todowrite（每次都是全量快照），只渲染最后一次：
- * 那才代表这一轮结束时的进度，全渲染会重复刷屏。
- *
- * 默认展开策略：本轮**还在进行**时展开（用户此刻想看「还剩什么」），
- * 跑完后收起成一行进度条（对话结尾留一大块待办会把真正的回复推远）。
- */
-const TurnTodoCards = memo(function TurnTodoCards({
-  messages,
-  isActive = false,
-}: {
-  messages: Message[]
-  isActive?: boolean
-}) {
-  const latest = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const content = messages[i].content
-      for (let j = content.length - 1; j >= 0; j--) {
-        const part = content[j]
-        if (part.type !== 'tool') continue
-        const name = part.tool?.toLowerCase() ?? ''
-        if (name !== 'todowrite' && name !== 'todo_write') continue
-        const state = part.state
-        // input 是模型写下的快照；服务端有时只在 metadata 回填，二者都认。
-        const raw =
-          state?.input?.todos ??
-          ('metadata' in (state ?? {}) ? (state as { metadata?: Record<string, unknown> }).metadata?.todos : undefined)
-        const todos = normalizeTodos(raw)
-        if (todos.length > 0) return { partId: part.id, todos }
-      }
-    }
-    return null
-  }, [messages])
-
-  if (!latest) return null
-
-  return (
-    <div className="flex flex-col gap-2" data-turn-todos>
-      <TodoList
-        todos={latest.todos}
-        stateKey={`turn-todo:${latest.partId}`}
-        defaultCollapsed={!isActive}
-        autoCollapse
-      />
-    </div>
-  )
-})
 
 interface MessageBodyProps {
   message: Message
@@ -368,13 +313,6 @@ const VirtualRow = memo(
                 onEntryGrowComplete={onEntryGrowComplete}
                 sessionId={sessionId}
               />
-              {/* 不套折叠壳的轮次同样要把待办露出来：MessageRenderer 的 'all'
-                  分支已剔除 todowrite，不在这里补渲染就会彻底看不到。
-                  这类行本身没有折叠壳，用「是否最新」判断它还在生成。 */}
-              <TurnTodoCards
-                messages={[item.message]}
-                isActive={item.message.isStreaming || turnLatestAssistantIds.has(item.message.info.id)}
-              />
             </div>
           ) : (
             <div className="flex justify-start">
@@ -411,15 +349,6 @@ const VirtualRow = memo(
                     />
                   ))}
                 </ProcessCollapseBlock>
-                {/*
-                  * 待办卡片常显：渲染在过程折叠块**外面**。
-                  *
-                  * todowrite 是 agent 同步进度的信号，不是需要折叠的执行细节。
-                  * 之前它作为普通 tool part 被收进「Worked for 22s」折叠块（默认收起），
-                  * 用户看不到待办，会以为「刷新后丢了」。
-                  * 只取这一轮里最后一次 todowrite，避免同一轮多次调用时重复刷屏。
-                  */}
-                <TurnTodoCards messages={item.children.map(child => child.message)} isActive={item.isActive} />
                 {/* shell 的 gap-2 只服务 process 壳 ↔ final 文本，子消息间距由 processBody 管 */}
                 {item.finalMessage && (
                   <MessageBody
