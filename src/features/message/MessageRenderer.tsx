@@ -214,10 +214,18 @@ export function ProcessCollapseBlock({
   /** 回拉进行中：展开后先显示占位，避免空白 */
   const [hydrating, setHydrating] = useState(false)
   /**
+   * 上一次回拉是否失败。
+   *
+   * 必须与「回拉成功但没有内容」区分开：两者此前都表现为一片空白，用户
+   * 无法判断是网络/隧道问题还是本来就没有，只能反复刷新碰运气。
+   * 失败时给一个明确的「重试」入口。
+   */
+  const [hydrateFailed, setHydrateFailed] = useState(false)
+  /**
    * 展开后是否真的没有内容。
    *
    * `children` 里的子消息可能全部返回 null（骨架轮的消息被压缩成纯统计、
-   * 或回拉落空），此时展开只剩空白。用它决定要不要给「无过程内容」提示。
+   * 或回拉落空），此时展开只剩空白。用它决定要不要给提示。
    */
   const isEmpty = !children || (Array.isArray(children) && children.flat().filter(Boolean).length === 0)
   // Android expand: 展开时用 max-height 假高度，避免 WebView 在 grid-rows 动画中
@@ -257,8 +265,10 @@ export function ProcessCollapseBlock({
       const pending = onExpand()
       if (pending && typeof (pending as Promise<void>).then === 'function') {
         setHydrating(true)
+        setHydrateFailed(false)
         void (pending as Promise<void>)
-          .catch(() => {})
+          .then(() => setHydrateFailed(false))
+          .catch(() => setHydrateFailed(true))
           .finally(() => setHydrating(false))
       }
     }
@@ -296,13 +306,32 @@ export function ProcessCollapseBlock({
           <div className={MSG_SPACING.processBody}>
             {hydrating ? (
               <ProcessHydratePlaceholder />
+            ) : hydrateFailed ? (
+              /**
+               * 回拉失败：必须与「本来就没有内容」区分开。
+               *
+               * 隧道抖动、主机短暂不可用都会走到这里。此前静默吞掉，用户只看到
+               * 一片空白，误以为「内容丢了」或「面板坏了」，只能反复刷新。
+               */
+              <p className="flex items-center gap-2 px-1 py-2 text-[length:var(--fs-xs)] text-text-400">
+                <span>{t('process.hydrateFailed')}</span>
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-text-200"
+                  onClick={() => {
+                    setHydrateFailed(false)
+                    setExpanded(false, { touched: false })
+                    // 下一帧再展开，触发一次新的回拉
+                    requestAnimationFrame(() => setExpanded(true, { touched: false }))
+                  }}
+                >
+                  {t('process.retry')}
+                </button>
+              </p>
             ) : isEmpty && expanded ? (
               /**
-               * 展开后仍然没有内容。
-               *
-               * 这可能是：该轮确实只有统计（骨架里 stepCount > 0 但没有可回的正文），
-               * 或者本次回拉没取到数据。两种情况都不该给一片死白 ——
-               * 用户会以为卡住了，然后反复折叠/刷新。
+               * 展开后确实没有内容（该轮只有统计，骨架里 stepCount > 0
+               * 但没有可回的正文）。给一句说明，避免一片死白让人以为卡住。
                */
               <p className="px-1 py-2 text-[length:var(--fs-xs)] text-text-400">
                 {t('process.emptyAfterExpand')}

@@ -49,7 +49,22 @@ import { hapticTap } from '../../../utils/haptics'
 const DIRECTORY_PAGE_SIZE = 5
 
 /** 长项目名：溢出时右侧渐隐（替代生硬的 ellipsis 截断），不 hover 也生效 */
-function ProjectNameTitle({ text, className = '' }: { text: string; className?: string }) {
+function ProjectNameTitle({
+  text,
+  className = '',
+  reserveRightPx = 0,
+}: {
+  text: string
+  className?: string
+  /**
+   * hover 时右侧操作按钮占用的宽度（px）。
+   *
+   * 那些按钮是绝对定位叠在行尾的，若不预留，长项目名会被压住。
+   * 用内联 padding 而不是固定类名：按钮数量随配置变化（可能没有 +、
+   * 也可能没有打开目录），宽度需要跟着变。
+   */
+  reserveRightPx?: number
+}) {
   const spanRef = useRef<HTMLSpanElement>(null)
   const [overflows, setOverflows] = useState(false)
 
@@ -66,9 +81,16 @@ function ProjectNameTitle({ text, className = '' }: { text: string; className?: 
   return (
     <span
       ref={spanRef}
-      className={`min-w-0 flex-1 whitespace-nowrap text-[length:var(--fs-sm)] font-semibold optical-center ${
+      // group-hover 时才加右内边距：按钮本身就只在 hover 出现，
+      // 这样静止态文字可用宽度不变，不会莫名其妙提前截断。
+      className={`min-w-0 flex-1 whitespace-nowrap text-[length:var(--fs-sm)] font-semibold optical-center transition-[padding] duration-150 group-hover/folder:pr-[var(--project-actions-w,0px)] ${
         overflows ? 'name-fade-right overflow-hidden' : 'truncate'
       } ${className}`}
+      style={
+        reserveRightPx > 0
+          ? ({ '--project-actions-w': `${reserveRightPx}px` } as React.CSSProperties)
+          : undefined
+      }
     >
       {text}
     </span>
@@ -859,6 +881,23 @@ function FolderRecentSection({
     sectionKind === 'workspace'
       ? (vcsInfo?.branch ?? (isBranchLoading ? '...' : workspaceFallbackName))
       : project.name || workspaceFallbackName
+
+  /**
+   * hover 操作按钮占用的总宽度（px），用于给项目名留出右内边距。
+   *
+   * 三个按钮是绝对定位叠在行尾的，位置固定：移除 right-1.5(6px)、
+   * 新建 right-34px、打开目录 right-62px，每个 size-6(24px)。
+   * 名字是 flex-1 占满整行，不预留就会被按钮压住（长项目名必现）。
+   *
+   * 只在 hover 时预留：静止态按钮不可见，没必要提前截断文字。
+   */
+  const projectActionsWidth = (() => {
+    if (isEditMode) return 0
+    let leftmost = 6 // 移除按钮的 right 偏移
+    if (onNewSessionInDirectory && project.worktree) leftmost = 34
+    if (canOpenDirectory) leftmost = 62
+    return leftmost + 24 + 6
+  })()
   const FolderDisplayIcon =
     project.id === 'global'
       ? GlobeIcon
@@ -1001,6 +1040,17 @@ function FolderRecentSection({
               // 字重上 medium 与 semibold 都解析到 600（字体只有 400/600 两档），
               // 无法再靠加粗区分，所以层级只能由颜色表达。
               className="text-text-100"
+              /**
+               * hover 时为右侧操作按钮让位。
+               *
+               * 那三个按钮（新建会话 / 打开目录 / 移除）是**绝对定位**叠在行尾的，
+               * 而项目名是 flex-1 占满整行 —— 名字一长就必然被按钮压住（实测
+               * `rtx4060-laptop-tensor-uni…` 与按钮重叠）。
+               *
+               * 这里在 hover 时给标题加右内边距：按钮数量决定宽度，
+               * 文字随之收缩并正常截断，视觉上不跳动（按钮本来就只在 hover 出现）。
+               */
+              reserveRightPx={projectActionsWidth}
             />
           </button>
           {/* 项目行 hover 的 + 按钮：在该项目目录下新建会话（全局/无目录项目不显示）；hover 才显示，与移除按钮一致。

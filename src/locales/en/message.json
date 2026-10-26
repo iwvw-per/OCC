@@ -184,6 +184,8 @@
   },
   "loadingProcess": "Loading processing details…",
   "process": {
-    "emptyAfterExpand": "No process content to expand for this turn (only stats were recorded)."
+    "emptyAfterExpand": "No process content to expand for this turn (only stats were recorded).",
+    "hydrateFailed": "Failed to load process content",
+    "retry": "Retry"
   }
 }

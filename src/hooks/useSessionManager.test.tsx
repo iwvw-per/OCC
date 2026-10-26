@@ -806,3 +806,86 @@ describe('hydrateTurn（展开折叠块回拉）', () => {
     expect(merged).toBeGreaterThan(0)
   })
 })
+
+describe('骨架未定稿轮次补拉（正在进行的回复不能消失）', () => {
+  /**
+   * 回归：刷新后最新那条「正在进行的回复」整段空白。
+   *
+   * 骨架投影把未定稿轮次（settled: false）整轮剔除，它只能靠一次补拉拿回来。
+   * 原实现里补拉失败被 catch 静默吞掉、锚点找不到时 tailMessages 为空 ——
+   * 于是页面只剩历史轮次，正在进行的回复凭空消失。
+   */
+  const UNSETTLED = 'msg_unsettled_1'
+
+  function skeletonPage(overrides: Partial<{ messages: unknown[]; nextCursor?: string }> = {}) {
+    return {
+      messages: [
+        { info: { id: 'hist_user', role: 'user', time: { created: 100 } }, parts: [] },
+        { info: { id: 'hist_reply', role: 'assistant', time: { created: 200, completed: 210 } }, parts: [] },
+      ],
+      nextCursor: 'c1',
+      hasMore: true,
+      config: {},
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    peekLightweightSupportMock.mockReturnValue(true)
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+  })
+
+  it('补拉成功时，未定稿轮次的内容进入首屏', async () => {
+    lightweightMessagesMock.mockResolvedValue({
+      ...skeletonPage(),
+      unsettledTurns: [UNSETTLED],
+    })
+    getSessionTurnPageMock.mockResolvedValue({
+      messages: [
+        { info: { id: UNSETTLED, role: 'user', time: { created: 300 } }, parts: [] },
+        { info: { id: 'live_reply', role: 'assistant', time: { created: 310 } }, parts: [] },
+      ],
+      nextCursor: undefined,
+      hasMore: false,
+    })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'session-1', directory: '/w' }))
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    const applied = messageStoreMock.setMessages.mock.calls.at(-1)?.[1] as Array<{ info: { id: string } }>
+    const ids = applied.map(m => m.info.id)
+    expect(ids).toContain('live_reply')
+  })
+
+  it('锚点不在页里时退化为「从最后一条 user 开始」，而不是放弃', async () => {
+    lightweightMessagesMock.mockResolvedValue({
+      ...skeletonPage(),
+      // Agent 给的 turn id 与消息 id 不同源
+      unsettledTurns: ['agent-side-turn-id'],
+    })
+    getSessionTurnPageMock.mockResolvedValue({
+      messages: [
+        { info: { id: 'old_user', role: 'user', time: { created: 100 } }, parts: [] },
+        { info: { id: 'old_reply', role: 'assistant', time: { created: 110 } }, parts: [] },
+        { info: { id: 'real_live_user', role: 'user', time: { created: 300 } }, parts: [] },
+        { info: { id: 'real_live_reply', role: 'assistant', time: { created: 310 } }, parts: [] },
+      ],
+      nextCursor: undefined,
+      hasMore: false,
+    })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'session-1', directory: '/w' }))
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    const applied = messageStoreMock.setMessages.mock.calls.at(-1)?.[1] as Array<{ info: { id: string } }>
+    const ids = applied.map(m => m.info.id)
+    // 从最后一条 user 起：正在进行的这一轮被拿回来了
+    expect(ids).toContain('real_live_user')
+    expect(ids).toContain('real_live_reply')
+  })
+})

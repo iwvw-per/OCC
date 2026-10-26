@@ -384,26 +384,46 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
            * 所以这一轮单独用完整消息拉取：轮次规模通常几十条，成本可控，
            * 而且拿到的是「当前完整正文」，后续 delta 可以安全追加。
            */
+          /**
+           * ⚠️ 这一段失败 = **正在进行的回复整段消失**（骨架里没有它，补拉也没
+           * 拿到）。此前 catch 静默吞掉、锚点找不到时 tailMessages 为空，
+           * 于是页面只剩历史轮次 —— 用户看到的就是「刷新后最新回复一片空白」。
+           *
+           * 因此这里：失败自动重试；锚点找不到时退化为「从最后一条 user 开始」，
+           * 而不是直接放弃。
+           */
           let tailMessages: ApiMessageWithParts[] = []
-          if (skeleton.unsettledTurns && skeleton.unsettledTurns.length > 0) {
-            try {
-              const page = await getSessionMessagePage(
-                sid,
-                LIGHTWEIGHT_MESSAGE_LIMIT,
-                undefined,
-                dir,
-                serverId,
-                { signal: abortController.signal },
-              )
-              // 只取未定稿轮次及其之后的内容（游标从最新端开始，天然覆盖尾部）
-              const unsettledSet = new Set(skeleton.unsettledTurns)
+          const unsettledTurns = skeleton.unsettledTurns ?? []
+          if (unsettledTurns.length > 0) {
+            const page = await withLoadRetry(
+              () =>
+                getSessionMessagePage(sid, LIGHTWEIGHT_MESSAGE_LIMIT, undefined, dir, serverId, {
+                  signal: abortController.signal,
+                }),
+              isStale,
+            ).catch(() => null)
+
+            if (page) {
+              const unsettledSet = new Set(unsettledTurns)
               const firstUnsettledIndex = page.messages.findIndex(
                 m => m.info.role === 'user' && unsettledSet.has(m.info.id),
               )
-              tailMessages = firstUnsettledIndex >= 0 ? page.messages.slice(firstUnsettledIndex) : []
-            } catch {
-              // 补拉失败不阻断：骨架内容照常可用，只是这一轮暂时不完整，
-              // 后续 SSE 到达后会自然补齐。
+
+              if (firstUnsettledIndex >= 0) {
+                tailMessages = page.messages.slice(firstUnsettledIndex)
+              } else {
+                /**
+                 * 锚点不在这页里（这一轮很长超过单页上限，或 Agent 给的 turn id
+                 * 与消息 id 不同源）。不能直接放弃 —— 放弃就等于正在进行的这一轮
+                 * 彻底不显示。退化为「从最后一条 user 消息开始」，那是本轮最可能
+                 * 的起点。
+                 */
+                const lastUserIndex = page.messages.reduce(
+                  (acc, m, idx) => (m.info.role === 'user' ? idx : acc),
+                  -1,
+                )
+                tailMessages = lastUserIndex >= 0 ? page.messages.slice(lastUserIndex) : page.messages
+              }
             }
           }
 
@@ -1074,6 +1094,13 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         }
       } catch (error) {
         sessionErrorHandler('hydrate turn', error)
+        /**
+         * 向上抛：调用方（ProcessCollapseBlock）据此显示「回拉失败，点击重试」。
+         *
+         * 不抛的话 Promise 永远 resolve，UI 无法区分「拉失败了」与
+         * 「本来就没有内容」—— 两者都只表现为一片空白，用户只能反复刷新。
+         */
+        throw error
       }
     },
     [sessionId],
