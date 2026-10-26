@@ -2028,6 +2028,39 @@ html[data-chat-width-dragging] .glass-alt {
   mask-image: linear-gradient(to left, transparent 0, #000 14px);
   -webkit-mask-image: linear-gradient(to left, transparent 0, #000 14px);
 }
+
+/**
+ * 项目名 hover 时让位给右侧操作按钮。
+ *
+ * 那些按钮是绝对定位叠在行尾的（新建 / 打开目录 / 移除），而项目名是
+ * flex-1 占满整行 —— 名字一长就必然被压住。
+ *
+ * 为什么写在 CSS 而不是 Tailwind 类：宽度是动态的（按钮数量随配置变化），
+ * 只能用 `var(--project-actions-w)` 传值。而
+ * `group-hover:pr-[var(--x,0px)]` 这种带逗号 fallback 的任意值不会被
+ * 类名扫描器识别，类根本不会生成 —— 实测就是 padding 一直为 0、照样重叠。
+ *
+ * ⚠️ 选择器不用 `.group\/folder:hover`：Tailwind 的 `group/folder` 类名带斜杠，
+ * 在 CSS 里转义后极易在构建/压缩环节被改写，实测规则不生效。
+ * 改为直接挂在带 `[data-project-title]` 的元素的**最近可 hover 祖先**上，
+ * 用属性选择器 + `:hover` 表达，避免依赖 Tailwind 的命名约定。
+ */
+[data-project-title] {
+  transition: margin-right 150ms ease;
+}
+/**
+ * ⚠️ 这里必须用 `margin-right` 而不是 `padding-right`。
+ *
+ * `padding-right` 只是把内容**起点**内移，元素盒子的可绘制宽度不变
+ * （实测 clientWidth 仍 235，而文字从 38 画到 273，压住 223 处的按钮）。
+ * 对 `overflow: hidden` 的元素来说，裁切边界是盒子的 padding box，
+ * 所以加 padding 根本不会缩短文字的绘制宽度。
+ *
+ * `margin-right` 直接收窄盒子本身，文字才真的在按钮之前停下。
+ */
+[data-project-row]:hover [data-project-title] {
+  margin-right: var(--project-actions-w, 0px);
+}
 .marquee-title:hover .marquee-title-inner,
 .marquee-title:focus-within .marquee-title-inner {
   animation: marquee-scroll var(--marquee-duration, 4s) linear infinite;

@@ -81,9 +81,17 @@ function ProjectNameTitle({
   return (
     <span
       ref={spanRef}
-      // group-hover 时才加右内边距：按钮本身就只在 hover 出现，
-      // 这样静止态文字可用宽度不变，不会莫名其妙提前截断。
-      className={`min-w-0 flex-1 whitespace-nowrap text-[length:var(--fs-sm)] font-semibold optical-center transition-[padding] duration-150 group-hover/folder:pr-[var(--project-actions-w,0px)] ${
+      /**
+       * hover 时为右侧操作按钮让位。
+       *
+       * ⚠️ 不能用 `group-hover/folder:pr-[var(--x,0px)]` 这类 Tailwind 任意值：
+       * 带逗号的 `var()` fallback 无法被类名扫描器解析，那个类根本不会生成，
+       * 于是 padding 永远是 0 —— 长项目名照样被按钮压住（实测踩过）。
+       *
+       * 改用纯 CSS 变量 + 一条全局规则控制，见下方 `<style>` 说明。
+       */
+      data-project-title
+      className={`min-w-0 flex-1 whitespace-nowrap text-[length:var(--fs-sm)] font-semibold optical-center transition-[padding] duration-150 ${
         overflows ? 'name-fade-right overflow-hidden' : 'truncate'
       } ${className}`}
       style={
@@ -885,18 +893,30 @@ function FolderRecentSection({
   /**
    * hover 操作按钮占用的总宽度（px），用于给项目名留出右内边距。
    *
-   * 三个按钮是绝对定位叠在行尾的，位置固定：移除 right-1.5(6px)、
-   * 新建 right-34px、打开目录 right-62px，每个 size-6(24px)。
+   * 按钮是绝对定位叠在行尾的，位置固定（每个 size-6 = 24px）：
+   *   移除   right-1.5  → 距右边 6px
+   *   新建   right-[34px]
+   *   打开目录 right-[62px]（仅桌面端且可打开时才有）
+   *
+   * 取「最左那个按钮的右偏移 + 24px 宽 + 一点间隙」。
    * 名字是 flex-1 占满整行，不预留就会被按钮压住（长项目名必现）。
    *
    * 只在 hover 时预留：静止态按钮不可见，没必要提前截断文字。
    */
   const projectActionsWidth = (() => {
     if (isEditMode) return 0
-    let leftmost = 6 // 移除按钮的 right 偏移
-    if (onNewSessionInDirectory && project.worktree) leftmost = 34
-    if (canOpenDirectory) leftmost = 62
-    return leftmost + 24 + 6
+    const hasRemove = !!onRemoveProject && !!project.worktree
+    const hasNew = !!onNewSessionInDirectory && !!project.worktree
+    const hasOpen = !!canOpenDirectory
+
+    let leftmost = 0
+    if (hasOpen) leftmost = 62
+    else if (hasNew) leftmost = 34
+    else if (hasRemove) leftmost = 6
+    else return 0
+
+    // 按钮宽 24 + 与文字之间留 8px 呼吸
+    return leftmost + 24 + 8
   })()
   const FolderDisplayIcon =
     project.id === 'global'
@@ -966,6 +986,7 @@ function FolderRecentSection({
           onTouchMove={handleProjectTouchMove}
           onTouchEnd={handleProjectTouchEnd}
           onTouchCancel={handleProjectTouchEnd}
+          data-project-row
           className={cn(
             'group/folder relative flex w-full items-center transition-colors duration-150 select-none',
             getSelectionRoundClass(isEditMode && isProjectChecked, projectCheckedPrev, folderCheckedNext, 'md'),
