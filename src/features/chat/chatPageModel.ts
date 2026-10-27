@@ -975,6 +975,26 @@ export function buildProcessTimeline(
       // 空回合：idle 结束；或后面已有 assistant（被跳过）
       return !sessionIsStreaming || laterHasAssistant(index)
     }
+    /**
+     * 末尾轮次 + 会话仍在运行 → 整轮还没结束。
+     *
+     * ⚠️ 为什么这一条必须**先于**下面的「全 completed 即锁定」判断：
+     * 重新进入会话时，首屏消息来自历史快照（骨架或分页），它们全是 completed；
+     * 而 agent 其实还在跑，实时 delta 还没到。此时若只看消息状态，这一轮会被
+     * 判成「已结束」→ `turnIsActive` 为 false → 折叠块按「历史轮次」处理并
+     * 收起，用户一进来就看不到正在生成的内容（实测反馈）。
+     *
+     * 限定条件（缺一不可，避免 SSE 状态滞后把历史轮次误判成进行中）：
+     *   - `sessionIsStreaming`：会话级运行状态
+     *   - 是**最后一轮**
+     *   - 该轮最后一条 assistant 的 `finish` 不是 `stop`
+     *     （`stop` 表示模型正常收尾，这一轮确实结束了）
+     */
+    if (sessionIsStreaming && index === userTurns.length - 1) {
+      const lastAssistant = assistants[assistants.length - 1]
+      const lastFinish = (lastAssistant?.info as { finish?: string } | undefined)?.finish
+      if (lastFinish !== 'stop') return false
+    }
     // 全 completed 且无 live → 锁定 Worked。
     // 不要再用 sessionIsStreaming 重开：发送时 busy 常早于新 user 入列，会闪一下。
     // 工具循环间隙若下一助手还没到，会短暂 Worked；下一助手 live 后自然回到 Working。

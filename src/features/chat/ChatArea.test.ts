@@ -1928,3 +1928,76 @@ describe('computePrependRestoreScrollTop', () => {
     expect(computePrependRestoreScrollTop(0, 5000, 6200)).toBe(1200)
   })
 })
+
+describe('重新进入会话时最新一轮不应被收起', () => {
+  /**
+   * 回归：重新进入会话后，最新一轮的过程块自动收起。
+   *
+   * 成因：首屏消息来自历史快照（骨架/分页），全是 completed；而 agent 其实
+   * 还在跑，实时 delta 还没到。此时只看消息状态会把这一轮判成「已结束」，
+   * `turnIsActive` 变 false → 折叠块按历史轮次处理并收起。
+   *
+   * 修法：末尾轮次 + 会话仍在流式 + 最后一条不是正常收尾（finish !== 'stop'）
+   * → 仍视为进行中。
+   */
+  const hasProcess = (m: Message) => m.content.some(p => p.type === 'tool' || p.type === 'reasoning')
+  const hasFinal = (m: Message) => m.content.some(p => p.type === 'text')
+
+  function build(messages: Message[], streaming: boolean) {
+    return buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: streaming,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+  }
+
+  /** 带 finish 的 assistant（模拟历史快照里的 completed 消息） */
+  function completedAssistant(id: string, created: number, completed: number, finish?: string): Message {
+    const message = createAssistantMessage(id, [createTextPart(`${id}-t`, id, 'done')], created, completed)
+    if (finish) (message.info as { finish?: string }).finish = finish
+    return message
+  }
+
+  it('会话仍在跑 + 末尾轮次未正常收尾 → 判定为进行中（不收起）', () => {
+    const messages = [
+      createUserMessage('user-1', 1),
+      completedAssistant('assistant-1', 2, 3, 'tool-calls'),
+    ]
+
+    const items = build(messages, true)
+    const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
+
+    expect(shell).toBeDefined()
+    // 关键：重新进入时不能当成已结束
+    expect(shell!.isActive).toBe(true)
+  })
+
+  it('末尾轮次已正常收尾（finish=stop）→ 视为已结束', () => {
+    const messages = [
+      createUserMessage('user-1', 1),
+      completedAssistant('assistant-1', 2, 3, 'stop'),
+    ]
+
+    const items = build(messages, true)
+    const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
+
+    // 已正常收尾 + 只有一段正文 → 不挂折叠壳（纯文本轮直接平铺）
+    // 如果挂了壳，则必须是「已结束」状态
+    if (shell) expect(shell.isActive).toBe(false)
+    else expect(items.some(i => i.kind === 'message')).toBe(true)
+  })
+
+  it('会话已空闲 → 历史轮次保持已结束', () => {
+    const messages = [
+      createUserMessage('user-1', 1),
+      completedAssistant('assistant-1', 2, 3, 'tool-calls'),
+    ]
+
+    const items = build(messages, false)
+    const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
+
+    // sessionIsStreaming 为 false 时不享受这条豁免
+    if (shell) expect(shell.isActive).toBe(false)
+  })
+})

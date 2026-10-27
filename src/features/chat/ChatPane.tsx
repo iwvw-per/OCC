@@ -15,7 +15,7 @@ import { OutlineIndex } from '../../components/OutlineIndex'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { Spinner } from '../../components/ui/Spinner'
 import { CheckIcon } from '../../components/Icons'
-import { useResumeRefresh } from '../../hooks/useResumeRefresh'
+import { useResumeRefresh, RESUME_UPDATED_HINT_MS } from '../../hooks/useResumeRefresh'
 import { PaneHeader } from './PaneHeader'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from './PaneDropOverlay'
 import { useFolderProjectDrop } from './useFolderProjectDrop'
@@ -1173,12 +1173,33 @@ export const ChatPane = memo(function ChatPane({
     enabled: !!routeSessionId,
   })
 
+  /**
+   * 「已更新」提示自动消失。
+   *
+   * 「正在更新」是有意义的持续状态（请求还在进行），但「已更新」是个瞬时
+   * 反馈 —— 不清理就会一直挂在顶部，看起来像坏掉了（实测用户反馈
+   * 「不会自动消失」）。
+   */
+  useEffect(() => {
+    if (!resume.updated) return
+    const timer = window.setTimeout(resume.clearUpdated, RESUME_UPDATED_HINT_MS)
+    return () => window.clearTimeout(timer)
+  }, [resume.updated, resume.clearUpdated])
+
   const chatContent = (
     <div ref={setChatContentRef} className="flex-1 relative overflow-hidden flex flex-col min-h-0">
       {/* 回前台补拉的反馈：正在更新 / 已更新。放在消息区顶部浮层，不挤占布局 */}
       {(resume.refreshing || resume.updated) && (
         <div
-          className="pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center"
+          className="pointer-events-none absolute inset-x-0 z-30 flex justify-center"
+          /**
+           * 从安全区下方起算，而不是 `top-2`。
+           *
+           * 移动端顶栏 + 状态栏会占掉上沿，`top-2` 会让提示压在状态栏/顶栏上
+           * （实测用户反馈「太靠上」）。这里叠加 safe-area-inset-top 与一段
+           * 固定间距，桌面端 safe-area 为 0，相当于 top-3。
+           */
+          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
           role="status"
           aria-live="polite"
         >
