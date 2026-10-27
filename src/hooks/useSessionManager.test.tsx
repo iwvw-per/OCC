@@ -889,3 +889,80 @@ describe('骨架未定稿轮次补拉（正在进行的回复不能消失）', (
     expect(ids).toContain('real_live_reply')
   })
 })
+
+describe('超长轮次：单页挤掉 user 时必须向前翻页', () => {
+  /**
+   * 回归：最新一轮整段消失。
+   *
+   * 实测会话有一轮 218 条 assistant 消息，从最新端取 200 条时把该轮的
+   * user 消息挤出了窗口。而前端按 user 切分轮次，没有 user 打头的
+   * assistant 会被整体丢弃（chatPageModel 的 currentUserCreated == null
+   * → continue），于是最新一轮从页面上彻底消失。
+   */
+  const UNSETTLED = 'msg_long_user'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // 前面的用例可能把这两个 mock 改成不支持骨架 / 或预置了返回值
+    peekLightweightSupportMock.mockReset()
+    peekLightweightSupportMock.mockReturnValue(true)
+    probeLightweightSupportMock.mockReset()
+    lightweightMessagesMock.mockReset()
+    getSessionTurnPageMock.mockReset()
+  })
+
+  it('第 1 页没有 user 时用 nextCursor 翻页，拿到该轮 user 后从它开始截取', async () => {
+    lightweightMessagesMock.mockResolvedValue({
+      messages: [
+        { info: { id: 'hist_user', role: 'user', time: { created: 100 } }, parts: [] },
+        { info: { id: 'hist_reply', role: 'assistant', time: { created: 200, completed: 210 } }, parts: [] },
+      ],
+      nextCursor: undefined,
+      hasMore: false,
+      config: {},
+      unsettledTurns: [UNSETTLED],
+    })
+
+    // 第 1 页：全是 assistant（对应 218 条那一轮，user 被挤出窗口）
+    const page1 = {
+      messages: Array.from({ length: 4 }, (_, i) => ({
+        info: { id: `live-${i}`, role: 'assistant', time: { created: 1000 + i, completed: 1010 + i } },
+        parts: [],
+      })),
+      nextCursor: 'cursor-page2',
+      hasMore: true,
+    }
+    // 第 2 页：含该轮 user
+    const page2 = {
+      messages: [
+        { info: { id: 'older_user', role: 'user', time: { created: 500 } }, parts: [] },
+        { info: { id: 'older_reply', role: 'assistant', time: { created: 510, completed: 520 } }, parts: [] },
+        { info: { id: UNSETTLED, role: 'user', time: { created: 1000 } }, parts: [] },
+      ],
+      nextCursor: undefined,
+      hasMore: false,
+    }
+
+    getSessionTurnPageMock.mockImplementation(async (...args: unknown[]) => {
+      const cursor = args[2]
+      if (cursor === 'cursor-page2') return page2
+      return page1
+    })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'session-long', directory: '/w' }))
+    await act(async () => {
+      await result.current.loadSession('session-long')
+    })
+
+    const calls = messageStoreMock.setMessages.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    const applied = calls.at(-1)?.[1] as Array<{ info: { id: string } }>
+    const ids = applied.map(m => m.info.id)
+
+    // 最新一轮的 user 与它的 assistant 都必须在
+    expect(ids).toContain(UNSETTLED)
+    expect(ids).toContain('live-0')
+    // 超出本轮的更早内容被截掉
+    expect(ids).not.toContain('older_user')
+  })
+})

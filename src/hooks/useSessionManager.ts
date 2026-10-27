@@ -395,35 +395,82 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           let tailMessages: ApiMessageWithParts[] = []
           const unsettledTurns = skeleton.unsettledTurns ?? []
           if (unsettledTurns.length > 0) {
-            const page = await withLoadRetry(
-              () =>
-                getSessionMessagePage(sid, LIGHTWEIGHT_MESSAGE_LIMIT, undefined, dir, serverId, {
-                  signal: abortController.signal,
-                }),
-              isStale,
-            ).catch(() => null)
+            /**
+             * 取「正在进行的这一轮」的完整消息。
+             *
+             * ⚠️ 单页 200 条常常不够：实测有一轮 218 条 assistant 消息，
+             * 从最新端取 200 条时**把该轮的 user 消息挤出了窗口**。
+             * 而前端按 user 切分轮次，没有 user 打头的 assistant 会被整体
+             * 丢弃（见 chatPageModel 的 `currentUserCreated == null → continue`）
+             * —— 于是最新一轮从页面上彻底消失。
+             *
+             * 因此必须按游标向前翻页，直到拿到该轮的 user 消息为止。
+             * 上限 10 页（2000 条）兜底，避免异常数据导致无限翻页。
+             */
+            const MAX_TAIL_PAGES = 10
+            const unsettledSet = new Set(unsettledTurns)
 
-            if (page) {
-              const unsettledSet = new Set(unsettledTurns)
-              const firstUnsettledIndex = page.messages.findIndex(
+            let cursor: string | undefined
+            let collected: ApiMessageWithParts[] = []
+            /** 是否已找到本轮起点（user 消息） */
+            let foundTurnStart = false
+
+            for (let pageIndex = 0; pageIndex < MAX_TAIL_PAGES; pageIndex++) {
+              const page: Awaited<ReturnType<typeof getSessionMessagePage>> | null = await withLoadRetry(
+                () =>
+                  getSessionMessagePage(sid, LIGHTWEIGHT_MESSAGE_LIMIT, cursor, dir, serverId, {
+                    signal: abortController.signal,
+                  }),
+                isStale,
+              ).catch(() => null)
+              if (!page || page.messages.length === 0) break
+
+              collected = [...page.messages, ...collected]
+
+              // 本轮起点有两种判定：命中 unsettled 的 user id，或页内出现任何 user
+              const hasTurnUser = page.messages.some(
                 m => m.info.role === 'user' && unsettledSet.has(m.info.id),
               )
-
-              if (firstUnsettledIndex >= 0) {
-                tailMessages = page.messages.slice(firstUnsettledIndex)
-              } else {
-                /**
-                 * 锚点不在这页里（这一轮很长超过单页上限，或 Agent 给的 turn id
-                 * 与消息 id 不同源）。不能直接放弃 —— 放弃就等于正在进行的这一轮
-                 * 彻底不显示。退化为「从最后一条 user 消息开始」，那是本轮最可能
-                 * 的起点。
-                 */
-                const lastUserIndex = page.messages.reduce(
-                  (acc, m, idx) => (m.info.role === 'user' ? idx : acc),
-                  -1,
-                )
-                tailMessages = lastUserIndex >= 0 ? page.messages.slice(lastUserIndex) : page.messages
+              const hasAnyUser = page.messages.some(m => m.info.role === 'user')
+              if (hasTurnUser || hasAnyUser) {
+                foundTurnStart = true
+                break
               }
+
+              // 没有 user 说明这一轮还没到头，继续向前
+              if (!page.nextCursor) break
+              cursor = page.nextCursor
+            }
+
+            if (foundTurnStart) {
+              /**
+               * 从「本轮 user」开始截取。
+               *
+               * 用 unsettled 里的 id 优先（最精确）；否则退化为「最后一段连续
+               * assistant 之前的那条 user」，也就是正常切分逻辑能识别的起点。
+               */
+              let startIdx = collected.findIndex(
+                m => m.info.role === 'user' && unsettledSet.has(m.info.id),
+              )
+              if (startIdx < 0) {
+                // 取最后一条 user：它后面就是本轮
+                for (let i = collected.length - 1; i >= 0; i--) {
+                  if (collected[i].info.role === 'user') {
+                    startIdx = i
+                    break
+                  }
+                }
+              }
+              tailMessages = startIdx >= 0 ? collected.slice(startIdx) : collected
+            } else {
+              /**
+               * 翻满上限仍未找到 user（异常数据）：保留已有消息。
+               *
+               * 这些消息没有 user 打头会被切分逻辑丢弃，但不塞进去更糟 ——
+               * 至少 store 里留下了它们，后续 loadMoreHistory 补到 user 时
+               * 能自然接上。
+               */
+              tailMessages = collected
             }
           }
 
