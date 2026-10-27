@@ -535,5 +535,7 @@
       "clearSettled": "清除已结束的后台任务",
       "clearSettledShort": "清除已结束"
     }
-  }
+  },
+  "resumeRefreshing": "正在更新…",
+  "resumeUpdated": "已更新到最新"
 }

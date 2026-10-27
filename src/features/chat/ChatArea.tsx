@@ -331,6 +331,15 @@ const VirtualRow = memo(
                       ? () => onHydrateTurn(item.userMessageId!)
                       : undefined
                   }
+                  /**
+                   * 这一轮的过程内容是否还在服务端。
+                   *
+                   * 骨架/压缩态的消息带 `isCompressed`（正文被投影剥掉），
+                   * 此时即便自动展开，展开区也是空的 —— 必须回拉。
+                   * 用真实标记判断，而不是「children 是否为空」：
+                   * 骨架轮的子消息是存在的（提问 + 最终回复），children 非空。
+                   */
+                  needsHydrate={item.children.some(child => child.message.isCompressed)}
                 >
                   {item.children.map(child => (
                     <MessageBody

@@ -189,10 +189,25 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
   const interruptedOutput = metadata?.interrupted === true && typeof metadata.output === 'string' ? metadata.output : undefined
   const output = stateOutput ?? runningOutput ?? interruptedOutput
   if (!result.files && !result.diff && output) {
-    result.output = typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+    const raw = typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+    result.output = raw
 
     // 推断语言
-    if (!result.outputLang && result.output) {
+    if (!result.outputLang && raw) {
+      const pretty = prettifyJsonOutput(raw)
+      if (pretty) {
+        /**
+         * 压缩成一行的 JSON 展开成缩进格式。
+         *
+         * 工具输出里的 JSON 常常是单行几千字符（截图里那种一长串
+         * `{"statusCode":200,"headers":{"Content-Type":[...`），
+         * 在代码块里横向溢出、只能靠拖动才能读到，几乎不可读。
+         *
+         * 只在「确实是 JSON 且能解析」时才格式化：解析失败说明它只是
+         * 以 `{` 开头的一段文本（日志、模板），保持原样才不会破坏内容。
+         */
+        result.output = pretty
+      }
       const trimmed = result.output.trim()
       if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
         result.outputLang = 'json'
@@ -201,6 +216,42 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
   }
 
   return result
+}
+
+/**
+ * 单行 JSON 的判定阈值：太短的不值得重排（`{"ok":true}` 展开反而更占地方）。
+ *
+ * 取 60：一个带两三个字段的响应对象通常就超过这个长度，而短于它的
+ * 一行里本来也没有让人读不下去的结构。
+ */
+const JSON_PRETTY_MIN_LENGTH = 60
+
+/**
+ * 把压成一行的 JSON 展开成 2 空格缩进；非 JSON 或解析失败返回 null。
+ *
+ * 为什么值得做：工具输出的 JSON 经常是单行几千字符，代码块里横向滚动几乎
+ * 没法读。格式化之后结构一眼可见，也不用拖动。
+ *
+ * 保守约束：
+ *   - 只处理单行（已有多行说明上游已经格式化过，再动可能改变用户的意图）
+ *   - 只处理对象/数组（数字、字符串字面量没有重排价值）
+ *   - 解析失败一律返回 null，绝不吞掉或改写原始内容
+ */
+export function prettifyJsonOutput(text: string): string | null {
+  const trimmed = text.trim()
+  if (trimmed.length < JSON_PRETTY_MIN_LENGTH) return null
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null
+  // 已经多行：上游格式化过，保持原样
+  if (trimmed.includes('\n')) return null
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (parsed === null || typeof parsed !== 'object') return null
+    const pretty = JSON.stringify(parsed, null, 2)
+    // 展开后没有变多（比如空对象）就没必要替换
+    return pretty.length > trimmed.length ? pretty : null
+  } catch {
+    return null
+  }
 }
 
 // ============================================

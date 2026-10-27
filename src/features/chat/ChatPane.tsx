@@ -13,6 +13,9 @@ import { ChatArea, Header, PermissionDialog, QuestionDialog, type ChatAreaHandle
 import { type ModelSelectorHandle } from './ModelSelector'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { LoadingState } from '../../components/ui/LoadingState'
+import { Spinner } from '../../components/ui/Spinner'
+import { CheckIcon } from '../../components/Icons'
+import { useResumeRefresh } from '../../hooks/useResumeRefresh'
 import { PaneHeader } from './PaneHeader'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from './PaneDropOverlay'
 import { useFolderProjectDrop } from './useFolderProjectDrop'
@@ -408,6 +411,7 @@ export const ChatPane = memo(function ChatPane({
     handleRedoAll,
     clearRevert,
     reloadSession,
+    refreshOnResume,
 
     registerMessage,
     registerInputBox,
@@ -1157,8 +1161,42 @@ export const ChatPane = memo(function ChatPane({
     onOpenProject?.()
   }, [onOpenProject])
 
+  /**
+   * 移动端从后台返回时补拉 + 反馈。
+   *
+   * 墓碑机制下切后台会冻结 JS：期间服务端继续产出消息，但 SSE 事件没人消费；
+   * 而连接靠心跳仍显示存活、不触发 onReconnected。于是界面停在离开那一刻，
+   * 用户要等很久才「一股脑刷新」。这里在回前台时主动补一次，并给出反馈。
+   */
+  const resume = useResumeRefresh({
+    onResume: refreshOnResume,
+    enabled: !!routeSessionId,
+  })
+
   const chatContent = (
     <div ref={setChatContentRef} className="flex-1 relative overflow-hidden flex flex-col min-h-0">
+      {/* 回前台补拉的反馈：正在更新 / 已更新。放在消息区顶部浮层，不挤占布局 */}
+      {(resume.refreshing || resume.updated) && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border-200/60 bg-bg-100/95 px-3 py-1 text-[length:var(--fs-xxs)] text-text-300 shadow-sm backdrop-blur">
+            {resume.refreshing ? (
+              <>
+                <Spinner size="xs" tone="current" variant="ring" />
+                <span>{t('chat:resumeRefreshing')}</span>
+              </>
+            ) : (
+              <>
+                <CheckIcon size={11} className="text-success-100" />
+                <span>{t('chat:resumeUpdated')}</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <div key={activeServerId} className={`absolute inset-0 ${hostSlide}`}>
         <InlineToolRequestContext.Provider value={inlineToolRequestCtx}>
           <ErrorBoundary onOpenSettings={onOpenSettings}>

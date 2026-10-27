@@ -1367,6 +1367,23 @@ export function useChatSession({
     reloadSession: () => {
       if (routeSessionId) void loadSession(routeSessionId, { force: true })
     },
+    /**
+     * 从后台返回时补拉当前会话，并报告是否带来了新内容。
+     *
+     * 移动端切后台会冻结 JS（墓碑机制），期间的 SSE 事件不会被处理，
+     * 而长连接靠心跳仍显示存活、不触发 onReconnected —— 所以这条路径
+     * 必须自己补拉，否则界面会停在离开时那一刻。
+     *
+     * 返回值用于 UI 给出「已更新」反馈：对比补拉前后的消息条数，
+     * 让用户知道「刚回来的这一下确实刷到了东西」。
+     */
+    refreshOnResume: async (): Promise<boolean> => {
+      if (!routeSessionId) return false
+      const before = messageStore.getSessionState(routeSessionId)?.messages.length ?? 0
+      await loadSession(routeSessionId, { force: true })
+      const after = messageStore.getSessionState(routeSessionId)?.messages.length ?? 0
+      return after > before
+    },
 
     // Animation
     registerMessage,

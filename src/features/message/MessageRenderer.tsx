@@ -183,6 +183,7 @@ export function ProcessCollapseBlock({
   reasoningCount = 0,
   activeLabel,
   onExpand,
+  needsHydrate = false,
 }: {
   children: ReactNode
   durationMs?: number
@@ -208,6 +209,14 @@ export function ProcessCollapseBlock({
    * 一片空白，用户以为没反应。实测经隧道回拉一轮约 1.5s，必须给反馈。
    */
   onExpand?: () => void | Promise<void>
+  /**
+   * 这一轮的过程内容是否尚未加载（骨架/压缩态，正文在服务端）。
+   *
+   * ⚠️ 不能用 `children` 是否为空来判断：骨架轮的子消息**存在**（有提问和
+   * 最终回复），只是过程正文被剥掉了，`children` 非空但展开后依然空白。
+   * 必须由调用方根据 `isCompressed` 等真实标记传入。
+   */
+  needsHydrate?: boolean
 }) {
   const [expanded, setExpanded] = useUiDisclosureState(stateKey, isActive)
   const { t } = useTranslation('message')
@@ -242,17 +251,48 @@ export function ProcessCollapseBlock({
   const headerRef = useRef<HTMLButtonElement>(null)
   const unlockScrollRef = useRef<(() => void) | null>(null)
 
+  /**
+   * 回拉骨架/压缩轮次的完整过程内容。
+   *
+   * 抽成函数是因为有两个入口：
+   *   1. 用户点击展开（toggleExpanded）
+   *   2. **自动展开**（进行中的轮次 / forceExpanded）
+   *
+   * ⚠️ 第 2 条此前漏了 —— 回拉只写在点击处理里，而进行中的轮次是
+   * useEffect 自动展开的，根本不走点击。于是骨架投影剥掉了正文的那一轮
+   * 自动展开后永远是空白（截图里那种「已处理 58s + 一片空白」）。
+   */
+  const runHydrate = useCallback(() => {
+    if (!onExpand) return
+    const pending = onExpand()
+    if (!pending || typeof (pending as Promise<void>).then !== 'function') return
+    setHydrating(true)
+    setHydrateFailed(false)
+    void (pending as Promise<void>)
+      .then(() => setHydrateFailed(false))
+      .catch(() => setHydrateFailed(true))
+      .finally(() => setHydrating(false))
+  }, [onExpand])
+
   useEffect(() => {
     // forceExpanded：内容原样输出，跟随「是否进行中」强制展开，不受用户折叠记忆影响
     setExpanded(isActive || forceExpanded, { touched: false, respectUser: !forceExpanded })
   }, [isActive, forceExpanded, setExpanded])
 
+  /**
+   * 自动展开时补一次回拉。
+   *
+   * 只在「展开态且还没有内容」时触发，避免每次重渲染都发请求：
+   * `isEmpty` 在数据到达后会变 false，效果自然停下；`hydrating` 期间不重入。
+   *
+   * 用微任务而不是同步 setState：effect 里直接 setState 会触发同一帧内的
+   * 级联渲染，而这里本来就要等一次网络往返，延后一拍更稳妥。
+   */
   useEffect(() => {
-    return () => {
-      unlockScrollRef.current?.()
-      unlockScrollRef.current = null
-    }
-  }, [])
+    if (!expanded || !needsHydrate || hydrating || hydrateFailed) return
+    const frame = requestAnimationFrame(runHydrate)
+    return () => cancelAnimationFrame(frame)
+  }, [expanded, needsHydrate, hydrating, hydrateFailed, runHydrate])
 
   const toggleExpanded = useCallback(() => {
     unlockScrollRef.current?.()
@@ -261,19 +301,16 @@ export function ProcessCollapseBlock({
     })
     // 仅展开时回拉；折叠无需数据。
     // 回拉是异步的（经隧道约 1.5s），期间显示占位，避免展开后一片空白。
-    if (!expanded && onExpand) {
-      const pending = onExpand()
-      if (pending && typeof (pending as Promise<void>).then === 'function') {
-        setHydrating(true)
-        setHydrateFailed(false)
-        void (pending as Promise<void>)
-          .then(() => setHydrateFailed(false))
-          .catch(() => setHydrateFailed(true))
-          .finally(() => setHydrating(false))
-      }
-    }
+    if (!expanded) runHydrate()
     setExpanded(!expanded)
-  }, [expanded, setExpanded, onExpand])
+  }, [expanded, runHydrate, setExpanded])
+
+  useEffect(() => {
+    return () => {
+      unlockScrollRef.current?.()
+      unlockScrollRef.current = null
+    }
+  }, [])
 
   // 进行中默认展开：不要跑 grid 展开动画（否则每条新消息都带动画高度重排）
   // 用户手动折叠/展开、或结束后自动收起时再开动画

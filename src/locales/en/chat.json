@@ -535,5 +535,7 @@
       "clearSettled": "Clear finished background jobs",
       "clearSettledShort": "Clear finished"
     }
-  }
+  },
+  "resumeRefreshing": "Updating…",
+  "resumeUpdated": "Up to date"
 }
