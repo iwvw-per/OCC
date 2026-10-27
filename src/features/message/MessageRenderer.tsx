@@ -171,6 +171,17 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
   )
 })
 
+/**
+ * 已尝试过自动回拉的轮次（stateKey）。
+ *
+ * 跨组件挂载生命周期：折叠块在虚拟列表里会反复卸载重挂，若只用组件内 ref，
+ * 每次重挂都当成「第一次」重新回拉，失败时就是「闪一下 → 再闪一下」。
+ *
+ * 上限与 useUiDisclosureState 的缓存同级（2000），避免长会话无限增长。
+ */
+const attemptedKeys = new Set<string>()
+const MAX_ATTEMPTED_KEYS = 2000
+
 /** 过程折叠块：动画与 tool steps 一致（grid-rows + delayed body） */
 export function ProcessCollapseBlock({
   children,
@@ -260,11 +271,51 @@ export function ProcessCollapseBlock({
    *
    * ⚠️ 第 2 条此前漏了 —— 回拉只写在点击处理里，而进行中的轮次是
    * useEffect 自动展开的，根本不走点击。于是骨架投影剥掉了正文的那一轮
-   * 自动展开后永远是空白（截图里那种「已处理 58s + 一片空白」）。
+   * 自动展开后永远是空白。
+   *
+   * ⚠️ 依赖只放 ref，不放 onExpand：调用方传的是内联箭头函数（每次渲染
+   * 都是新引用），若把它放进依赖，runHydrate 每帧都变，下面的自动回拉
+   * effect 就会反复重跑 —— 表现为骨架条不停闪烁、请求连发。
    */
+  const onExpandRef = useRef(onExpand)
+  useEffect(() => {
+    onExpandRef.current = onExpand
+  }, [onExpand])
+
+  /**
+   * 「这一轮已尝试过回拉」的持久标记（按 stateKey 记，跨挂载/跨卸载有效）。
+   *
+   * 为什么不能只用组件内的 ref：折叠块在虚拟列表里会被反复挂载卸载，
+   * 卸载后组件内 ref 归零；而 `useUiDisclosureState` 的缓存有 2000 条上限，
+   * 长会话里旧 key 被淘汰后 `expanded` 也会重置成初始值。两者叠加就是
+   * 「每次重新挂载都当成第一次 → 再拉一次 → 又失败 → 再卸载」，
+   * 表现为骨架条持续闪烁、请求连发。
+   *
+   * 用模块级 Set 记「这个轮次已经试过」，与组件生命周期解耦。上限复用
+   * 展开态缓存的量级，避免无限增长。
+   */
+  const attemptKey = stateKey
+  const alreadyAttempted = attemptedKeys.has(attemptKey)
+  const attemptedRef = useRef(alreadyAttempted)
+  const markAttempted = useCallback(() => {
+    attemptedRef.current = true
+    attemptedKeys.add(attemptKey)
+    // 简单封顶：超过就清掉最早的一批（Set 保持插入序）
+    if (attemptedKeys.size > MAX_ATTEMPTED_KEYS) {
+      const overflow = attemptedKeys.size - MAX_ATTEMPTED_KEYS
+      let removed = 0
+      for (const key of attemptedKeys) {
+        if (removed >= overflow) break
+        attemptedKeys.delete(key)
+        removed += 1
+      }
+    }
+  }, [attemptKey])
+
   const runHydrate = useCallback(() => {
-    if (!onExpand) return
-    const pending = onExpand()
+    const handler = onExpandRef.current
+    if (!handler) return
+    const pending = handler()
     if (!pending || typeof (pending as Promise<void>).then !== 'function') return
     setHydrating(true)
     setHydrateFailed(false)
@@ -272,7 +323,7 @@ export function ProcessCollapseBlock({
       .then(() => setHydrateFailed(false))
       .catch(() => setHydrateFailed(true))
       .finally(() => setHydrating(false))
-  }, [onExpand])
+  }, [])
 
   useEffect(() => {
     // forceExpanded：内容原样输出，跟随「是否进行中」强制展开，不受用户折叠记忆影响
@@ -282,17 +333,27 @@ export function ProcessCollapseBlock({
   /**
    * 自动展开时补一次回拉。
    *
-   * 只在「展开态且还没有内容」时触发，避免每次重渲染都发请求：
-   * `isEmpty` 在数据到达后会变 false，效果自然停下；`hydrating` 期间不重入。
+   * 触发条件严格收敛，避免「失败 → 重试 → 再失败」的死循环：
+   *   - 已展开、需要回拉
+   *   - 当前没有在拉（hydrating）
+   *   - **从未成功过也从未失败过**（attempted 为 false）
    *
-   * 用微任务而不是同步 setState：effect 里直接 setState 会触发同一帧内的
-   * 级联渲染，而这里本来就要等一次网络往返，延后一拍更稳妥。
+   * 关键在最后一条：失败后 `hydrateFailed` 会置 true，若只用它做判断，
+   * 依赖变化（比如 onExpand 引用变了）会让 effect 重新跑一遍再试，
+   * 失败越快循环越密 —— 那就是用户看到的持续闪烁。失败后必须由用户
+   * 显式点「重试」，不能自动重来。
    */
   useEffect(() => {
-    if (!expanded || !needsHydrate || hydrating || hydrateFailed) return
+    if (!expanded || !needsHydrate || hydrating || hydrateFailed || attemptedRef.current) return
+    markAttempted()
     const frame = requestAnimationFrame(runHydrate)
     return () => cancelAnimationFrame(frame)
-  }, [expanded, needsHydrate, hydrating, hydrateFailed, runHydrate])
+  }, [expanded, needsHydrate, hydrating, hydrateFailed, runHydrate, markAttempted])
+
+  const retryHydrate = useCallback(() => {
+    markAttempted()
+    runHydrate()
+  }, [markAttempted, runHydrate])
 
   const toggleExpanded = useCallback(() => {
     unlockScrollRef.current?.()
@@ -355,12 +416,7 @@ export function ProcessCollapseBlock({
                 <button
                   type="button"
                   className="underline underline-offset-2 hover:text-text-200"
-                  onClick={() => {
-                    setHydrateFailed(false)
-                    setExpanded(false, { touched: false })
-                    // 下一帧再展开，触发一次新的回拉
-                    requestAnimationFrame(() => setExpanded(true, { touched: false }))
-                  }}
+                  onClick={retryHydrate}
                 >
                   {t('process.retry')}
                 </button>
