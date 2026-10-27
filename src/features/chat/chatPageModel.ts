@@ -1110,10 +1110,40 @@ export function buildProcessTimeline(
       const value = m.compressedStats?.durationMs
       return value != null && value > 0 ? value : undefined
     }, undefined)
-    // 骨架轮次已有确定的时长 → 视为已结束（不再显示 Working / 不再实时计时）
-    const turnIsActive = skeletonDuration == null && activeUserId != null && userId === activeUserId
+    /**
+     * 这一轮是否仍在生成。
+     *
+     * ⚠️ `skeletonDuration` **不能**参与这里的判定。
+     *
+     * 它原本的用意是「骨架轮已有确定时长 → 一定已结束，别再按 active 现算
+     * 计时（会算出荒唐的巨大值）」。但那只是**计时来源**的选择，不是
+     * 「是否结束」的证据 —— 实测骨架对**未定稿轮次**同样带 `durationMs`：
+     *
+     *   {"id":"msg_9558a...","durationMs":104110,"settled":false,
+     *    "stats":{"stepCount":12},"reply":null}
+     *
+     * 这一轮 `reply` 为 null、步骤还在 10→13 增长（agent 正在跑），却因为
+     * durationMs 非空把 `turnIsActive` 判成 false，于是：
+     *   - header 从「Working for 2m 4s」变成「Worked for 1m 33s」；
+     *   - 折叠块按历史轮次处理并**收起**，正在生成的过程内容被藏起来；
+     *   - 硬刷新后尤其明显（实测用户截图就是这个形态）。
+     *
+     * 正确判据只有「有没有活跃工作」：`activeUserId` 由 `isTurnSettled`
+     * 三层判据算出（live 工作 / serverRunning 权威 / 本地 streaming 兜底），
+     * 已经把「服务端还在跑」的情况包含进去了。
+     */
+    const turnIsActive = activeUserId != null && userId === activeUserId
+    /**
+     * 计时来源。
+     *
+     * 进行中一律走实时计时（`undefined` → header 用 now - startedAt 现算），
+     * 这样「Working for 3s」会逐秒跳动；已结束才用确定时长。
+     *
+     * 骨架 durationMs 只用于**已结束**的轮次 —— 也正因如此上面不能拿它
+     * 反推「已结束」，否则就循环论证了。
+     */
     const durationMs =
-      skeletonDuration ?? (turnIsActive ? undefined : resolveTurnDurationMs(assistants, startedAt, turnDurationMap))
+      turnIsActive ? undefined : (skeletonDuration ?? resolveTurnDurationMs(assistants, startedAt, turnDurationMap))
 
     /**
      * 最后一轮**且仍在生成** → 原样输出，不拆过程/最终。

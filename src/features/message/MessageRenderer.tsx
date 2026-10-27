@@ -182,6 +182,15 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
 const attemptedKeys = new Set<string>()
 const MAX_ATTEMPTED_KEYS = 2000
 
+/**
+ * 回拉 UI 的兜底超时。
+ *
+ * 略大于底层请求超时（30s），让正常超时先走 catch 给出精确错误；只有
+ * 「既不 resolve 也不 reject」的挂死形态才由它兜底。超过后隐藏骨架条并
+ * 展示「重试」入口 —— 卡死不可怕，可怕的是没有任何反馈。
+ */
+const HYDRATE_UI_TIMEOUT_MS = 45_000
+
 /** 过程折叠块：动画与 tool steps 一致（grid-rows + delayed body） */
 export function ProcessCollapseBlock({
   children,
@@ -319,10 +328,26 @@ export function ProcessCollapseBlock({
     if (!pending || typeof (pending as Promise<void>).then !== 'function') return
     setHydrating(true)
     setHydrateFailed(false)
+    /**
+     * 兜底超时。
+     *
+     * 底层请求本身有 30s 超时（`trackedFetch`），正常情况下会走到 catch 显示
+     * 重试入口。但实测存在整块**一直停在灰色骨架条**的形态（用户截图）：
+     * 请求既没 resolve 也没 reject —— 共享在途登记里挂着一个永不落地的
+     * Promise，或组件在请求中途被虚拟列表卸载又重挂。
+     *
+     * 那种情况下 `hydrating` 永远为 true，骨架条一直转，用户只能刷新碰运气。
+     * 这里给 UI 层加一道独立兜底：超过时限就当作失败，至少给出「重试」入口，
+     * 把「无反馈的卡死」降级成「可恢复的失败」。
+     */
+    const guard = window.setTimeout(() => setHydrating(false), HYDRATE_UI_TIMEOUT_MS)
     void (pending as Promise<void>)
       .then(() => setHydrateFailed(false))
       .catch(() => setHydrateFailed(true))
-      .finally(() => setHydrating(false))
+      .finally(() => {
+        window.clearTimeout(guard)
+        setHydrating(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -421,10 +446,16 @@ export function ProcessCollapseBlock({
                   {t('process.retry')}
                 </button>
               </p>
-            ) : isEmpty && expanded ? (
+            ) : isEmpty && expanded && !isActive ? (
               /**
                * 展开后确实没有内容（该轮只有统计，骨架里 stepCount > 0
                * 但没有可回的正文）。给一句说明，避免一片死白让人以为卡住。
+               *
+               * ⚠️ 必须排除 `isActive`：进行中的轮次首条 delta 还没到时
+               * `children` 也可能是空的，此时提示「这一轮没有可展开的过程内容」
+               * 是错的 —— 它正在生成，内容马上就到。实测用户看到的是
+               * 「Working for 12s」配一句「没有可展开的过程内容」，判定为坏了。
+               * 运行中留空即可，header 的 Working 计时本身就是进度反馈。
                */
               <p className="px-1 py-2 text-[length:var(--fs-xs)] text-text-400">
                 {t('process.emptyAfterExpand')}

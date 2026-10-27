@@ -100,6 +100,17 @@ function createTextPart(id: string, messageID: string, text: string): Part {
   }
 }
 
+function createReasoningPart(id: string, messageID: string, text: string): ReasoningPart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID,
+    type: 'reasoning',
+    text,
+    time: { start: 1, end: 2 },
+  }
+}
+
 describe('buildVisibleMessageEntries', () => {
   it('keeps source ids for merged assistant tool messages', () => {
     const first = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')])
@@ -2044,5 +2055,105 @@ describe('状态同步：serverRunning 消除刷新盲区', () => {
     const items = build([createUserMessage('u1', 1), snapshotAssistant('a1', 2, 3)], false, false)
     const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
     if (shell) expect(shell.isActive).toBe(false)
+  })
+})
+
+describe('骨架 durationMs 不得把正在生成的轮次判为已结束', () => {
+  /**
+   * 实测回归（会话 ses_e826ccc5dffezmLIm8LbJxVx7Y）。
+   *
+   * 骨架对**未定稿轮次**同样下发 durationMs：
+   *
+   *   {"id":"msg_9558a...","durationMs":104110,"settled":false,
+   *    "stats":{"stepCount":12},"reply":null}
+   *
+   * 该轮 reply 为 null、步骤仍在 10→13 增长（agent 正在跑），但旧实现用
+   * `skeletonDuration == null` 参与 turnIsActive 判定，于是判成已结束：
+   * header 从「Working for 2m 4s」变成「Worked for 1m 33s」，折叠块收起，
+   * 正在生成的过程内容被藏起来。硬刷新后尤其明显。
+   *
+   * 正确判据只看「有没有活跃工作」，durationMs 仅决定**计时来源**。
+   */
+  const hasProcess = (m: Message) => m.content.some(p => p.type === 'tool' || p.type === 'reasoning')
+  const hasFinal = (m: Message) => m.content.some(p => p.type === 'text')
+
+  /** 骨架投影出来的助手消息：带 durationMs，没有 finish */
+  function skeletonAssistant(id: string, created: number, completed: number, durationMs: number): Message {
+    const m = createAssistantMessage(
+      id,
+      [createReasoningPart(`${id}-r`, id, 'thinking'), createTextPart(`${id}-t`, id, 'reply')],
+      created,
+      completed,
+    )
+    m.isCompressed = true
+    m.compressedStats = { reasoningCount: 1, stepCount: 3, durationMs }
+    return m
+  }
+
+  function build(messages: Message[], streaming: boolean, running: boolean) {
+    return buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: streaming,
+      serverRunning: running,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+  }
+
+  it('骨架带 durationMs + 服务端仍在跑 → 保持进行中（不收起）', () => {
+    const items = build(
+      [createUserMessage('u1', 1), skeletonAssistant('a1', 2, 3, 104_110)],
+      false,
+      true,
+    )
+    const shell = items.find(i => i.kind === 'process-shell') as
+      | { isActive?: boolean; durationMs?: number }
+      | undefined
+
+    expect(shell).toBeDefined()
+    // 关键：不能被 durationMs 判成已结束
+    expect(shell!.isActive).toBe(true)
+    // 进行中不写死时长，交给 header 实时计时
+    expect(shell!.durationMs).toBeUndefined()
+  })
+
+  it('骨架带 durationMs + 服务端已空闲 → 已结束，且用骨架时长', () => {
+    const items = build(
+      [createUserMessage('u1', 1), skeletonAssistant('a1', 2, 3, 104_110)],
+      false,
+      false,
+    )
+    const shell = items.find(i => i.kind === 'process-shell') as
+      | { isActive?: boolean; durationMs?: number }
+      | undefined
+
+    if (shell) {
+      expect(shell.isActive).toBe(false)
+      expect(shell.durationMs).toBe(104_110)
+    }
+  })
+
+  it('历史骨架轮（非末轮）+ durationMs → 保持已结束', () => {
+    const items = build(
+      [
+        createUserMessage('u1', 1),
+        skeletonAssistant('a1', 2, 3, 60_000),
+        createUserMessage('u2', 4),
+        skeletonAssistant('a2', 5, 6, 90_000),
+      ],
+      false,
+      true,
+    )
+    const shells = items.filter(i => i.kind === 'process-shell') as Array<{
+      key: string
+      isActive?: boolean
+    }>
+
+    // 第一轮是历史轮次，不应因服务端 busy 变成进行中
+    const first = shells.find(s => s.key.includes('u1'))
+    if (first) expect(first.isActive).toBe(false)
+    // 末轮仍在跑
+    const last = shells.find(s => s.key.includes('u2'))
+    if (last) expect(last.isActive).toBe(true)
   })
 })
