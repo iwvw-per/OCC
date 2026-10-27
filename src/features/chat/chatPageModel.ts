@@ -889,6 +889,14 @@ export function buildProcessTimeline(
   options: {
     turnDurationMap: Map<string, number>
     sessionIsStreaming: boolean
+    /**
+     * 服务端权威运行状态（`session.active`）。
+     *
+     * 与 `sessionIsStreaming` 互补：后者看本地消息是否在增长，刷新后的瞬间
+     * 为 false（全是快照完成态）；这个值来自服务端，能立刻说明会话还在跑。
+     * 缺省 false（历史存档、测试）。
+     */
+    serverRunning?: boolean
     messageHasProcess: (message: Message) => boolean
     messageHasFinal: (message: Message) => boolean
     /** 用户消息入场生长是否完成；缺省视为已完成（历史消息 / 测试） */
@@ -898,6 +906,7 @@ export function buildProcessTimeline(
   const {
     turnDurationMap,
     sessionIsStreaming,
+    serverRunning = false,
     messageHasProcess,
     messageHasFinal,
     isUserEntryReady = () => true,
@@ -984,16 +993,23 @@ export function buildProcessTimeline(
      * 判成「已结束」→ `turnIsActive` 为 false → 折叠块按「历史轮次」处理并
      * 收起，用户一进来就看不到正在生成的内容（实测反馈）。
      *
-     * 限定条件（缺一不可，避免 SSE 状态滞后把历史轮次误判成进行中）：
-     *   - `sessionIsStreaming`：会话级运行状态
-     *   - 是**最后一轮**
-     *   - 该轮最后一条 assistant 的 `finish` 不是 `stop`
-     *     （`stop` 表示模型正常收尾，这一轮确实结束了）
+     * 三层判据，从严到宽：
+     *   1. 该轮有 live 工作（`assistantHasLiveWork`）→ 已在上面返回 false
+     *   2. `serverRunning`（服务端 `session.active` 权威）→ 一定还在跑
+     *   3. 本地 `sessionIsStreaming` + 末条不是 `finish: 'stop'` → 大概率还在跑
+     *
+     * 第 2 条是权威来源：它由 SSE 的 session 状态与回前台的主动对齐提供，
+     * 不依赖消息快照的新鲜度，能消除「快照到手、增量未到」的盲区。
+     * 第 3 条是兜底：服务端状态可能因订阅缺失而拿不到（如子会话）。
      */
-    if (sessionIsStreaming && index === userTurns.length - 1) {
-      const lastAssistant = assistants[assistants.length - 1]
-      const lastFinish = (lastAssistant?.info as { finish?: string } | undefined)?.finish
-      if (lastFinish !== 'stop') return false
+    if (index === userTurns.length - 1) {
+      if (serverRunning) return false
+      if (sessionIsStreaming) {
+        const lastAssistant = assistants[assistants.length - 1]
+        const lastFinish = (lastAssistant?.info as { finish?: string } | undefined)?.finish
+        // `stop` 表示模型已正常收尾，这一轮确实结束了
+        if (lastFinish !== 'stop') return false
+      }
     }
     // 全 completed 且无 live → 锁定 Worked。
     // 不要再用 sessionIsStreaming 重开：发送时 busy 常早于新 user 入列，会闪一下。

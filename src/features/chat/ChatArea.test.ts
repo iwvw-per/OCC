@@ -2001,3 +2001,48 @@ describe('重新进入会话时最新一轮不应被收起', () => {
     if (shell) expect(shell.isActive).toBe(false)
   })
 })
+
+describe('状态同步：serverRunning 消除刷新盲区', () => {
+  /**
+   * 刷新后的瞬间，本地消息全是快照来的完成态（isStreaming=false），
+   * 但服务端其实还在跑。`serverRunning` 来自 session.active，能立刻
+   * 说明会话仍在运行，从而消除「快照到手、增量未到」的盲区。
+   */
+  const hasProcess = (m: Message) => m.content.some(p => p.type === 'tool' || p.type === 'reasoning')
+  const hasFinal = (m: Message) => m.content.some(p => p.type === 'text')
+
+  /** 快照来的完成态 assistant（不带 finish，模拟骨架投影） */
+  function snapshotAssistant(id: string, created: number, completed: number, finish?: string): Message {
+    const m = createAssistantMessage(id, [createTextPart(`${id}-t`, id, 'answer')], created, completed)
+    if (finish) (m.info as { finish?: string }).finish = finish
+    return m
+  }
+
+  function build(messages: Message[], streaming: boolean, running: boolean) {
+    return buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: streaming,
+      serverRunning: running,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+  }
+
+  it('本地无活跃 + 服务端说在跑 → 最新一轮仍视为进行中', () => {
+    const items = build([createUserMessage('u1', 1), snapshotAssistant('a1', 2, 3)], false, true)
+    const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
+    expect(shell?.isActive).toBe(true)
+  })
+
+  it('服务端空闲 + finish=stop → 判为已结束', () => {
+    const items = build([createUserMessage('u1', 1), snapshotAssistant('a1', 2, 3, 'stop')], true, false)
+    const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
+    if (shell) expect(shell.isActive).toBe(false)
+  })
+
+  it('两者都为 false → 历史轮次正常收起', () => {
+    const items = build([createUserMessage('u1', 1), snapshotAssistant('a1', 2, 3)], false, false)
+    const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
+    if (shell) expect(shell.isActive).toBe(false)
+  })
+})

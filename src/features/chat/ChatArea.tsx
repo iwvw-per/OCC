@@ -87,6 +87,16 @@ interface ChatAreaProps {
   turnLatestAssistantIds?: Set<string>
   sessionId?: string | null
   isStreaming?: boolean
+  /**
+   * 服务端权威运行状态（`session.active`）。
+   *
+   * 与 `isStreaming`（本地消息状态）互补：
+   * `isStreaming` 反映「本地有没有正在增长的消息」，刷新后的瞬间它是 false
+   * （消息全是快照来的完成态）；而这个值来自服务端，能立刻说明「会话还在跑」。
+   *
+   * 两者取并集作为「这一轮是否进行中」的判据，消除刷新后那段状态盲区。
+   */
+  serverRunning?: boolean
   allowStreamingLayoutAnimation?: boolean
   loadState?: 'idle' | 'loading' | 'loaded' | 'error'
   loadError?: MessageError
@@ -429,6 +439,7 @@ export const ChatArea = memo(
         turnLatestAssistantIds: turnLatestAssistantIdsProp,
         sessionId,
         isStreaming = false,
+        serverRunning = false,
         allowStreamingLayoutAnimation = false,
         loadState = 'idle',
         loadError,
@@ -499,7 +510,11 @@ export const ChatArea = memo(
             }))
           : buildProcessTimeline(visibleMessages, {
               turnDurationMap,
+              // 本地活跃（消息在增长）与服务端权威运行状态分开传：
+              // 前者用于「Working 计时」等需要真实数据增长的场景，
+              // 后者用于消除刷新后「快照完成、增量未到」的状态盲区。
               sessionIsStreaming: isStreaming,
+              serverRunning,
               messageHasProcess: messageHasProcessContent,
               messageHasFinal: messageHasFinalContent,
               isUserEntryReady: emptyShellGate.isReady,

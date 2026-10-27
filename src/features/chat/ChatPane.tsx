@@ -16,6 +16,7 @@ import { LoadingState } from '../../components/ui/LoadingState'
 import { Spinner } from '../../components/ui/Spinner'
 import { CheckIcon } from '../../components/Icons'
 import { useResumeRefresh, RESUME_UPDATED_HINT_MS } from '../../hooks/useResumeRefresh'
+import { useSessionStatus } from '../../store/activeSessionStore'
 import { PaneHeader } from './PaneHeader'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from './PaneDropOverlay'
 import { useFolderProjectDrop } from './useFolderProjectDrop'
@@ -1186,6 +1187,17 @@ export const ChatPane = memo(function ChatPane({
     return () => window.clearTimeout(timer)
   }, [resume.updated, resume.clearUpdated])
 
+  /**
+   * 服务端权威运行状态。
+   *
+   * `isStreaming` 来自本地消息（刷新后的瞬间全是快照完成态 → false），
+   * 这个值来自 SSE 的 `session.active` 与回前台的主动对齐，反映服务端实况。
+   * 两者取并集才能消除「快照到手但增量还没推来」那段盲区。
+   */
+  const sessionStatus = useSessionStatus(routeSessionId ?? null)
+  // busy = 正在生成；retry = 正在自动重试（同样属于「这一轮还没结束」）
+  const serverRunning = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry'
+
   const chatContent = (
     <div ref={setChatContentRef} className="flex-1 relative overflow-hidden flex flex-col min-h-0">
       {/* 回前台补拉的反馈：正在更新 / 已更新。放在消息区顶部浮层，不挤占布局 */}
@@ -1239,6 +1251,7 @@ export const ChatPane = memo(function ChatPane({
                 turnLatestAssistantIds={chatPageViewModel.turnLatestAssistantIds}
                 sessionId={routeSessionId}
                 isStreaming={isStreaming}
+                serverRunning={serverRunning}
                 allowStreamingLayoutAnimation={false}
                 loadState={renderedLoadState}
                 loadError={loadError}
