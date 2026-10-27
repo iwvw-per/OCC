@@ -491,6 +491,11 @@ const MermaidZoomableSurface = memo(function MermaidZoomableSurface({
         className={`mermaid-diagram ${fill ? 'h-full w-full' : 'min-h-40 min-w-fit'} select-none overflow-hidden p-1 [&_svg]:max-w-full [&_svg]:h-auto ${supportsTouchGestures && !isTouchPanEnabled ? 'cursor-default touch-pan-y' : 'cursor-grab touch-none active:cursor-grabbing'}`}
         role="img"
         aria-label={t('markdown.diagramLabel')}
+        /**
+         * 放行页面级缩放拦截：图表自己实现了双指缩放 / 平移，
+         * 全局 preventPageZoom 若吃掉 gesture 事件，图表就操作不了。
+         */
+        data-allow-pinch
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}

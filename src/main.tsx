@@ -20,6 +20,7 @@ import { resetPathModeCache } from './utils/directoryUtils'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { apiErrorHandler, globalErrorHandler } from './utils/errorHandling'
 import { applyLocalServiceUrl } from './utils/localServiceUrl'
+import { preventPageZoom } from './utils/preventPageZoom'
 
 // Polyfill: randomUUID 在非 HTTPS 环境可能缺失（如局域网 HTTP）
 // 统一补齐，避免业务层 scattered fallback。
@@ -189,6 +190,14 @@ window.addEventListener('unhandledrejection', event => {
  */
 async function bootstrap() {
   await i18nReady.catch(err => globalErrorHandler('initialize i18n', err))
+  /**
+   * 禁止页面级双指缩放。
+   *
+   * viewport meta 已经写了 `maximum-scale=1, user-scalable=no`，但 iOS Safari
+   * 从 iOS 10 起忽略它，双指仍能放大整个页面（放大后聊天界面错位、
+   * 输入框被推出视口）。这里补上事件拦截，见 utils/preventPageZoom。
+   */
+  preventPageZoom()
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <Suspense fallback={null}>

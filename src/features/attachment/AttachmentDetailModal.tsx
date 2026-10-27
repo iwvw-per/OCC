@@ -433,6 +433,11 @@ function ZoomableImage({ url, alt }: { url: string; alt: string }) {
         ref={containerRef}
         className="flex-1 min-h-0 overflow-hidden relative"
         style={{ touchAction: 'none', cursor: isDragging ? 'grabbing' : 'grab' }}
+        /**
+         * 放行页面级缩放拦截：这个容器自己实现了捏合缩放（图片查看器），
+         * 全局的 preventPageZoom 若吃掉 gesture/touchmove，图片就放不大了。
+         */
+        data-allow-pinch
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onDoubleClick={handleDoubleClick}
