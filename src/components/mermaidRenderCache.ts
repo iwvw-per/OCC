@@ -69,6 +69,68 @@ export function clearMermaidRenderCache() {
 }
 
 /**
+ * 为 C4 图自动补一条 `UpdateLayoutConfig`。
+ *
+ * ## 为什么需要
+ *
+ * Pele 的 C4 布局内部默认 `shapeInRow = 4`（见其 c4 实现），也就是**每行
+ * 固定排 4 个元素**。元素一多（典型的容器图有 10+ 个），这个密度会把
+ * 长链路硬压成 4 列，连线只能绕行、大量穿过无关节点 —— 实测 15 个节点的
+ * 电商容器图有 8 条连线直接穿过节点框，整张图糊成一团。
+ *
+ * 实测同一张图的对比（连线穿过节点数）：
+ *
+ *   shapeInRow=4（默认）  1296×854    8 条穿过  ❌
+ *   shapeInRow=3          1025×1052   0 条穿过  ✅
+ *   shapeInRow=2           778×1650   0 条穿过  ✅（但过高）
+ *   shapeInRow=5          1632×878   11 条穿过  ❌
+ *
+ * 所以按节点规模选列数：节点少时保持宽扁（好看），节点多时降列数换取
+ * 连线清晰（能看）。这是「排版密度」的取舍，不是「越多越宽越好」。
+ *
+ * ## 为什么改源码而不是 render 选项
+ *
+ * Pele 只从**源码里的 `UpdateLayoutConfig(...)`** 读取这两个值；
+ * `render(code, { config: { c4ShapeInRow } })` 实测无效（不报错，被忽略）。
+ *
+ * ## 边界
+ *
+ * - 只处理 C4 系（Context/Container/Component/Dynamic/Deployment），其他图不动
+ * - 作者已写 `UpdateLayoutConfig` 时原样尊重，不覆盖
+ * - 解析失败就原样返回，让 render 自己报错，不掩盖真实问题
+ */
+export function injectC4Layout(source: string): string {
+  if (!/^\s*C4(?:Context|Container|Component|Dynamic|Deployment)\b/.test(source)) return source
+  // 作者已显式指定布局 → 尊重
+  if (/UpdateLayoutConfig\s*\(/i.test(source)) return source
+
+  /**
+   * 统计「元素」与「关系」规模。
+   *
+   * 元素关键字：Person / System / Container / Component / Node / Database
+   * 及其 `_Ext` / `_Db` 等变体（C4 里都是这些前缀开头）。
+   * 关系是 Rel / BiRel / Rel_Up / Rel_Back 等。
+   */
+  const elementCount = (
+    source.match(/^\s*(?:Person|System|Container|Component|Node|Database|Enterprise|Boundary)\w*\s*\(/gm) || []
+  ).length
+  const relCount = (source.match(/^\s*(?:Bi)?Rel(?:_\w+)?\s*\(/gm) || []).length
+
+  /**
+   * 列数选择。
+   *
+   * 元素少（<=6）保持默认 4 列：宽扁的图更好看，且元素少时不会拥挤。
+   * 元素多则降到 3 列：实测这是「连线不穿节点」与「不过分细长」的平衡点。
+   * 关系特别密集（>20）再降到 2 列，用高度换清晰度。
+   */
+  let columns = 4
+  if (elementCount > 6) columns = 3
+  if (relCount > 20) columns = 2
+
+  return `${source.replace(/\s*$/, '')}\n  UpdateLayoutConfig($c4ShapeInRow="${columns}", $c4BoundaryInRow="1")`
+}
+
+/**
  * 渲染 Mermaid 语法为 SVG 字符串。
  *
  * @param code Mermaid 源码
@@ -81,7 +143,7 @@ export async function renderMermaidToSvg(
   maxWidth?: number,
 ): Promise<string> {
   const { render } = await import('pele')
-  const result: RenderResult = render(code, {
+  const result: RenderResult = render(injectC4Layout(code), {
     idPrefix,
     /**
      * 宽度自适应。
