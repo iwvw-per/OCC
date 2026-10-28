@@ -5,8 +5,7 @@ import { clearMermaidRenderCache } from './mermaidRenderCache'
 import { FullscreenProvider } from '../contexts'
 
 const mermaidMocks = vi.hoisted(() => ({
-  initialize: vi.fn(),
-  render: vi.fn(async () => ({ svg: '<svg><title>Diagram</title></svg>' })),
+  render: vi.fn(() => ({ svg: '<svg><title>Diagram</title></svg>' })),
 }))
 const useInputCapabilitiesMock = vi.hoisted(() =>
   vi.fn(() => ({
@@ -58,8 +57,9 @@ vi.mock('../hooks/useInputCapabilities', () => ({
   useInputCapabilities: () => useInputCapabilitiesMock(),
 }))
 
-vi.mock('mermaid', () => ({
-  default: mermaidMocks,
+vi.mock('pele', () => ({
+  render: mermaidMocks.render,
+  PeleError: class PeleError extends Error {},
 }))
 
 vi.mock('./ui', () => ({
@@ -81,9 +81,8 @@ describe('MarkdownRenderer', () => {
       hasTouch: false,
       preferTouchUi: false,
     })
-    mermaidMocks.initialize.mockClear()
     mermaidMocks.render.mockClear()
-    mermaidMocks.render.mockResolvedValue({ svg: '<svg><title>Diagram</title></svg>' })
+    mermaidMocks.render.mockReturnValue({ svg: '<svg><title>Diagram</title></svg>' })
   })
 
   it('renders headings and inline code', () => {
@@ -1240,8 +1239,10 @@ $$`
 
     expect(await screen.findByRole('img', { name: 'Mermaid diagram' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy to clipboard' })).toBeInTheDocument()
-    expect(mermaidMocks.initialize).toHaveBeenCalledWith(
-      expect.objectContaining({ securityLevel: 'strict', startOnLoad: false, theme: 'default' }),
+    // Pele 不再需要 initialize()，改为校验渲染选项：安全相关必须关掉链接与图片
+    expect(mermaidMocks.render).toHaveBeenCalledWith(
+      expect.stringContaining('graph TD'),
+      expect.objectContaining({ links: false, images: false }),
     )
   })
 
@@ -1267,7 +1268,7 @@ $$`
   })
 
   it('scopes cached mermaid ids for each mounted diagram', async () => {
-    mermaidMocks.render.mockResolvedValue({
+    mermaidMocks.render.mockReturnValue({
       svg: '<svg id="diagram" aria-labelledby="diagram-title"><title id="diagram-title">Diagram</title><style>#diagram-node { fill: red; }</style><defs><marker id="diagram-arrow"></marker></defs><path id="diagram-node" marker-end="url(#diagram-arrow)"></path><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">hello<br>world</div></foreignObject></svg>',
     })
     render(

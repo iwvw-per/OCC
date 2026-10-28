@@ -35,7 +35,7 @@ import {
   HTML_SANDBOX_SECURITY_HEAD,
   HTML_SANDBOX_VIEWPORT_HEAD,
 } from './htmlSandbox'
-import { getCachedMermaidSvg, getOrRenderMermaidSvg } from './mermaidRenderCache'
+import { getCachedMermaidSvg, getOrRenderMermaidSvg, mermaidCacheKey, renderMermaidToSvg } from './mermaidRenderCache'
 import { inferImageDimensions } from './imageDimensions'
 
 interface MarkdownRendererProps {
@@ -62,7 +62,6 @@ type PinchGesture = {
   startCenter: { x: number; y: number }
 }
 
-let mermaidRenderCounter = 0
 const markdownProjectionCache = new Map<string, MarkdownStreamProjection>()
 
 const htmlCache = new Map<string, string>()
@@ -155,12 +154,6 @@ function applyMarkdownHtml(root: HTMLElement, html: string) {
   })
 }
 
-function createMermaidRenderId(prefix: string) {
-  mermaidRenderCounter += 1
-  const safePrefix = prefix.replace(/[^a-zA-Z0-9_-]/g, '') || 'diagram'
-  return `mermaid-${safePrefix}-${mermaidRenderCounter}`
-}
-
 function scopeMermaidSvg(svg: string, instanceId: string) {
   const template = document.createElement('template')
   template.innerHTML = svg
@@ -205,14 +198,8 @@ function scopeMermaidSvg(svg: string, instanceId: string) {
   return root.outerHTML
 }
 
-async function getMermaidSvg(code: string, theme: 'dark' | 'default', renderPrefix: string) {
-  const cacheKey = `${theme}:${code}`
-  return getOrRenderMermaidSvg(cacheKey, async () => {
-    const { default: mermaid } = await import('mermaid')
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme })
-    const result = await mermaid.render(createMermaidRenderId(renderPrefix), code)
-    return result.svg
-  })
+async function getMermaidSvg(code: string, renderPrefix: string, cacheKey: string, maxWidth?: number) {
+  return getOrRenderMermaidSvg(cacheKey, () => renderMermaidToSvg(code, renderPrefix, maxWidth))
 }
 
 function clampMermaidScale(scale: number) {
@@ -512,16 +499,40 @@ const MermaidZoomableSurface = memo(function MermaidZoomableSurface({
 
 const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { code: string; isIncomplete?: boolean }) {
   const { t } = useTranslation('components')
-  const { resolvedTheme } = useTheme()
-  const mermaidTheme = resolvedTheme === 'dark' ? 'dark' : 'default'
   const { hasCoarsePointer, hasTouch, preferTouchUi } = useInputCapabilities()
   const supportsTouchGestures = hasCoarsePointer || hasTouch
   const renderPrefix = useId()
   const instanceSvgId = `mermaid-instance-${renderPrefix.replace(/[^a-zA-Z0-9_-]/g, '')}`
   const fullscreen = useOptionalFullscreen()
   const fullscreenId = `mermaid:${instanceSvgId}`
-  const [svg, setSvg] = useState(() => (isIncomplete ? '' : (getCachedMermaidSvg(`${mermaidTheme}:${code}`) ?? '')))
+  /**
+   * 渲染缓存键**不含主题**。
+   *
+   * Pele 用 CSS 变量着色，同一份 SVG 在亮色/暗色下都成立 —— 切换主题只需
+   * 换变量值，不必重渲染。这也是替换 mermaid.js 的主要收益之一：
+   * 原先 `key={theme:code}` 会让每次切主题都重挂 + 重新渲染所有图表。
+   *
+   * 但**含宽度分档**：Pele 按 maxWidth 决定横/竖布局，宽屏与窄屏产出的
+   * SVG 不同（见 `mermaidCacheKey`）。
+   */
+  const [svg, setSvg] = useState(() => (isIncomplete ? '' : (getCachedMermaidSvg(mermaidCacheKey(code)) ?? '')))
   const [error, setError] = useState('')
+  /**
+   * 外层容器 ref。
+   *
+   * ⚠️ 必须挂在**始终存在**的节点上。此前挂在内层的「渲染中」占位 div 上，
+   * 而那个 div 在 svg 就绪后就被替换掉 —— 于是测到的 `clientWidth` 是 0，
+   * 传给 Pele 的 maxWidth 缺失或为 0，flowchart 被当成极窄屏渲染成竖版
+   * （实测容器 640px 却渲染成 194×513）。
+   */
+  const containerRef = useRef<HTMLDivElement>(null)
+  /**
+   * 容器宽度分档。
+   *
+   * Pele 只在 `maxWidth` 跨越 `directionBreakpoint`（640px）时改变布局，
+   * 所以按「方向分档」比较即可 —— 每像素变化都重渲染会让拖拽窗口时卡顿。
+   */
+  const [widthBucket, setWidthBucket] = useState<'narrow' | 'wide' | 'auto'>('auto')
 
   const scopedSvg = useMemo(() => scopeMermaidSvg(svg, instanceSvgId), [instanceSvgId, svg])
 
@@ -565,11 +576,22 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
 
     async function renderDiagram() {
       try {
-        const cached = getCachedMermaidSvg(`${mermaidTheme}:${code}`)
+        /**
+         * 用容器实测宽度决定布局方向。
+         *
+         * `clientWidth` 为 0 时（尚未布局、或处于隐藏面板）不传宽度，
+         * 让 Pele 用自然尺寸渲染 —— 传 0 会被当成「极窄」而错误地转成竖向。
+         */
+        const width = containerRef.current?.clientWidth
+        const maxWidth = width && width > 0 ? width : undefined
+        const key = mermaidCacheKey(code, maxWidth)
+
+        const cached = getCachedMermaidSvg(key)
         setSvg(cached ?? '')
         setError('')
         if (cached !== undefined) return
-        const result = await getMermaidSvg(code, mermaidTheme, renderPrefix)
+
+        const result = await getMermaidSvg(code, renderPrefix, key, maxWidth)
         if (!cancelled) setSvg(result)
       } catch (err) {
         if (import.meta.env.DEV) {
@@ -587,7 +609,27 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
     return () => {
       cancelled = true
     }
-  }, [code, isIncomplete, mermaidTheme, renderPrefix])
+  }, [code, isIncomplete, renderPrefix, widthBucket])
+
+  /**
+   * 容器宽度跨过布局断点时重渲染。
+   *
+   * Pele 只在 `maxWidth` 跨越 `directionBreakpoint`（640px）时改变布局，
+   * 所以按「方向分档」比较即可 —— 每像素变化都重渲染会让拖拽窗口时卡顿。
+   */
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const measure = () => {
+      const w = el.clientWidth
+      const next = w <= 0 ? 'auto' : w < 640 ? 'narrow' : 'wide'
+      setWidthBucket(prev => (prev === next ? prev : next))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   if (isIncomplete) {
     return <CodeBlock code={code} language="mermaid" deferHighlight />
@@ -605,6 +647,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
   if (!svg) {
     return (
       <div
+        ref={containerRef}
         className="my-4 first:mt-0 last:mb-0 flex min-h-40 items-center justify-center"
         aria-label={t('markdown.renderingDiagram')}
       >
@@ -614,14 +657,16 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
   }
 
   return (
-    <MermaidZoomableSurface
-      key={`${mermaidTheme}:${code}`}
-      scopedSvg={scopedSvg}
-      copyText={code}
-      supportsTouchGestures={supportsTouchGestures}
-      preferTouchUi={preferTouchUi}
-      onFullscreen={handleOpenFullscreen}
-    />
+    <div ref={containerRef}>
+      <MermaidZoomableSurface
+        key={code}
+        scopedSvg={scopedSvg}
+        copyText={code}
+        supportsTouchGestures={supportsTouchGestures}
+        preferTouchUi={preferTouchUi}
+        onFullscreen={handleOpenFullscreen}
+      />
+    </div>
   )
 })
 

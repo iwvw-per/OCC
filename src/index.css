@@ -2163,3 +2163,47 @@ html[data-chat-width-dragging] .glass-alt {
     --border-200: 220 12% 36%;
   }
 }
+
+/* ============================================
+ * Mermaid 图表（Pele 渲染）
+ *
+ * Pele 用 CSS 变量着色，所以这里只做「映射」：把 OCC 的色板接到 --pele-*。
+ * 好处是切换亮/暗主题**不需要重新渲染图表** —— 变量值一变，SVG 立刻跟随。
+ *
+ * ⚠️ 特异性必须压过 themeStore 注入的 `:root:root`（同为 0,2,0，但注入的
+ * <style> 在文件之后，同级会被它覆盖）。这里用 `:root .mermaid-diagram .pele`
+ * （0,3,0）确保映射始终生效。
+ *
+ * 变量说明见 https://pele.run/theming
+ * ============================================ */
+:root .mermaid-diagram .pele {
+  --pele-bg: hsl(var(--bg-100));
+  --pele-fg: hsl(var(--text-100));
+  --pele-muted: hsl(var(--text-300));
+  --pele-line: hsl(var(--text-300));
+  --pele-surface: hsl(var(--bg-200));
+  --pele-surface-alt: hsl(var(--bg-300));
+  --pele-border: hsl(var(--border-200));
+  --pele-accent: hsl(var(--accent-main-100));
+  --pele-critical: hsl(var(--danger-100));
+  --pele-error: hsl(var(--danger-100));
+  /* 图表里若有填色块，文字自动取与底色对比度更高的一侧 */
+  --pele-fg-on-light: hsl(var(--text-100));
+  --pele-fg-on-dark: hsl(var(--bg-000));
+  --pele-radius: 4px;
+  /* 图表内文字用界面正文字体，避免和周围排版割裂 */
+  --pele-font: var(--font-sans);
+  --pele-font-mono: var(--font-mono);
+}
+
+/* 图表系列的 8 个颜色：用 OCC 的工具色相，保证与界面一致且区分度足够 */
+:root .mermaid-diagram .pele {
+  --pele-series-1: hsl(var(--tool-read));
+  --pele-series-2: hsl(var(--tool-search));
+  --pele-series-3: hsl(var(--tool-write));
+  --pele-series-4: hsl(var(--danger-100));
+  --pele-series-5: hsl(var(--tool-network));
+  --pele-series-6: hsl(var(--warning-100));
+  --pele-series-7: hsl(var(--tool-task));
+  --pele-series-8: hsl(var(--tool-todo));
+}
