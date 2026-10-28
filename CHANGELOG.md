@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.0.40] - 2026-10-28
+
+- feat: 用 Pele 替换 mermaid.js 渲染图表 (2782baaf)
+
 ## [v2.0.39] - 2026-10-27
 
 - fix: 骨架 durationMs 不再把正在生成的轮次判为已结束；回拉卡死不再无限转圈 (88fe2ca1)
