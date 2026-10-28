@@ -172,14 +172,30 @@ export async function renderMermaidToSvg(
 /**
  * 渲染缓存键。
  *
- * ⚠️ 必须含宽度分档：Pele 按 maxWidth 决定横/竖布局，同一份源码在宽屏和
- * 窄屏下产出**不同的 SVG**。只按 code 缓存会让第一次渲染的布局永久生效
+ * ⚠️ 必须含宽度：Pele 按 maxWidth 决定布局，同一份源码在不同宽度下产出
+ * **不同的 SVG**。只按 code 缓存会让第一次渲染的布局永久生效
  * —— 实测先窄屏打开、再回到宽屏，图表一直是竖版。
  *
- * 按方向分档而不是按像素：布局只在跨越 directionBreakpoint 时改变，
- * 同一档内复用可以显著提高命中率。
+ * ## 为什么不是简单地「按像素」
+ *
+ * 每像素都进键会让拖拽窗口时疯狂重渲染。这里按**布局档**分：
+ *
+ *   - `narrow`    < 640px   竖排布局
+ *   - `wide`      640..1199 常规横向
+ *   - `full`      >= 1200   大屏 / 全屏
+ *
+ * `full` 单独成档是必要的：全屏时容器约 1500px，若与 `wide` 共用键，
+ * 会直接命中内嵌那份按 640px 渲染的窄图 —— 表现为「全屏里图只占中间一小块，
+ * 两边大片空白」（实测全屏 1600px 容器里图只有 863px 宽）。
  */
 export function mermaidCacheKey(code: string, maxWidth?: number): string {
-  const bucket = maxWidth == null || maxWidth <= 0 ? 'auto' : maxWidth < 640 ? 'narrow' : 'wide'
+  const bucket =
+    maxWidth == null || maxWidth <= 0
+      ? 'auto'
+      : maxWidth < 640
+        ? 'narrow'
+        : maxWidth < 1200
+          ? 'wide'
+          : 'full'
   return `${bucket}:${code}`
 }

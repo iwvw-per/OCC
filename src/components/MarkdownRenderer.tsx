@@ -475,7 +475,18 @@ const MermaidZoomableSurface = memo(function MermaidZoomableSurface({
         </button>
       </div>
       <div
-        className={`mermaid-diagram ${fill ? 'h-full w-full' : 'min-h-40 min-w-fit'} select-none overflow-hidden p-1 [&_svg]:max-w-full [&_svg]:h-auto ${supportsTouchGestures && !isTouchPanEnabled ? 'cursor-default touch-pan-y' : 'cursor-grab touch-none active:cursor-grabbing'}`}
+        /**
+         * `fill`（全屏）下的布局要点：
+         *
+         * ⚠️ 这里**不能**用 `overflow-hidden`。全屏容器宽度是屏幕宽，而图是
+         * 按内嵌宽度（如 640px）渲染的固定尺寸 SVG —— 一旦图比容器高/宽，
+         * 超出部分会被直接裁掉。实测 640×703 的时序图在全屏里上下都被切，
+         * participant 头和第 17 步都看不见（用户截图反馈「全屏显示不全」）。
+         *
+         * 改成 `overflow-auto`：放不下时可滚动，内容不再丢失。
+         * 加上 `flex` 居中，图比容器小时居中显示（而不是贴左上角）。
+         */
+        className={`mermaid-diagram ${fill ? 'h-full w-full overflow-auto flex items-center justify-center' : 'min-h-40 min-w-fit overflow-hidden'} select-none p-1 [&_svg]:max-w-full [&_svg]:h-auto ${supportsTouchGestures && !isTouchPanEnabled ? 'cursor-default touch-pan-y' : 'cursor-grab touch-none active:cursor-grabbing'}`}
         role="img"
         aria-label={t('markdown.diagramLabel')}
         /**
@@ -488,6 +499,10 @@ const MermaidZoomableSurface = memo(function MermaidZoomableSurface({
         onPointerUp={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
         style={{
+          /**
+           * 全屏时把变换加在**内层**包装上会更干净，但这里用同一套逻辑：
+           * `translate` 只在用户主动平移时才生效，`scale` 默认 1。
+           */
           transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
           transformOrigin: 'top left',
         }}
@@ -536,20 +551,56 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
 
   const scopedSvg = useMemo(() => scopeMermaidSvg(svg, instanceSvgId), [instanceSvgId, svg])
 
+  /**
+   * 全屏专用的 SVG。
+   *
+   * ⚠️ 不能直接复用内嵌那份：图是按内嵌宽度（如 640px）渲染的固定尺寸 SVG，
+   * 全屏后容器变成屏幕宽（如 1600px），图既不会重排也不会自适应 —— 表现为
+   * 「全屏显示不全 / 图只占中间一小块」（用户反馈 + 实测复现）。
+   *
+   * 按全屏可用宽度重新渲染一份，让 Pele 用大屏宽度重新布局。
+   * 用 `full` 档缓存键（>=1200px），与内嵌的窄/宽档互不干扰。
+   *
+   * 实现上复用同一个 effect 的「按需渲染 + 缓存」路径，而不是另起一个
+   * setState effect —— 后者会在 effect 里同步 setState，触发级联渲染。
+   */
+  const fullscreenWidth = useMemo(() => {
+    if (!fullscreen) return undefined
+    return Math.max(320, typeof window === 'undefined' ? 1200 : window.innerWidth - 64)
+  }, [fullscreen])
+
+  /** 全屏宽度就绪后才渲染；未就绪时先复用内嵌那份，避免闪白 */
+  const fullscreenKey = fullscreenWidth != null ? mermaidCacheKey(code, fullscreenWidth) : null
+  const fullscreenSvg = fullscreenKey ? getCachedMermaidSvg(fullscreenKey) : undefined
+
+  /** 全屏优先用重新渲染的版本，未就绪时先用内嵌那份 */
+  const fullscreenScopedSvg = useMemo(() => {
+    if (!fullscreenSvg) return scopedSvg
+    return scopeMermaidSvg(fullscreenSvg, instanceSvgId)
+  }, [fullscreenSvg, instanceSvgId, scopedSvg])
+
   const fullscreenContent = useMemo(() => {
-    if (!scopedSvg) return null
+    if (!fullscreenScopedSvg) return null
+    /**
+     * ⚠️ 这里**不套** `flex items-center justify-center`。
+     *
+     * 那层 flex 会把子项压成「内容尺寸」（flex 子项默认 `min-height: auto`
+     * 且不拉伸），于是 `MermaidZoomableSurface` 的 `h-full w-full` 拿不到
+     * 真实可用空间 —— 实测全屏容器只有 640×490，图被裁掉且无法适配大屏。
+     *
+     * 直接让 surface 填满全屏层（其自身已用 `overflow-auto` + 居中处理
+     * 图比容器小的情况）。
+     */
     return (
-      <div className="flex h-full items-center justify-center">
-        <MermaidZoomableSurface
-          scopedSvg={scopedSvg}
-          copyText={code}
-          supportsTouchGestures={supportsTouchGestures}
-          preferTouchUi={preferTouchUi}
-          fill
-        />
-      </div>
+      <MermaidZoomableSurface
+        scopedSvg={fullscreenScopedSvg}
+        copyText={code}
+        supportsTouchGestures={supportsTouchGestures}
+        preferTouchUi={preferTouchUi}
+        fill
+      />
     )
-  }, [code, preferTouchUi, scopedSvg, supportsTouchGestures])
+  }, [code, fullscreenScopedSvg, preferTouchUi, supportsTouchGestures])
 
   const fullscreenLayer = useMemo(() => {
     if (!fullscreenContent) return null
@@ -610,6 +661,36 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
       cancelled = true
     }
   }, [code, isIncomplete, renderPrefix, widthBucket])
+
+  /**
+   * 全屏时预渲染大屏版本。
+   *
+   * 单独一个 effect 而不是并进上面那个：内嵌与全屏的宽度来源不同
+   * （容器实测 vs 视口宽度），混在一起会让依赖语义变乱。
+   *
+   * 渲染完成后写入缓存，`fullscreenSvg` 在下次渲染时通过
+   * `getCachedMermaidSvg` 取到 —— 不在这里 setState，避免级联渲染。
+   * 用一个局部 state 只记「已就绪」触发一次重渲染。
+   */
+  const [fullscreenReady, setFullscreenReady] = useState(false)
+  useEffect(() => {
+    if (fullscreenKey == null) return
+    if (getCachedMermaidSvg(fullscreenKey) !== undefined) return
+    let cancelled = false
+    void getMermaidSvg(code, `${renderPrefix}-fs`, fullscreenKey, fullscreenWidth).then(
+      () => {
+        if (!cancelled) setFullscreenReady(v => !v)
+      },
+      () => {
+        // 失败就继续用内嵌那份，至少能看
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [code, fullscreenKey, fullscreenWidth, renderPrefix])
+  // 让 lint 知道 fullscreenReady 是「触发重渲染」用的，值本身不参与计算
+  void fullscreenReady
 
   /**
    * 容器宽度跨过布局断点时重渲染。

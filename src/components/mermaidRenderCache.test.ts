@@ -37,8 +37,9 @@ describe('mermaidCacheKey', () => {
 
   it('同一档位内复用同一个键（避免每像素都重渲染）', () => {
     const code = 'flowchart LR\n  A --> B'
-    expect(mermaidCacheKey(code, 1400)).toBe(mermaidCacheKey(code, 900))
+    expect(mermaidCacheKey(code, 800)).toBe(mermaidCacheKey(code, 1100))
     expect(mermaidCacheKey(code, 400)).toBe(mermaidCacheKey(code, 320))
+    expect(mermaidCacheKey(code, 1600)).toBe(mermaidCacheKey(code, 1400))
   })
 
   it('未知宽度单独成档', () => {
@@ -49,10 +50,13 @@ describe('mermaidCacheKey', () => {
     expect(auto).not.toBe(mermaidCacheKey(code, 400))
   })
 
-  it('640px 是断点：恰好 640 归入宽屏', () => {
+  it('640px 起进入 wide 档，1200px 起进入 full 档', () => {
     const code = 'flowchart LR\n  A --> B'
-    expect(mermaidCacheKey(code, 640)).toBe(mermaidCacheKey(code, 1400))
+    expect(mermaidCacheKey(code, 640)).toBe(mermaidCacheKey(code, 1100))
     expect(mermaidCacheKey(code, 639)).toBe(mermaidCacheKey(code, 400))
+    expect(mermaidCacheKey(code, 1200)).toBe(mermaidCacheKey(code, 1600))
+    // 全屏档必须与内嵌宽档分开，否则全屏会命中 640px 渲染的窄图
+    expect(mermaidCacheKey(code, 1536)).not.toBe(mermaidCacheKey(code, 640))
   })
 })
 
@@ -183,5 +187,35 @@ describe('injectC4Layout', () => {
       const src = `${kind}\n  Person(u, "用户", "使用")\n  Rel(u, u, "自")`
       expect(injectC4Layout(src), kind).toContain('UpdateLayoutConfig')
     }
+  })
+})
+
+describe('全屏档位独立（回归：全屏显示不全 / 只占中间一小块）', () => {
+  /**
+   * 实测回归，用户反馈「全屏显示不全」。
+   *
+   * 两处成因：
+   *  1. 全屏容器原本 `overflow-hidden` + 内嵌尺寸的固定 SVG → 超出的上下部分
+   *     被裁掉（participant 头、末尾步骤都看不见）。
+   *  2. 缓存键只有 narrow/wide 两档，全屏 ~1536px 与内嵌 640px 同属 wide 档
+   *     → 直接命中 640px 渲染的图，全屏两侧大片空白。
+   *
+   * 修法：加 `full` 档（>=1200px），全屏按屏幕宽度重渲染。
+   */
+  it('全屏宽度不与内嵌宽度共用缓存', () => {
+    const code = 'sequenceDiagram\n  A->>B: hi'
+    expect(mermaidCacheKey(code, 1536)).not.toBe(mermaidCacheKey(code, 640))
+    expect(mermaidCacheKey(code, 1536)).not.toBe(mermaidCacheKey(code, 400))
+  })
+
+  it('全屏宽度稳定落在同一档（避免缩放窗口时反复重渲染）', () => {
+    const code = 'sequenceDiagram\n  A->>B: hi'
+    expect(mermaidCacheKey(code, 1536)).toBe(mermaidCacheKey(code, 1920))
+    expect(mermaidCacheKey(code, 1200)).toBe(mermaidCacheKey(code, 2560))
+  })
+
+  it('内嵌常规宽度仍复用 wide 档（不因加档而退化成逐像素渲染）', () => {
+    const code = 'sequenceDiagram\n  A->>B: hi'
+    expect(mermaidCacheKey(code, 700)).toBe(mermaidCacheKey(code, 1100))
   })
 })
