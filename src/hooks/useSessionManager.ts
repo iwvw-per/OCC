@@ -29,7 +29,7 @@ import {
   type ApiSession,
 } from '../api'
 import { sessionErrorHandler } from '../utils'
-import { scheduleBackfillSessionUsage } from '../api/contextBackfill'
+import { scheduleBackfillSessionUsage, scheduleOutlineBackfill } from '../api/contextBackfill'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_TURN_LIMIT, HISTORY_TURN_BATCH_SIZE, RECENT_FULL_TURNS } from '../constants'
 import { extractTurnOutlineEntries } from '../components/outlineIndexModel'
@@ -571,22 +571,29 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
            * ⚠️ 刻意**不**把结果 prepend 进消息列表：那会让正在阅读的用户视图
            * 突然被插入几百条消息，视口跳动。用户点轴跳到某轮时，`loadUntilMessage`
            * 会按同一游标正常续取，锚点逻辑在那条路径上是完整的。
+           *
+           * ⚠️ 必须**延后**发起。这个请求一次翻 60 页（串行，每页约 0.2~0.6s），
+           * 实测大会话上要十几秒。虽然不 await，但它会占满隧道带宽：实测首屏
+           * 骨架第 2 页因此等到 +2.5s 才发出，`/context` 排到 +4s。侧边轴大纲
+           * 属于「可有可无的导航辅助」，绝不该和首屏内容抢队列。
            */
           const tailCursor = skeleton.nextCursor
           if (tailCursor) {
-            void (async () => {
-              try {
-                const older = await getSessionLightweightMessages(sid, dir, serverId, {
-                  cursor: tailCursor,
-                  pages: 60,
-                })
-                if (isStale() || older.messages.length === 0) return
-                const entries = extractTurnOutlineEntries(older.messages.map(toUIMessage))
-                if (entries.length > 0) turnOutlineStore.merge(serverId, sid, entries)
-              } catch {
-                // 静默：大纲只是导航辅助，点轴时仍会按需续取
-              }
-            })()
+            scheduleOutlineBackfill(() => {
+              void (async () => {
+                try {
+                  const older = await getSessionLightweightMessages(sid, dir, serverId, {
+                    cursor: tailCursor,
+                    pages: 60,
+                  })
+                  if (isStale() || older.messages.length === 0) return
+                  const entries = extractTurnOutlineEntries(older.messages.map(toUIMessage))
+                  if (entries.length > 0) turnOutlineStore.merge(serverId, sid, entries)
+                } catch {
+                  // 静默：大纲只是导航辅助，点轴时仍会按需续取
+                }
+              })()
+            })
           }
 
           /**

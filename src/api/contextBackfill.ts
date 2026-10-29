@@ -110,6 +110,34 @@ function usageTotal(usage: TokenUsage): number {
 }
 
 /**
+ * 首屏之后再做「侧边轴大纲补全」。
+ *
+ * ## 为什么需要调度
+ *
+ * 骨架首屏只取最近几页，剩余部分由 `pages=60` 的请求一次翻到底，仅用于给
+ * 侧边轴补出全部轮次。这个请求不 await，但**会占满隧道带宽**：
+ *
+ *   实测（1089 条消息的会话，走网关）：
+ *     首屏骨架 limit=200        +0.9s 发出
+ *     骨架第 2 页（cursor）      +2.5s 才发出   ← 被大纲请求挤住
+ *     /context                  +4.0s 才轮到
+ *
+ * 侧边轴大纲属于「导航辅助」——晚几秒出没有任何影响；而首屏内容是用户在等的东西。
+ * 所以把它整体推到首屏稳定之后。
+ *
+ * ## 与 `scheduleBackfillSessionUsage` 的顺序
+ *
+ * 两者都要用同一条隧道，这里再晚一点（3 秒）：用量数字比大纲更常被看，
+ * 优先让它先拿到带宽。
+ */
+export function scheduleOutlineBackfill(run: () => void): void {
+  scheduleAfterFirstPaint(run, OUTLINE_BACKFILL_DELAY_MS)
+}
+
+/** 大纲补全的静默期：比用量回填再晚一些，见上面的顺序说明 */
+const OUTLINE_BACKFILL_DELAY_MS = 3000
+
+/**
  * 首屏之后再做用量回填。
  *
  * ## 为什么需要调度而不是直接 `void backfillSessionUsage()`
@@ -122,21 +150,30 @@ function usageTotal(usage: TokenUsage): number {
  *
  * 原因是 `/context` 在读过大量文件的会话上会有十几 MB，把隧道带宽吃满。
  * 所以必须等首屏**真正画完**再发，而不是「发出去不管返回」。
+ */
+export function scheduleBackfillSessionUsage(sessionKey: string): void {
+  scheduleAfterFirstPaint(() => {
+    void backfillSessionUsage(sessionKey)
+  }, BACKFILL_IDLE_DELAY_MS)
+}
+
+/**
+ * 等首屏画完 + 一段静默期后执行。
  *
  * 用 `requestIdleCallback`（带 setTimeout 兜底）等浏览器空闲；再叠一个
  * 短延迟，避开首屏渲染与布局抖动最密集的那一小段。
  */
-export function scheduleBackfillSessionUsage(sessionKey: string): void {
-  const run = () => {
-    void backfillSessionUsage(sessionKey)
+function scheduleAfterFirstPaint(run: () => void, delayMs: number): void {
+  const start = () => {
+    window.setTimeout(run, delayMs)
   }
   const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
     .requestIdleCallback
   if (typeof ric === 'function') {
-    ric(() => { window.setTimeout(run, BACKFILL_IDLE_DELAY_MS) }, { timeout: BACKFILL_IDLE_TIMEOUT_MS })
+    ric(start, { timeout: BACKFILL_IDLE_TIMEOUT_MS })
     return
   }
-  window.setTimeout(run, BACKFILL_IDLE_DELAY_MS)
+  window.setTimeout(start, delayMs)
 }
 
 /**
