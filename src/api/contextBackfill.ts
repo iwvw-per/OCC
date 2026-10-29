@@ -122,26 +122,15 @@ function usageTotal(usage: TokenUsage): number {
  *     骨架第 2 页（cursor）      +2.5s 才发出   ← 被大纲请求挤住
  *     /context                  +4.0s 才轮到
  *
- * 侧边轴大纲属于「导航辅助」——晚几秒出没有任何影响；而首屏内容是用户在等的东西。
- * 所以把它整体推到首屏稳定之后。
+ * 侧边轴大纲属于「导航辅助」，理论上可以晚一点；但实测它通常**只花 186ms**
+ * 就返回（`cursor` 往往已经指向最早一页，`pages=60` 实际上翻不了几页），
+ * 为它加延时纯属让侧边轴白等。
  *
- * ## 与 `scheduleBackfillSessionUsage` 的顺序
- *
- * 两者都要用同一条隧道，这里再晚一点（3 秒）：用量数字比大纲更常被看，
- * 优先让它先拿到带宽。
+ * 所以和用量回填一样：首屏画完立即发，不再叠加静默期。
  */
 export function scheduleOutlineBackfill(run: () => void): void {
-  scheduleAfterFirstPaint(run, OUTLINE_BACKFILL_DELAY_MS)
+  scheduleAfterFirstPaint(run, 0)
 }
-
-/**
- * 大纲补全的静默期。
- *
- * 它一次翻 60 页（串行），比用量回填重得多，所以要晚一点；但 3 秒太久 ——
- * 侧边轴的轮次跳转在 1 秒内就可用，用户点轴时也能按需续取，没必要让它在
- * 首屏刚结束就抢带宽。
- */
-const OUTLINE_BACKFILL_DELAY_MS = 800
 
 /**
  * 用量回填：首屏骨架上屏后**立即**发起。
