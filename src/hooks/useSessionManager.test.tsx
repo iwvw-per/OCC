@@ -70,9 +70,13 @@ vi.mock('../store', () => ({
 }))
 
 // 上下文用量兜底会真的打网络（session.context），测试里必须隔离。
-// 它由 loadSession 通过 `void` 调用，若让真实实现跑起来，失败路径会变成
+// 它由 loadSession 通过调度器异步调用，若让真实实现跑起来，失败路径会变成
 // unhandled rejection —— 表现为「断言全过但退出码非 0」。
+//
+// ⚠️ 调用入口是 `scheduleBackfillSessionUsage`（首屏渲染后再跑），不是
+// `backfillSessionUsage`。这里把调度器直接接成同步调用，测试才能断言到。
 vi.mock('../api/contextBackfill', () => ({
+  scheduleBackfillSessionUsage: (...args: unknown[]) => backfillSessionUsageMock(...(args as [])),
   backfillSessionUsage: (...args: unknown[]) => backfillSessionUsageMock(...(args as [])),
   resetContextBackfill: vi.fn(),
 }))

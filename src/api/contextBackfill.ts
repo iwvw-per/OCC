@@ -33,7 +33,7 @@
 // 2. 每个会话每次加载只拉一次（内存去重），避免翻页/重渲染反复请求。
 // 3. 只在缺失时写入（见 messageStore 的各个 record* 方法）。
 
-import { nativeGetSessionContext } from '../api/v2NativeSession'
+import { nativeGetSession, nativeGetSessionContext } from '../api/v2NativeSession'
 import { messageStore } from '../store/messageStore'
 import { rawSessionIdOfKey } from '../store/messagePartMerge'
 import { sessionKeyToServerId } from '../utils/sessionKey'
@@ -42,6 +42,31 @@ import type { TokenUsage } from '../types/message'
 
 /** 已经补过用量的会话（含失败），避免重复请求 */
 const backfilled = new Set<string>()
+
+/**
+ * 会话累计用量快照：已经通过轻量接口拿到、但还没用上的数据。
+ *
+ * 见 `backfillSessionUsage` 的注释 —— `/context` 在大会话上会返回十几 MB，
+ * 而它绝大部分体积来自工具大输出，只为算几个数字实在不值。
+ */
+interface SessionTotals {
+  tokens: TokenUsage
+  cost: number
+}
+
+/** 从 `session` 接口的 tokens 字段读出累计用量 */
+function totalsOfSession(info: Record<string, unknown>): SessionTotals | null {
+  const tokens = rec(info.tokens)
+  const cache = rec(tokens.cache)
+  const usage: TokenUsage = {
+    input: num(tokens.input),
+    output: num(tokens.output),
+    reasoning: num(tokens.reasoning),
+    cache: { read: num(cache.read), write: num(cache.write) },
+  }
+  if (usageTotal(usage) <= 0) return null
+  return { tokens: usage, cost: num(info.cost) }
+}
 
 /** 测试用 */
 export function resetContextBackfill(): void {
@@ -85,9 +110,67 @@ function usageTotal(usage: TokenUsage): number {
 }
 
 /**
- * 从 `session.context` 汇总会话累计用量、上下文快照，并按 id 回填骨架消息。
+ * 首屏之后再做用量回填。
  *
- * 口径说明（与官方一致）：
+ * ## 为什么需要调度而不是直接 `void backfillSessionUsage()`
+ *
+ * 回填虽然不 `await`，但它会**和首屏抢同一条隧道**。实测经网关的同一会话：
+ *
+ *   只拉骨架                      748ms
+ *   骨架 + context 并发          1885ms   ← 骨架被拖慢 2.5 倍
+ *   context 先跑完再拉骨架       3494ms
+ *
+ * 原因是 `/context` 在读过大量文件的会话上会有十几 MB，把隧道带宽吃满。
+ * 所以必须等首屏**真正画完**再发，而不是「发出去不管返回」。
+ *
+ * 用 `requestIdleCallback`（带 setTimeout 兜底）等浏览器空闲；再叠一个
+ * 短延迟，避开首屏渲染与布局抖动最密集的那一小段。
+ */
+export function scheduleBackfillSessionUsage(sessionKey: string): void {
+  const run = () => {
+    void backfillSessionUsage(sessionKey)
+  }
+  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
+    .requestIdleCallback
+  if (typeof ric === 'function') {
+    ric(() => { window.setTimeout(run, BACKFILL_IDLE_DELAY_MS) }, { timeout: BACKFILL_IDLE_TIMEOUT_MS })
+    return
+  }
+  window.setTimeout(run, BACKFILL_IDLE_DELAY_MS)
+}
+
+/**
+ * 渲染完到发回填之间的静默期。
+ *
+ * 取 1.2s：首屏内容已经上屏并稳定，用户能立刻看到消息；
+ * 再晚就会让「上下文百分比」迟迟不出数字。
+ */
+const BACKFILL_IDLE_DELAY_MS = 1200
+
+/** idle 回调的最长等待：再忙也要在此时限内排上队 */
+const BACKFILL_IDLE_TIMEOUT_MS = 3000
+
+/**
+ * 从轻量接口汇总会话累计用量，并按 id 回填骨架消息。
+ *
+ * ## 为什么优先用 `session` 而不是 `session.context`
+ *
+ * `session.context` 返回「最后一次压缩之后的完整消息」。在读过大量文件的会话里
+ * 这个响应会非常巨大 —— 实测某 V1 升级上来的会话（50 次 `read`，每次 350~666KB）
+ * 返回 **10.76 MB / 93 条消息 / 约 2.3~3.9 秒**，而 OCC 只用它算几个 token 数字。
+ * 更糟的是它和骨架、session info 抢同一条隧道，把首屏拖慢到好几秒。
+ *
+ * `session` 接口自带**会话累计用量**，504 字节 / 约 600ms，数值口径一致
+ * （服务端累计的 input/output/reasoning/cache 总和）。因此：
+ *
+ *   1. 先用 `session` 拿累计用量 → 覆盖「累计消耗」（最常见、最必需的部分）
+ *   2. 需要「上下文占用快照」和「按 id 回填骨架消息」时，才走 `session.context`
+ *
+ * 第 2 步的代价在大会话上确实高，但它是**按需**的：只有骨架路径（消息不带
+ * tokens）才需要逐条回填；按量分页路径的消息本身带 tokens，无需这一步。
+ *
+ * ## 口径说明（与官方一致）
+ *
  *   - 累计消耗 = Σ 每条 assistant 的 tokens（每条是该次请求的用量）
  *   - 上下文占用 = **最后一条**带 tokens 的 assistant（不是累加）
  *     见 opencode `client/src/solid/usage.ts` 的 lastAssistantWithUsage
@@ -101,6 +184,27 @@ export async function backfillSessionUsage(sessionKey: string): Promise<void> {
   if (!bareId) return
 
   try {
+    /**
+     * 第一步：轻量拿累计用量。
+     *
+     * 大部分会话靠这一步就够了 —— 圆环百分比和累计消耗都能立刻正确显示，
+     * 不必等十几 MB 的 context 响应。
+     */
+    const sessionInfo = await nativeGetSession(serverId, bareId).catch(() => null)
+    const totals = sessionInfo ? totalsOfSession(sessionInfo as unknown as Record<string, unknown>) : null
+    if (totals) {
+      messageStore.recordSessionUsageFallback(sessionKey, totals.tokens, totals.cost)
+    }
+
+    /**
+     * 第二步：`session.context` 只用于「上下文占用快照」与「骨架逐条回填」。
+     *
+     * 两者都依赖逐条 assistant 的 tokens，无法从累计值反推。这里保留原逻辑，
+     * 但把它放在累计用量之后 —— 即使它很慢或失败，圆环与累计消耗已经正确了。
+     *
+     * ⚠️ 大会话上这个响应可达十几 MB（工具大输出全在里面），因此对失败或
+     * 超时一律静默：累计用量已经写入，缺的只是逐条明细，属于可选增强。
+     */
     const messages = await nativeGetSessionContext(serverId, bareId)
     let input = 0
     let output = 0
@@ -151,11 +255,17 @@ export async function backfillSessionUsage(sessionKey: string): Promise<void> {
     // 没有任何 assistant：说明会话还没跑过，交给上层按消息估算即可
     if (!sawAssistant) return
 
-    messageStore.recordSessionUsageFallback(
-      sessionKey,
-      { input, output, reasoning, cache: { read: cacheRead, write: cacheWrite } },
-      cost,
-    )
+    /**
+     * 累计用量已经由上面的 `session` 接口写入。只有它没拿到（接口失败或
+     * tokens 全 0）时才用这里的求和结果兜底 —— 两者口径一致，互为备份。
+     */
+    if (!totals) {
+      messageStore.recordSessionUsageFallback(
+        sessionKey,
+        { input, output, reasoning, cache: { read: cacheRead, write: cacheWrite } },
+        cost,
+      )
+    }
 
     // 上下文占用快照：让「刚进入会话」就能显示真实用量，而不是等发消息。
     if (contextSnapshot) {

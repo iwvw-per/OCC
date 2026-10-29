@@ -29,7 +29,7 @@ import {
   type ApiSession,
 } from '../api'
 import { sessionErrorHandler } from '../utils'
-import { backfillSessionUsage } from '../api/contextBackfill'
+import { scheduleBackfillSessionUsage } from '../api/contextBackfill'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_TURN_LIMIT, HISTORY_TURN_BATCH_SIZE, RECENT_FULL_TURNS } from '../constants'
 import { extractTurnOutlineEntries } from '../components/outlineIndexModel'
@@ -599,7 +599,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
            *
            * 这条分支下面直接 `return` 了，所以不能指望末尾那个统一调用。
            */
-          void backfillSessionUsage(sid)
+          scheduleBackfillSessionUsage(sid)
           return
         }
 
@@ -775,7 +775,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         // 后不会再补发，此时统计会退化成「按已加载消息累加」（首屏仅 50 条，
         // 真实上下文 300+ 条 → 数字小一个数量级）。`session.context` 能补上这个洞。
         // 不 await：纯补数据，失败/慢都不该影响首屏。
-        void backfillSessionUsage(sid)
+        scheduleBackfillSessionUsage(sid)
       } catch (error) {
         if (isStale() || abortController.signal.aborted) return
         sessionErrorHandler('load session', error)
