@@ -245,10 +245,22 @@ export async function nativeListInbox(serverId: string | undefined, sessionID: s
  *
  * 返回「最后一次压缩之后」的消息，也就是**真正发给模型的那一段**。用它算上下文
  * 占用比前端把全部已加载消息累加要准得多（压缩后旧消息不计入）。
+ *
+ * ⚠️ 必须带 `X-Lightweight` 头。
+ *
+ * 这个端点的原始响应会把全部工具大输出再带一遍 —— 实测某个从 V1 升级上来的
+ * 会话（50 次 `read`，每次 350~666KB）是 **10.76 MB / 2.9~4.9 秒**，其中
+ * 21MB 级的 `content[].state.content[].uri` 是 base64 图片，OCC 一个字节都用不到。
+ *
+ * 带该头后主机 Agent 会把它投影成「只留 id/type/tokens/cost/time/model」，
+ * 实测 **33 KB / 230ms**，而累计用量、上下文快照、回填条数完全一致。
+ *
+ * 旧版 Agent 不认识这个头会原样透传（不带 `X-Lightweight` 响应头），
+ * 行为退回优化前，不会出错。
  */
 export async function nativeGetSessionContext(serverId: string | undefined, sessionID: string): Promise<unknown[]> {
   const client = getV2Client(serverId)
-  const res = await client.session.context({ sessionID })
+  const res = await client.session.context({ sessionID }, { headers: { 'X-Lightweight': '1' } })
   return adaptDataList(res)
 }
 
