@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.0.45] - 2026-10-29
+
+- perf: 侧边轴大纲补全延后，不再和首屏抢隧道 (f598ac97)
+
 ## [v2.0.44] - 2026-10-29
 
 - perf: /context 请求带上 X-Lightweight，响应从 11MB 降到 33KB (a820d1ce)
