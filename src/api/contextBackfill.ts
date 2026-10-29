@@ -122,15 +122,19 @@ function usageTotal(usage: TokenUsage): number {
  *     骨架第 2 页（cursor）      +2.5s 才发出   ← 被大纲请求挤住
  *     /context                  +4.0s 才轮到
  *
- * 侧边轴大纲属于「导航辅助」，理论上可以晚一点；但实测它通常**只花 186ms**
- * 就返回（`cursor` 往往已经指向最早一页，`pages=60` 实际上翻不了几页），
- * 为它加延时纯属让侧边轴白等。
+ * 侧边轴大纲属于「导航辅助」，但它本身很轻（实测通常 186ms 就返回，
+ * `cursor` 往往已指向最早一页）。**真正的代价不是它自己慢，而是它会挤占
+ * 并发额度**：首屏阶段浏览器对同域只有 6 个连接，实测同时在途请求峰值达到
+ * **29 个**，骨架、session info、/context 全在排队。
  *
- * 所以和用量回填一样：首屏画完立即发，不再叠加静默期。
+ * 所以它不该和首屏内容抢名额，延后 800ms 再发（等首屏那批请求退潮）。
  */
 export function scheduleOutlineBackfill(run: () => void): void {
-  scheduleAfterFirstPaint(run, 0)
+  scheduleAfterFirstPaint(run, OUTLINE_BACKFILL_DELAY_MS)
 }
+
+/** 大纲补全的延后：等首屏那批并发请求退潮 */
+const OUTLINE_BACKFILL_DELAY_MS = 800
 
 /**
  * 用量回填：首屏骨架上屏后**立即**发起。
