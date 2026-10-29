@@ -60,15 +60,16 @@ export interface WorkStatusSectionContext {
 
 // ─── 会话：上下文占用 + 成本 ──────────────────
 
-const DEFAULT_CONTEXT_LIMIT = 200_000
-
 export const WorkStatusSessionSection = memo(function WorkStatusSessionSection({
   sessionId,
   contextLimit,
 }: WorkStatusSectionContext) {
   const { t } = useTranslation('chat')
-  const limit = contextLimit > 0 ? contextLimit : DEFAULT_CONTEXT_LIMIT
-  const stats = useSessionStatsFor(sessionId, limit)
+  /**
+   * 不兜底默认窗口：实测某模型真实窗口 1000000，旧的 200000 兜底会让
+   * 百分比虚高 5 倍。窗口未知时 `contextPercent` 为 null，这里显示「—」。
+   */
+  const stats = useSessionStatsFor(sessionId, contextLimit > 0 ? contextLimit : 0)
   const hasUsage = stats.contextUsed > 0
   const percent = hasUsage ? stats.contextPercent : null
   const cost = stats.totalCost > 0 ? stats.totalCost : null

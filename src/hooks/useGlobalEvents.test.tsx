@@ -46,7 +46,9 @@ const {
   markIdleMock,
 } = vi.hoisted(() => ({
   subscribeToEventsMock: vi.fn(),
-  getSessionStatusMock: vi.fn<(directory?: string) => Promise<Record<string, { type: string }>>>(() => Promise.resolve({})),
+  getSessionStatusMock: vi.fn<(directory?: string) => Promise<Record<string, { type: string }>>>(() =>
+    Promise.resolve({}),
+  ),
   getPendingPermissionsMock: vi.fn(() =>
     Promise.resolve([] as Array<{ id: string; sessionID: string; permission: string; patterns?: string[] }>),
   ),
@@ -115,6 +117,23 @@ vi.mock('../api/permission', () => ({
   replyPermission: replyPermissionMock,
 }))
 
+/**
+ * `useGlobalEvents` 直接从 `../api/events` 取缺口订阅入口（不走 `../api` 的
+ * 再导出），因此必须单独 mock，否则会拉起真实的 SSE 连接管理器。
+ */
+const { seqGapHandlers, ackSeqGapMock } = vi.hoisted(() => ({
+  seqGapHandlers: new Set<(serverId: string, aggregateID: string) => void>(),
+  ackSeqGapMock: vi.fn(),
+}))
+vi.mock('../api/events', () => ({
+  onSeqGap: (fn: (serverId: string, aggregateID: string) => void) => {
+    seqGapHandlers.add(fn)
+    return () => seqGapHandlers.delete(fn)
+  },
+  ackSeqGap: ackSeqGapMock,
+  subscribeToServerEvents: (_serverId: string, cb: unknown) => subscribeToEventsMock(cb),
+}))
+
 vi.mock('../store', () => ({
   messageStore: {
     handleMessageUpdated: vi.fn(),
@@ -124,6 +143,10 @@ vi.mock('../store', () => ({
     handleSessionIdle: vi.fn(),
     handleSessionError: vi.fn(),
     markServerSessionsStale: vi.fn(),
+    markSessionStale: vi.fn(),
+    getAllSessionKeys: vi.fn(() => [] as string[]),
+    getIsStreaming: vi.fn(() => false),
+    settleByAuthoritativeIdle: vi.fn(() => false),
     recordCompactionResult: vi.fn(),
     recordSessionUsage: vi.fn(),
     getSessionState: vi.fn(() => null),
@@ -398,11 +421,7 @@ describe('useGlobalEvents', () => {
     })
 
     // 用户手动 /compact 后必须得到反馈，否则会以为功能失效
-    expect(notificationToastMock).toHaveBeenCalledWith(
-      'error',
-      expect.any(String),
-      'Nothing to compact yet',
-    )
+    expect(notificationToastMock).toHaveBeenCalledWith('error', expect.any(String), 'Nothing to compact yet')
     expect(messageStore.markServerSessionsStale).not.toHaveBeenCalled()
   })
 
@@ -507,11 +526,7 @@ describe('useGlobalEvents', () => {
     callbacks!.onSessionUsageUpdated?.({ sessionID: 'ses_1', tokens, cost: 1.25 })
 
     // 压缩裁掉旧轮次后，按可见消息汇总会变小；这份是服务端累计口径
-    expect(messageStore.recordSessionUsage).toHaveBeenCalledWith(
-      expect.stringContaining('ses_1'),
-      tokens,
-      1.25,
-    )
+    expect(messageStore.recordSessionUsage).toHaveBeenCalledWith(expect.stringContaining('ses_1'), tokens, 1.25)
   })
 
   it('reconciles full server status when SSE reconnects to drop stale busy entries', async () => {
@@ -566,7 +581,9 @@ describe('useGlobalEvents', () => {
     await Promise.resolve()
 
     expect(activeSessionStoreMock.mergeStatusRefresh).toHaveBeenCalledTimes(1)
-    expect(activeSessionStoreMock.mergeStatusRefresh).not.toHaveBeenCalledWith({ 'local::old-session': { type: 'idle' } })
+    expect(activeSessionStoreMock.mergeStatusRefresh).not.toHaveBeenCalledWith({
+      'local::old-session': { type: 'idle' },
+    })
   })
 
   it('replays pending requests that arrive while initialization is in flight', async () => {
@@ -777,7 +794,10 @@ describe('useGlobalEvents', () => {
     })
     expect(autoApproveStoreMock.claimAutoReply).toHaveBeenCalledWith('perm-global')
     await waitFor(() => {
-      expect(consumerRepliedMock).toHaveBeenCalledWith({ sessionID: 'local::background-session', requestID: 'perm-global' })
+      expect(consumerRepliedMock).toHaveBeenCalledWith({
+        sessionID: 'local::background-session',
+        requestID: 'perm-global',
+      })
     })
     expect(activeSessionStoreMock.resolvePendingRequest).toHaveBeenCalledWith('perm-global')
 
@@ -814,7 +834,10 @@ describe('useGlobalEvents', () => {
       )
     })
     await waitFor(() => {
-      expect(consumerRepliedMock).toHaveBeenCalledWith({ sessionID: 'local::background-session', requestID: 'perm-mismatch' })
+      expect(consumerRepliedMock).toHaveBeenCalledWith({
+        sessionID: 'local::background-session',
+        requestID: 'perm-mismatch',
+      })
     })
 
     unregister()
@@ -990,7 +1013,9 @@ describe('useGlobalEvents', () => {
       disabledType: 'completed',
       trigger: 'onSessionStatus',
       beforeTrigger: () => {
-        activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: { 'local::background-session': { type: 'busy' } } })
+        activeSessionStoreMock.getSnapshot.mockReturnValue({
+          statusMap: { 'local::background-session': { type: 'busy' } },
+        })
       },
       payload: { sessionID: 'background-session', status: { type: 'idle' } },
     },
@@ -1171,5 +1196,63 @@ describe('useGlobalEvents', () => {
     callbacks!.onSessionUpdated?.({ id: 'archived-session', time: { archived: 123 } } as never)
 
     expect(removeSessionNotificationsMock).toHaveBeenCalledWith('local::archived-session')
+  })
+})
+
+describe('seq 缺口批量处理（节流）', () => {
+  it('同一窗口内的多个缺口只触发一次批量处理，且按会话去重', async () => {
+    /**
+     * 一次断连/背压恢复后，同一台服务器上可能有多个会话同时报缺口。
+     * 逐个立即重拉会在隧道上打出并发风暴（实测经网关单次往返约 1.1s）。
+     */
+    vi.useFakeTimers()
+    try {
+      const { messageStore } = await import('../store')
+      renderHook(() => useGlobalEvents())
+
+      const handler = [...seqGapHandlers][0]
+      expect(handler).toBeDefined()
+
+      ackSeqGapMock.mockClear()
+      ;(messageStore.markSessionStale as ReturnType<typeof vi.fn>).mockClear()
+
+      // 三个会话同时报缺口（其中 ses_a 报两次，应去重）
+      handler!('local', 'ses_a')
+      handler!('local', 'ses_b')
+      handler!('local', 'ses_a')
+      handler!('local', 'ses_c')
+
+      // 窗口内还没处理
+      expect(ackSeqGapMock).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(400)
+
+      // 三个会话各 ack 一次（去重后）
+      expect(ackSeqGapMock).toHaveBeenCalledTimes(3)
+      const acked = ackSeqGapMock.mock.calls.map(c => c[1]).sort()
+      expect(acked).toEqual(['ses_a', 'ses_b', 'ses_c'])
+      expect(messageStore.markSessionStale).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('卸载时清掉挂起的批量任务，不再回调已卸载的 consumer', async () => {
+    vi.useFakeTimers()
+    try {
+      const { unmount } = renderHook(() => useGlobalEvents())
+      const handler = [...seqGapHandlers][0]
+      expect(handler).toBeDefined()
+
+      ackSeqGapMock.mockClear()
+      handler!('local', 'ses_x')
+      // 还没到窗口就卸载
+      unmount()
+      vi.advanceTimersByTime(400)
+
+      expect(ackSeqGapMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

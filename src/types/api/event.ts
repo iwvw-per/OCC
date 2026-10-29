@@ -121,6 +121,17 @@ export interface SessionUsagePayload {
   cost: number
 }
 
+/**
+ * 已读水位（v2 `session.viewed`）。
+ *
+ * `idle` 是「用户观察到的 idle 时间戳」——服务端保证只升不降（实测传更小的
+ * 值会被忽略），因此可以安全地按 max 合并。
+ */
+export interface SessionViewedPayload {
+  sessionID: string
+  idle: number
+}
+
 export type SessionDiffPayload = SDKEventSessionDiff['properties']
 
 /** message.part.delta 载荷（v2 原生） */
@@ -230,6 +241,22 @@ export const EventTypes = {
   /** v2 会话累计用量（tokens / cost），不随消息裁剪变化 */
   SESSION_USAGE_UPDATED: 'session.usage.updated',
   /**
+   * v2 已读水位（`session.viewed`，durable）：某端把某会话读到哪一次 idle。
+   *
+   * 这是**服务端权威的跨端已读信号**，语义是 `viewed < idle` 即未读。
+   * 本地另有 `readWatermarkStore`（走账号通道、max 合并）作为离线兜底；
+   * 两者都只是「抬升水位」，因此可以共存且天然收敛。
+   */
+  SESSION_VIEWED: 'session.viewed',
+  /**
+   * v2 压缩用量的耐久记录（`session.usage.recorded`，source=compaction）。
+   *
+   * 与 `SESSION_USAGE_UPDATED` 的区别：后者是**会话累计消耗**（ephemeral），
+   * 这条是**压缩那一次请求**的用量（durable）。写错地方会让累计值被重复计入，
+   * 所以用独立事件名承载，消费方明确。
+   */
+  SESSION_COMPACTION_USAGE: 'session.compaction.usage',
+  /**
    * v2 重试信号：`session.retry.scheduled`。后端因限流/超时对某条 assistant
    * 消息发起重试时，会先广播此事件（带被放弃的 assistantMessageID），随后用
    * **新的** assistantMessageID 重新生成。若不处理，前端会把旧消息已产生的
@@ -319,6 +346,8 @@ export const EventTypes = {
   | 'session.renamed'
   | 'session.retry.scheduled'
   | 'session.usage.updated'
+  | 'session.viewed'
+  | 'session.compaction.usage'
   | 'session.step.streamed'
   | 'session.inbox.enqueued'
   | 'session.synthetic'
@@ -395,6 +424,14 @@ export interface EventCallbacks {
   /** 会话压缩结束（v2）：成功/失败都回调，用于提示与刷新消息 */
   onSessionCompacted?: (data: SessionCompactedPayload) => void
   onSessionUsageUpdated?: (data: SessionUsagePayload) => void
+  /** 已读水位变化（v2 `session.viewed`）：其它端读了会话，本端应同步已读 */
+  onSessionViewed?: (data: SessionViewedPayload) => void
+  /**
+   * 压缩那一次请求的用量（v2 `session.usage.recorded`，source=compaction）。
+   *
+   * 与 `onSessionUsageUpdated` 的区别：那条是会话累计消耗，这条是单次压缩用量。
+   */
+  onSessionCompactionUsage?: (data: { sessionID: string; tokens: CompactionTokenUsage; cost: number; at: number }) => void
   onSessionError?: (data: SessionErrorPayload) => void
   onSessionStatus?: (data: SessionStatusPayload) => void
   onPermissionAsked?: (request: PermissionRequest) => void
@@ -420,5 +457,12 @@ export interface EventCallbacks {
   onWorktreeFailed?: (data: WorktreeFailedPayload) => void
   onVcsBranchUpdated?: (data: VcsBranchUpdatedPayload) => void
   onError?: (error: Error) => void
+  /**
+   * 背压溢出：本地消费不过来（SDK subscriber 队列满），整条连接被停掉后立即重连。
+   *
+   * 与 onError 的区别：这不是网络/服务端故障，不需要用户感知成「连接出错」，
+   * 也不该走退避重连。上层若需要统计或提示，可单独处理；默认忽略即可。
+   */
+  onBackpressure?: (detail: string) => void
   onReconnected?: (reason: 'network' | 'server-switch') => void
 }

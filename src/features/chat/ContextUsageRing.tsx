@@ -23,7 +23,14 @@ interface ContextUsageRingProps {
 export function ContextUsageRing({ contextLimit, onOpenDetails, className }: ContextUsageRingProps) {
   const { t } = useTranslation(['chat', 'common'])
   const stats = useSessionStats(contextLimit)
-  const percent = Math.min(Math.max(stats.contextPercent, 0), 100)
+  /**
+   * 窗口未知（模型列表还没到手 / 该模型没声明 limit）时不画环、不算百分比。
+   *
+   * 旧实现兜底 200000：实测某模型真实窗口 1000000，分母错 5 倍，圆环虚高。
+   * 画一个错的环比不画更有害 —— 用户会据此判断「快满了」。
+   */
+  const known = stats.contextPercent !== null
+  const percent = known ? Math.min(Math.max(stats.contextPercent ?? 0, 0), 100) : 0
 
   const progressColor =
     percent === 0
@@ -34,7 +41,9 @@ export function ContextUsageRing({ contextLimit, onOpenDetails, className }: Con
           ? 'text-warning-100'
           : 'text-accent-main-100'
 
-  const title = `${t('sidebar.contextUsage')}: ${formatTokens(stats.contextUsed)} / ${formatTokens(stats.contextLimit)} · ${Math.round(percent)}% · ${formatCost(stats.totalCost)}`
+  const title = known
+    ? `${t('sidebar.contextUsage')}: ${formatTokens(stats.contextUsed)} / ${formatTokens(stats.contextLimit)} · ${Math.round(percent)}% · ${formatCost(stats.totalCost)}`
+    : `${t('sidebar.contextUsage')}: ${formatTokens(stats.contextUsed)} · ${t('sidebar.contextLimitUnknown')} · ${formatCost(stats.totalCost)}`
 
   return (
     <button
@@ -48,13 +57,24 @@ export function ContextUsageRing({ contextLimit, onOpenDetails, className }: Con
         className,
       )}
     >
-      <CircularProgress
-        progress={percent / 100}
-        size={18}
-        strokeWidth={2.5}
-        trackClassName="text-text-100/10"
-        progressClassName={progressColor}
-      />
+      {known ? (
+        <CircularProgress
+          progress={percent / 100}
+          size={18}
+          strokeWidth={2.5}
+          trackClassName="text-text-100/10"
+          progressClassName={progressColor}
+        />
+      ) : (
+        // 未知窗口：只画轨道，不画进度，避免任何「占用多少」的暗示
+        <CircularProgress
+          progress={0}
+          size={18}
+          strokeWidth={2.5}
+          trackClassName="text-text-100/10"
+          progressClassName="text-transparent"
+        />
+      )}
     </button>
   )
 }

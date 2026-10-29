@@ -16,14 +16,17 @@ import { activeSessionStore } from '../store/activeSessionStore'
 import { backgroundJobStore } from '../store/backgroundJobStore'
 import { parseBackgroundNotice } from '../features/workStatus/backgroundJobs'
 import { notificationStore } from '../store/notificationStore'
+import { readWatermarkStore } from '../store/readWatermarkStore'
 import { soundStore } from '../store/soundStore'
 import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
 import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
+import { onSeqGap, ackSeqGap } from '../api/events'
 import { reportSessionViewed } from '../api/sessionView'
 import { recoverPendingInbox } from '../api/inboxRecovery'
+import { backfillSessionUsage } from '../api/contextBackfill'
 import { invalidateSessionListCache } from '../api/sessionListCache'
 import { sessionListIndexStore } from '../store/sessionListIndexStore'
 import type { EventCallbacks } from '../types/api/event'
@@ -163,6 +166,14 @@ const PENDING_TIMEOUT = 5000
 // 断连窗口内 replied 事件可能永久丢失，必须靠 TTL 兜底清理，否则条目会无限累积
 const LATE_PENDING_TIMEOUT = 5 * 60 * 1000
 const LATE_PENDING_MAX = 200
+
+/**
+ * seq 缺口批量处理窗口。
+ *
+ * 一次断连/背压恢复后，同一台服务器上可能有多个会话同时报缺口；逐个立即重拉
+ * 会在隧道上打出并发风暴。300ms 足够吸收一次重连风暴，又不会让用户明显等待。
+ */
+const SEQ_GAP_FLUSH_MS = 300
 
 interface LatePendingRequest {
   requestId: string
@@ -719,6 +730,25 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             scoped[makeSessionKey(serverId, sid)] = status
           }
           activeSessionStore.replaceServerStatus(serverId, scoped)
+          /**
+           * 同时校正 messageStore 的「生成中」状态。
+           *
+           * 这是 messageStore 唯一的**独立于 SSE** 的兜底：收尾事件（idle /
+           * execution.succeeded）一旦丢失，界面会永久显示生成中 —— 停止按钮、
+           * 项目行转圈、消息半透明都停不下来。而 `/session/active` 是权威快照，
+           * 它说「不在跑」就一定不在跑。
+           *
+           * 判据用 `Date.now()`：服务端此刻没把它列为运行中，即「现在已结束」，
+           * 这个时间必然不早于最后一条 assistant（后者是过去产生的）。
+           */
+          const now = Date.now()
+          for (const sessionKey of messageStore.getAllSessionKeys()) {
+            if (sessionKeyToServerId(sessionKey) !== serverId) continue
+            if (!messageStore.getIsStreaming(sessionKey)) continue
+            // 服务端仍认为它在跑 → 不动
+            if (scoped[sessionKey]) continue
+            messageStore.settleByAuthoritativeIdle(sessionKey, now)
+          }
         })
         .catch(() => {})
     }
@@ -1086,6 +1116,39 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 会话累计用量（tokens/cost）。压缩后旧轮次被裁掉，按可见消息汇总
           // 会变小；这份是服务端口径，直接覆盖累计值。
           messageStore.recordSessionUsage(scope(data.sessionID), data.tokens, data.cost)
+        },
+
+        /**
+         * 压缩那一次请求的用量（durable）。
+         *
+         * 只写 `compactionUsage`（压缩后上下文快照），**不写** `usage`：
+         * 后者是会话累计消耗，混入单次压缩用量会让侧栏数字重复计入。
+         */
+        onSessionCompactionUsage: data => {
+          if (isEphemeralSession(data.sessionID)) return
+          messageStore.recordCompactionResult(scope(data.sessionID), {
+            tokens: data.tokens,
+            cost: data.cost,
+            at: data.at,
+          })
+        },
+
+        /**
+         * 已读水位（服务端权威，跨端）。
+         *
+         * 语义是 `viewed < idle` 即未读。这里把服务端水位同步到本地
+         * `readWatermarkStore`（max 合并，天然收敛），从而：
+         *   - A 端读了会话 → 服务端 viewed 前进 → B 端收到事件 → B 端未读点消失；
+         *   - 不依赖账号登录（账号通道只是离线兜底）。
+         *
+         * 用 `idle` 而不是本地时间：两端比较必须同基准，服务端时间戳才是权威。
+         */
+        onSessionViewed: data => {
+          if (isEphemeralSession(data.sessionID)) return
+          if (!data.idle || data.idle <= 0) return
+          const scopedId = scope(data.sessionID)
+          readWatermarkStore.raise(scopedId, data.idle)
+          notificationStore.markSessionNotificationsRead(scopedId, 'completed')
         },
 
         onSessionError: error => {
@@ -1465,6 +1528,22 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           }
         },
 
+        /**
+         * 背压溢出：本地消费不过来导致整条连接被 SDK 停掉（已由传输层立即重连）。
+         *
+         * 这里要做的是「补齐溢出期间丢掉的事件」：溢出是跨会话的，无法定位丢了
+         * 哪些，因此把该服务器的会话全部标记 stale（下次打开会重拉），并对账
+         * 运行态。不给用户弹 toast —— 这不是故障，重连通常在一秒内完成，
+         * 弹提示反而制造焦虑。
+         */
+        onBackpressure: detail => {
+          logger.warn(`[GlobalEvents] backpressure overflow on ${serverId}, marking sessions stale: ${detail}`)
+          messageStore.markServerSessionsStale(serverId)
+          reconcileServerStatus(serverId)
+          fetchAndInitialize(serverId)
+          void recoverPendingInbox(serverId)
+        },
+
         // ============================================
         // Reconnected → 通知调用方刷新数据 + 重新拉取 session status
         // ============================================
@@ -1507,6 +1586,65 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
     const unsubscribes = activeServerIds.map(serverId =>
       subscribeToServerEvents(serverId, buildServerCallbacks(serverId)),
     )
+
+    /**
+     * seq 缺口修复。
+     *
+     * 传输层只负责「发现丢了」（见 api/seqGap.ts），这里负责「怎么修」：
+     * 把该会话标记为 stale 并通知 pane 重拉快照，然后 ack 掉缺口。
+     *
+     * 为什么只能重拉快照：实测 `GET /session/{id}/log?after=N` 不回放历史事件
+     * （`after=0` 也只返回当前水位），服务端没有游标续传能力。
+     *
+     * 为什么 ack 必须在这里做：ack 之后该会话的 seq 记录被清空，下一条事件按
+     * 「首次见到」放行。若忘记 ack，会一直卡在缺口判定上反复重拉。
+     */
+    /**
+     * seq 缺口修复（带节流与合并）。
+     *
+     * 为什么需要节流：一次断连/背压恢复后，同一台服务器上**多个会话**可能同时
+     * 报缺口。每个都立即触发一次 force 重载，就会在隧道上打出一波并发请求
+     * （实测经网关单次往返约 1.1s，几个大会话足以把后续请求全拖慢）。
+     *
+     * 策略：
+     *   - 按 serverId 合并：一个窗口内的所有缺口只触发一次「批量处理」；
+     *   - 窗口 300ms：足够吸收一次重连风暴，又不会让用户明显等待；
+     *   - 同一会话在窗口内只处理一次（Set 去重）。
+     */
+    const pendingGaps = new Map<string, Set<string>>()
+    let gapFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+    const flushGaps = () => {
+      gapFlushTimer = null
+      const batches = [...pendingGaps.entries()]
+      pendingGaps.clear()
+      for (const [serverId, aggregateIDs] of batches) {
+        for (const aggregateID of aggregateIDs) {
+          const scopedId = makeSessionKey(serverId, aggregateID)
+          messageStore.markSessionStale(scopedId)
+          // 通知打开着该会话的 pane：它的 onReconnected 会做 force 重载。
+          // 复用同一回调是刻意的 —— 对 pane 而言「数据不可信需要重拉」和
+          // 「断线重连」是同一件事，没必要再造一套。
+          for (const consumer of sessionConsumers.values()) {
+            if (consumer.sessionId !== scopedId) continue
+            consumer.callbacks.onReconnected?.('network', serverId)
+          }
+          ackSeqGap(serverId, aggregateID)
+        }
+      }
+    }
+
+    const unsubscribeSeqGap = onSeqGap((serverId, aggregateID) => {
+      let set = pendingGaps.get(serverId)
+      if (!set) {
+        set = new Set()
+        pendingGaps.set(serverId, set)
+      }
+      set.add(aggregateID)
+      if (gapFlushTimer !== null) return
+      gapFlushTimer = setTimeout(flushGaps, SEQ_GAP_FLUSH_MS)
+    })
+
     activeServerIds.forEach(serverId => {
       // 只有该服务器「首次连接」才用 replace：这是全量初始化，需要
       // initializePendingRequests 建立待处理请求的基线。
@@ -1556,7 +1694,26 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       for (const serverId of activeServerIdsRef.current) {
         reconcileServerStatus(serverId)
       }
+      reconcileUsage()
     }, 60000)
+
+    /**
+     * 周期性对齐会话用量。
+     *
+     * 为什么单独需要它：`session.usage.updated` 是 ephemeral 事件，丢了就没有
+     * 第二次机会；而上面的 activeStatusReconcileTimer 只对账运行态
+     * （`/session/active`），完全没碰 `usage` / `contextUsage`。
+     * 结果是「连接看起来活着、但事件丢了」时，token 与花费数字永久停在旧值。
+     *
+     * 只对账**已加载进内存**的会话（messageStore 里有 state 的），且复用
+     * contextBackfill 的轻量路径（`session` 接口 504 字节），不做全量重拉。
+     * 用 force 绕过去重：周期对账的目的就是纠错，被「已补过」挡掉就失去意义。
+     */
+    const reconcileUsage = () => {
+      for (const sessionKey of messageStore.getAllSessionKeys()) {
+        void backfillSessionUsage(sessionKey, { force: true })
+      }
+    }
 
     // 回前台时重新对齐 session 状态：应用在后台被冻结期间 SSE 事件可能未被处理，
     // 而连接靠心跳仍显示存活、不会触发 onReconnected。此时主动拉一次全量状态，
@@ -1566,6 +1723,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       for (const serverId of activeServerIdsRef.current) {
         reconcileServerStatus(serverId)
       }
+      reconcileUsage()
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
 
@@ -1577,6 +1735,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       window.clearInterval(activeStatusReconcileTimer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
       unsubscribes.forEach(unsubscribe => unsubscribe())
+      unsubscribeSeqGap()
+      // 挂起的缺口批量任务必须清掉：effect 已销毁，再回调会打到已卸载的 consumer
+      if (gapFlushTimer !== null) {
+        clearTimeout(gapFlushTimer)
+        gapFlushTimer = null
+      }
+      pendingGaps.clear()
       unsubscribeAutoApprove()
       unsubscribeServerChange()
     }

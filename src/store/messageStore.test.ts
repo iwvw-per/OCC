@@ -1313,3 +1313,171 @@ describe('applyToolProgress performance contract', () => {
     expect(after.find(m => m.info.id === 'message-1')).not.toBe(before.find(m => m.info.id === 'message-1'))
   })
 })
+
+describe('onSessionEvicted（会话状态被丢弃的通知）', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  it('clearSession 会通知订阅者，且带上复合 key', () => {
+    /**
+     * 会话状态（含 usage / contextUsage）只在内存里，清掉即丢失。
+     * 依赖这些字段的模块（contextBackfill 的去重集合）必须能感知到，
+     * 否则重新打开会话时会被「已补过」挡掉，圆环永久退化为字符估算。
+     */
+    const seen: string[] = []
+    const off = messageStore.onSessionEvicted(key => seen.push(key))
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.clearSession('session-1')
+    off()
+    expect(seen).toEqual(['session-1'])
+  })
+
+  it('clearAll 会为每个被丢弃的会话各通知一次', () => {
+    const seen: string[] = []
+    const off = messageStore.onSessionEvicted(key => seen.push(key))
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handleMessageUpdated({ ...createAssistantMessage('message-2'), sessionID: 'session-2' })
+    messageStore.clearAll()
+    off()
+    expect(seen.sort()).toEqual(['session-1', 'session-2'])
+  })
+
+  it('取消订阅后不再收到通知', () => {
+    const seen: string[] = []
+    const off = messageStore.onSessionEvicted(key => seen.push(key))
+    off()
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.clearSession('session-1')
+    expect(seen).toEqual([])
+  })
+
+  it('订阅者抛错不影响其它订阅者与清空流程', () => {
+    const seen: string[] = []
+    const offBad = messageStore.onSessionEvicted(() => {
+      throw new Error('boom')
+    })
+    const offGood = messageStore.onSessionEvicted(key => seen.push(key))
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    expect(() => messageStore.clearSession('session-1')).not.toThrow()
+    offBad()
+    offGood()
+    expect(seen).toEqual(['session-1'])
+    expect(messageStore.getSessionState('session-1')).toBeUndefined()
+  })
+})
+
+describe('recordSessionUsageFallback（服务端快照兜底累计用量）', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  const usage = (input: number) => ({
+    input,
+    output: 10,
+    reasoning: 0,
+    cache: { read: 0, write: 0 },
+  })
+
+  it('没有现有值时直接写入', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.recordSessionUsageFallback('session-1', usage(100), 0.5)
+    expect(messageStore.getSessionUsage('session-1')?.tokens.input).toBe(100)
+  })
+
+  it('服务端快照更大时覆盖（纠正丢事件留下的偏小值）', () => {
+    /**
+     * 回归：旧实现「已有值就不覆盖」。一旦某次 usage 事件丢失、写进了偏小的
+     * 值，后续任何对账都纠正不回来，数字永久偏小。
+     * 服务端累计用量单调递增，所以「更大 = 更新」。
+     */
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.recordSessionUsageFallback('session-1', usage(100), 0.5)
+    messageStore.recordSessionUsageFallback('session-1', usage(900), 2)
+    expect(messageStore.getSessionUsage('session-1')?.tokens.input).toBe(900)
+    expect(messageStore.getSessionUsage('session-1')?.cost).toBe(2)
+  })
+
+  it('服务端快照更小时保留现有值（不回退）', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.recordSessionUsageFallback('session-1', usage(900), 2)
+    messageStore.recordSessionUsageFallback('session-1', usage(100), 0.5)
+    expect(messageStore.getSessionUsage('session-1')?.tokens.input).toBe(900)
+  })
+
+  it('会话不在内存时不建档', () => {
+    messageStore.recordSessionUsageFallback('session-unknown', usage(100), 0.5)
+    expect(messageStore.getSessionState('session-unknown')).toBeUndefined()
+  })
+})
+
+describe('getAllSessionKeys（周期对账的枚举入口）', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  it('只返回内存里真实存在的会话', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handleMessageUpdated({ ...createAssistantMessage('message-2'), sessionID: 'session-2' })
+    expect(messageStore.getAllSessionKeys().sort()).toEqual(['session-1', 'session-2'])
+    messageStore.clearSession('session-1')
+    expect(messageStore.getAllSessionKeys()).toEqual(['session-2'])
+  })
+})
+
+describe('settleByAuthoritativeIdle：外部权威时间 + 悬空工具兜底', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    messageStore.clearAll()
+  })
+
+  it('可用外部传入的权威 idle 时间落定（不依赖加载时记下的 lastTurn）', () => {
+    /**
+     * 回归：`lastTurn` 只在 loadSession 时写一次，之后不随 SSE 更新。
+     * 运行期「收尾事件丢失」时，只靠 lastTurn 的判定永远返回 false，
+     * 界面就永久卡在「生成中」—— 这正是这条兜底要解决的问题。
+     */
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.setStreaming('session-1', true)
+    const state = messageStore.getSessionState('session-1')!
+    state.messages = state.messages.map(m => ({ ...m, isStreaming: true }))
+    state.messages[0].info.time = { created: 1000 } as never
+    // 没有任何 lastTurn
+    expect(messageStore.getSessionState('session-1')!.lastTurn).toBeUndefined()
+
+    expect(messageStore.settleByAuthoritativeIdle('session-1', 5000)).toBe(true)
+    expect(messageStore.getIsStreaming('session-1')).toBe(false)
+    expect(messageStore.getSessionState('session-1')!.messages[0].isStreaming).toBe(false)
+  })
+
+  it('外部时间早于最后一条 assistant 时仍拒绝落定（避免误杀新一轮）', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.setStreaming('session-1', true)
+    const state = messageStore.getSessionState('session-1')!
+    state.messages[0].info.time = { created: 9000 } as never
+
+    expect(messageStore.settleByAuthoritativeIdle('session-1', 5000)).toBe(false)
+    expect(messageStore.getIsStreaming('session-1')).toBe(true)
+  })
+
+  it('落定时一并把悬空工具标为 interrupted（不依赖 tool 事件）', () => {
+    /**
+     * 工具的落定原本只有两个入口：settleToolByCallID（SSE 驱动）与
+     * finalizeSession（idle 事件驱动）。两者都依赖同一条事件流，
+     * 事件一丢，工具卡片就永久转圈。这里让权威 idle 也能收尾。
+     */
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    messageStore.handlePartUpdated(createRunningToolPart('part-1', 'message-1', 'running', 'call-1'))
+    messageStore.setStreaming('session-1', true)
+    const state = messageStore.getSessionState('session-1')!
+    state.messages[0].info.time = { created: 1000 } as never
+
+    expect(messageStore.settleByAuthoritativeIdle('session-1', 5000)).toBe(true)
+    const part = messageStore.getSessionState('session-1')!.messages[0].content[0]
+    expect(part.type).toBe('tool')
+    expect(part.type === 'tool' ? part.state.status : null).toBe('interrupted')
+  })
+})

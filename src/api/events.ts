@@ -12,6 +12,7 @@ import { normalizeTodoItems } from './todo'
 import { getV2Client } from './sdkV2'
 import { v2EventToGlobalEvent } from './v2/events'
 import { toolResultMetadata } from './v2/adapt'
+import { SeqGapTracker, durableOf } from './seqGap'
 import { isTauri } from '../utils/tauri'
 import { logger } from '../utils/logger'
 import { serverStore } from '../store/serverStore'
@@ -26,7 +27,13 @@ import type {
   SessionCompactedPayload,
   TodoUpdatedPayload,
 } from './types'
-import type { PartDeltaPayload, PartRemovedPayload, SessionUsagePayload, InboxEnqueuedPayload } from '../types/api/event'
+import type {
+  PartDeltaPayload,
+  PartRemovedPayload,
+  SessionUsagePayload,
+  SessionViewedPayload,
+  InboxEnqueuedPayload,
+} from '../types/api/event'
 import { EventTypes } from '../types/api/event'
 
 // ============================================
@@ -54,6 +61,17 @@ interface ServerConnection {
   generation: number
   /** 上一次 onReconnected 广播的时间戳（cooldown） */
   lastReconnectedBroadcast: number
+  /**
+   * 最近一次**任何传输层活动**的时间戳（含不带 data 的注释心跳帧）。
+   *
+   * 与 `info.lastEventTime` 的区别：后者只在真正收到事件时更新，是「有没有新
+   * 数据」；这里是「连接是否还活着」。两者必须分开，否则空闲会话会被误判为断连
+   * （见 touchConnection 的说明）。
+   *
+   * 刻意放在 ConnectionInfo 之外：它每秒可能变多次，若进入 info 就会触发
+   * 订阅者重渲染，而它只服务于内部的存活判定。
+   */
+  lastActivityAt: number
 }
 
 /** serverId -> connection */
@@ -90,6 +108,7 @@ function getOrCreateConnection(serverId: string): ServerConnection {
       isConnecting: false,
       generation: 0,
       lastReconnectedBroadcast: 0,
+      lastActivityAt: 0,
     }
     connections.set(serverId, conn)
   }
@@ -187,10 +206,34 @@ function teardownConnectionTransport(conn: ServerConnection): void {
   conn.isConnecting = false
 }
 
-function resetHeartbeat(conn: ServerConnection) {
+/**
+ * 记录一次传输层活动（含注释心跳帧），并顺延心跳超时。
+ *
+ * 为什么必须单独有这个入口：服务端空闲期只发 `: heartbeat` 注释帧（实测约
+ * 15s 一次），而 SDK 的 SSE 解析器**只在 data 非空时才 yield** —— 注释帧
+ * 不会进入 for-await 循环。旧实现只在收到真实事件时 resetHeartbeat，于是
+ * 一个长时间没新消息的会话（等用户输入、长任务无输出）会在 60s 后误判为
+ * 断连并重连，白白打断连接、触发一轮全量对账。
+ *
+ * SDK 提供了 `onActivity`：每读到一个网络 chunk 就回调一次，注释帧也算。
+ * 用它把「连接还活着」与「有没有新事件」解耦。
+ */
+function touchConnection(conn: ServerConnection) {
+  conn.lastActivityAt = Date.now()
+  resetHeartbeat(conn)
+}
+
+/**
+ * 顺延心跳超时。
+ *
+ * @param activityOnly 仅由传输层活动触发（含注释心跳）。此时不更新
+ *   `info.lastEventTime` —— 那个字段的语义是「最后一次收到真实事件」，
+ *   被注释帧刷新会让「多久没数据」失真（例如后台 keepalive 的日志与判定）。
+ */
+function resetHeartbeat(conn: ServerConnection, activityOnly = false) {
   if (conn.heartbeatTimer) clearTimeout(conn.heartbeatTimer)
 
-  updateConnectionState(conn.serverId, { lastEventTime: Date.now() })
+  if (!activityOnly) updateConnectionState(conn.serverId, { lastEventTime: Date.now() })
 
   // 后台时使用更宽松的超时，因为移动端后台 timer 可能被冻结/延迟
   const timeout = isInBackground ? BACKGROUND_HEARTBEAT_TIMEOUT : HEARTBEAT_TIMEOUT
@@ -200,6 +243,29 @@ function resetHeartbeat(conn: ServerConnection) {
     updateConnectionState(conn.serverId, { state: 'disconnected', error: 'Heartbeat timeout' })
     scheduleReconnect(conn)
   }, timeout)
+}
+
+/**
+ * 是否是 SDK 的背压溢出错误（subscriber 队列满）。
+ *
+ * SDK 抛的是 `Event subscriber exceeded its 4096-event capacity`。
+ * 用消息匹配而非错误类：SDK 内部抛的是普通 `Error`，没有可识别的类型标识。
+ */
+function isBackpressureError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /exceeded its \d+-event capacity/i.test(message)
+}
+
+/**
+ * 连接看起来还活着吗？
+ *
+ * 判据取「最后一次传输层活动」与「最后一次真实事件」中较晚的那个：
+ * 空闲会话只有注释心跳帧，`lastEventTime` 会一直很旧，但连接其实是好的。
+ */
+function isConnectionFresh(conn: ServerConnection, now = Date.now()): boolean {
+  const staleTimeout = isInBackground ? BACKGROUND_HEARTBEAT_TIMEOUT : HEARTBEAT_TIMEOUT
+  const lastSeen = Math.max(conn.info.lastEventTime, conn.lastActivityAt)
+  return now - lastSeen <= staleTimeout
 }
 
 function scheduleReconnect(conn: ServerConnection) {
@@ -229,20 +295,15 @@ function connectServer(serverId: string) {
 
   // 如果状态声称 connected，验证连接是否真的活着
   if (conn.info.state === 'connected') {
-    const timeSinceLastEvent = Date.now() - conn.info.lastEventTime
-    // 后台时使用更宽松的超时判断
-    const staleTimeout = isInBackground ? BACKGROUND_HEARTBEAT_TIMEOUT : HEARTBEAT_TIMEOUT
-    if (timeSinceLastEvent > staleTimeout) {
-      // 太久没收到事件，连接可能已死，强制断开再重连
-      if (import.meta.env.DEV) {
-        logger.log(
-          `[SSE] connectServer: ${serverId} state=connected but stale (${Math.round(timeSinceLastEvent / 1000)}s), forcing disconnect`,
-        )
-      }
-      updateConnectionState(serverId, { state: 'disconnected' })
-    } else {
+    if (isConnectionFresh(conn)) {
       return // 连接确实还活着
     }
+    // 太久没有任何活动，连接可能已死，强制断开再重连
+    if (import.meta.env.DEV) {
+      const staleSec = Math.round((Date.now() - Math.max(conn.info.lastEventTime, conn.lastActivityAt)) / 1000)
+      logger.log(`[SSE] connectServer: ${serverId} state=connected but stale (${staleSec}s), forcing disconnect`)
+    }
+    updateConnectionState(serverId, { state: 'disconnected' })
   }
 
   // 建立新传输前，务必彻底终止上一条流：递增代次让旧的 for-await / reader 循环
@@ -280,10 +341,24 @@ function connectViaV2(conn: ServerConnection) {
 
   ;(async () => {
     try {
-      const stream = client.event.subscribe({ signal: conn.controller?.signal })
+      /**
+       * `onActivity` 在每个网络 chunk 到达时回调，**包括不带 data 的注释心跳帧**。
+       *
+       * 这是「连接还活着」的唯一可靠信号：SDK 的 SSE 解析器只在 data 非空时
+       * yield，所以注释帧不会进入下面的 for-await。只靠事件重置心跳的话，
+       * 空闲会话 60s 后必被误判断连（实测服务端心跳间隔约 15s）。
+       */
+      const stream = client.event.subscribe({
+        signal: conn.controller?.signal,
+        onActivity: () => {
+          if (myGeneration !== conn.generation) return
+          touchConnection(conn)
+        },
+      })
 
       finalizeConnectionAttempt(conn, myGeneration)
       updateConnectionState(serverId, { state: 'connected', reconnectAttempt: 0, error: undefined })
+      conn.lastActivityAt = Date.now()
       resetHeartbeat(conn)
       if (import.meta.env.DEV) logger.log(`[SSE/v2] ${serverId} connected`)
 
@@ -294,6 +369,9 @@ function connectViaV2(conn: ServerConnection) {
       for await (const event of stream) {
         if (myGeneration !== conn.generation) break
         resetHeartbeat(conn)
+        // 缺口检测必须在映射之前：seq 只在原始事件上，映射后就丢了。
+        // 构成缺口的事件直接丢弃（数据不可信，等快照重拉）。
+        if (checkSeqGap(conn, event)) continue
         const globalEvent = v2EventToGlobalEvent(event)
         if (globalEvent) broadcastEvent(conn, globalEvent)
       }
@@ -307,6 +385,38 @@ function connectViaV2(conn: ServerConnection) {
       if (!finalizeConnectionAttempt(conn, myGeneration)) return
       if (error instanceof Error && error.name === 'AbortError') return
       const errorMsg = error instanceof Error ? error.message : String(error)
+
+      /**
+       * 背压溢出：SDK 的 subscriber 队列满（默认 4096 条）时会抛
+       * `Event subscriber exceeded its N-event capacity` 并**停掉整条连接**。
+       *
+       * 这既不是网络故障也不是服务端故障，而是「本地消费不过来」——通常是主线程
+       * 被渲染或大 delta 风暴占满。它与断线的处理方式应当不同：
+       *   - 断线：指数退避，避免服务端故障时高频重连；
+       *   - 背压：**立即重连**（退避只会让积压更久），并把已消费的 seq 水位
+       *     作废，让重连后的第一条事件按「首次见到」放行（否则会被判成缺口
+       *     而反复触发快照重拉）。
+       *
+       * 另外必须让该服务器所有会话都失效：溢出期间丢的事件是**跨会话**的，
+       * 无法知道具体丢了哪些，只能整台重拉一次。
+       */
+      if (isBackpressureError(error)) {
+        logger.warn(`[SSE/v2] ${serverId} backpressure overflow, reconnecting immediately:`, errorMsg)
+        // 水位作废：重连后按首次见到处理，避免误判缺口
+        seqTrackers.get(serverId)?.clear()
+        /**
+         * 溢出期间丢的事件是**跨会话**的，无法知道具体丢了哪些，只能整台重拉。
+         * 传输层不直接碰 store（避免 api → store 的反向依赖），交给上层处理。
+         */
+        conn.subscribers.forEach(cb => cb.onBackpressure?.(errorMsg))
+        updateConnectionState(serverId, { state: 'connecting', error: errorMsg })
+        // 立即重连，不走退避
+        conn.generation++
+        teardownConnectionTransport(conn)
+        connectServer(serverId)
+        return
+      }
+
       if (import.meta.env.DEV) logger.warn(`[SSE/v2] ${serverId} error:`, errorMsg)
       updateConnectionState(serverId, { state: 'error', error: errorMsg })
       conn.subscribers.forEach(cb => cb.onError?.(error instanceof Error ? error : new Error(errorMsg)))
@@ -346,17 +456,19 @@ function startBackgroundKeepalive() {
     const now = Date.now()
 
     for (const conn of connections.values()) {
-      const timeSinceLastEvent = now - conn.info.lastEventTime
       const serverId = conn.serverId
+      // 存活判定要算上注释心跳帧（lastActivityAt），否则空闲会话在后台会被
+      // 反复判死并重连 —— 每次重连都要重拉一遍状态，既费流量又打断订阅。
+      const timeSinceActivity = now - Math.max(conn.info.lastEventTime, conn.lastActivityAt)
 
       if (import.meta.env.DEV) {
         logger.log(
-          `[SSE] Background keepalive check ${serverId}: last event ${Math.round(timeSinceLastEvent / 1000)}s ago, state=${conn.info.state}`,
+          `[SSE] Background keepalive check ${serverId}: last activity ${Math.round(timeSinceActivity / 1000)}s ago, state=${conn.info.state}`,
         )
       }
 
-      if (conn.info.state === 'connected' && timeSinceLastEvent > BACKGROUND_HEARTBEAT_TIMEOUT) {
-        // 连接声称是 connected，但已经太久没收到事件了 — 连接可能已经静默断开
+      if (conn.info.state === 'connected' && timeSinceActivity > BACKGROUND_HEARTBEAT_TIMEOUT) {
+        // 连接声称是 connected，但已经太久没有任何传输层活动 — 大概率已静默断开
         logger.warn(`[SSE] Background keepalive: ${serverId} appears dead, forcing reconnect`)
 
         // 断开旧连接
@@ -427,13 +539,14 @@ function handleVisibilityChange() {
         }
         forceReconnectNow(conn)
       } else {
-        // 状态是 connected，但连接可能已经在后台静默断开
-        // 检查最后一次收到事件的时间
-        const timeSinceLastEvent = Date.now() - conn.info.lastEventTime
-        if (timeSinceLastEvent > HEARTBEAT_TIMEOUT) {
-          // 太久没收到事件了，连接大概率已死
+        // 状态是 connected，但连接可能已经在后台静默断开。
+        // 判据用「最后一次传输层活动」：后台冻结期间连注释心跳也收不到，
+        // 所以这里的老化程度才是可信的断连信号。
+        const staleFor = Date.now() - Math.max(conn.info.lastEventTime, conn.lastActivityAt)
+        if (staleFor > HEARTBEAT_TIMEOUT) {
+          // 太久没有任何活动了，连接大概率已死
           logger.warn(
-            `[SSE] Page visible: ${conn.serverId} may be stale (last event ${Math.round(timeSinceLastEvent / 1000)}s ago), forcing reconnect`,
+            `[SSE] Page visible: ${conn.serverId} may be stale (last activity ${Math.round(staleFor / 1000)}s ago), forcing reconnect`,
           )
           forceReconnectNow(conn)
         } else {
@@ -528,6 +641,77 @@ function unregisterLifecycleListeners() {
 // Event broadcast（只发给对应服务器的订阅者）
 // ============================================
 
+/**
+ * 每个服务器的 durable 事件序号跟踪器。
+ *
+ * 用途见 `seqGap.ts`：seq 是 per-aggregate 的，跳号说明断连/背压期间丢了事件，
+ * 该会话数据不可信，需要重拉快照。检测到缺口时不在这里修复（传输层不该知道
+ * 业务如何重拉），而是通过 `onGap` 回调交给上层。
+ */
+const seqTrackers = new Map<string, SeqGapTracker>()
+
+function getSeqTracker(serverId: string): SeqGapTracker {
+  let tracker = seqTrackers.get(serverId)
+  if (!tracker) {
+    tracker = new SeqGapTracker()
+    seqTrackers.set(serverId, tracker)
+  }
+  return tracker
+}
+
+/** 缺口回调：serverId + 裸 aggregateID（会话） */
+export type SeqGapHandler = (serverId: string, aggregateID: string) => void
+const seqGapHandlers = new Set<SeqGapHandler>()
+
+/**
+ * 订阅「检测到 seq 缺口」事件。
+ *
+ * 上层（useGlobalEvents）收到后应重拉该会话的快照，然后调用
+ * `ackSeqGap(serverId, aggregateID)` 表示已修复 —— 否则后续事件会持续被判为缺口。
+ */
+export function onSeqGap(handler: SeqGapHandler): () => void {
+  seqGapHandlers.add(handler)
+  return () => seqGapHandlers.delete(handler)
+}
+
+/**
+ * 声明某会话的缺口已被修复（快照已重拉）。
+ *
+ * 必须调用：重拉拿到的是权威快照，之后的事件无论 seq 是多少都应正常应用，
+ * 否则会一直卡在缺口判定上反复重拉。
+ */
+export function ackSeqGap(serverId: string, aggregateID: string): void {
+  seqTrackers.get(serverId)?.reset(serverId, aggregateID)
+}
+
+/**
+ * 检查事件是否构成缺口；构成则通知订阅者并返回 true（调用方应丢弃该事件）。
+ *
+ * 丢弃而不是先应用再修复：缺口期间的数据本来就不可信，先写进去再被快照覆盖
+ * 会让 UI 闪一下错的内容。
+ */
+function checkSeqGap(conn: ServerConnection, raw: unknown): boolean {
+  const durable = durableOf(raw)
+  if (!durable) return false // ephemeral 事件不参与
+
+  const verdict = getSeqTracker(conn.serverId).accept(conn.serverId, durable.aggregateID, durable.seq)
+  if (verdict.kind !== 'gap') return false
+
+  if (import.meta.env.DEV) {
+    logger.warn(
+      `[SSE] seq gap on ${conn.serverId}/${durable.aggregateID}: expected ${verdict.expected}, got ${verdict.received}`,
+    )
+  }
+  seqGapHandlers.forEach(fn => {
+    try {
+      fn(conn.serverId, durable.aggregateID)
+    } catch {
+      // 观察者异常不能打断事件流
+    }
+  })
+  return true
+}
+
 function broadcastEvent(conn: ServerConnection, globalEvent: GlobalEvent) {
   conn.subscribers.forEach(callbacks => {
     handleEventForSubscriber(globalEvent.payload, callbacks)
@@ -572,6 +756,27 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     const props = (payload as { properties?: SessionUsagePayload }).properties
     if (props && typeof props.sessionID === 'string' && props.tokens) {
       callbacks.onSessionUsageUpdated?.(props)
+    }
+    return
+  }
+  if ((payload.type as string) === EventTypes.SESSION_VIEWED) {
+    const props = (payload as { properties?: SessionViewedPayload }).properties
+    if (props && typeof props.sessionID === 'string' && typeof props.idle === 'number') {
+      callbacks.onSessionViewed?.(props)
+    }
+    return
+  }
+  if ((payload.type as string) === EventTypes.SESSION_COMPACTION_USAGE) {
+    const props = (payload as {
+      properties?: { sessionID?: unknown; tokens?: unknown; cost?: unknown; at?: unknown }
+    }).properties
+    if (props && typeof props.sessionID === 'string' && props.tokens) {
+      callbacks.onSessionCompactionUsage?.({
+        sessionID: props.sessionID,
+        tokens: props.tokens as never,
+        cost: typeof props.cost === 'number' ? props.cost : 0,
+        at: typeof props.at === 'number' ? props.at : Date.now(),
+      })
     }
     return
   }

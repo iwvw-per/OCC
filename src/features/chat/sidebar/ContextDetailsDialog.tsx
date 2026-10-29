@@ -77,9 +77,10 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
   }, [messages])
 
   const contextUsagePercent = useMemo(() => {
-    if (stats.contextUsed <= 0 || contextLimit <= 0) return null
+    // contextPercent 为 null 表示「窗口未知」，不能当成 0% 展示
+    if (stats.contextUsed <= 0 || stats.contextPercent === null) return null
     return Math.round(stats.contextPercent)
-  }, [stats.contextUsed, stats.contextPercent, contextLimit])
+  }, [stats.contextUsed, stats.contextPercent])
 
   const contextMsg = lastAssistantWithTokens?.msg
   const contextTokens = contextMsg?.info.role === 'assistant' ? contextMsg.info.tokens : undefined

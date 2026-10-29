@@ -63,7 +63,7 @@ export interface SidebarFooterProps {
 export function SidebarFooter({
   showLabels,
   connectionState,
-  contextLimit = 200000,
+  contextLimit = 0,
   onOpenSettings,
 }: SidebarFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
@@ -105,8 +105,16 @@ export function SidebarFooter({
     }
   })()
 
+  /** 上下文窗口是否已知：未知时不画占用条、不显示百分比（见 contextPercent 为 null 的约定） */
+  const contextKnown = stats.contextPercent !== null
   const statsColor =
-    stats.contextPercent >= 90 ? 'bg-danger-100' : stats.contextPercent >= 70 ? 'bg-warning-100' : 'bg-accent-main-100'
+    !contextKnown
+      ? 'bg-text-500/40'
+      : stats.contextPercent! >= 90
+        ? 'bg-danger-100'
+        : stats.contextPercent! >= 70
+          ? 'bg-warning-100'
+          : 'bg-accent-main-100'
 
   // 打开菜单
   const openMenu = useCallback(() => {
@@ -227,7 +235,7 @@ export function SidebarFooter({
               <span className="text-[length:var(--fs-sm)] font-medium text-text-200">{t('sidebar.contextUsage')}</span>
               <div className="flex items-baseline gap-1.5">
                 <span className="text-[length:var(--fs-sm)] leading-none text-text-400 tabular-nums">
-                  {Math.round(stats.contextPercent)}%
+                  {contextKnown ? `${Math.round(stats.contextPercent!)}%` : '--'}
                 </span>
                 <button
                   type="button"
@@ -244,12 +252,13 @@ export function SidebarFooter({
             <div className="w-full h-1.5 bg-bg-300 rounded-full overflow-hidden relative mb-2">
               <div
                 className={`absolute inset-0 ${statsColor} transition-transform duration-500 ease-out origin-left`}
-                style={{ transform: `scaleX(${Math.min(100, stats.contextPercent) / 100})` }}
+                style={{ transform: `scaleX(${contextKnown ? Math.min(100, stats.contextPercent!) / 100 : 0})` }}
               />
             </div>
             <div className="flex justify-between text-[length:var(--fs-xxs)] text-text-400 tabular-nums">
               <span>
-                {formatTokens(stats.contextUsed)} / {formatTokens(stats.contextLimit)}
+                {formatTokens(stats.contextUsed)} /{' '}
+                {contextKnown ? formatTokens(stats.contextLimit) : t('sidebar.contextLimitUnknown')}
               </span>
               <span>{formatCost(stats.totalCost)}</span>
             </div>
@@ -356,10 +365,10 @@ export function SidebarFooter({
             paddingLeft: showLabels ? 6 : 5,
             paddingRight: showLabels ? 8 : 4,
           }}
-          title={`Context: ${formatTokens(hasMessages ? stats.contextUsed : 0)} tokens • ${Math.round(stats.contextPercent)}% • ${formatCost(stats.totalCost)}`}
+          title={`Context: ${formatTokens(hasMessages ? stats.contextUsed : 0)} tokens • ${contextKnown ? `${Math.round(stats.contextPercent!)}%` : t('sidebar.contextLimitUnknown')} • ${formatCost(stats.totalCost)}`}
         >
           {/* 状态指示器 */}
-          <StatusIndicator percent={stats.contextPercent} size={20} />
+          <StatusIndicator percent={stats.contextPercent ?? 0} size={20} />
 
           {/* 展开时显示详细信息 */}
           <span
@@ -367,18 +376,21 @@ export function SidebarFooter({
             style={{ opacity: showLabels ? 1 : 0 }}
           >
             <span className="text-[length:var(--fs-sm)] tabular-nums text-text-300 truncate">
-              {hasMessages ? formatTokens(stats.contextUsed) : '0'} / {formatTokens(stats.contextLimit)}
+              {hasMessages ? formatTokens(stats.contextUsed) : '0'} /{' '}
+              {contextKnown ? formatTokens(stats.contextLimit) : t('sidebar.contextLimitUnknown')}
             </span>
             <span
               className={`text-[length:var(--fs-sm)] font-medium ml-2 ${
-                stats.contextPercent >= 90
-                  ? 'text-danger-100'
-                  : stats.contextPercent >= 70
-                    ? 'text-warning-100'
-                    : 'text-text-400'
+                !contextKnown
+                  ? 'text-text-400'
+                  : stats.contextPercent! >= 90
+                    ? 'text-danger-100'
+                    : stats.contextPercent! >= 70
+                      ? 'text-warning-100'
+                      : 'text-text-400'
               }`}
             >
-              {Math.round(stats.contextPercent)}%
+              {contextKnown ? `${Math.round(stats.contextPercent!)}%` : '--'}
             </span>
           </span>
         </button>

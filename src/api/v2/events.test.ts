@@ -607,6 +607,28 @@ describe('v2 event → GlobalEvent', () => {
       })
       expect(p).toBeNull()
     })
+
+    it('maps session.viewed to SESSION_VIEWED', () => {
+      /**
+       * 实测（本机 opencode v2.2.0）：`POST /api/session/{id}/view` 之后，
+       * SSE 会推一条 durable 的 session.viewed。它是跨端已读的权威信号 ——
+       * 不映射就意味着 A 端读了会话、B 端仍显示未读点。
+       */
+      const p = payloadOf({
+        type: 'session.viewed',
+        data: { sessionID: 's', idle: 1793069080769 },
+        location: { directory: '/w' },
+        durable: { aggregateID: 's', seq: 74, version: 1 },
+      })
+      expect(p?.type).toBe(EventTypes.SESSION_VIEWED)
+      expect(p?.properties).toMatchObject({ sessionID: 's', idle: 1793069080769 })
+    })
+
+    it('drops session.viewed without a usable idle watermark', () => {
+      // idle 是水位本身；缺了它这条事件无法参与 max 合并，直接丢弃
+      expect(payloadOf({ type: 'session.viewed', data: { sessionID: 's' } })).toBeNull()
+      expect(payloadOf({ type: 'session.viewed', data: { idle: 1 } })).toBeNull()
+    })
   })
 
 /**
@@ -653,5 +675,56 @@ describe('session.tool.progress', () => {
         location: { directory: '/w' },
       }),
     ).toBeNull()
+  })
+})
+
+describe('session.usage.recorded（压缩用量的耐久记录）', () => {
+  it('source=compaction 时映射为独立的压缩用量事件，不混入累计消耗', () => {
+    /**
+     * 关键区分：`usage.recorded` 是「某次特定用途花了多少」，不是会话累计值。
+     * 若映射成 SESSION_USAGE_UPDATED，侧栏累计 token/花费会被重复计入。
+     */
+    const p = payloadOf({
+      type: 'session.usage.recorded',
+      data: {
+        sessionID: 's',
+        source: 'compaction',
+        cost: 0.5,
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 300, write: 0 } },
+      },
+      location: { directory: '/w' },
+      created: 1700000000000,
+      durable: { aggregateID: 's', seq: 9, version: 1 },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_COMPACTION_USAGE)
+    expect(p?.properties).toMatchObject({ sessionID: 's', cost: 0.5, at: 1700000000000 })
+  })
+
+  it('source=title 被忽略（内部临时调用，用户不可见）', () => {
+    const p = payloadOf({
+      type: 'session.usage.recorded',
+      data: {
+        sessionID: 's',
+        source: 'title',
+        cost: 0.1,
+        tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      location: { directory: '/w' },
+    })
+    expect(p).toBeNull()
+  })
+
+  it('全零 tokens 视为未测到，丢弃', () => {
+    const p = payloadOf({
+      type: 'session.usage.recorded',
+      data: {
+        sessionID: 's',
+        source: 'compaction',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      location: { directory: '/w' },
+    })
+    expect(p).toBeNull()
   })
 })

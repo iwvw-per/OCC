@@ -8,9 +8,14 @@
 //   - 本地未读：换一台设备、换一个浏览器，未读点完全不同步；刷新即丢。
 //   - 服务端水位：任何端打开过就是已读，其它端立刻一致。
 //
-// 本模块只负责「把已读水位推给服务端」，不改变现有 UI 的未读判断（那套逻辑
-// 仍以 notificationStore 为准，避免一次性改动过大）。等水位数据稳定后，UI 可以
-// 直接改成读 `viewed < idle`，本模块的上报就会成为唯一数据源。
+// 本模块负责「把已读水位推给服务端」，并在本地立即抬升 `readWatermarkStore`。
+// 服务端侧的对应信号是 durable 事件 `session.viewed`（见 useGlobalEvents 的
+// onSessionViewed）：其它端收到后抬升自己的水位，从而清掉未读点。
+//
+// 两套机制的关系（不是二选一，而是主备）：
+//   - `session.viewed`（服务端，durable）：跨端、跨设备的主通道，无需登录账号；
+//   - `readWatermarkStore`（本地 + 账号通道，max 合并）：离线兜底与同端持久化。
+// 两者都只做「抬升水位」，语义一致且天然收敛（max），因此可以共存。
 //
 // 设计要点：
 // 1. 幂等：同一 (sessionId, idle) 只上报一次，避免每次渲染都发请求。
@@ -19,6 +24,7 @@
 
 import { nativeViewSession } from '../api/v2NativeSession'
 import { rawSessionIdOfKey } from '../store/messagePartMerge'
+import { readWatermarkStore } from '../store/readWatermarkStore'
 import { sessionKeyToServerId } from '../utils/sessionKey'
 import { logger } from '../utils'
 
@@ -49,6 +55,15 @@ export async function reportSessionViewed(sessionKey: string, idle: number | und
   // 先记账再发请求：并发调用（焦点变化 + 完成事件同时触发）时只发一次。
   // 失败不回收 —— 下次有更新的 idle 时会自然重试，避免失败抖动放大请求量。
   reported.set(cacheKey, idle)
+
+  /**
+   * 本地立即抬升水位，不等服务端回环。
+   *
+   * 本端自己读的会话应当立刻变已读；若等 `session.viewed` 事件回来，
+   * 中间会有一次可见的「未读点闪一下」。服务端只升不降，本地提前抬升
+   * 与随后到达的事件天然收敛（都是 max）。
+   */
+  readWatermarkStore.raise(sessionKey, idle)
 
   try {
     await nativeViewSession(serverId, { sessionID: bareId, idle })

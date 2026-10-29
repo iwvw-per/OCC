@@ -285,6 +285,7 @@
     "notifications": "Notifications",
     "readAll": "Read all",
     "contextUsage": "Context Usage",
+    "contextLimitUnknown": "window unknown",
     "viewDetails": "View details",
     "appearance": "Appearance",
     "themeAuto": "Auto",

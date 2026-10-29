@@ -258,7 +258,13 @@ function contextFromCompactionMarker(
 
 export function computeSessionStats(
   messages: Message[],
-  contextLimit: number = 200000,
+  /**
+   * 该模型的上下文窗口。传 0（或缺省）表示**未知**，此时百分比为 null。
+   *
+   * 不设「看起来合理」的默认值：实测某模型真实窗口 1000000，而旧默认 200000
+   * 会让百分比虚高 5 倍。未知就该显示未知。
+   */
+  contextLimit: number = 0,
   compactionUsage?: CompactionUsageHint,
   sessionUsage?: { tokens: TokenUsage; cost: number },
   compactionMarker?: CompactionMarker,
@@ -364,7 +370,13 @@ export function computeSessionStats(
         : contextEstimated
           ? estimatedContextUsed
           : (measuredContext ?? estimatedContextUsed)
-  const contextPercent = contextLimit > 0 ? Math.min(100, (contextUsed / contextLimit) * 100) : 0
+  /**
+   * 百分比：窗口未知时必须是 null 而不是 0。
+   *
+   * 0% 会被读成「上下文几乎空着」，与「不知道分母」是两回事；用 200000 之类的
+   * 猜测值算出来更糟 —— 真实窗口可能是它的 5 倍。
+   */
+  const contextPercent = contextLimit > 0 ? Math.min(100, (contextUsed / contextLimit) * 100) : null
 
   return {
     inputTokens,
@@ -426,7 +438,7 @@ const sessionStatsMemo = new WeakMap<
 
 export function computeSessionStatsCached(
   messages: Message[],
-  contextLimit: number = 200000,
+  contextLimit: number = 0,
   compactionUsage?: CompactionUsageHint,
   sessionUsage?: { tokens: TokenUsage; cost: number },
   compactionMarker?: CompactionMarker,

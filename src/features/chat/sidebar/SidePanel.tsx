@@ -87,7 +87,7 @@ export function SidePanel({
   isMobile = false,
   isExpanded = true,
   onToggleSidebar,
-  contextLimit = 200000,
+  contextLimit = 0,
   onOpenSettings,
   hideHeader = false,
   headerContent,

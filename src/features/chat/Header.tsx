@@ -169,7 +169,11 @@ export function Header({
   const focusedController = usePaneController(paneLayout.focusedPaneId)
   const workStatusPanelVisible = useWorkStatusPanelVisible(paneLayout.focusedPaneId)
   const showContextRing = !!sessionId && !workStatusPanelVisible
-  const contextRingLimit = focusedController?.contextLimit ?? 200000
+  /**
+   * 圆环用的窗口大小：**不兜底**。拿不到模型声明时传 0，圆环会显示「窗口未知」
+   * 而不是按一个猜来的 200000 算百分比（实测真实值可能差 5 倍）。
+   */
+  const contextRingLimit = focusedController?.contextLimit ?? 0
 
   const sessionTitle = currentSessionTitle || t('header.newChat')
   const isCompact = presentation.isCompact

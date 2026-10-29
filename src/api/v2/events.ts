@@ -731,6 +731,32 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         reason: str(data.reason),
         error: str(rec(data.error).message) ?? str(data.error) ?? '',
       })
+    /**
+     * 用量记录（durable）。
+     *
+     * ⚠️ 与 `session.usage.updated` 语义**不同**，不能直接当成会话累计值：
+     * `usage.recorded` 多一个 `source: 'title' | 'compaction'`，表示「这次是
+     * 为了某个特定用途（生成标题 / 压缩摘要）花的量」，不是会话累计消耗。
+     * 把它写进 `usage` 会让侧栏累计 token/花费被重复计入。
+     *
+     * 只有 `source === 'compaction'` 对我们有意义：它是压缩那一次请求的真实
+     * 用量，补进 `compactionUsage`（压缩后上下文快照的权威来源）。
+     * `title` 是内部临时调用（AI 重命名），用户不可见，直接忽略。
+     *
+     * 实测该事件在当前后端（v2.2.0）的普通对话流里**不出现**，属于低频路径；
+     * 接它是为了在真的出现时不被静默丢弃。
+     */
+    case 'session.usage.recorded': {
+      const tokens = adaptTokenUsage(data.tokens)
+      if (!tokens) return null
+      if (str(data.source) !== 'compaction') return null
+      return globalEvent(directory, EventTypes.SESSION_COMPACTION_USAGE, {
+        sessionID,
+        tokens,
+        cost: num(data.cost) ?? 0,
+        at: eventCreated ?? Date.now(),
+      })
+    }
     case 'session.usage.updated': {
       const tokens = adaptTokenUsage(data.tokens)
       if (!tokens) return null
@@ -739,6 +765,21 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         tokens,
         cost: num(data.cost) ?? 0,
       })
+    }
+
+    /**
+     * 已读水位（durable）。
+     *
+     * 语义：`viewed < idle` 即未读。实测该事件**确实会推送**（当 viewed 真的
+     * 前进时；传与当前相同的值服务端不产生事件），且服务端只升不降。
+     *
+     * 不映射它的后果：A 端读了会话，B 端仍显示未读点，直到 B 端自己点开
+     * 或走账号通道的 readWatermarks 同步（未登录时根本没有那条通道）。
+     */
+    case 'session.viewed': {
+      const idle = num(data.idle)
+      if (!sessionID || idle == null) return null
+      return globalEvent(directory, EventTypes.SESSION_VIEWED, { sessionID, idle })
     }
 
     default:

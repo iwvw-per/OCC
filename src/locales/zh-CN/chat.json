@@ -285,6 +285,7 @@
     "notifications": "通知",
     "readAll": "全部已读",
     "contextUsage": "上下文用量",
+    "contextLimitUnknown": "窗口未知",
     "viewDetails": "查看详情",
     "appearance": "外观",
     "themeAuto": "自动",

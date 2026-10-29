@@ -77,4 +77,25 @@ describe('reportSessionViewed', () => {
     expect(viewSession).toHaveBeenCalledTimes(2)
     expect(viewSession).toHaveBeenLastCalledWith('aiagent:inst_1', { sessionID: 'ses_a', idle: 1000 })
   })
+
+  it('本地立即抬升水位，不等服务端事件回环', async () => {
+    /**
+     * 本端自己读的会话应当立刻变已读。若等 `session.viewed` 事件回来再抬升，
+     * 中间会有一次可见的「未读点闪一下」。
+     */
+    const { readWatermarkStore } = await import('../store/readWatermarkStore')
+    const before = readWatermarkStore.get('ses_local_instant')
+    expect(before).toBe(0)
+
+    await reportSessionViewed('local::ses_local_instant', 1700000000000)
+    expect(readWatermarkStore.get('ses_local_instant')).toBe(1700000000000)
+    expect(readWatermarkStore.isRead('ses_local_instant', 1700000000000)).toBe(true)
+  })
+
+  it('上报失败时本地水位仍然抬升（离线也能读掉未读点）', async () => {
+    viewSession.mockRejectedValue(new Error('offline'))
+    const { readWatermarkStore } = await import('../store/readWatermarkStore')
+    await reportSessionViewed('local::ses_offline', 1700000000001)
+    expect(readWatermarkStore.get('ses_offline')).toBe(1700000000001)
+  })
 })

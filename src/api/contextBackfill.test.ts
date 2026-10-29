@@ -16,6 +16,8 @@ const getContext = vi.fn()
 const recordFallback = vi.fn()
 const recordSnapshot = vi.fn()
 const applyUsageBackfill = vi.fn()
+/** 捕获 contextBackfill 在模块加载时注册的淘汰回调 */
+let evictListener: ((key: string) => void) | null = null
 
 vi.mock('./v2NativeSession', () => ({
   nativeGetSessionContext: getContext,
@@ -26,6 +28,12 @@ vi.mock('../store/messageStore', () => ({
     recordSessionUsageFallback: recordFallback,
     recordContextUsageSnapshot: recordSnapshot,
     applyUsageBackfill,
+    onSessionEvicted: (fn: (key: string) => void) => {
+      evictListener = fn
+      return () => {
+        evictListener = null
+      }
+    },
   },
 }))
 vi.mock('../utils/sessionKey', () => ({
@@ -92,6 +100,30 @@ describe('backfillSessionUsage', () => {
     await backfillSessionUsage(KEY)
     await backfillSessionUsage(KEY)
     expect(getContext).toHaveBeenCalledOnce()
+  })
+
+  it('会话状态被淘汰后允许重新补一次', async () => {
+    /**
+     * messageStore 的内存有容量上限（每服务器 16 / 全局 48），会话被淘汰后
+     * `usage` / `contextUsage` 一并丢失。若去重集合不跟着失效，重新打开该会话
+     * 会被挡掉，圆环永久退化成字符估算，只能整页刷新才恢复。
+     */
+    expect(evictListener).toBeTruthy()
+
+    getContext.mockResolvedValue([assistant({ input: 1 })])
+    await backfillSessionUsage(KEY)
+    await backfillSessionUsage(KEY)
+    expect(getContext).toHaveBeenCalledTimes(1)
+
+    // 淘汰的是别的会话：不该清掉本 key 的去重记录
+    evictListener!('local::ses_other')
+    await backfillSessionUsage(KEY)
+    expect(getContext).toHaveBeenCalledTimes(1)
+
+    // 淘汰本会话：允许重新补
+    evictListener!(KEY)
+    await backfillSessionUsage(KEY)
+    expect(getContext).toHaveBeenCalledTimes(2)
   })
 
   it('失败时不抛错，也不重复请求', async () => {
@@ -288,5 +320,34 @@ describe('轻量路径：优先用 session 接口的累计 tokens', () => {
     // 只写一次，且写的是 session 的值
     expect(recordFallback).toHaveBeenCalledTimes(1)
     expect(recordFallback.mock.calls[0][1].input).toBe(999)
+  })
+})
+
+describe('force：周期对账绕过去重', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetContextBackfill()
+    getSession.mockResolvedValue(null)
+  })
+
+  it('force 时即使已补过也会重新请求', async () => {
+    /**
+     * 周期对账的目的就是纠正「ephemeral 事件丢失后数字停在旧值」，
+     * 若被「已补过」挡住就完全失去意义。
+     */
+    getContext.mockResolvedValue([assistant({ input: 1 })])
+    await backfillSessionUsage(KEY)
+    await backfillSessionUsage(KEY)
+    expect(getContext).toHaveBeenCalledTimes(1)
+
+    await backfillSessionUsage(KEY, { force: true })
+    expect(getContext).toHaveBeenCalledTimes(2)
+  })
+
+  it('force 之后普通调用仍受去重约束', async () => {
+    getContext.mockResolvedValue([assistant({ input: 1 })])
+    await backfillSessionUsage(KEY, { force: true })
+    await backfillSessionUsage(KEY)
+    expect(getContext).toHaveBeenCalledTimes(1)
   })
 })

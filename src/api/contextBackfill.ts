@@ -30,7 +30,8 @@
 //
 // 设计约束：
 // 1. **不阻塞首屏**：这是补数据，失败或慢都不该影响消息显示。
-// 2. 每个会话每次加载只拉一次（内存去重），避免翻页/重渲染反复请求。
+// 2. 每个会话的**同一份内存状态**只拉一次（内存去重），避免翻页/重渲染反复请求；
+//    该状态被淘汰后（messageStore.onSessionEvicted）重新允许补一次。
 // 3. 只在缺失时写入（见 messageStore 的各个 record* 方法）。
 
 import { nativeGetSession, nativeGetSessionContext } from '../api/v2NativeSession'
@@ -42,6 +43,21 @@ import type { TokenUsage } from '../types/message'
 
 /** 已经补过用量的会话（含失败），避免重复请求 */
 const backfilled = new Set<string>()
+
+/**
+ * 会话状态被丢弃（内存淘汰 / 清空）时，允许重新补一次。
+ *
+ * 为什么必须挂这个钩子：`usage` / `contextUsage` / `compactionMarker` 全在
+ * messageStore 的内存 state 里，淘汰即丢失。而 messageStore 有容量上限
+ * （每服务器 16 / 全局 48），长会话列表里打开十几个会话就会把先前的挤掉。
+ * 若 `backfilled` 不跟着失效，重新打开时会被去重挡掉，圆环永久退化成
+ * 字符估算 —— 只能整页刷新才恢复。
+ *
+ * 语义保持「同一份内存状态只补一次」：只有 state 真被丢掉才重新允许补。
+ */
+messageStore.onSessionEvicted(sessionKey => {
+  backfilled.delete(sessionKey)
+})
 
 /**
  * 会话累计用量快照：已经通过轻量接口拿到、但还没用上的数据。
@@ -214,8 +230,24 @@ const BACKFILL_IDLE_TIMEOUT_MS = 600
  *   - 上下文占用 = **最后一条**带 tokens 的 assistant（不是累加）
  *     见 opencode `client/src/solid/usage.ts` 的 lastAssistantWithUsage
  */
-export async function backfillSessionUsage(sessionKey: string): Promise<void> {
-  if (backfilled.has(sessionKey)) return
+export async function backfillSessionUsage(
+  sessionKey: string,
+  options: {
+    /**
+     * 绕过去重，强制重新补一次。
+     *
+     * 用途是**周期对账**：`session.usage.updated` 是 ephemeral 事件，丢了就没有
+     * 第二次机会；对账的目的正是纠正这种丢失，因此不能被「已补过」挡住。
+     * 普通加载路径不传（保持每个内存状态只补一次）。
+     */
+    force?: boolean
+  } = {},
+): Promise<void> {
+  if (!options.force) {
+    if (backfilled.has(sessionKey)) return
+  }
+  // 两条路径都登记：force 只是「允许本次穿透去重」，不应该让紧随其后的
+  // 普通调用再白跑一次（那会让周期对账后紧跟一次加载变成双请求）。
   backfilled.add(sessionKey)
 
   const serverId = sessionKeyToServerId(sessionKey)
@@ -320,8 +352,8 @@ export async function backfillSessionUsage(sessionKey: string): Promise<void> {
      */
     messageStore.applyUsageBackfill(sessionKey, perMessage)
   } catch (error) {
-    // 补数据失败不影响任何主流程；下次重新打开会话会再试（backfilled 已置位，
-    // 因此同一会话本次不再重试，避免失败抖动放大请求）。
+    // 补数据失败不影响任何主流程；该会话的内存状态被淘汰后（onSessionEvicted）
+    // 会重新允许补一次，因此不必在这里立即重试，避免失败抖动放大请求。
     //
     // 这里再包一层 try：本函数是从 loadSession 的 .then 里 `void` 调用的，
     // 一旦 catch 内部抛错（例如日志实现异常、mock 缺失导出），就会变成

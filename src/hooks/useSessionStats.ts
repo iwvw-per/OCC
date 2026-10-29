@@ -14,7 +14,7 @@ const STREAMING_STATS_INTERVAL_MS = 200
  * 当前 focused session 的统计。
  * 直接订 messageStore，流式期间节流通知，避免 footer 每 token 重渲。
  */
-export function useSessionStats(contextLimit: number = 200000): SessionStats {
+export function useSessionStats(contextLimit: number = 0): SessionStats {
   const cacheRef = useRef<SessionStats | null>(null)
 
   const getSnapshot = useCallback((): SessionStats => {

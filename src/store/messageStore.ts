@@ -68,6 +68,23 @@ const MAX_SESSION_MESSAGE_COUNT = 20_000
 /** D5：单会话乱序 delta 待回放键上限（超出丢最旧，防无界增长） */
 const MAX_PENDING_DELTAS = 256
 
+/**
+ * 用量总量（各字段之和）。
+ *
+ * 服务端的累计用量单调递增，所以「总量更大」等价于「更新」，可以据此判断
+ * 兜底数据是否值得覆盖现有值（见 recordSessionUsageFallback）。
+ */
+function tokenUsageTotal(tokens: TokenUsage | undefined): number {
+  if (!tokens) return 0
+  return (
+    (tokens.input ?? 0) +
+    (tokens.output ?? 0) +
+    (tokens.reasoning ?? 0) +
+    (tokens.cache?.read ?? 0) +
+    (tokens.cache?.write ?? 0)
+  )
+}
+
 class MessageStore {
   private sessions = new Map<string, SessionState>()
   /**
@@ -137,6 +154,37 @@ class MessageStore {
    * 精确命中（复用同一 id）或按文本替换时移除。
    */
   private optimisticMessageIds = new Set<string>()
+  /**
+   * 会话被淘汰/清除时的观察者。
+   *
+   * 为什么需要它：会话状态（含 `usage` / `contextUsage` / `compactionMarker`）
+   * 全在内存里，淘汰即丢失；而补这些数据的模块（`api/contextBackfill`）用
+   * 「每会话只补一次」的 Set 去重。若淘汰后不通知它，会话重新打开时会被
+   * 去重挡掉，圆环永久退化成字符估算 —— 直到整页刷新。
+   *
+   * 只通知「state 真的被丢掉」的路径（evict / clearSession / clearAll），
+   * 不动「仍在内存里」的会话。
+   */
+  private sessionEvictListeners = new Set<(sessionKey: string) => void>()
+
+  /**
+   * 订阅「会话状态被丢弃」事件。回调收到复合 key（`serverId::sessionId`）。
+   * 返回取消订阅函数。
+   */
+  onSessionEvicted(fn: (sessionKey: string) => void): () => void {
+    this.sessionEvictListeners.add(fn)
+    return () => this.sessionEvictListeners.delete(fn)
+  }
+
+  private notifySessionEvicted(sessionKey: string): void {
+    this.sessionEvictListeners.forEach(fn => {
+      try {
+        fn(sessionKey)
+      } catch {
+        // 观察者异常不能影响淘汰本身
+      }
+    })
+  }
 
   // ============================================
   // Subscription & Notification
@@ -303,6 +351,16 @@ class MessageStore {
 
   getSessionState(sessionId: string): SessionState | undefined {
     return this.sessions.get(this.resolveKey(sessionId))
+  }
+
+  /**
+   * 列出**当前内存里所有**会话的复合 key。
+   *
+   * 供周期对账使用（如用量纠错）：只对账真正在内存里的会话，避免为从未打开过
+   * 的会话建档（那会让侧栏冒出幽灵项）。
+   */
+  getAllSessionKeys(): string[] {
+    return [...this.sessions.keys()]
   }
 
   /**
@@ -594,6 +652,8 @@ class MessageStore {
       this.partIndexCache.delete(oldestId)
       this.rawSessionToKey.delete(rawSessionIdOfKey(oldestId))
       this.rawSessionServers.delete(rawSessionIdOfKey(oldestId))
+      // 状态连同 usage/contextUsage 一起丢了：通知依赖它们的模块可以重新补
+      this.notifySessionEvicted(oldestId)
       return true
     }
 
@@ -889,22 +949,25 @@ class MessageStore {
   }
 
   /**
-   * 用 `session.context` 汇总出的用量兜底会话累计值。
+   * 用服务端快照兜底会话累计用量（`session` 接口 / `session.context` 汇总）。
    *
-   * 为什么需要兜底：`usage` 的唯一来源是 `session.usage.updated` 事件，而它是
+   * 为什么需要兜底：`usage` 的实时来源是 `session.usage.updated`，而它是
    * **ephemeral**（不落盘）。断线重连、切设备、刷新页面之后这个事件不会再补发，
-   * 于是侧栏的 token/花费统计会一直停在「按已加载消息累加」的口径上 ——
-   * 而首屏只加载 50 条，真实上下文可能有 300+ 条，数字会小一个数量级。
+   * 于是统计会一直停在「按已加载消息累加」的口径上 —— 而首屏只加载 50 条，
+   * 真实上下文可能有 300+ 条，数字会小一个数量级。
    *
-   * `session.context` 返回「最后一次压缩之后」的完整消息，正好覆盖这个缺口。
-   * 已有的事件值优先（它更实时），这里只在缺失时写入。
+   * 合并策略是**取较大值**而不是「有值就不覆盖」：
+   * 服务端的累计用量单调递增（实测同一会话连续两次读取，值不变或更大），
+   * 所以「更大的那份一定更新」。旧实现「已有值就 return」的问题是：一旦某次
+   * SSE 丢了 usage 事件、写进了一个偏小的值，后续任何一次对账都纠正不回来，
+   * 数字会永久停在偏小值上。
    */
   recordSessionUsageFallback(sessionId: string, tokens: TokenUsage, cost: number) {
     sessionId = this.resolveKey(sessionId)
     const state = this.sessions.get(sessionId)
     if (!state) return
-    // 事件来源更实时：已有值就不覆盖
-    if (state.usage) return
+    const prev = state.usage
+    if (prev && tokenUsageTotal(prev.tokens) >= tokenUsageTotal(tokens)) return
     state.usage = { tokens, cost }
     this.notify([sessionId])
   }
@@ -1086,6 +1149,21 @@ class MessageStore {
       updated = true
     }
     if (updated) this.notify('all')
+  }
+
+  /**
+   * 只失效单个会话（seq 缺口修复用）。
+   *
+   * 与 markServerSessionsStale 的区别：缺口是按 aggregate（会话）判定的，
+   * 一台服务器上通常只有一个会话丢了事件，没必要把整台的缓存全部作废。
+   */
+  markSessionStale(sessionKey: string): boolean {
+    const key = this.resolveKey(sessionKey)
+    const state = this.sessions.get(key)
+    if (!state || state.isStale) return false
+    state.isStale = true
+    this.notify([key])
+    return true
   }
 
   setLoadState(sessionId: string, loadState: SessionState['loadState']) {
@@ -1373,6 +1451,8 @@ class MessageStore {
   }
 
   clearAll() {
+    // 先收集再清空：通知需要原始的复合 key 列表
+    const droppedKeys = [...this.sessions.keys()]
     this.sessions.clear()
     this.sessionAccessTime.clear()
     this.dirtyPartsBySession.clear()
@@ -1388,6 +1468,7 @@ class MessageStore {
       this.rafId = null
     }
     this.pendingNotify = false
+    droppedKeys.forEach(key => this.notifySessionEvicted(key))
     this.notifyImmediate('all')
   }
 
@@ -1407,6 +1488,7 @@ class MessageStore {
       this.rawSessionToKey.delete(raw)
       this.rawSessionServers.delete(raw)
     }
+    this.notifySessionEvicted(sessionId)
     this.notify([sessionId])
   }
 
@@ -1986,19 +2068,27 @@ class MessageStore {
    *
    * @returns 是否真的改变了状态（供调用方决定是否要额外通知）
    */
-  settleByAuthoritativeIdle(sessionId: string): boolean {
+  settleByAuthoritativeIdle(sessionId: string, authoritativeIdleAt?: number): boolean {
     sessionId = this.resolveKey(sessionId, true)
     const state = this.sessions.get(sessionId)
     if (!state) return false
-    const turn = state.lastTurn
-    if (!turn) return false
+    /**
+     * 权威 idle 时间优先用调用方传入的（来自 `/session/active` 的实时对账），
+     * 其次才是加载时记下的 `lastTurn`。
+     *
+     * 为什么需要外部传入：`lastTurn` 只在 loadSession 时写一次，之后不随 SSE
+     * 更新。若只靠它，运行期发生「收尾事件丢失」时这里永远拿到旧值，判定
+     * 会一直返回 false，界面就卡在「生成中」—— 正是这条兜底要解决的问题。
+     */
+    const idleAt = authoritativeIdleAt ?? state.lastTurn?.at
+    if (idleAt === undefined) return false
     if (!state.isStreaming) return false
 
     const lastAssistant = state.messages.filter(m => m.info.role === 'assistant').at(-1)
     const lastAssistantAt = lastAssistant?.info.time?.created ?? 0
     // idle 必须不早于最后一条 assistant：否则那是「上一轮」的结论，
     // 新一轮可能刚开始，不能据此落定。
-    if (turn.at < lastAssistantAt) return false
+    if (idleAt < lastAssistantAt) return false
 
     state.isStreaming = false
     // 最后一条 assistant 若还挂着 isStreaming，一并落定（否则渲染层仍显示光标）。
@@ -2006,6 +2096,8 @@ class MessageStore {
     if (last?.isStreaming) {
       state.messages = state.messages.map(m => (m.isStreaming ? { ...m, isStreaming: false } : m))
     }
+    // 会话已结束：把仍悬空的工具一并落定（独立于 SSE 事件，见方法注释）
+    this.reconcileInFlightTools(state, Date.now())
     this.notify([sessionId])
     return true
   }

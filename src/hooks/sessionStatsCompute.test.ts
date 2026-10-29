@@ -409,3 +409,57 @@ describe('v2 compaction marker → context usage', () => {
     expect(stats.contextUsed).toBe(5100)
   })
 })
+
+describe('contextPercent 在窗口未知时为 null（不猜默认窗口）', () => {
+  it('contextLimit 传 0 时 percent 为 null，而不是 0 或按 200000 算出的值', () => {
+    /**
+     * 回归：旧实现各处兜底 200000，实测某模型真实窗口是 1000000。
+     * 用猜来的分母算百分比会虚高 5 倍，用户会以为「快满了」。
+     * 未知就该是 null，由 UI 显示「窗口未知」。
+     */
+    const stats = computeSessionStats(
+      [userMessage('u1', 'hello', 1000), assistantMessage('a1', 2000, {
+        input: 300000,
+        output: 1000,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      })],
+      0,
+    )
+    expect(stats.contextLimit).toBe(0)
+    expect(stats.contextPercent).toBeNull()
+    // 用量本身仍要正确上报（用户还是要看到用了多少）
+    expect(stats.contextUsed).toBeGreaterThan(0)
+  })
+
+  it('缺省参数同样视为未知', () => {
+    const stats = computeSessionStats([userMessage('u1', 'hi', 1000)])
+    expect(stats.contextPercent).toBeNull()
+  })
+
+  it('窗口已知时仍正常计算', () => {
+    const stats = computeSessionStats(
+      [userMessage('u1', 'hello', 1000), assistantMessage('a1', 2000, {
+        input: 100000,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      })],
+      1000000,
+    )
+    expect(stats.contextPercent).toBeCloseTo(10, 1)
+  })
+
+  it('缓存命中后仍区分「未知窗口」与「已知窗口」，不会互相污染', () => {
+    const messages = [userMessage('u1', 'hello', 1000), assistantMessage('a1', 2000, {
+      input: 100000,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    })]
+    const unknown = computeSessionStatsCached(messages, 0)
+    const known = computeSessionStatsCached(messages, 1000000)
+    expect(unknown.contextPercent).toBeNull()
+    expect(known.contextPercent).toBeCloseTo(10, 1)
+  })
+})
