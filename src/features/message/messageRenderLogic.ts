@@ -148,17 +148,28 @@ function splitProcessRenderItemsUncached(items: RenderItem[]): ProcessSplit {
     return { processItems: [], finalItems: [], hasProcess: false, hasFinal: false }
   }
 
-  let lastTextIdx = -1
+  /**
+   * 找出「最后一段连续 text」的下标区间。
+   *
+   * ⚠️ 不能只看末项。实测一条 assistant 消息的 content 顺序常常是
+   * `[reasoning, text, tool, tool]` —— 模型先说明一句、然后继续调工具。
+   * 旧实现从末尾往前找，第一项不是 text 就 `break`，于是 lastTextIdx = -1、
+   * hasFinal = false，整轮回复被归进**默认折叠**的过程块：收起后用户只剩
+   * 一行「已处理 Ns」，正文凭空消失（实测 179 轮里 77 轮是这个形状）。
+   *
+   * 正确语义（也是本函数注释一直写的）是「最终回答 = 最后一段连续 text」，
+   * 后面再跟工具不影响它是不是回复。末尾的工具仍进过程块。
+   */
+  let lastTextEnd = -1
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i]
     if (item.type === 'single' && item.content.type === 'text') {
-      lastTextIdx = i
+      lastTextEnd = i
       break
     }
-    break
   }
 
-  if (lastTextIdx < 0) {
+  if (lastTextEnd < 0) {
     return {
       processItems: items,
       finalItems: [],
@@ -167,7 +178,8 @@ function splitProcessRenderItemsUncached(items: RenderItem[]): ProcessSplit {
     }
   }
 
-  let textRunStart = lastTextIdx
+  // 向前扩展成连续 text 段（多段 text 相邻时合并成一段最终回答）
+  let textRunStart = lastTextEnd
   while (textRunStart > 0) {
     const prev = items[textRunStart - 1]
     if (prev.type === 'single' && prev.content.type === 'text') {
@@ -177,8 +189,15 @@ function splitProcessRenderItemsUncached(items: RenderItem[]): ProcessSplit {
     break
   }
 
-  const finalItems = items.slice(textRunStart)
-  const processItems = items.slice(0, textRunStart)
+  const finalItems = items.slice(textRunStart, lastTextEnd + 1)
+  /**
+   * 过程项 = 除最终 text 段之外的全部，**保持原有相对顺序**。
+   *
+   * 不能用 `items.slice(0, textRunStart)`：那会把位于最终 text **之后**的
+   * 工具项整段丢掉（`[reasoning, text, tool]` 里的 tool 会消失）。
+   */
+  const finalSet = new Set(finalItems)
+  const processItems = items.filter(item => !finalSet.has(item))
 
   return {
     processItems,
