@@ -134,38 +134,55 @@ export function scheduleOutlineBackfill(run: () => void): void {
   scheduleAfterFirstPaint(run, OUTLINE_BACKFILL_DELAY_MS)
 }
 
-/** 大纲补全的静默期：比用量回填再晚一些，见上面的顺序说明 */
-const OUTLINE_BACKFILL_DELAY_MS = 3000
+/**
+ * 大纲补全的静默期。
+ *
+ * 它一次翻 60 页（串行），比用量回填重得多，所以要晚一点；但 3 秒太久 ——
+ * 侧边轴的轮次跳转在 1 秒内就可用，用户点轴时也能按需续取，没必要让它在
+ * 首屏刚结束就抢带宽。
+ */
+const OUTLINE_BACKFILL_DELAY_MS = 800
 
 /**
- * 首屏之后再做用量回填。
+ * 用量回填：首屏骨架上屏后**立即**发起。
  *
- * ## 为什么需要调度而不是直接 `void backfillSessionUsage()`
+ * ## 为什么不再延后
  *
- * 回填虽然不 `await`，但它会**和首屏抢同一条隧道**。实测经网关的同一会话：
+ * 早期确实必须延后：那时 `/context` 会返回 11MB（工具大输出 + base64 图片全带着），
+ * 实测把骨架从 748ms 拖到 1885ms。
  *
- *   只拉骨架                      748ms
- *   骨架 + context 并发          1885ms   ← 骨架被拖慢 2.5 倍
- *   context 先跑完再拉骨架       3494ms
+ * 但主机 Agent 侧加上 `/context` 投影后（只留 id/type/tokens/cost/time/model，
+ * 剥掉全部 content），实测同一会话：
  *
- * 原因是 `/context` 在读过大量文件的会话上会有十几 MB，把隧道带宽吃满。
- * 所以必须等首屏**真正画完**再发，而不是「发出去不管返回」。
+ *   优化前  11,021 KB / 3058 ms
+ *   优化后      33 KB /  428 ms
+ *
+ * 三十几 KB 的请求已经不值得为它牺牲体验。继续延后（原先 1.2s 静默 + 3s 兜底
+ * 超时，最坏 4.2s）只会让「上下文百分比、Token 总量、提供方、模型」在刷新后
+ * 空着好几秒 —— 实测用户反馈「刷新后要超过 5 秒才出来」。
+ *
+ * ## 保留调度器的原因
+ *
+ * 旧版 Agent 不认识 `X-Lightweight`，会原样透传 10MB 响应。那种情况下抢带宽
+ * 依然有害，但前端无法预知。用 `requestIdleCallback`（不叠加额外延时）既能让
+ * 首屏先画出来，又不会拖到秒级。
  */
 export function scheduleBackfillSessionUsage(sessionKey: string): void {
   scheduleAfterFirstPaint(() => {
     void backfillSessionUsage(sessionKey)
-  }, BACKFILL_IDLE_DELAY_MS)
+  }, 0)
 }
 
 /**
- * 等首屏画完 + 一段静默期后执行。
+ * 首屏画完后执行（不叠加额外延时）。
  *
- * 用 `requestIdleCallback`（带 setTimeout 兜底）等浏览器空闲；再叠一个
- * 短延迟，避开首屏渲染与布局抖动最密集的那一小段。
+ * 用 `requestIdleCallback` 让浏览器先把首屏渲染完；空闲回调迟迟不来时用
+ * timeout 兜底，避免数字一直空着。
  */
 function scheduleAfterFirstPaint(run: () => void, delayMs: number): void {
   const start = () => {
-    window.setTimeout(run, delayMs)
+    if (delayMs > 0) window.setTimeout(run, delayMs)
+    else run()
   }
   const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
     .requestIdleCallback
@@ -176,16 +193,8 @@ function scheduleAfterFirstPaint(run: () => void, delayMs: number): void {
   window.setTimeout(start, delayMs)
 }
 
-/**
- * 渲染完到发回填之间的静默期。
- *
- * 取 1.2s：首屏内容已经上屏并稳定，用户能立刻看到消息；
- * 再晚就会让「上下文百分比」迟迟不出数字。
- */
-const BACKFILL_IDLE_DELAY_MS = 1200
-
 /** idle 回调的最长等待：再忙也要在此时限内排上队 */
-const BACKFILL_IDLE_TIMEOUT_MS = 3000
+const BACKFILL_IDLE_TIMEOUT_MS = 600
 
 /**
  * 从轻量接口汇总会话累计用量，并按 id 回填骨架消息。
