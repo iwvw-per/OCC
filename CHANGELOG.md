@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.0.44] - 2026-10-29
+
+- perf: /context 请求带上 X-Lightweight，响应从 11MB 降到 33KB (a820d1ce)
+
 ## [v2.0.43] - 2026-10-29
 
 - perf: 会话加载不再被 /context 的十几 MB 拖慢 (7b43452c)
