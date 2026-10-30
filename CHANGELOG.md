@@ -1,5 +1,12 @@
 # Changelog
 
+## [v2.0.49] - 2026-10-30
+
+- fix(sync): 侧栏里未打开的会话丢事件后，不用再靠 F5 才恢复（缺口修复补上元数据重拉）(b2bc9d0c)
+- fix(sidebar): 项目行识别不到运行状态（busy 会话缺 directory，补回查与乐观写入）(b2bc9d0c)
+- fix(chat): agent 跑完后折叠块不自动收起（timeline 依赖漏 serverRunning）(b2bc9d0c)
+- docs: 记录第三批同步修复（T1–T3）与两项未采纳方案 (fd470aa7)
+
 ## [v2.0.48] - 2026-10-29
 
 - fix(sync): 修上下文统计失真与 SSE 丢事件不可恢复 (e80258db)
