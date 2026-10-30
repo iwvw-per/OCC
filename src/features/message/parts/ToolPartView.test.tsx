@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToolPartView } from './ToolPartView'
+import { SessionNavigationContext } from '../../../contexts/SessionNavigationContext'
 import type { ToolPart } from '../../../types/message'
 
 const { getActiveCalibratedNowMock, useSessionStatusMock, useChildSessionStatusMock } = vi.hoisted(() => ({
@@ -353,5 +354,57 @@ describe('ToolPartView todowrite', () => {
     expect(screen.queryByText('第二步')).not.toBeInTheDocument()
     // 不再是待办卡片：没有「已完成 / 总数」进度
     expect(screen.queryByText(/\d+\/\d+/)).not.toBeInTheDocument()
+  })
+})
+
+describe('ToolPartView parameter chip', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function toolPart(tool: string, input: Record<string, unknown>): ToolPart {
+    return {
+      id: 'tool-chip',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-chip',
+      tool,
+      state: { status: 'completed', input, time: { start: 1, end: 2 } },
+    }
+  }
+
+  /** 提供会话目录，路径才会被裁成相对形式 */
+  function renderInSession(part: ToolPart, directory = '/repo') {
+    return render(
+      <SessionNavigationContext.Provider value={{ navigateToSession: vi.fn(), currentDirectory: directory }}>
+        <ToolPartView part={part} />
+      </SessionNavigationContext.Provider>,
+    )
+  }
+
+  /**
+   * 回归：v2 的 tool part 不带 state.title / input.description，
+   * 此前 read/edit 行只剩「Read」「Edit」，看不出作用在哪个文件上。
+   */
+  it('shows the file name for a read tool without a server title', () => {
+    renderInSession(toolPart('read', { path: '/repo/src/App.tsx' }))
+
+    expect(screen.getByText('Read')).toBeInTheDocument()
+    expect(screen.getByText('src/App.tsx')).toBeInTheDocument()
+  })
+
+  it('shows the search term for grep', () => {
+    renderInSession(toolPart('grep', { pattern: 'DisclosureRow', path: '/repo/src' }))
+
+    expect(screen.getByText('DisclosureRow')).toBeInTheDocument()
+  })
+
+  it('keeps the full path in the hover title when the path is shortened', () => {
+    renderInSession(toolPart('edit', { path: '/repo/src/App.tsx' }))
+
+    const chip = screen.getByText('src/App.tsx')
+    // 展示相对路径，hover 仍是完整绝对路径
+    expect(chip.closest('span[title]')?.getAttribute('title')).toBe('/repo/src/App.tsx')
   })
 })

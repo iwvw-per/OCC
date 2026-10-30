@@ -40,6 +40,7 @@ import { MSG_SPACING } from '../messageSpacing'
 import { MessageExpandPanel } from '../messageExpand'
 import { useMessageExpandRender } from '../messageExpandShared'
 import { getToolDisplayName } from './toolDisplayName'
+import { getToolTitle } from './toolTitle'
 
 // ============================================
 // ToolPartView - 单个工具调用
@@ -85,11 +86,20 @@ export const ToolPartView = memo(function ToolPartView({
 }: ToolPartViewProps) {
   const { t } = useTranslation('message')
   const { state, tool: toolName } = part
-  const { currentSessionId } = useSessionNavigation()
+  const { currentSessionId, currentDirectory } = useSessionNavigation()
   // part.tool 就是真实工具名（已由数据库实测确认）。个别 MCP 代理工具会显式
   // 提供 displayName，仅在存在时才覆盖。
   const toolDisplayName = getToolDisplayName(part) ?? toolName
-  const title = state.title || getInputDescription(part) || ''
+  /**
+   * 参数胶囊的文案。
+   *
+   * v2 的 tool part 不带 `state.title`（实测 session_message 里读/写/搜/shell
+   * 全为空），也不带 `input.description`，只按这两个字段取会让工具行退化成
+   * 只剩动作名。这里兜底到 input 里的关键参数（路径/搜索词/命令），
+   * 并把绝对路径裁成相对会话目录的形式。
+   */
+  const toolTitle = useMemo(() => getToolTitle(part, currentDirectory), [part, currentDirectory])
+  const title = toolTitle.text
 
   /**
    * execute（Code Mode）在 input.code 里通过 tools.xxx() 调用其它工具。
@@ -489,7 +499,7 @@ export const ToolPartView = memo(function ToolPartView({
                     {formatToolName(toolDisplayName)}
                   </span>
 
-                  {title && <ToolParamChip text={title} error={isError} />}
+                  {title && <ToolParamChip text={title} titleText={toolTitle.full} error={isError} />}
                   {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                 </>
               )}
@@ -556,7 +566,7 @@ export const ToolPartView = memo(function ToolPartView({
                     <span className="font-medium text-[length:var(--fs-md)] leading-tight transition-colors duration-300 shrink-0">
                       {formatToolName(toolDisplayName)}
                     </span>
-                    {title && <ToolParamChip text={title} error={isError} />}
+                    {title && <ToolParamChip text={title} titleText={toolTitle.full} error={isError} />}
                     {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                   </>
                 )}
@@ -639,7 +649,7 @@ export const ToolPartView = memo(function ToolPartView({
                     {formatToolName(toolDisplayName)}
                   </span>
 
-                  {title && <ToolParamChip text={title} error={isError} />}
+                  {title && <ToolParamChip text={title} titleText={toolTitle.full} error={isError} />}
                   {!title && executeCallSummary && <ToolParamChip text={executeCallSummary} error={isError} />}
                 </>
               )}
@@ -784,12 +794,6 @@ const ToolBody = memo(function ToolBody({
 
 function getTaskChildSessionId(part: ToolPart): string | undefined {
   return getSubagentSessionId(part)
-}
-
-/** Extract description from tool input as title fallback (available while running) */
-function getInputDescription(part: ToolPart): string | undefined {
-  const input = part.state.input as Record<string, unknown> | undefined
-  return (input?.description as string) || undefined
 }
 
 // ============================================
