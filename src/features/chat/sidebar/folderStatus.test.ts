@@ -212,3 +212,45 @@ describe('buildFolderStatus', () => {
     expect(status?.kind).toBe('unread')
   })
 })
+
+describe('busy 会话缺少 directory 时项目行识别不到（回归）', () => {
+  /**
+   * `/api/session/active` 只返回 `{type:'running'}`，不带目录；项目行靠
+   * `entry.directory` 把 busy 会话归到项目。若 meta 还没写入（会话在应用启动前
+   * 就在跑，或「先收到 busy、后收到 updated」），项目行就不转圈 ——
+   * 表现为「侧栏收起了，看不到运行状态」。
+   *
+   * 修复点在写入侧（useGlobalEvents / useChatSession 补 directory），
+   * 这里固住「有 directory 才能识别」这一事实，防止有人误以为可以放宽。
+   */
+  it('directory 缺失时返回 null（说明必须在写入侧补目录）', () => {
+    const status = buildFolderStatus({
+      serverId: 'local',
+      directories: ['/repo/BetterScene'],
+      busySessions: [
+        { sessionId: 'local::ses_x', directory: undefined, status: { type: 'busy' }, source: 'server' },
+      ],
+      notifications: [],
+      t,
+    })
+    expect(status).toBeNull()
+  })
+
+  it('补上 directory 后能识别为运行中', () => {
+    const status = buildFolderStatus({
+      serverId: 'local',
+      directories: ['/repo/BetterScene'],
+      busySessions: [
+        {
+          sessionId: 'local::ses_x',
+          directory: '/repo/BetterScene',
+          status: { type: 'busy' },
+          source: 'server',
+        },
+      ],
+      notifications: [],
+      t,
+    })
+    expect(status?.kind).toBe('working')
+  })
+})

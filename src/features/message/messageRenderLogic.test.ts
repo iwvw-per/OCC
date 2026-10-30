@@ -197,3 +197,114 @@ describe('轮次级：折叠块的最终回复提取（走真实 messageHasFinal
     expect(shell && 'finalMessage' in shell ? shell.finalMessage?.info.id : undefined).toBe('a1')
   })
 })
+
+describe('轮次结束后折叠块应自动收起（serverRunning 参与判定）', () => {
+  /**
+   * 回归：ChatArea 的 useMemo 漏了 serverRunning 依赖。
+   *
+   * agent 跑完后服务端把会话从 /session/active 摘掉、serverRunning 变 false，
+   * 若 timeline 不重算，isActive 仍为 true → forceExpanded 仍为 true →
+   * 折叠块不收起，只有刷新（重建组件）才收起。
+   *
+   * 这里固住「同样的消息，serverRunning 不同 → timeline 输出必须不同」。
+   */
+  function userMsg(id: string, t: number): Message {
+    return {
+      info: { id, sessionID: 's', role: 'user', time: { created: t } } as Message['info'],
+      content: [],
+      isStreaming: false,
+    }
+  }
+
+  function streamingAssistant(id: string, created: number): Message {
+    // 消息已完成、但工具仍 running（agent 还在跑）
+    return {
+      info: { id, sessionID: 's', role: 'assistant', time: { created } } as Message['info'],
+      content: [
+        text('t1', 'reply'),
+        {
+          id: 'c1',
+          sessionID: 's',
+          messageID: id,
+          type: 'tool',
+          tool: 'shell',
+          callID: 'c1',
+          state: { status: 'running', input: {}, time: { start: 1 } },
+        } as unknown as Message['content'][0],
+      ],
+      isStreaming: false,
+    }
+  }
+
+  function doneAssistant(id: string, created: number, completed: number): Message {
+    return {
+      info: {
+        id,
+        sessionID: 's',
+        role: 'assistant',
+        time: { created, completed },
+        finish: 'stop',
+      } as Message['info'],
+      content: [
+        text('t1', 'reply'),
+        {
+          id: 'c1',
+          sessionID: 's',
+          messageID: id,
+          type: 'tool',
+          tool: 'shell',
+          callID: 'c1',
+          state: { status: 'completed', input: {}, time: { start: 1, end: 2 } },
+        } as unknown as Message['content'][0],
+      ],
+      isStreaming: false,
+    }
+  }
+
+  async function timeline(messages: Message[], serverRunning: boolean) {
+    const { buildProcessTimeline } = await import('../chat/chatPageModel')
+    return buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: serverRunning,
+      serverRunning,
+      messageHasProcess: messageHasProcessContent,
+      messageHasFinal: messageHasFinalContent,
+    })
+  }
+
+  it('serverRunning 由 true 变 false 时，isActive 与 scope 都随之变化', async () => {
+    // 关键：消息 content 完全一样，只有 serverRunning 不同
+    const running = await timeline([userMsg('u1', 50), streamingAssistant('a1', 100)], true)
+    const shellRunning = running.find(i => i.kind === 'process-shell')
+    expect(shellRunning && 'isActive' in shellRunning ? shellRunning.isActive : null).toBe(true)
+    // 进行中：整轮不拆，forceExpanded 因此为 true
+    expect(
+      shellRunning && 'children' in shellRunning
+        ? shellRunning.children.every(c => c.processContentScope === 'all')
+        : null,
+    ).toBe(true)
+
+    // 服务端说「不跑了」，但消息还没补 completed —— 这正是依赖 serverRunning 的窗口
+    const stopped = await timeline([userMsg('u1', 50), streamingAssistant('a1', 100)], false)
+    const shellStopped = stopped.find(i => i.kind === 'process-shell')
+    // 落定后再看
+    const settled = await timeline([userMsg('u1', 50), doneAssistant('a1', 100, 200)], false)
+    const shellSettled = settled.find(i => i.kind === 'process-shell')
+
+    expect(shellSettled && 'isActive' in shellSettled ? shellSettled.isActive : null).toBe(false)
+    // 已结束：不再 forceExpanded，允许自动收起
+    expect(
+      shellSettled && 'children' in shellSettled
+        ? shellSettled.children.some(c => c.processContentScope === 'all')
+        : null,
+    ).toBe(false)
+    // 两个输入确实产出了不同的 timeline（证明重算是必要的）
+    expect(JSON.stringify(shellStopped ?? {})).not.toBe(JSON.stringify(shellSettled ?? {}))
+  })
+
+  it('结束后 finalMessage 被提取到折叠块外', async () => {
+    const items = await timeline([userMsg('u1', 50), doneAssistant('a1', 100, 200)], false)
+    const shell = items.find(i => i.kind === 'process-shell')
+    expect(shell && 'finalMessage' in shell ? shell.finalMessage?.info.id : undefined).toBe('a1')
+  })
+})

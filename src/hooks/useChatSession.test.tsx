@@ -101,6 +101,8 @@ vi.mock('../store', () => ({
     updateStatus: vi.fn(() => true),
     mergeStatusRefresh: vi.fn(),
     removeSession: vi.fn(),
+    setSessionMeta: vi.fn(),
+    getSessionMeta: vi.fn(() => undefined),
   },
 }))
 

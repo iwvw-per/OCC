@@ -533,6 +533,19 @@ export const ChatArea = memo(
         visibleMessages,
         turnDurationMap,
         isStreaming,
+        /**
+         * ⚠️ serverRunning 必须进依赖。
+         *
+         * 它参与 buildProcessTimeline 的轮次结束判定（isTurnSettled 里
+         * `if (serverRunning) return false`）。漏掉它的后果：agent 跑完后
+         * 服务端把该会话从 /session/active 摘掉、serverRunning 变 false，
+         * 但 timeline 不重算 → isActive 仍为 true → forceExpanded 仍为 true，
+         * 折叠块**不会自动收起**，只有刷新（重建组件、重算 timeline）才收起。
+         *
+         * 之前没暴露是因为通常 isStreaming 也会同步变化；但服务端 status 与
+         * 消息完成信号可能分先后到达，存在 serverRunning 独自变化的窗口。
+         */
+        serverRunning,
         emptyShellGate.version,
         emptyShellGate.isReady,
       ])

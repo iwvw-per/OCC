@@ -811,6 +811,10 @@ export function useChatSession({
         const idleGenerationBeforeSend = messageStore.getIdleGeneration(sessionId)
         // 本地乐观置忙：请求往返期间侧栏/项目行立即显示「运行中」，停止按钮也可用。
         // 服务端 status 到达后会转成「有佐证」；若这一轮根本没跑起来，超时自动回收。
+        //
+        // 同时补上 directory：项目行靠它把 busy 会话归到项目（`/session/active`
+        // 不带目录）。这里已经知道目标目录，直接写入，省掉一次回查。
+        if (input.directory) activeSessionStore.setSessionMeta(sessionId, undefined, input.directory)
         activeSessionStore.applyOptimisticBusy(sessionId)
 
         // 「发新消息 = 终止旧轮次」。
@@ -1116,6 +1120,8 @@ export function useChatSession({
 
           // 命令也可能启动一轮生成（如 /compact 之后继续、自定义命令模板）：
           // 同样先本地乐观置忙；纯本地命令（不发消息）不会被任何事件佐证，超时后自动回收。
+          // 同上：补 directory，供项目行归类 busy 会话。
+          if (effectiveDirectory) activeSessionStore.setSessionMeta(sessionId, undefined, effectiveDirectory)
           activeSessionStore.applyOptimisticBusy(sessionId)
 
           // Commands should count as sent once they are accepted for execution.

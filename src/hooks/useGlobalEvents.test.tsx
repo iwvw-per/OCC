@@ -1255,4 +1255,34 @@ describe('seq 缺口批量处理（节流）', () => {
       vi.useRealTimers()
     }
   })
+
+  it('侧栏里未打开的会话报缺口时，也会重拉元数据（否则只有 F5 才恢复）', async () => {
+    /**
+     * 回归：缺口修复原先只通知「打开着该会话的 pane」，没有 pane 时什么都不做。
+     * 而缺口最常发生在侧栏里有、但没打开的会话上 —— 它们照样在收事件，丢掉的
+     * 事件却永远补不回来：标题与最后回复停在断连那一刻，只有刷新页面才恢复。
+     */
+    vi.useFakeTimers()
+    try {
+      const { messageStore } = await import('../store')
+      getSessionMock.mockClear()
+      renderHook(() => useGlobalEvents())
+
+      const handler = [...seqGapHandlers][0]
+      expect(handler).toBeDefined()
+
+      // 该会话没有任何 pane 打开
+      getFocusedSessionIdMock.mockReturnValue(null)
+
+      handler!('local', 'ses_unopened')
+      vi.advanceTimersByTime(400)
+
+      // 必须去拉元数据，才能把新标题写回列表索引
+      expect(getSessionMock).toHaveBeenCalledWith('ses_unopened', undefined, 'local')
+      expect(messageStore.markSessionStale).toHaveBeenCalled()
+      expect(ackSeqGapMock).toHaveBeenCalledWith('local', 'ses_unopened')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

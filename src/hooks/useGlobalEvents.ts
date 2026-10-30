@@ -1525,6 +1525,29 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 否则子代理面板显示已完成、Working 列表却显示在跑。
           if (childSessionStore.markRunning(scopedId)) {
             activeSessionStore.updateStatus(scopedId, data.status)
+            /**
+             * 确保该会话有 directory，否则**项目行识别不到运行状态**。
+             *
+             * 项目行（buildFolderStatus）靠 `entry.directory` 把 busy 会话归到
+             * 某个项目；`/api/session/active` 只返回 `{type:'running'}`，不带目录，
+             * 目录只能从 sessionMeta 取。而 sessionMeta 原本只在 session.created /
+             * updated 时写入：
+             *   - 应用启动前就在跑的会话：从来没收到过 created；
+             *   - 更常见的是「先收到 busy、后收到 updated」，中间这段时间项目行
+             *     不转圈，看起来像「没识别到运行状态」。
+             *
+             * 这里按需补一次（已有 directory 就直接返回，不发请求）。
+             * 失败静默：拿不到目录只是少一个图标，不能影响状态显示。
+             */
+            if (!activeSessionStore.getSessionMeta(scopedId)?.directory) {
+              void getSession(data.sessionID, undefined, serverId)
+                .then(session => {
+                  if (session?.directory) {
+                    activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
+                  }
+                })
+                .catch(() => {})
+            }
           }
         },
 
@@ -1625,9 +1648,31 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 通知打开着该会话的 pane：它的 onReconnected 会做 force 重载。
           // 复用同一回调是刻意的 —— 对 pane 而言「数据不可信需要重拉」和
           // 「断线重连」是同一件事，没必要再造一套。
+          let repaired = false
           for (const consumer of sessionConsumers.values()) {
             if (consumer.sessionId !== scopedId) continue
             consumer.callbacks.onReconnected?.('network', serverId)
+            repaired = true
+          }
+          /**
+           * 没有 pane 打开该会话时，上面那条路什么都不做 —— 而缺口恰恰最常发生
+           * 在「侧栏里有、但没打开」的会话上（它们同样在收事件）。此时被丢弃的
+           * 事件永远补不回来：标题、最后回复停在断连那一刻，只有刷新页面才恢复。
+           *
+           * 这里补一次元数据重拉，把结果写回列表索引与 session meta。只取会话
+           * 元数据（一个轻量 GET，带 TTL 缓存），不拉消息，避免为侧栏里几十个
+           * 会话打出请求风暴。
+           */
+          if (!repaired) {
+            void getSession(aggregateID, undefined, serverId)
+              .then(session => {
+                if (!session?.id) return
+                sessionListIndexStore.applySessionChanged(serverId, session)
+                activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
+              })
+              .catch(() => {
+                // 会话可能已被删除；拿不到就保持现状，不能影响其它缺口修复
+              })
           }
           ackSeqGap(serverId, aggregateID)
         }
