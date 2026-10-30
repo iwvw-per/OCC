@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { messageHasFinalContent, messageHasProcessContent, splitProcessRenderItems } from './messageRenderLogic'
+import { buildProcessTimeline } from '../chat/chatPageModel'
 import type { Message, TextContent, ToolContent } from '../../types/message'
 
 const MID = 'msg_1'
@@ -167,8 +168,7 @@ describe('轮次级：折叠块的最终回复提取（走真实 messageHasFinal
     }
   }
 
-  async function timelineOf(messages: Message[]) {
-    const { buildProcessTimeline } = await import('../chat/chatPageModel')
+  function timelineOf(messages: Message[]) {
     return buildProcessTimeline(messages, {
       turnDurationMap: new Map(),
       sessionIsStreaming: false,
@@ -261,8 +261,7 @@ describe('轮次结束后折叠块应自动收起（serverRunning 参与判定�
     }
   }
 
-  async function timeline(messages: Message[], serverRunning: boolean) {
-    const { buildProcessTimeline } = await import('../chat/chatPageModel')
+  function timeline(messages: Message[], serverRunning: boolean) {
     return buildProcessTimeline(messages, {
       turnDurationMap: new Map(),
       sessionIsStreaming: serverRunning,

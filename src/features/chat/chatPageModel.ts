@@ -834,6 +834,18 @@ export function reuseProcessTimelineItems(
   return allSame ? previous : result
 }
 
+function isEffectiveAssistantMessage(message: Message): boolean {
+  if (message.info.role !== 'assistant') return false
+  // 流式中、或有任何内容、或有错误、或骨架带有统计信息，均视为有效助手消息
+  if (message.isStreaming || messageCompletedAt(message) == null) return true
+  if (message.content.length > 0) return true
+  if ((message.info as { error?: unknown })?.error != null) return true
+  if (message.isCompressed && message.compressedStats && (message.compressedStats.stepCount > 0 || message.compressedStats.reasoningCount > 0)) {
+    return true
+  }
+  return false
+}
+
 function assistantHasLiveWork(message: Message): boolean {
   if (message.info.role !== 'assistant') return false
   if (messageCompletedAt(message) == null || message.isStreaming) return true
@@ -928,6 +940,9 @@ export function buildProcessTimeline(
       continue
     }
     if (message.info.role !== 'assistant') continue
+    // 过滤完全没有任何有效内容/统计/错误的非流式空 assistant 消息，
+    // 防止网络中转导致的幽灵空消息污染时间线并被装入过程壳
+    if (!isEffectiveAssistantMessage(message)) continue
     if (!current) {
       // 历史续段 / 页首无 user：直接平铺，不挂壳
       items.push({ kind: 'message', key: message.info.id, message })

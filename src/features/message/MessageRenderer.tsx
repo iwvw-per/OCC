@@ -1200,8 +1200,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
     allowStepFinishOnMessage && !isStreaming && stepFinishDisplay.completedAt && completed != null
 
   if (!isStreaming && content.length === 0) {
-    // process/final 空内容时不占位
-    if (processContentScope === 'process' || processContentScope === 'final') return null
     // 有错误时直接显示错误信息
     if (messageError) {
       return (
@@ -1210,13 +1208,13 @@ const AssistantMessageView = memo(function AssistantMessageView({
         </div>
       )
     }
-    // content 尚未 hydrate — 保留最小占位减少 CLS，不显示骨架/loading 文字
-    // onEnsureParts 已在上方 useEffect 中触发 hydrate，content 到位后自动 re-render
-    return <div className="w-full min-h-[40px]" />
+    // 无内容、非流式、且无错误的消息绝不渲染 40px 空占位，直接静默返回 null，
+    // 彻底消除界面在各种状态或网络中转下出现的 40px 空白条幽灵占位。
+    return null
   }
 
-  // process/final 拆完后可能为空
-  if (renderItems.length === 0 && processContentScope !== 'all' && processContentScope !== 'inline') {
+  // 渲染项为空时，非流式或无错误直接不占位（避免空 div 产生 DOM 与高度）
+  if (renderItems.length === 0 && !isStreaming && !messageError) {
     return null
   }
 
