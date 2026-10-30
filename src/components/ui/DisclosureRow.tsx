@@ -80,7 +80,20 @@ export const DisclosureRow = forwardRef<HTMLButtonElement, DisclosureRowProps>(
       onClick={onClick}
       aria-expanded={expanded}
       className={cn(
-        'group/disclosure flex w-full min-w-0 items-center rounded-md text-left',
+        'group/disclosure flex min-w-0 items-center rounded-md text-left',
+        /**
+         * `w-full` 与 `contentRow` 的负边距组合会让行盒左右不对称。
+         *
+         * `contentRow` 是 `px-1.5 -mx-1.5`：负边距把行盒左右各外扩 6px，
+         * 本意是「hover 底色比正文宽一圈、内边距把文字推回正文左缘」。但 `w-full`
+         * 把宽度钉死为父容器的 100%，负边距就只剩「整行左移 6px」——文字左缘
+         * 仍对齐正文，右缘却比正文窄 12px。展开面板是满宽渲染的，于是同一个
+         * 工具行的 header 比它下面的内容窄一截，右侧看起来「更靠外」。
+         *
+         * 用 calc 把负边距那 12px 补回宽度，行盒才真正左右对称：
+         * 文字左右缘都与正文（以及展开面板）对齐。
+         */
+        inset ? 'w-[calc(100%+0.75rem)]' : 'w-full',
         'transition-colors duration-150',
         inset ? interactive.contentRow : 'px-3',
         sizeStyles[size],
