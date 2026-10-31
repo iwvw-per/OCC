@@ -1,5 +1,13 @@
 # Changelog
 
+## [v2.0.55] - 2026-11-01
+
+- fix(chat): 打断后不再泄漏过程内容。最终回复的判据从「轮内最后一条带 text 的消息」改为服务端权威信号：有 `finish` 时只认 `finish=stop`（`length` 兜底），`tool-calls` 一律算过程。三台主机 391 轮实测：succeeded 轮次末条 `finish` 100% 为 `stop`，`stop` 出现在非末条位置的次数为 0
+- fix(chat): 打断后明确显示「本轮已被中断，没有最终回复」。中断信号原先在三条路径上全部被丢弃——实时 `session.step.failed{error:{type:'aborted'}}` 被显式丢弃、刷新 `adaptMessage` 不读 `error`、骨架只返回 `reply:null`。三处都补齐，并把错误映射抽到 `api/v2/adapt.ts` 供事件与快照共用
+- fix(chat): 单步中断（刚发出长命令就被停止）不再把过程说明当回答。该形态连 `finish` 都没有（服务端只发 `step.failed`、不发 `step.ended`），旧的位置兜底会让「这条命令会先静默等待 90 秒…」露到折叠块外；中断轮现在直接不选最终回复
+- fix(chat): 中断提示在刷新前后一致。骨架轮从轮次之后的 `idle.outcome` 还原服务端真实形状（`finish:'error'` + `error:{type:'aborted'}`），此前刷新后提示消失
+- fix(android): 首次授权后不再报「无权限」，从系统设置返回后自动续装 (87ff3919)
+
 ## [v2.0.54] - 2026-11-01
 
 - fix(mobile): 点对话里的本地文件链接时给出明确提示。原实现调用 `plugin-opener` 的 `openPath()`，而该插件的 Android 侧没有 `open_path`，且这些文件在主机上、手机本地不存在——失败被 `catch` 吞掉，表现为「点了没反应」
