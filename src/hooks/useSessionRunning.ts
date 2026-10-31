@@ -29,7 +29,10 @@ import { messageCompletedAt } from '../store/messagePartMerge'
 export function isSessionRunning(input: {
   serverRunning?: boolean
   localStreaming?: boolean
-  lastAssistant?: { isStreaming?: boolean; info?: { time?: { completed?: number } | null } | null } | null
+  lastAssistant?: {
+    isStreaming?: boolean
+    info?: { time?: { created?: number; completed?: number } | null } | null
+  } | null
 }): boolean {
   const { serverRunning, localStreaming, lastAssistant } = input
   // 服务端说在跑 → 一定在跑（快照可能比本地旧，这条压过一切）
