@@ -20,7 +20,9 @@ import { useTheme } from '../hooks/useTheme'
 import { useInputCapabilities } from '../hooks/useInputCapabilities'
 import { useOptionalFullscreen } from '../contexts'
 import { detectLanguage } from '../utils/languageUtils'
-import { isTauri } from '../utils/tauri'
+import { isTauri, isTauriMobile } from '../utils/tauri'
+import i18n from '../i18n'
+import { notificationStore } from '../store/notificationStore'
 import { marked } from 'marked'
 import type { Tokens } from 'marked'
 import { isMarkupPreviewLanguage, projectMarkdownStream, stripLeadingHtmlComments, type MarkdownStreamProjection } from './markdownStream'
@@ -236,8 +238,25 @@ function decodeLocalFileHref(href?: string): string | null {
   }
 }
 
+/**
+ * 打开对话里引用的本地文件。
+ *
+ * ⚠️ 移动端（Android/iOS）必须提前返回并给出提示。
+ *
+ * `@tauri-apps/plugin-opener` 的 Android 实现（OpenerPlugin.kt）**只注册了
+ * `open` 命令，没有 `open_path`**：`openPath()` 在安卓上必然 reject；即便能过，
+ * 它也只发 `file://` 的 ACTION_VIEW，Android 7+ 会抛 FileUriExposedException。
+ * 原来这里 `catch(() => {})` 把失败吞掉 —— 用户点链接毫无反应，以为界面坏了。
+ *
+ * 这些路径是**主机上**的文件，手机本地并不存在，本来也打不开，所以正确行为
+ * 是明确告知，而不是静默失败。
+ */
 function openLocalFilePath(filePath: string) {
   if (!isTauri()) return
+  if (isTauriMobile()) {
+    notificationStore.toast('completed', i18n.t('components:markdown.localFileOnHostOnly'))
+    return
+  }
   import('@tauri-apps/plugin-opener').then(mod => mod.openPath(filePath)).catch(() => {})
 }
 

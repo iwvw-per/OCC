@@ -197,6 +197,7 @@
     "fullscreenView": "全屏查看"
   },
   "markdown": {
+    "localFileOnHostOnly": "该文件在主机上，手机无法直接打开。请在电脑端查看。",
     "renderingDiagram": "正在渲染图表",
     "diagramLabel": "Mermaid 图表",
     "zoomIn": "放大",

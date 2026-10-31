@@ -200,6 +200,7 @@
     "fullscreenView": "Fullscreen"
   },
   "markdown": {
+    "localFileOnHostOnly": "That file lives on the host machine, so it cannot be opened on this device.",
     "renderingDiagram": "Rendering diagram",
     "diagramLabel": "Mermaid diagram",
     "zoomIn": "Zoom in",
