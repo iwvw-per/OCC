@@ -1124,11 +1124,49 @@ describe('settleByAuthoritativeIdle', () => {
     expect(messageStore.getIsStreaming('session-1')).toBe(true)
   })
 
-  it('is a no-op when the session is not streaming', () => {
-    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+  it('settles a message left unfinished even when the session flag is already false', () => {
+    // 会话级 isStreaming 与消息级状态是两套标志。收尾路径可能只清了前者，
+    // 而末条 assistant 仍缺 completed —— 渲染层据此继续显示「处理中」。
+    // 权威 idle 说这一轮结束了，就必须把消息一并定稿。
+    const assistant = createAssistantMessage('message-1')
+    assistant.time = { created: 1000 }
+    messageStore.handleMessageUpdated(assistant)
     messageStore.setStreaming('session-1', false)
     messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(true)
+    const settled = messageStore.getSessionState('session-1')!.messages[0]
+    expect(settled.isStreaming).toBe(false)
+    expect(settled.info.time?.completed).toBe(2000)
+  })
+
+  it('is a no-op when the last assistant message is already completed', () => {
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    // 模拟这一轮已经由收尾事件正常定稿（消息带 completed、无 streaming 标记）
+    messageStore.handleSessionIdle('session-1')
+    messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+
     expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(false)
+  })
+
+  /**
+   * 新一轮刚发出、助手还没吐第一个 token 时，末条 assistant 仍是上一轮的。
+   * 只比对 assistant 的时间会误把上一轮的 idle 当成本论结束信号 —— 界面会从
+   * Working 突然跳成 Worked，msg 流一回来又跳回 Working（用户说的「不太稳定」）。
+   */
+  it('does not settle a brand-new turn whose user message is newer than the idle record', () => {
+    seedStreamingAssistant('message-1', 1000)
+    messageStore.updateSessionMetadata('session-1', { lastTurn: { at: 2000, outcome: 'succeeded' } })
+    // 再发一条用户消息（2000ms 之后），助手还没开始
+    messageStore.handleMessageUpdated({
+      id: 'user-2',
+      sessionID: 'session-1',
+      role: 'user',
+      time: { created: 3000 },
+    } as never)
+
+    expect(messageStore.settleByAuthoritativeIdle('session-1')).toBe(false)
+    expect(messageStore.getIsStreaming('session-1')).toBe(true)
   })
 
   it('records interrupted/failed outcomes so the UI can distinguish them', () => {

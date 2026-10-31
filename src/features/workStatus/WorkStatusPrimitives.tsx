@@ -65,6 +65,8 @@ export function WorkStatusCollapsibleSection({
   summary,
   /** 独立的标题行操作，例如刷新本板块数据 */
   action,
+  /** 操作与聚合值的先后：end = 数值在左、操作在右；beforeSummary = 操作在左、数值在右 */
+  actionPlacement = 'end',
   /** 折叠时仍显示在标题下方的预览 */
   collapsedContent,
   children,
@@ -75,6 +77,7 @@ export function WorkStatusCollapsibleSection({
   icon?: ReactNode
   summary?: ReactNode
   action?: ReactNode
+  actionPlacement?: 'end' | 'beforeSummary'
   collapsedContent?: ReactNode
   children: ReactNode
 }) {
@@ -84,6 +87,12 @@ export function WorkStatusCollapsibleSection({
     () => workStatusStore.isSectionExpanded(id),
   )
   const onToggle = () => workStatusStore.setSectionExpanded(id, !expanded)
+  const summaryNode =
+    summary !== undefined && summary !== null ? (
+      <span className="min-w-0 max-w-[60%] truncate text-right text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+        {summary}
+      </span>
+    ) : null
   return (
     <section className={SECTION_CLASS}>
       <div data-work-status-heading className="flex h-6 items-center gap-1">
@@ -112,13 +121,16 @@ export function WorkStatusCollapsibleSection({
             <ChevronDownIcon size={11} />
           </span>
           <span className="flex-1" />
-          {summary !== undefined && summary !== null ? (
-            <span className="min-w-0 max-w-[60%] truncate text-right text-[length:var(--fs-xxs)] tabular-nums text-text-500">
-              {summary}
-            </span>
-          ) : null}
+          {actionPlacement === 'end' && summaryNode}
         </button>
-        {action}
+        {actionPlacement === 'beforeSummary' ? (
+          <>
+            {action}
+            {summaryNode}
+          </>
+        ) : (
+          action
+        )}
       </div>
       {/* 折叠态预览：只在收起时显示，与正文互斥，不参与高度动画 */}
       {!expanded && collapsedContent ? <div className="pt-1">{collapsedContent}</div> : null}

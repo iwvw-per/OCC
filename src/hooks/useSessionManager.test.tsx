@@ -35,6 +35,7 @@ const {
     setTurnSkeleton: vi.fn(),
     getTrimmedCount: vi.fn(() => 0),
     settleByAuthoritativeIdle: vi.fn(() => false),
+    getSessionChangeVersion: vi.fn(() => 0),
   },
   sessionErrorHandlerMock: vi.fn(),
   revertMessageMock: vi.fn(),

@@ -333,7 +333,13 @@ class SessionListIndexStore {
       if (bucket.key.serverId !== serverId) continue
       const index = bucket.items.findIndex(session => session.id === sessionId)
       if (index === -1) continue
-      bucket.items[index] = { ...bucket.items[index], ...patch }
+      const previous = bucket.items[index]
+      bucket.items[index] = {
+        ...previous,
+        ...patch,
+        // time 需要深合并：patch 一般只带 {archived}，浅合并会顶掉 idle/viewed
+        ...(patch.time ? { time: { ...previous.time, ...patch.time } } : {}),
+      }
       bucket.contentRevision++
       bucket.touchedAt = Date.now()
       changed = true
@@ -423,10 +429,59 @@ class SessionListIndexStore {
     }
     if (session.parentID) return
 
-    const dir = normalizeForComparison(session.directory)
+    let dir = normalizeForComparison(session.directory)
+    /**
+     * 事件缺目录时不能直接按 '' 处理。
+     *
+     * 下面按桶目录过滤用的是「桶目录非空就必须与事件目录相等」，所以事件目录
+     * 一旦是 ''，所有按目录分桶的侧栏桶都会被跳过 —— 这条增量被整条丢弃。
+     * 而 `session.metadata.updated`（归档写在这里）/`session.moved` 的 payload
+     * 都可能不带 location，事件级 location 也可能缺失。
+     *
+     * 实测后果：归档、恢复、改名这类「只带变更字段」的事件在侧栏不生效，
+     * 要等下一次整桶重拉（或刷新页面）才同步。
+     *
+     * 兜底顺序：事件目录 → 该会话已在某个桶里的目录。
+     */
+    if (!dir) {
+      for (const bucket of this.buckets.values()) {
+        if (bucket.key.serverId !== serverId) continue
+        const existing = bucket.items.find(item => item.id === session.id)
+        if (!existing?.directory) continue
+        dir = normalizeForComparison(existing.directory)
+        if (dir) break
+      }
+    }
     const archived = Boolean(session.time?.archived)
     const view: SessionListView = archived ? 'archived' : 'active'
     let changed = false
+
+    /**
+     * 该会话在任意桶里的已知版本。
+     *
+     * 归档迁移会把条目从一个视图的桶摘掉、写进另一个视图的桶。新桶里原本没有
+     * 这条记录，`writeIntoBucket` 无从合并 —— 残缺 payload（只有 metadata、
+     * 没有 directory/title）就会把新条目的这些字段写成空值。所以先在旧桶里
+     * 找到它，作为迁移时的合并基线。
+     */
+    let known: ApiSession | undefined
+    for (const bucket of this.buckets.values()) {
+      if (bucket.key.serverId !== serverId) continue
+      const existing = bucket.items.find(item => item.id === session.id)
+      if (existing) {
+        known = existing
+        break
+      }
+    }
+    const incoming: ApiSession = known
+      ? ({
+          ...known,
+          ...session,
+          id: session.id,
+          time: { ...known.time, ...(session.time ?? {}) },
+          directory: session.directory || known.directory,
+        } as ApiSession)
+      : session
 
     for (const bucket of this.buckets.values()) {
       if (bucket.key.serverId !== serverId) continue
@@ -457,7 +512,7 @@ class SessionListIndexStore {
       bucket.tombstones.delete(session.id)
       // D15：用 loaded 判定「已加载过」；空桶也应接受增量
       if (!bucket.loaded) continue
-      if (this.writeIntoBucket(bucket, session)) changed = true
+      if (this.writeIntoBucket(bucket, incoming)) changed = true
     }
 
     if (changed) this.emit()
@@ -507,9 +562,30 @@ class SessionListIndexStore {
       bucket.items = insertSessionByAnchor(bucket.items, stripped)
       bucket.membershipRevision++
     } else {
-      if (isSameSessionSummary(bucket.items[index], stripped)) return false
+      /**
+       * 增量事件常常是**残缺对象**（只带变更字段）：
+       *   - `session.metadata.updated`：只有 metadata
+       *   - `session.moved`：只有 location / projectID
+       *   - 缺 location 的 `session.created`
+       * 直接整条替换会把这些字段冲成 undefined/''，于是：
+       *   - `time.archived` 被清掉 → 归档的会话留在活跃列表 / 恢复的不回来；
+       *   - `directory` 变空 → 之后所有按目录路由的事件都落不进这个桶
+       *     （标题永久不更新，直到整桶重拉）。
+       *
+       * 因此按字段合并：只覆盖事件里真的带了的字段。
+       */
+      const merged: ApiSession = {
+        ...bucket.items[index],
+        ...stripped,
+        id: stripped.id,
+        // time 是嵌套对象，需要深合并，否则 {archived} 会顶掉 created/updated/idle
+        time: { ...bucket.items[index].time, ...(stripped.time ?? {}) } as ApiSession['time'],
+        // 目录只在事件确实给出时才改，避免残缺 payload 把它清空
+        directory: stripped.directory || bucket.items[index].directory,
+      }
+      if (isSameSessionSummary(bucket.items[index], merged)) return false
       // 就地替换：位置不动
-      bucket.items[index] = stripped
+      bucket.items[index] = merged
     }
 
     bucket.contentRevision++

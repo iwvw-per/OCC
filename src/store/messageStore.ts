@@ -1166,12 +1166,78 @@ class MessageStore {
     return true
   }
 
+  /**
+   * 该会话是否还有未定稿的 assistant 消息。
+   *
+   * 供运行态对账判断「服务端说结束了、本地还挂着一条没完的消息」——
+   * 这种残留只靠内存里的信号清不掉，需要重拉消息尾部。
+   */
+  hasUnsettledAssistant(sessionKey: string): boolean {
+    const state = this.sessions.get(this.resolveKey(sessionKey))
+    if (!state) return false
+    const last = state.messages.filter(m => m.info.role === 'assistant').at(-1)
+    if (!last) return false
+    return last.isStreaming || messageCompletedAt(last) == null
+  }
+
   setLoadState(sessionId: string, loadState: SessionState['loadState']) {
     sessionId = this.resolveKey(sessionId, true)
     const state = this.ensureSession(sessionId)
     state.loadState = loadState
     if (loadState !== 'error') state.loadError = undefined
     this.notify([sessionId])
+  }
+
+  /**
+   * 这一轮在本地是否「拼完整了」。
+   *
+   * 判据是**最后一个用户回合**里，assistant 消息全部定稿、且没有仍在流式的
+   * part。v2 的正文是增量拼装出来的（`text.delta` / `tool.progress` 都是
+   * ephemeral，丢了不补发），所以「本地有消息」不等于「本地内容完整」。
+   *
+   * 供轮次定稿时决定要不要跟服务端对一次：返回 false 就说明这一轮可能停在
+   * 中途，需要重拉。
+   */
+  isLastTurnComplete(sessionId: string): boolean {
+    const state = this.sessions.get(this.resolveKey(sessionId))
+    if (!state || state.messages.length === 0) return false
+    const messages = state.messages
+    let lastUserIndex = -1
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].info.role === 'user') {
+        lastUserIndex = i
+        break
+      }
+    }
+    // 没有用户回合（历史续段）：以末条 assistant 是否定稿为准
+    const turnMessages = lastUserIndex === -1 ? messages : messages.slice(lastUserIndex + 1)
+    const assistants = turnMessages.filter(m => m.info.role === 'assistant')
+    if (assistants.length === 0) return false
+    const allSettled = assistants.every(m => !m.isStreaming && messageCompletedAt(m) != null)
+    if (!allSettled) return false
+    /**
+     * 消息定稿了，运行期建的 part 也可能没定稿。
+     *
+     * v2 的正文与推理是增量拼装的：`text.started` 建 part，`text.ended` 才补
+     * `time.end`。而 `delta` 是 ephemeral（不重放、丢了检测不出来），`ended`
+     * 也是单条事件，丢了同样不会重发。缺 `time.end` 的后果是连锁的：
+     * `handlePartDelta` 靠它丢弃迟到增量，没有它就一直往 part 里追加 ——
+     * 停止后内容还在流，两个端最后拼出不同结果。
+     *
+     * ⚠️ 判据只能是「**有** time 但**没有** end」。
+     *
+     * 历史快照里的 text part 根本不带 `time`（见 v2/message.ts 的
+     * adaptAssistantParts），按「缺 end」判会把每个正常轮次都算成不完整，
+     * 收敛点就会每轮都重拉一次。带 time 说明它是事件流建的，才该有 end。
+     */
+    for (const message of assistants) {
+      for (const part of message.content) {
+        if (part.type !== 'text' && part.type !== 'reasoning') continue
+        const time = (part as { time?: { start?: number; end?: number } }).time
+        if (time && time.end == null) return false
+      }
+    }
+    return true
   }
 
   setLoadError(sessionId: string, error: MessageError) {
@@ -2066,6 +2132,13 @@ class MessageStore {
    * 所以这里提供「按记录校正」的入口：只要有一条 idle 记录不早于最后一条
    * assistant 消息，就说明那一轮在服务端已经结束。
    *
+   * ⚠️ 两个调用方的权威强度不同，不能共用同一套判据：
+   *   - `/session/active` 全量对账（传 authoritativeIdleAt）：服务端**此刻**
+   *     不把它列为运行中，就是已结束。可以直接落定。
+   *   - 加载时的 `lastTurn`（不传）：那只是**上一次**读到的历史记录，可能比
+   *     当前这一轮旧。此时必须保留「本地仍在流式」的否决权，否则会把正在跑的
+   *     轮次误判成结束（界面突然从 Working 跳成 Worked，随后又被新 delta 打回）。
+   *
    * @returns 是否真的改变了状态（供调用方决定是否要额外通知）
    */
   settleByAuthoritativeIdle(sessionId: string, authoritativeIdleAt?: number): boolean {
@@ -2082,22 +2155,65 @@ class MessageStore {
      */
     const idleAt = authoritativeIdleAt ?? state.lastTurn?.at
     if (idleAt === undefined) return false
-    if (!state.isStreaming) return false
-
+    /**
+     * 判据不能只看会话级的 `state.isStreaming`。
+     *
+     * 会话级标志与消息级状态是两套：`finalizeSession` / `setStreaming` 只清前者，
+     * 而渲染层判「这一轮还在跑」看的是末条 assistant 的 `isStreaming` 与
+     * `time.completed`（见 chatPageModel 的 assistantHasLiveWork）。只清会话级
+     * 标志时，消息仍算未完成 → 界面继续显示「处理中」、过程块不收起。
+     * 所以这里以**末条 assistant 是否仍未定稿**为准。
+     */
     const lastAssistant = state.messages.filter(m => m.info.role === 'assistant').at(-1)
-    const lastAssistantAt = lastAssistant?.info.time?.created ?? 0
+    if (!lastAssistant) return false
+    const pendingMessage = lastAssistant.isStreaming || messageCompletedAt(lastAssistant) == null
+    if (!pendingMessage) return false
+
+    const lastAssistantAt = lastAssistant.info.time?.created ?? 0
     // idle 必须不早于最后一条 assistant：否则那是「上一轮」的结论，
     // 新一轮可能刚开始，不能据此落定。
     if (idleAt < lastAssistantAt) return false
+    /**
+     * 还要压住「本轮用户消息晚于 idle」的情形。
+     *
+     * 新一轮刚发出、助手还没吐第一个 token 时，末条 assistant 仍是上一轮的，
+     * 上面那条时间校验会通过 —— 但 idle 显然属于上一轮。用本轮用户消息的时间
+     * 兜住它，避免把刚开始的轮次误判成已结束。
+     *
+     * 注意不能改用「本地 isStreaming 为真就不落定」：那正是本次要修的形态 ——
+     * 会话级标志与消息级状态可能不同步，卡死的轮次恰恰是标志已清、消息未定稿。
+     */
+    const lastUserAt = state.messages.filter(m => m.info.role === 'user').at(-1)?.info.time?.created ?? 0
+    if (idleAt < lastUserAt) return false
 
     state.isStreaming = false
-    // 最后一条 assistant 若还挂着 isStreaming，一并落定（否则渲染层仍显示光标）。
-    const last = state.messages.at(-1)
-    if (last?.isStreaming) {
-      state.messages = state.messages.map(m => (m.isStreaming ? { ...m, isStreaming: false } : m))
+    /**
+     * 把末条 assistant 定稿。
+     *
+     * 只清 isStreaming 是不够的：`messageCompletedAt` 仍为 undefined，渲染层
+     * 依旧按「未完成」处理（显示处理中、正文带光标）。用权威 idle 时间补上
+     * completed —— 那正是这一轮在服务端结束的时刻。
+     */
+    const completedAt = Math.max(idleAt, lastAssistantAt)
+    const { messages, changed } = finalizeStreamingMessages(state.messages, completedAt)
+    if (changed) state.messages = messages
+    const lastIndex = state.messages.length - 1
+    const lastMessage = state.messages[lastIndex]
+    if (
+      lastMessage?.info.role === 'assistant' &&
+      messageCompletedAt(lastMessage) == null
+    ) {
+      state.messages = [
+        ...state.messages.slice(0, lastIndex),
+        {
+          ...lastMessage,
+          isStreaming: false,
+          info: { ...lastMessage.info, time: { ...lastMessage.info.time, completed: completedAt } },
+        },
+      ]
     }
     // 会话已结束：把仍悬空的工具一并落定（独立于 SSE 事件，见方法注释）
-    this.reconcileInFlightTools(state, Date.now())
+    this.reconcileInFlightTools(state, completedAt)
     this.notify([sessionId])
     return true
   }

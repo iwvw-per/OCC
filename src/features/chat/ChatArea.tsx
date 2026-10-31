@@ -572,7 +572,15 @@ export const ChatArea = memo(
             map.set(item.message.info.id, index)
             continue
           }
-          if (item.userMessageId) map.set(item.userMessageId, index)
+          /**
+           * 过程壳的锚点是 userMessageId，但该用户消息在上方**还有自己的一行**
+           * （`kind: 'message'`，先 push）。
+           *
+           * 这里必须用「只在缺席时写入」覆盖映射：否则壳的 index 会把用户消息
+           * 那一行的索引顶掉，`scrollToMessageId(userMessageId)` 便落到壳上 ——
+           * 用户消息被滚到视口上方之外，表现为「点历史轮次定位不到用户消息」。
+           */
+          if (item.userMessageId && !map.has(item.userMessageId)) map.set(item.userMessageId, index)
           for (const child of item.children) map.set(child.message.info.id, index)
           if (item.finalMessage) map.set(item.finalMessage.info.id, index)
         }
@@ -1367,8 +1375,16 @@ export const ChatArea = memo(
                 return
               }
             }
-            // 最多追 30 帧（约 0.5s）：目标行被撑高/图片解码都会改变落点
-            if (++frames < 30) requestAnimationFrame(step)
+            /**
+             * 最多追 90 帧（约 1.5s）。
+             *
+             * 目标行此前可能从未渲染过：它挂载后高度重测、Markdown 首帧排版、
+             * 图片解码、折叠块入场动画都会继续改变它上方的高度，把落点顶偏。
+             * 只追 0.5s 时这些后置位移还没结束就放弃了 —— 表现就是「点了历史
+             * 轮次，用户消息停在顶上偏下一点，或又滑回去」。稳定 2 帧即提前退出，
+             * 所以延长上限不会让正常情况多跑。
+             */
+            if (++frames < 90) requestAnimationFrame(step)
           }
           requestAnimationFrame(step)
         },

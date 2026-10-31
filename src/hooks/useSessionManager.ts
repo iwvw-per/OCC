@@ -179,16 +179,39 @@ function mergePartsForReload(
 export function mergeWithLocalStreamingMessages(
   apiMessages: ApiMessageWithParts[],
   localState?: SessionState,
+  options?: {
+    /**
+     * 本地在请求期间被 SSE 推进过。
+     *
+     * 此时快照是**旧**的：它在服务端生成完之后，本地又收到了新的增量。
+     * 对同一条消息，若本地已定稿而快照未定稿，必须保留本地（否则「刷新后
+     * 反而少了一段」）；其余情况仍以服务端为准。
+     */
+    localAdvanced?: boolean
+  },
 ): ApiMessageWithParts[] {
   if (!localState || localState.messages.length === 0) return apiMessages
 
   const localById = new Map(localState.messages.map(message => [message.info.id, message]))
   const apiIds = new Set(apiMessages.map(m => m.info.id))
+  const localAdvanced = options?.localAdvanced ?? false
 
   // 同 message：仅未定稿时 part 文本不回退；incoming 已 completed 则强制服务端
   const mergedApi = apiMessages.map(apiMessage => {
     const local = localById.get(apiMessage.info.id)
     if (!local) return apiMessage
+    /**
+     * 本地已定稿、快照未定稿 → 快照是旧的，保留本地。
+     *
+     * 只在 `localAdvanced` 时启用：否则快照通常更新（服务端刚收尾），
+     * 反过来压住它会让我们永远看不到最终版。
+     */
+    if (localAdvanced && !messageTimeIncomplete(local.info.time) && messageTimeIncomplete(apiMessage.info.time)) {
+      return {
+        ...toApiMessageWithParts(local),
+        info: { ...local.info },
+      } as ApiMessageWithParts
+    }
     if (!messageTimeIncomplete(apiMessage.info.time)) return apiMessage
     const preserve = local.isStreaming || messageTimeIncomplete(local.info.time) || localState.isStreaming
     if (!preserve) return apiMessage
@@ -228,7 +251,9 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
   const loadSequenceRef = useRef<Map<string, number>>(new Map())
   /** 每个 session 是否正在加载更早的历史，防止并发 loadMore 造成分页错位 */
   const isLoadingMoreRef = useRef<Map<string, boolean>>(new Map())
-  const loadSessionRef = useRef<(sid: string, options?: { force?: boolean }) => Promise<void>>(async () => {})
+  const loadSessionRef = useRef<
+    (sid: string, options?: { force?: boolean; metaOnly?: boolean }) => Promise<void>
+  >(async () => {})
   /**
    * 补回「因内存预算被裁掉的最旧一段」的入口。
    *
@@ -256,8 +281,30 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
   // ============================================
 
   const loadSession = useCallback(
-    async (sid: string, options?: { force?: boolean }) => {
+    async (sid: string, options?: { force?: boolean; metaOnly?: boolean }) => {
       const force = options?.force ?? false
+      /**
+       * `metaOnly`：只刷新会话级元数据，不碰消息。
+       *
+       * 与 `force` 是**正交**的两件事，此前混在 `force` 一个开关上：
+       *   - `metaOnly: true`  → 标题/目录/分页游标/模型等，绝不覆盖消息
+       *   - `force: true`     → 消息也要用服务端权威版本覆盖（即使本地正在流式）
+       *
+       * 合并成一个开关的后果：想让标题刷新就得接受消息被覆盖，想保住正在流式的
+       * 内容就只能连标题一起放弃。多端场景下尤其致命 —— B 端拿到中途快照后，
+       * 唯一能纠错的路径被「正在流式」挡掉，而只想刷新标题的调用又不敢传 force。
+       */
+      const metaOnly = options?.metaOnly ?? false
+
+      /**
+       * 本地内容代际：请求发出前记一份，落地时比对。
+       *
+       * 快照与 SSE 是两条并发通道，快照可能比本地已收到的增量**更旧**。
+       * 此前落地时直接 `setMessages` 覆盖，旧快照会把期间到达的新内容盖掉
+       * （表现为「刷新后反而少了一段」）。记下代际，落地时若本地已前进，
+       * 就改为合并保留本地更新。
+       */
+      const snapshotGeneration = messageStore.getSessionChangeVersion(sid)
 
       const seq = (loadSequenceRef.current.get(sid) ?? 0) + 1
       loadSequenceRef.current.set(sid, seq)
@@ -278,27 +325,39 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       // 如果已经有消息且正在 streaming，不能覆盖消息，但仍需加载元数据
       // 仅在「已经完整加载过」时才跳过覆盖；
       // 对于仅靠 SSE 暂存出来的 session（loadState=idle），仍要做一次完整拉取
-      // force 模式下也不覆盖正在 streaming 且已加载的消息
-      if (hasExistingMessages && existingState.isStreaming && hasLoadedBaseline) {
+      //
+      // ⚠️ `force` 不再被这条挡住。
+      //
+      // 原来这里写成「force 模式下也不覆盖正在 streaming 的消息」，于是重连、
+      // 轮次定稿这类**明确要求以服务端为准**的场景也被跳过 —— 多端时 B 端
+      // 一旦拼错内容就再无纠正机会。现在：force 直接穿透（下面用服务端版本
+      // 覆盖），普通加载与 metaOnly 仍走这条轻量分支。
+      if (!force && (metaOnly || (hasExistingMessages && existingState.isStreaming && hasLoadedBaseline))) {
         // 异步加载 session 元数据（不阻塞）
         const dir = directoryRef.current
         const serverId = sessionKeyToServerId(sid)
-        Promise.all([
-          getSession(sid, dir, serverId).catch(() => null),
-          getSessionTurnPage(sid, INITIAL_TURN_LIMIT, undefined, dir, serverId, {
-            signal: abortController.signal,
-          })
-            .then(page => ({ ok: true as const, page }))
-            .catch(() => ({
-              ok: false as const,
-              page: { messages: [] as ApiMessageWithParts[], nextCursor: undefined, hasMore: false },
-            })),
-        ])
+        /**
+         * `metaOnly` 只取会话元数据：连 turn page 都不发。
+         *
+         * 该分支的用途是「标题/目录/模型等变了，但消息不能动」。顺手拉一页消息
+         * 既浪费（结果只用来读分页游标），又会在慢网下拖住整次刷新。
+         */
+        const pagePromise = metaOnly
+          ? Promise.resolve({ ok: true as const, page: null })
+          : getSessionTurnPage(sid, INITIAL_TURN_LIMIT, undefined, dir, serverId, {
+              signal: abortController.signal,
+            })
+              .then(page => ({ ok: true as const, page }))
+              .catch(() => ({
+                ok: false as const,
+                page: { messages: [] as ApiMessageWithParts[], nextCursor: undefined, hasMore: false },
+              }))
+        Promise.all([getSession(sid, dir, serverId).catch(() => null), pagePromise])
           .then(([sessionInfo, pageResult]) => {
             if (isStale()) return
 
             messageStore.updateSessionMetadata(sid, {
-              ...(pageResult.ok
+              ...(pageResult.ok && pageResult.page
                 ? {
                     hasMoreHistory: pageResult.page.hasMore,
                     historyCursor: pageResult.page.nextCursor,
@@ -683,7 +742,18 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           return
         }
 
-        const mergedMessages = mergeWithLocalStreamingMessages(apiMessages, currentState)
+        /**
+         * 落地前再判一次：期间本地是否已被 SSE 推进。
+         *
+         * 推进了就说明这份快照是旧的，直接覆盖会丢掉更新过的内容。此时改用
+         * `mergeWithLocalStreamingMessages`（它在「快照里有的用服务端、快照里
+         * 没有的保留本地」之上，还对未定稿的本地消息保留更长文本），属于补集式
+         * 合并而非覆盖。
+         *
+         * force 的目的正是「以服务端为准」，所以 force 不走这条。
+         */
+        const localAdvanced = !force && messageStore.getSessionChangeVersion(sid) !== snapshotGeneration
+        const mergedMessages = mergeWithLocalStreamingMessages(apiMessages, currentState, { localAdvanced })
 
         // 设置消息到 store
         messageStore.setMessages(sid, mergedMessages, {

@@ -521,11 +521,17 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       if (!messageID) return null
       const tokens = rec(data.tokens)
       const cache = rec(tokens.cache)
+      const completed = num(e.created) ?? Date.now()
       return globalEvent(directory, EventTypes.MESSAGE_UPDATED, {
         info: {
           id: messageID,
           sessionID,
           role: 'assistant',
+          // 步结束时必须落下 completed：渲染层用 messageCompletedAt 判「这条消息
+          // 已定稿」，assistantHasLiveWork 也据此判断这一轮是否还在跑。缺它时
+          // 消息永远算未完成 —— 对话已结束仍挂「处理中」、过程块不收起、
+          // 思考内容继续外露，只有整页刷新才会被快照修正。
+          time: { completed },
           cost: num(data.cost) ?? 0,
           tokens: {
             input: num(tokens.input) ?? 0,

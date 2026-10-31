@@ -28,6 +28,7 @@ import {
   useTurnOutlineEntries,
   useMergeTurnOutline,
   useBackfillTurnOutline,
+  useSessionRunning,
 } from '../../hooks'
 import { useServerStore } from '../../hooks/useServerStore'
 import { useHostSlideState } from './sidebar/hostSwitchDirection'
@@ -440,16 +441,39 @@ export const ChatPane = memo(function ChatPane({
     navigateHome,
   })
 
+  /**
+   * 统一的「这一轮是否还在跑」。
+   *
+   * `isStreaming`（会话级标志）与渲染层判据（末条 assistant 是否定稿）可能
+   * 不同步，各自为政就会出现「同一会话在不同位置表现不一致」。这里统一走
+   * `useSessionRunning`，优先级：服务端权威 > 消息是否定稿 > 会话标志。
+   */
+  const sessionRunning = useSessionRunning(routeSessionId ?? null)
+
   const handleOutlineScrollToMessage = useCallback(
     (messageId: string) => {
-      // 轴现在可能含未加载的轮次：先补拉到目标进入内存再滚动
+      /**
+       * 补拉完成后不能立刻滚。
+       *
+       * `loadUntilMessage` 只保证消息进了 messageStore；ChatArea 的 timeline /
+       * 虚拟行映射要到**下一次渲染**才包含它，`scrollToMessageId` 在那之前
+       * 查不到索引，直接 return —— 表现成「点了未加载的历史轮次，什么都没发生」。
+       * 所以补拉成功后等两帧（渲染提交 + 行测量）再滚。
+       */
       const scroll = () => chatAreaRef.current?.scrollToMessageId(messageId)
+      const scrollAfterRender = () => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(scroll)
+        })
+      }
       const state = routeSessionId ? messageStore.getSessionState(routeSessionId) : undefined
       if (state?.messages.some(m => m.info.id === messageId)) {
         scroll()
         return
       }
-      void loadUntilMessage(messageId).then(scroll)
+      void loadUntilMessage(messageId).then(loaded => {
+        if (loaded) scrollAfterRender()
+      })
     },
     [routeSessionId, loadUntilMessage],
   )
@@ -631,7 +655,7 @@ export const ChatPane = memo(function ChatPane({
   // ============================================
   // Cancel Hint
   // ============================================
-  const { showCancelHint, handleCancelMessage } = useCancelHint(isStreaming, handleAbort)
+  const { showCancelHint, handleCancelMessage } = useCancelHint(sessionRunning, handleAbort)
 
   // ============================================
   // Visible IDs bridge
@@ -1147,7 +1171,7 @@ export const ChatPane = memo(function ChatPane({
   // 只在「无 session 且没有消息且未流式」时展示。发送第一条消息后 routeSessionId
   // 立即从 null 变为有值，welcome 自然退场——不需要自己维护 docked 状态。
   // ============================================
-  const showWelcome = !routeSessionId && renderedMessages.length === 0 && !isStreaming && chatAreaMountKey !== null
+  const showWelcome = !routeSessionId && renderedMessages.length === 0 && !sessionRunning && chatAreaMountKey !== null
   const handleWelcomeSelectProject = useCallback(
     (path: string) => {
       setCurrentDirectory(path)
@@ -1250,7 +1274,7 @@ export const ChatPane = memo(function ChatPane({
                 turnDurationMap={chatPageViewModel.turnDurationMap}
                 turnLatestAssistantIds={chatPageViewModel.turnLatestAssistantIds}
                 sessionId={routeSessionId}
-                isStreaming={isStreaming}
+                isStreaming={sessionRunning}
                 serverRunning={serverRunning}
                 allowStreamingLayoutAnimation={false}
                 loadState={renderedLoadState}

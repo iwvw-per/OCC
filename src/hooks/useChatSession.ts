@@ -477,6 +477,25 @@ export function useChatSession({
         }
         // 应用内 toast 已在 useGlobalEvents 中统一处理
       },
+      /**
+       * 轮次定稿的收敛点。
+       *
+       * 为什么必须有：首屏/重连时拿到的可能是**这一轮中途的快照**（骨架或
+       * 分页在模型还在写的时候就返回了），此后只有增量事件在补。而 v2 的
+       * 正文是增量拼装的，`text.delta` / `tool.progress` 都是 ephemeral
+       * （不重放、丢了检测不出来）。一旦丢一条，这一轮就永久定格在中途 ——
+       * 表现为「同一个会话在两个窗口里内容不一样、时长也不同」，只有刷新才对齐。
+       *
+       * 「轮次结束」是**唯一确定的收敛时机**：此刻服务端内容已定稿，用它覆盖
+       * 本地那份拼接结果一定是对的。所以不看 stale 标记（它只在 seq 缺口/重连
+       * 时置位，抓不到「一开始就拿到中途快照」），而是用 idle 前记录的
+       * 「本地是否已完整」。
+       */
+      onSessionIncomplete: (sessionID: string, incomplete: boolean) => {
+        if (!incomplete) return
+        if (!routeSessionId || sessionID !== routeSessionId) return
+        void loadSession(routeSessionId, { force: true })
+      },
       onSessionCompacted: (data: import('../types/api/event').SessionCompactedPayload) => {
         // 压缩改写了历史（摘要 + 裁剪旧轮次），强制重拉当前会话，
         // 否则界面仍显示压缩前的完整历史，看不到「历史已压缩」分隔。
@@ -560,6 +579,7 @@ export function useChatSession({
       onQuestionRejected: data => sseCallbacksRef.current.onQuestionRejected(data),
       onScrollRequest: () => sseCallbacksRef.current.onScrollRequest(),
       onSessionIdle: sid => sseCallbacksRef.current.onSessionIdle(sid),
+      onSessionIncomplete: (sid, incomplete) => sseCallbacksRef.current.onSessionIncomplete?.(sid, incomplete),
       onSessionCompacted: data => sseCallbacksRef.current.onSessionCompacted?.(data),
       onSessionError: sid => sseCallbacksRef.current.onSessionError(sid),
       onReconnected: (reason, serverId) => sseCallbacksRef.current.onReconnected(reason, serverId),

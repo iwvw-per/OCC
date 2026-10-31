@@ -219,4 +219,62 @@ describe('sessionListIndexStore', () => {
 
     expect(sessionListIndexStore.get(active)).toBeUndefined()
   })
+
+  /**
+   * 归档写在 `session.metadata.updated` 上，该事件只带 metadata，没有 location。
+   * 事件目录为空时，按目录过滤会把整条增量跳过 —— 归档的会话留在活跃列表，
+   * 恢复的不回来，要等整桶重拉（刷新）才同步。
+   */
+  it('applies an event without directory by falling back to the known entry directory', () => {
+    sessionListIndexStore.replace(active, [makeSession('a')], { limit: 5, hasMore: false })
+    // 归档桶必须先「已加载」才会接收迁移（未加载的桶不建条目，等面板自己拉）
+    sessionListIndexStore.replace(archived, [], { limit: 0, hasMore: false })
+
+    sessionListIndexStore.applySessionChanged(
+      'srv-a',
+      makeSession('a', { directory: '', time: { created: 1, updated: 3, archived: 99 } }),
+    )
+
+    expect(sessionListIndexStore.get(active)?.map(s => s.id)).toEqual([])
+    expect(sessionListIndexStore.get(archived)?.map(s => s.id)).toEqual(['a'])
+  })
+
+  /**
+   * 增量 payload 常是残缺对象（只带变更字段）。整条替换会把 time.archived
+   * 与 directory 冲掉，表现为「归档不生效、标题再也不更新」。
+   */
+  it('merges partial payloads instead of overwriting known fields', () => {
+    sessionListIndexStore.replace(active, [makeSession('a')], { limit: 5, hasMore: false })
+    sessionListIndexStore.replace(archived, [], { limit: 0, hasMore: false })
+
+    // 只带 metadata 的事件（目录、标题都不带）
+    sessionListIndexStore.applySessionChanged('srv-a', {
+      id: 'a',
+      time: { archived: 99 },
+    } as never)
+
+    const archivedItem = sessionListIndexStore.get(archived)?.[0] as unknown as {
+      directory?: string
+      title?: string
+      time?: { created?: number; archived?: number }
+    }
+    expect(archivedItem?.directory).toBe('/workspace/demo')
+    expect(archivedItem?.title).toBe('Session a')
+    expect(archivedItem?.time?.created).toBe(1)
+    expect(archivedItem?.time?.archived).toBe(99)
+  })
+
+  it('keeps the sibling time fields when patching a rename or archive in place', () => {
+    sessionListIndexStore.replace(active, [makeSession('a', { time: { created: 1, updated: 2, idle: 7 } })], {
+      limit: 5,
+      hasMore: false,
+    })
+
+    sessionListIndexStore.patchAll('srv-a', 'a', { time: { archived: 42 } } as never)
+
+    const item = sessionListIndexStore.get(active)?.[0] as unknown as { time?: Record<string, number> }
+    expect(item?.time?.idle).toBe(7)
+    expect(item?.time?.archived).toBe(42)
+    expect(item?.time?.created).toBe(1)
+  })
 })

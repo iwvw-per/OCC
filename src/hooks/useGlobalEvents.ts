@@ -22,7 +22,7 @@ import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
-import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
+import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions, invalidateSessionMetaCache } from '../api'
 import { onSeqGap, ackSeqGap } from '../api/events'
 import { reportSessionViewed } from '../api/sessionView'
 import { recoverPendingInbox } from '../api/inboxRecovery'
@@ -53,6 +53,13 @@ export interface SessionEventCallbacks {
   onQuestionRejected?: (data: { sessionID: string; requestID: string }) => void
   onScrollRequest?: () => void
   onSessionIdle?: (sessionID: string) => void
+  /**
+   * 会话转 idle，且**本地这一轮内容可能不完整**。
+   *
+   * 在 `handleSessionIdle` 落定之前分发，因此 `incomplete` 反映的是落定前的
+   * 真实状态。消费者据此决定要不要跟服务端对一次内容。
+   */
+  onSessionIncomplete?: (sessionID: string, incomplete: boolean) => void
   /** 会话压缩结束（v2）：用于刷新消息或提示 */
   onSessionCompacted?: (data: SessionCompactedPayload) => void
   onSessionError?: (sessionID: string) => void
@@ -744,13 +751,39 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           const now = Date.now()
           for (const sessionKey of messageStore.getAllSessionKeys()) {
             if (sessionKeyToServerId(sessionKey) !== serverId) continue
-            if (!messageStore.getIsStreaming(sessionKey)) continue
             // 服务端仍认为它在跑 → 不动
             if (scoped[sessionKey]) continue
+            /**
+             * 不再先按会话级 `isStreaming` 过滤：那是另一套标志，可能已被先到的
+             * 路径清掉，而消息级仍判「未完成」（末条 assistant 无 completed）。
+             * 只看它会漏掉这类残留，界面就一直卡在「处理中」。
+             * 是否有待落定的内容由 settleByAuthoritativeIdle 自己判断。
+             */
             messageStore.settleByAuthoritativeIdle(sessionKey, now)
           }
+          markSettledSessionsStale(serverId, scoped)
         })
         .catch(() => {})
+    }
+
+    /**
+     * 后台会话的收尾兜底：SSE 收尾事件丢了以后重拉一次消息尾部。
+     *
+     * `settleByAuthoritativeIdle` 只能把**已经拿到**的消息定稿。若收尾事件
+     * （execution.succeeded / step.ended）与随后的快照都被丢弃，本地那条
+     * assistant 可能连 `completed` 来源都没有，图片/工具输出也会缺。
+     *
+     * 只对「服务端已不认为在跑、但本地仍觉得未定稿」的会话触发，且走
+     * `messageStore.markSessionStale` 让下次进入时重拉，而不是在这里立刻
+     * 连续请求 —— 侧栏里可能同时有很多这类会话，逐个拉消息会打出一波大响应。
+     */
+    const markSettledSessionsStale = (serverId: string, scoped: SessionStatusMap) => {
+      for (const sessionKey of messageStore.getAllSessionKeys()) {
+        if (sessionKeyToServerId(sessionKey) !== serverId) continue
+        if (scoped[sessionKey]) continue
+        if (!messageStore.hasUnsettledAssistant(sessionKey)) continue
+        messageStore.markSessionStale(sessionKey)
+      }
     }
 
     const markPermissionReplied = (sessionID: string, requestID: string) => {
@@ -1037,6 +1070,14 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         onSessionIdle: data => {
           if (isEphemeralSession(data.sessionID)) return
           const scopedId = scope(data.sessionID)
+          /**
+           * 先记录「本地这一轮是否已完整」，再落定。
+           *
+           * 下面 `handleSessionIdle` 会清 isStreaming 并把末条 assistant 补上
+           * `completed`——落定之后本地看起来永远「完整」，这个信息就丢了。
+           * 而它正是判断是否需要跟服务端对账的唯一依据（见 pane 的 onSessionIdle）。
+           */
+          dispatchToConsumers(scopedId, cb => cb.onSessionIncomplete?.(scopedId, !messageStore.isLastTurnComplete(scopedId)))
           messageStore.handleSessionIdle(scopedId)
           childSessionStore.markIdle(scopedId)
           // session.idle 是会话完成的权威信号。activeSessionStore 此前只由
@@ -1064,6 +1105,34 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
                 ? i18n.t('chat:notification.turnInterruptedInactivity')
                 : i18n.t('chat:notification.turnInterruptedShutdown'),
             )
+          }
+          /**
+           * 首次对话的标题兜底。
+           *
+           * v2 的「自动命名」只在服务端跑完第一轮后触发，并且**只有一条
+           * `session.renamed` 事件**能把它带到前端。这条事件是 durable 的，
+           * 一旦被 seq 缺口判据丢弃（断连/背压/隧道抖动，见 checkSeqGap），
+           * 就再没有任何补拉路径：侧栏永远「未命名对话」、顶栏永远「新对话」，
+           * 直到整页刷新重拉全量。用户报的正是这个形态。
+           *
+           * 这里在会话转入 idle 时补一次**仅元数据**的重拉（不拉消息），成本
+           * 相当于侧栏几十条会话里的一条 GET，且带 15s TTL + singleFlight。
+           * 只在标题看起来还没生成时才发，避免每轮结束都多打一个请求。
+           */
+          const sessionState = messageStore.getSessionState(scopedId)
+          const currentMeta = activeSessionStore.getSessionMeta(scopedId)
+          if (!currentMeta?.title && !sessionState?.title) {
+            invalidateSessionMetaCache(serverId, data.sessionID)
+            void getSession(data.sessionID, undefined, serverId)
+              .then(session => {
+                if (!session?.id || !session.title) return
+                sessionListIndexStore.applySessionChanged(serverId, session)
+                activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
+                if (messageStore.getSessionState(scopedId)) {
+                  messageStore.updateSessionMetadata(scopedId, { title: session.title })
+                }
+              })
+              .catch(() => {})
           }
           // 子 agent 运行结束：自动关闭其分屏 pane
           paneLayoutStore.closeSubtaskSession(scopedId)
@@ -1236,6 +1305,17 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           if (messageStore.getSessionState(scopedId)) {
             messageStore.updateSessionMetadata(scopedId, { title })
           }
+          /**
+           * 元数据缓存也要失效。
+           *
+           * `getSession` 有 15s 的短 TTL 缓存，而后台刚重命名完，前端常在同一
+           * 窗口内再拉一次会话详情（打开会话、切 pane、补 meta）。不失效就拿到
+           * 改名前的旧快照，于是标题「又变回去了」，与用户描述的「重命名后没有
+           * 及时更新」完全一致。
+           */
+          invalidateSessionMetaCache(serverId, sessionID)
+          // 服务端已经把标题落到库里，列表响应的缓存同样陈旧
+          invalidateSessionListCache(serverId)
         },
 
         // v2 重试：后端放弃旧 assistant 消息（assistantMessageID）、用新 id 重新生成。

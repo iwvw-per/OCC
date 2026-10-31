@@ -13,6 +13,7 @@ import {
   CircleIcon,
   ClockIcon,
   DatabaseIcon,
+  FolderIcon,
   GitBranchIcon,
   LayersIcon,
   PinIcon,
@@ -128,7 +129,7 @@ export const WorkStatusProjectSection = memo(function WorkStatusProjectSection({
   return (
     <WorkStatusSection
       title={t('workStatus.section.project')}
-      icon={<GitBranchIcon size={14} />}
+      icon={<FolderIcon size={14} />}
       summary={projectLabel}
     >
       {branch || showLoading ? (
@@ -425,6 +426,7 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
         icon={<TerminalIcon size={14} />}
         id="backgroundJobs"
         summary={running.length > 0 ? `${running.length}/${jobs.length}` : String(jobs.length)}
+        actionPlacement="beforeSummary"
         action={
           settled.length > 0 ? (
             <WorkStatusRowAction

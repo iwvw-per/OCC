@@ -22,6 +22,7 @@ import type { Message } from '../types/message'
 import { useChatViewport, CHAT_VIEWPORT_MOBILE_BREAKPOINT } from '../features/chat/chatViewport'
 import { hapticTap } from '../utils/haptics'
 import { buildOutlineSourceEntries, truncateOutlineLabel, type OutlineSourceEntry } from './outlineIndexModel'
+import { nearestIndexFromY, type OutlineFisheyeConfig } from './outlineFisheye'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -45,22 +46,7 @@ interface OutlineIndexProps {
   onScrollToMessageId: (messageId: string) => void
 }
 
-interface FisheyeConfig {
-  tickWidth: { min: number; max: number }
-  tickHeight: number
-  margin: { min: number; max: number }
-  labelThreshold: number
-  /** CSS 声明式鱼眼参数（从稳态数值拟合得到，使纯 CSS transform 1:1 复刻原 JS-per-frame 效果）。
-   *  strength: s = cos(clamp(dist/strengthRadius,0,1)*90deg)^2
-   *  纵向位移: delta = -shiftAmp * sin(clamp(dy/shiftRadius,-1,1)*90deg) */
-  css: {
-    strengthRadius: number
-    shiftAmp: number
-    shiftRadius: number
-    /** lerp(0.18) 平滑的 CSS transition 等价时长（秒）。 */
-    ease: number
-  }
-}
+type FisheyeConfig = OutlineFisheyeConfig
 
 interface VisualConfig {
   rightOffset: number
@@ -105,7 +91,15 @@ const COMPACT_FISHEYE: FisheyeConfig = {
 
 const DESKTOP_VISUAL: VisualConfig = {
   rightOffset: 13,
-  hitPadLeft: 0,
+  /**
+   * 命中区向左额外扩出的宽度。
+   *
+   * 原先只有 `pointerHitWidth = 8`，也就是整条轨道只在这 8px 内响应 hover ——
+   * 鼠标稍微偏一点就脱离，鱼眼瞬间收起、选中丢失。用户描述的「缺少鼠标吸附、
+   * 无法精准选中」主要就是这块命中区太窄。向左加宽不改变视觉位置（tick 仍是
+   * 右对齐），只是让靠近轨道左侧的移动也能持续被接管。
+   */
+  hitPadLeft: 14,
   pointerHitWidth: 8,
   zonePadLeft: 200,
   labelClassName: 'text-[length:var(--fs-md)] leading-none text-text-200',
@@ -118,7 +112,8 @@ const DESKTOP_VISUAL: VisualConfig = {
 
 const COMPACT_VISUAL: VisualConfig = {
   rightOffset: 12,
-  hitPadLeft: 0,
+  // 触摸端同样放宽：手指落点比鼠标更粗，8px 命中区基本不可能命中
+  hitPadLeft: 12,
   pointerHitWidth: 6,
   zonePadLeft: 140,
   labelClassName: 'text-[length:var(--fs-xs)] leading-none text-text-300',
@@ -160,18 +155,7 @@ function deactivateRail(rail: HTMLElement | null) {
   rail?.style.setProperty('--oi-active', '0')
 }
 
-/** 根据光标 Y 与 rail 静态几何，算最近 item 下标（用于选中 / overlay 标题 / 触觉反馈）。
- *  不读 DOM、不写样式；中心点公式与 CSS --oi-cy 完全一致。 */
-function nearestIndexFromY(count: number, cursorY: number, railCenterY: number, fisheye: FisheyeConfig): number {
-  if (count <= 0 || typeof window === 'undefined') return -1
-  const step = fisheye.tickHeight + fisheye.margin.min * 2
-  const mid = (count - 1) / 2
-  const index = Math.round((cursorY - railCenterY) / step + mid)
-  if (index < 0 || index >= count) return -1
-
-  const centerY = railCenterY + (index - mid) * step
-  return Math.abs(cursorY - centerY) <= fisheye.css.strengthRadius ? index : -1
-}
+/** 鱼眼几何与命中判定：纯函数，见 outlineFisheye（与 CSS `--oi-shift` 同一条公式） */
 
 /** 从 entries 中找偏置后的可见索引。
  *  取第二个匹配项（而非第一个），避免 viewport 顶部刚好落在上一条 prompt 尾部时误判。
@@ -524,12 +508,22 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
   }, [getTicks])
   const onZoneLeave = useCallback(() => deactivate(), [deactivate])
 
-  const onZoneClick = useCallback(() => {
-    const idx = focusIdxRef.current
+  /**
+   * 点击时按**当前光标位置**重新吸附一次，而不是复用 hover 期间记下的焦点。
+   *
+   * 两个原因：
+   *   1. hover 焦点是在 mousemove 里算的，快速点下时可能还停在进入那一刻的值；
+   *   2. 光标刚进入就得点击（触控板轻点）时，某些路径下 mousemove 还没触发过，
+   *      `focusIdxRef` 仍是 -1 —— 表现成「点了没反应」。这里兜底再算一次。
+   */
+  const onZoneClick = useCallback((e: React.MouseEvent) => {
     const cur = entriesRef.current
-    if (idx >= 0 && idx < cur.length) {
+    if (cur.length === 0) return
+    const idx = nearestIndexFromY(cur.length, e.clientY, railCenterRef.current, fisheyeRef.current)
+    const target = idx >= 0 ? idx : focusIdxRef.current
+    if (target >= 0 && target < cur.length) {
       deactivate()
-      onSelectRef.current(cur[idx].messageId)
+      onSelectRef.current(cur[target].messageId)
     }
   }, [deactivate])
 

@@ -248,8 +248,15 @@ function sessionMetaCacheKey(serverId: string, sessionId: string, _directory?: s
 }
 
 /** 写操作后失效某会话的元数据缓存（含各目录键，简单起见按 server:session 前缀） */
-function invalidateSessionMetaCache(serverId: string, sessionId: string): void {
-  ttlCacheInvalidate(`${SESSION_META_CACHE_PREFIX}${serverId}:${sessionId}:`)
+export function invalidateSessionMetaCache(serverId: string, sessionId: string): void {
+  /**
+   * 不能再带尾部冒号。
+   *
+   * 实际缓存键是 `session-meta:${serverId}:${sessionId}`（不含 directory），
+   * 此前失效前缀多拼了一个 `:`，`startsWith` 永远不命中 —— 改名/归档后 15s 内
+   * 再读仍是旧元数据，表现为「标题改了又不更新、刷新才恢复」。
+   */
+  ttlCacheInvalidate(`${SESSION_META_CACHE_PREFIX}${serverId}:${sessionId}`)
 }
 
 /**

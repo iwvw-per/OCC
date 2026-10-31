@@ -111,6 +111,7 @@ vi.mock('../api', () => ({
   getSessionStatus: getSessionStatusMock,
   getPendingPermissions: getPendingPermissionsMock,
   getPendingQuestions: getPendingQuestionsMock,
+  invalidateSessionMetaCache: vi.fn(),
 }))
 
 vi.mock('../api/permission', () => ({
@@ -146,6 +147,7 @@ vi.mock('../store', () => ({
     markSessionStale: vi.fn(),
     getAllSessionKeys: vi.fn(() => [] as string[]),
     getIsStreaming: vi.fn(() => false),
+    hasUnsettledAssistant: vi.fn(() => false),
     settleByAuthoritativeIdle: vi.fn(() => false),
     recordCompactionResult: vi.fn(),
     recordSessionUsage: vi.fn(),
