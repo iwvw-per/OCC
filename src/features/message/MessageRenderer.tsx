@@ -2,6 +2,7 @@ import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo, useCallbac
 import { useTranslation } from 'react-i18next'
 import { animate } from 'motion/mini'
 import {
+  AlertCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ImageIcon,
@@ -204,6 +205,7 @@ export function ProcessCollapseBlock({
   activeLabel,
   onExpand,
   needsHydrate = false,
+  interrupted = false,
 }: {
   children: ReactNode
   durationMs?: number
@@ -237,6 +239,17 @@ export function ProcessCollapseBlock({
    * 必须由调用方根据 `isCompressed` 等真实标记传入。
    */
   needsHydrate?: boolean
+  /**
+   * 这一轮被中断（用户主动停止 / 服务端判定空闲中止）。
+   *
+   * 服务端在中断轮末尾补一条**内容为空**的 assistant（`finish: 'error'` +
+   * `error.type = 'aborted'`），时间线把它换算成这个标记
+   * （见 chatPageModel 的 `interrupted`）。
+   *
+   * 必须在折叠块**下方**写出来：中断轮没有最终回复，收起后就只剩一行
+   * 「已处理 Ns」，用户完全看不出「是被自己打断了」还是「本来就没有回复」。
+   */
+  interrupted?: boolean
 }) {
   const [expanded, setExpanded] = useUiDisclosureState(stateKey, isActive)
   const { t } = useTranslation('message')
@@ -466,6 +479,15 @@ export function ProcessCollapseBlock({
           </div>
         )}
       </MessageExpandPanel>
+      {interrupted && (
+        <p
+          className="flex items-center gap-1.5 px-1 pt-1 text-[length:var(--fs-xs)] text-text-400"
+          data-turn-interrupted
+        >
+          <AlertCircleIcon size={12} className="shrink-0 text-warning-100" />
+          <span>{t('process.interrupted')}</span>
+        </p>
+      )}
     </div>
   )
 }

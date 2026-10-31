@@ -186,6 +186,7 @@
   "process": {
     "emptyAfterExpand": "No process content to expand for this turn (only stats were recorded).",
     "hydrateFailed": "Failed to load process content",
-    "retry": "Retry"
+    "retry": "Retry",
+    "interrupted": "This turn was interrupted, so there is no final reply."
   }
 }

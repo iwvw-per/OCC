@@ -193,7 +193,20 @@ describe('buildVisibleMessageEntries', () => {
     expect(entries[0].message.info.id).toBe('assistant-aborted-with-tool')
   })
 
-  it('hides aborted assistant messages without renderable parts', () => {
+  it('keeps aborted assistant messages visible even without renderable parts', () => {
+    /**
+     * 2026-11-01 语义修正：空 abort 消息**必须**可见。
+     *
+     * 服务端把「这一轮被中断」记成一条内容为空的 assistant
+     * （`finish: 'error'`、`error.type = 'aborted'`，实测见
+     * `chatPageModel.interruptView.test.ts`）。旧规则把它整条过滤掉，于是：
+     *   - 轮内有过程时，时间线分不清「被打断」和「本来就没回复」，只剩一个折叠块；
+     *   - 轮内没过程时，用户消息下面完全空白，没有任何中断提示。
+     *
+     * 现在让它可见：有过程时由折叠块下方写「本轮已被中断」（消息本身不进壳，
+     * 见 chatPageModel 的 `isAbortedMessage(m.info) && content.length === 0` 分支）；
+     * 没过程时直接渲染错误视图。
+     */
     const emptyReasoning: ReasoningPart = {
       id: 'reasoning-empty',
       sessionID: 'session-1',
@@ -209,7 +222,8 @@ describe('buildVisibleMessageEntries', () => {
 
     const entries = buildVisibleMessageEntries([message])
 
-    expect(entries).toHaveLength(0)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].message.info.id).toBe('assistant-empty-abort')
   })
 })
 
@@ -850,8 +864,16 @@ describe('buildProcessTimeline', () => {
     ])
   })
 
-  it('settles a turn that ends with tool-calls once the session goes idle', () => {
-    // 被中断/出错而停在 tool-calls 的历史轮次：会话已空闲，正文必须露出来
+  it('does not leak a tool-calls turn body outside the shell once the session goes idle', () => {
+    /**
+     * 2026-11-01 语义修正：`finish=tool-calls` 的正文是**过程说明**，不是回答。
+     *
+     * 旧断言要求它露到壳外，实测那正是「工作中被打断后过程内容泄漏」的形态
+     * （笔电主机 ses_e6cc8b786ffepHbTstQ3zvDJ7f）：打断后那句 41 字说明被当成
+     * 最终回复显示，刷新后又消失（服务端该轮没有回复）。
+     *
+     * 现在只有 `finish === 'stop'`（或 `length`）的正文才露到壳外。
+     */
     const stepWithText = createAssistantMessage(
       'assistant-1',
       [
@@ -875,7 +897,8 @@ describe('buildProcessTimeline', () => {
     expect(shell).toBeTruthy()
     if (shell?.kind !== 'process-shell') return
     expect(shell.isActive).toBe(false)
-    expect(shell.finalMessage?.info.id).toBe('assistant-1')
+    // 没有 finish=stop → 这一轮没有最终回复，正文留在壳内
+    expect(shell.finalMessage).toBeUndefined()
   })
 
   it('does not reopen a completed turn when session becomes busy before the next user lands', () => {

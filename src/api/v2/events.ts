@@ -14,7 +14,7 @@ import type { GlobalEvent } from '../types'
 import type { ApiSession } from '../../types'
 import type { CompactionTokenUsage } from '../../types/api/event'
 import { EventTypes } from '../../types/api/event'
-import { rec, str, num, toolResultMetadata } from './adapt'
+import { rec, str, num, toolResultMetadata, toMessageError } from './adapt'
 import { adaptSession } from './session'
 import { adaptFormToQuestionRequest } from './form'
 import { adaptPermission } from './entities'
@@ -66,43 +66,6 @@ function adaptSessionEvent(e: { data?: unknown; location?: unknown; created?: nu
     location: rec(d.location).directory ? d.location : eventLocation,
     time: { ...dataTime, created, updated },
   })
-}
-
-/**
- * 把 v2 的 `SessionStructuredError`（`{ type, message, status?, response? }`）映射为
- * 前端 `MessageError['name']`。
- *
- * v2 用 `type`（如 `provider.quota` / `provider.auth` / `aborted`），v1/前端用 `name`
- * （`APIError` / `ProviderAuthError` / `MessageAbortedError` …）。此前误读 `error.name`
- * 导致语义丢失（额度超限等被显示成通用 UnknownError）。
- */
-function mapV2ErrorName(error: Record<string, unknown>): string {
-  const type = str(error.type) ?? ''
-  const status = num(error.status)
-  if (type === 'aborted' || type === 'interrupted') return 'MessageAbortedError'
-  if (type === 'provider.auth' || status === 401 || status === 403) return 'ProviderAuthError'
-  if (type === 'provider.quota' || type === 'provider.rate_limit' || status === 429) return 'APIError'
-  if (type.startsWith('provider.') || type.startsWith('tool.') || status !== undefined) return 'APIError'
-  return 'UnknownError'
-}
-
-/**
- * 把 v2 结构化错误转成前端 `MessageError`（name + data），供错误视图渲染。
- * data 字段对齐 MessageErrorView：message / statusCode / isRetryable / responseBody。
- */
-function toMessageError(error: Record<string, unknown>): { name: string; data: Record<string, unknown> } {
-  const name = mapV2ErrorName(error)
-  const response = rec(error.response)
-  return {
-    name,
-    data: {
-      message: str(error.message) ?? str(error.type) ?? 'error',
-      statusCode: num(error.status),
-      isRetryable: name === 'APIError',
-      responseBody: str(response.body),
-      providerID: str(error.providerID),
-    },
-  }
 }
 
 /** 从 v2 错误对象抽取可读文本（工具错误等简单展示用）。 */
@@ -544,13 +507,33 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       })
     }
 
-    // step.failed：把结构化错误挂到该 assistant 消息上（v1 的 message.updated 携带 error）。
-    // 用户主动中止（aborted）不挂错误——由 execution.interrupted → IDLE 静默收尾。
+    /**
+     * step.failed：把结构化错误挂到该 assistant 消息上。
+     *
+     * ⚠️ **aborted 也要挂**。旧实现直接 `return null` 丢弃，理由是「由
+     * execution.interrupted → IDLE 静默收尾」。但中断的事实只存在于这个消息级
+     * 错误里：
+     *
+     *   服务端实测（2026-11-01，笔电主机 ses_e6c99dcdeffeMcaqrZebeKHF1R，
+     *   用正确端点 `session.interrupt` 真中断）：
+     *     > session.step.failed  { error: { type: 'aborted', message: 'Step interrupted' } }
+     *     > session.execution.interrupted { reason: 'user' }
+     *   刷新后的最终形状：
+     *     assistant { finish: 'error', error: 'aborted', parts: [reasoning, text, tool] }
+     *     idle      { outcome: 'interrupted' }
+     *
+     * 也就是**同一条** assistant 消息被打上 error，没有新增消息。丢弃这个事件
+     * 后，实时视图里那条消息只有 `finish=tool-calls` 的正文，与「本来就没有
+     * 回复的纯工具轮」完全无法区分 —— 用户看不到任何「已中断」的说明。
+     *
+     * 注意它不会把消息变成刺眼的红色错误卡片：`chatAreaVisibility` 与
+     * `chatPageModel` 会把它识别为中断标记，渲染成折叠块下方的一行说明
+     * （见 `ProcessCollapseBlock` 的 `interrupted`）。
+     */
     case 'session.step.failed': {
       const messageID = str(data.assistantMessageID) ?? ''
       if (!messageID) return null
       const err = rec(data.error)
-      if (str(err.type) === 'aborted') return null
       return globalEvent(directory, EventTypes.MESSAGE_UPDATED, {
         info: {
           id: messageID,

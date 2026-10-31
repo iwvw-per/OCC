@@ -1,4 +1,5 @@
 import type { Message, ToolPart } from '../../types/message'
+import { isAbortedMessage } from '../../types/message'
 import { messageCompletedAt } from '../../store/messagePartMerge'
 import { collectChangedFiles } from '../message/parts/changedFiles'
 import type { ChangedFile } from '../message/parts/changedFiles'
@@ -756,6 +757,19 @@ export type ProcessTimelineItem =
       startedAt?: number
       durationMs?: number
       isActive: boolean
+      /**
+       * 这一轮被中断（用户主动停止 / 服务端判定空闲中止）。
+       *
+       * 由轮内带 `error.name === 'MessageAbortedError'` 的 assistant 消息判定。
+       * 实测两种形态都会出现（2026-11-01，笔电主机）：
+       *   - 多步中断：末尾补一条**内容为空**的 assistant（`finish:'error'`）；
+       *   - 单步中断：**就是那条正在跑的消息**被打上 error（它带 reasoning/text/tool，
+       *     且 `finish` 为 undefined —— 服务端只发 step.failed，不发 step.ended）。
+       *
+       * 渲染层据此在折叠块下方写明中断 —— 否则界面上只剩一个折叠块，
+       * 用户分不清「被打断了」和「本来就没有回复」。
+       */
+      interrupted?: boolean
       /** 壳内消息（不含壳外 final） */
       children: Array<{
         message: Message
@@ -789,6 +803,7 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
       a.durationMs !== b.durationMs ||
       a.isActive !== b.isActive ||
       a.finalMessage !== b.finalMessage ||
+      a.interrupted !== b.interrupted ||
       a.children.length !== b.children.length
     ) {
       return false
@@ -1088,22 +1103,75 @@ export function buildProcessTimeline(
     const isLastUserTurn = userId === userTurns[userTurns.length - 1]?.user.info.id
 
     /**
-     * 最终回复 = 轮内**最后一条以正文收尾**的助手消息。
+     * 最终回复 = 轮内 `finish === 'stop'` 的那条 assistant 的正文。
      *
-     * 不能只看末条：工具密集型回合经常以工具调用收尾（实测某会话 2823 条
-     * assistant 消息里有 2698 条如此）。若按末条判定，`messageHasFinal` 为
-     * false → `finalOutside` 为空 → 整轮正文全部落进**默认折叠**的过程块，
-     * 用户只看到一行「已处理 N 分钟」，回复凭空消失（实测 179 轮里 77 轮中招）。
+     * ⚠️ 不能按「最后一条带 text 的消息」猜。
      *
-     * 末尾那些只含工具调用的消息仍进过程块。折叠态下这点顺序差异不可见，
-     * 展开后内容也齐全，而默认视图正是「用户 + 回复」。
+     * 服务端在 `session.step.ended` 里给出 `finish`（`FinishReason`）：
+     *   - `stop`        模型正常收尾 → 这条正文就是回答
+     *   - `tool-calls`  还要继续调工具 → 这条正文只是过程说明
+     *   - `length`      被输出长度截断 → 仍是回答，只是不完整（兜底用）
+     *
+     * 实测（2026-11-01，笔电主机 ses_e6cc8b786ffepHbTstQ3zvDJ7f）：用户在工作中
+     * 点停止，那一轮最后一条是 `finish=tool-calls` 且带 41 字过程说明。旧判据
+     * 只看「有没有 text」，于是把过程说明当最终回复挂到折叠块**外面** ——
+     * 正是「打断后过程内容泄漏」的形态；刷新（走投影，服务端该轮没有回复）后
+     * 那句话又消失，前后不一致。
+     *
+     * 判据分两层，缺一不可：
+     *
+     *   1. 轮内**有** `finish` → 只信 `finish`（`stop` → `length`）。
+     *      `tool-calls` 一律是过程，即使带正文也不露到壳外。这条挡住的是
+     *      「打断/中断后过程说明泄漏」：实测该轮最后一条是 `finish=tool-calls`
+     *      且带 41 字过程说明，服务端最终形状里这一轮**没有回复**。
+     *
+     *   2. 轮内**完全没有** `finish` → 按位置兜底（最后一条带正文的）。
+     *
+     * 第 2 条是必需的，不是兼容性妥协：**轮次骨架**（历史快照主路径）合成的
+     * 回复消息不带 `finish` —— 实测骨架响应里 `reply` 只有 `{text, messageID,
+     * ordinal}`，没有 finish 字段（见 `api/turnSkeleton.ts` 的 raw.push）。
+     * 若只认 `finish === 'stop'`，刷新后**所有历史轮次的回答都会消失**，
+     * 只剩一行「已处理 N 步」。
+     *
+     * 两层用「轮内是否出现过 finish」来分，而不是逐条兜底：逐条兜底会让
+     * 中断轮里那条 `tool-calls` 的过程说明被重新选中（实测复现）。
      */
+    const finishOf = (message: Message) => (message.info as { finish?: string }).finish
+    const hasFinalText = (message: Message) => messageHasFinal(message)
+    const turnHasFinish = assistants.some(m => finishOf(m) != null)
+    /**
+     * 这一轮是否被中断。
+     *
+     * 服务端在中断轮补一条带 `error.type = 'aborted'` 的 assistant（实测见
+     * `chatPageModel.interruptView.test.ts` 与 `true-abort` 现场：中断时服务端
+     * 发 `session.step.failed{error:{type:'aborted'}}`，刷新后的消息形状是
+     * `finish:'error', error:'aborted'`）。
+     *
+     * 它是唯一能把「被用户打断」和「本来就没有回复的纯工具轮」区分开的信号：
+     * 两者在内容上完全一样（都是若干 tool-calls + 没有 stop）。
+     */
+    const interrupted = assistants.some(m => isAbortedMessage(m.info))
     let finalIndex = -1
-    for (let i = assistants.length - 1; i >= 0; i--) {
-      if (messageHasFinal(assistants[i])) {
-        finalIndex = i
-        break
-      }
+    if (interrupted) {
+      /**
+       * 中断轮**没有最终回复**，不再按位置兜底。
+       *
+       * 单步中断轮（例如刚发出一个长命令就被停止）连 `finish` 都没有：
+       * 服务端只发 `session.step.failed`，不发 `step.ended`，所以这条
+       * assistant 的 `finish` 是 undefined。此时 `turnHasFinish` 为 false，
+       * 旧逻辑会走位置兜底，把那条消息里的过程说明（「这条命令会先静默等待
+       * 90 秒…」）当成最终回答挂到折叠块外面 —— 实测：折叠块已收起，但
+       * 148px 的过程说明仍然可见，正是用户反馈的「打断后泄露已处理折叠设计」。
+       *
+       * 服务端对中断轮的权威结论是「没有回复」：骨架里 `reply: null`。
+       */
+      finalIndex = -1
+    } else if (turnHasFinish) {
+      finalIndex = assistants.findLastIndex(m => finishOf(m) === 'stop' && hasFinalText(m))
+      if (finalIndex < 0) finalIndex = assistants.findLastIndex(m => finishOf(m) === 'length' && hasFinalText(m))
+    } else {
+      // 骨架/老数据：没有服务端信号，退回位置判据
+      finalIndex = assistants.findLastIndex(hasFinalText)
     }
     const finalAssistant = finalIndex >= 0 ? assistants[finalIndex] : null
     const finalId = finalAssistant?.info.id ?? null
@@ -1190,6 +1258,7 @@ export function buildProcessTimeline(
           durationMs,
           isActive: turnIsActive,
           children: rawChildren,
+          ...(interrupted ? { interrupted: true } : {}),
         })
         continue
       }
@@ -1234,6 +1303,18 @@ export function buildProcessTimeline(
        */
       for (let index = 0; index < assistants.length; index++) {
         const m = assistants[index]
+        /**
+         * 内容为空的中断标记消息**不进壳**。
+         *
+         * 多步中断时服务端会补一条空 assistant 只带 `error.type = 'aborted'`。
+         * 它唯一的用途是把「这一轮被中断」告诉时间线（见上面的 `interrupted`）。
+         * 放进壳里的话，MessageRenderer 会把它的错误视图画在折叠区内部 ——
+         * 收起时看不见，展开时又和壳下方的中断提示重复。
+         *
+         * 单步中断时那条消息**本身有内容**（reasoning/text/tool），走下面的
+         * 正常分支进壳即可：它的正文属于过程，`interrupted` 已保证不会被当成回答。
+         */
+        if (isAbortedMessage(m.info) && m.content.length === 0) continue
         if (index === finalIndex) {
           /**
            * 既有正文又有过程的最终回答消息：以 `final` 作用域留在壳内，
@@ -1260,7 +1341,16 @@ export function buildProcessTimeline(
     // 进行中或有过程内容 → 挂壳
     // 更晚的空 pending 回合：turnIsActive=false 且无 children → 不挂壳（只显示 user）
     // 纯 final 正文、无过程 → 直接平铺
-    if (children.length > 0 || turnIsActive) {
+    /**
+     * ⚠️ 中断轮即使 `children` 为空也要挂壳。
+     *
+     * 中断标记消息本身不进壳（它没有内容，只承载「被中断」这个事实），
+     * 所以「只有一条中断消息」的轮次（例如刚发出去就被停止、还没产生任何
+     * 过程）算出来 `children.length === 0`。此时若不挂壳，就会落到下面的
+     * `else` 分支把那条空消息平铺出去 —— 渲染成一个独立的「Message Aborted」
+     * 错误卡片（实测刷新后就是这样），而不是折叠块下方的一行说明。
+     */
+    if (children.length > 0 || turnIsActive || interrupted) {
       items.push({
         kind: 'process-shell',
         key: `process-shell:${userId}`,
@@ -1270,6 +1360,7 @@ export function buildProcessTimeline(
         isActive: turnIsActive,
         children,
         finalMessage: finalOutside,
+        ...(interrupted ? { interrupted: true } : {}),
       })
     } else if (finalOutside) {
       items.push({

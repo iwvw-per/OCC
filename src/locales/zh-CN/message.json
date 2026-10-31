@@ -160,6 +160,7 @@
   "process": {
     "emptyAfterExpand": "这一轮没有可展开的过程内容（可能只有统计信息）。",
     "hydrateFailed": "过程内容拉取失败",
-    "retry": "重试"
+    "retry": "重试",
+    "interrupted": "本轮已被中断，没有最终回复。"
   }
 }

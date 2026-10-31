@@ -435,13 +435,31 @@ describe('v2 event → GlobalEvent', () => {
     expect((p?.properties.data as { statusCode?: number }).statusCode).toBe(429)
   })
 
-  it('maps aborted step.failed to nothing (silent, no error bubble)', () => {
+  it('maps aborted step.failed to a MessageAbortedError so the turn can show「已中断」', () => {
+    /**
+     * 2026-11-01 语义修正：abort 不再被静默丢弃。
+     *
+     * 服务端真中断（`session.interrupt`，笔电主机 ses_e6c99dcdeffeMcaqrZebeKHF1R）
+     * 发出的就是这条事件：
+     *   session.step.failed { error: { type: 'aborted', message: 'Step interrupted' } }
+     *   session.execution.interrupted { reason: 'user' }
+     * 刷新后的最终形状是同一条 assistant 被打上 `error.type = 'aborted'`。
+     *
+     * 丢掉它，实时视图就只剩 `finish=tool-calls` 的过程正文，与「本来就没有
+     * 回复的纯工具轮」无法区分 —— 用户看不到任何中断说明。
+     *
+     * 它不会变成红色错误气泡：可见性与时间线把它识别成中断标记，渲染成
+     * 折叠块下方一行「本轮已被中断」（见 ProcessCollapseBlock 的 interrupted）。
+     */
     const p = payloadOf({
       type: 'session.step.failed',
       data: { sessionID: 's', assistantMessageID: 'm', error: { type: 'aborted', message: 'Step interrupted' } },
       location: { directory: '/w' },
     })
-    expect(p).toBeNull()
+    expect(p?.type).toBe(EventTypes.MESSAGE_UPDATED)
+    const info = p?.properties.info as { id: string; error: { name: string } }
+    expect(info.id).toBe('m')
+    expect(info.error.name).toBe('MessageAbortedError')
   })
 
   it('maps step.ended to MESSAGE_UPDATED carrying tokens/cost (no model/agent fields to clobber)', () => {

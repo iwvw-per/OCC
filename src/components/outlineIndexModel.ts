@@ -1,5 +1,5 @@
 import type { Message } from '../types/message'
-import { getMessageText, hasRenderableContent, isAbortedMessage, isUserMessage } from '../types/message'
+import { getMessageText, hasRenderableContent, isUserMessage } from '../types/message'
 
 const FULL_TITLE_MAX = 80
 
@@ -45,8 +45,15 @@ function normalizeWhitespace(s: string): string {
 
 function messageHasContent(msg: Message): boolean {
   const hasRenderable = hasRenderableContent(msg)
+  /**
+   * 有错误的助手消息始终可见（含 abort）。
+   *
+   * abort 对应「这一轮被中断」，服务端记成一条内容为空的 assistant。
+   * 与 `chatAreaVisibility` 保持一致，否则大纲里有这一轮、对话区没有
+   * （或反之），点大纲跳转会落到空白处。
+   */
   if (msg.info.role === 'assistant' && 'error' in msg.info && msg.info.error) {
-    return isAbortedMessage(msg.info) ? hasRenderable : true
+    return true
   }
   if (msg.content.length === 0) return true
   return hasRenderable

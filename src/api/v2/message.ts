@@ -1,5 +1,5 @@
 import type { MessageWithParts, Part, TextPart, ReasoningPart, ToolPart, FilePart, AgentPart } from '../../types'
-import { rec, str, num, list } from './adapt'
+import { rec, str, num, list, toMessageError } from './adapt'
 import { mapInSlices } from '../../utils/chunkedWork'
 
 function adaptToolState(raw: unknown): ToolPart['state'] {
@@ -217,6 +217,21 @@ export function adaptMessage(raw: unknown): MessageWithParts | null {
           cache: { read: num(cache.read) ?? 0, write: num(cache.write) ?? 0 },
         },
         finish: str(m.finish),
+        /**
+         * 消息级错误必须保留。
+         *
+         * ⚠️ 此前这里完全不读 `error`，于是**刷新后「这一轮是被打断的」这个
+         * 事实消失**：实时路径（`v2/events.ts` 的 `session.step.failed`）会把
+         * 服务端错误映射成 `MessageAbortedError` 挂到消息上，而历史快照走
+         * `adaptMessage`，丢掉 error 后同一个会话刷新前后呈现不一致 ——
+         * 用户看到的就是「打断后界面变了样」。
+         *
+         * 服务端实测（2026-11-01，笔电主机 ses_e6cc8b786ffepHbTstQ3zvDJ7f）：
+         * 中断那一轮的末条是
+         *   `{ finish: 'error', error: { type: 'aborted', message: 'Step interrupted' }, content: [] }`
+         * 且同页 idle 的 `outcome = 'interrupted'`。
+         */
+        ...(m.error != null ? { error: toMessageError(rec(m.error)) } : {}),
       } as never,
       parts: adaptAssistantParts(m),
       ...(lightweight ? { lightweight } : {}),

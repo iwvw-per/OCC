@@ -42,3 +42,44 @@ export function toolResultMetadata(data: Record<string, unknown>): Record<string
   }
   return undefined
 }
+
+/**
+ * 把 v2 的 `SessionStructuredError`（`{ type, message, status?, response? }`）映射为
+ * 前端 `MessageError['name']`。
+ *
+ * v2 用 `type`（如 `provider.quota` / `provider.auth` / `aborted`），v1/前端用 `name`
+ * （`APIError` / `ProviderAuthError` / `MessageAbortedError` …）。此前误读 `error.name`
+ * 导致语义丢失（额度超限等被显示成通用 UnknownError）。
+ *
+ * 放在 adapt.ts 而不是 events.ts：**实时事件**（`session.step.failed`）与
+ * **历史快照**（`message.list` 里的 `error` 字段）都要走同一套映射，否则同一个
+ * 错误在刷新前后会呈现成两种形态。
+ */
+export function mapV2ErrorName(error: Record<string, unknown>): string {
+  const type = str(error.type) ?? ''
+  const status = num(error.status)
+  if (type === 'aborted' || type === 'interrupted') return 'MessageAbortedError'
+  if (type === 'provider.auth' || status === 401 || status === 403) return 'ProviderAuthError'
+  if (type === 'provider.quota' || type === 'provider.rate_limit' || status === 429) return 'APIError'
+  if (type.startsWith('provider.') || type.startsWith('tool.') || status !== undefined) return 'APIError'
+  return 'UnknownError'
+}
+
+/**
+ * 把 v2 结构化错误转成前端 `MessageError`（name + data），供错误视图渲染。
+ * data 字段对齐 MessageErrorView：message / statusCode / isRetryable / responseBody。
+ */
+export function toMessageError(error: Record<string, unknown>): { name: string; data: Record<string, unknown> } {
+  const name = mapV2ErrorName(error)
+  const response = rec(error.response)
+  return {
+    name,
+    data: {
+      message: str(error.message) ?? str(error.type) ?? 'error',
+      statusCode: num(error.status),
+      isRetryable: name === 'APIError',
+      responseBody: str(response.body),
+      providerID: str(error.providerID),
+    },
+  }
+}

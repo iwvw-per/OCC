@@ -122,6 +122,37 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
     { id: string; kind: string; title: string; status: string; messageId?: string }
   >()
 
+  /**
+   * 每一轮之后的那条 `idle` 的 outcome。
+   *
+   * 骨架里「这一轮怎么结束的」只体现在轮次**之后**的 idle 标记上（实测：
+   * `{type:'idle', outcome:'interrupted'}`）。中断轮本身长这样：
+   *
+   *   { type: 'turn', id: msg_x, reply: null, stats: {stepCount: 1}, durationMs: 8199 }
+   *   { type: 'idle', outcome: 'interrupted' }
+   *
+   * 也就是**回复为空**、也没有任何 `error` 字段 —— 前端无从区分「被用户打断」
+   * 和「本来就没有回复的纯工具轮」，刷新后中断提示直接消失（实测对比：
+   * 实时视图有「本轮已被中断」，刷新后没有）。
+   *
+   * 这里先把「轮次下标 → 其后第一个 idle 的 outcome」算出来，供下面还原
+   * 服务端真实形状（assistant + finish:'error' + error:{type:'aborted'}）。
+   */
+  const outcomeAfterTurn = new Map<number, string>()
+  for (let i = 0; i < data.length; i++) {
+    if (str(rec(data[i]).type) !== 'turn') continue
+    for (let j = i + 1; j < data.length; j++) {
+      const next = rec(data[j])
+      const nextType = str(next.type)
+      if (nextType === 'turn') break
+      if (nextType === 'idle') {
+        const outcome = str(next.outcome)
+        if (outcome) outcomeAfterTurn.set(i, outcome)
+        break
+      }
+    }
+  }
+
   for (const [index, entry] of data.entries()) {
     const item = rec(entry)
     const type = str(item.type)
@@ -275,12 +306,28 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
        * 消息，排序上仍稳定在过程消息之后（同值时按数组插入顺序）。
        */
       const replyCreated = createdAt + (durationMs ?? 0)
+      /**
+       * 中断轮：还原成服务端的真实形状。
+       *
+       * 实测（2026-11-01，笔电主机 ses_e6c99dcdeffeMcaqrZebeKHF1R，真中断）：
+       *   assistant { finish: 'error', error: { type: 'aborted' }, content: [...] }
+       *   idle      { outcome: 'interrupted' }
+       *
+       * 骨架把这轮压成了 `reply: null`，但**它后面的 idle 带着 outcome**。
+       * 不还原这个错误，刷新后中断提示就消失了（实时视图有、刷新后没有，
+       * 实测已复现）。`finish: 'error'` 同时保证 `chatPageModel` 不会把这轮
+       * 的过程说明当成最终回答露到折叠块外。
+       */
+      const turnInterrupted = outcomeAfterTurn.get(index) === 'interrupted'
 
       raw.push({
         type: 'assistant',
         id: replyMessageId,
         time: { created: replyCreated, completed: replyCreated },
         content,
+        ...(turnInterrupted
+          ? { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }
+          : {}),
         ...(hasProcess || changedFiles.length > 0
           ? {
               lightweight: {

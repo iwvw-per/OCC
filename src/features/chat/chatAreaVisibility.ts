@@ -1,12 +1,22 @@
 import type { Message, Content } from '../../types/message'
-import { hasRenderableContent, isAbortedMessage, isVisibleReasoningContent, isVisibleTextContent } from '../../types/message'
+import { hasRenderableContent, isVisibleReasoningContent, isVisibleTextContent } from '../../types/message'
 
 function messageHasContent(message: Message): boolean {
   const hasRenderable = hasRenderableContent(message)
-  // 有非 abort 错误的助手消息始终可见（展示错误信息）。
-  // abort 只有在已经产生可见内容时才显示；空 abort 不占信息流位置。
+  /**
+   * 有错误的助手消息始终可见（展示错误信息）。
+   *
+   * ⚠️ abort（用户主动停止）也算：服务端把「这一轮被中断」记成一条**内容为空**
+   * 的 assistant 消息（`finish: 'error'`、`error.type = 'aborted'`）。旧规则
+   * 「空 abort 不占信息流位置」会把它整条过滤掉，于是时间线只看到前面那些
+   * `finish=tool-calls` 的过程消息 —— 无法区分「被用户打断」和「本来就没有
+   * 回复的纯工具轮」，界面上两者都只剩一个折叠块，用户看不到任何中断说明。
+   *
+   * 现在让它进可见列表，由过程壳把「已中断」渲染在折叠块下方
+   * （见 chatPageModel 的 `interrupted` 标记），不额外占一整行。
+   */
   if (message.info.role === 'assistant' && 'error' in message.info && message.info.error) {
-    return isAbortedMessage(message.info) ? hasRenderable : true
+    return true
   }
   /**
    * 骨架轮：正文已被主机 Agent 剥掉，只剩「过程规模」。
