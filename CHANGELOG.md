@@ -1,11 +1,14 @@
 # Changelog
 
-## [未发布]
+## [v2.0.53] - 2026-10-31
 
-- fix(sync): 轮次投影合成的「该轮回复」改用「轮次起点 + 总耗时」做 created。此前用轮次起点（= user 的 created），与流式过程消息混排后回复被排到本轮最前，渲染层据此把过程说明当最终回答，真正的回答被折进折叠块——表现为「回复显示不全，Ctrl+R 刷新才完整」（中途打开会话 + 多工具长回合必现）
+- fix(chat): 修复「回复显示不全，Ctrl+R 刷新才完整」。轮次投影合成的「该轮回复」原本用轮次起点（user 的 created）当消息时间，与流式过程消息混排后回复被排到本轮最前，渲染层据此把过程里的最后一句说明当成最终回答，真正的回答被折进默认收起的过程块
 - fix(chat): 最终回答那条消息自身也以工具调用收尾时，整条以 `process` 作用域挂进壳导致正文一个字都不渲染；改为 `final` 作用域，壳内只画正文
-- fix(sync): 「只刷元数据」两条早退分支补上权威 idle 落地与定稿校正，中途打开的会话不再永久停在「处理中」
-- fix(sync): 不再无条件采信 `/api/session/active`——该接口会残留已结束的会话（实测 idle 早 10~30 分钟仍报 running），现在用「权威 idle 时间 ≥ 会话最近消息」判定为残留并落定为 idle
+- fix(chat): 修复「回复已写完却一直显示处理中」。`/api/session/active` 会残留已结束的会话（实测 idle 早 10~30 分钟仍报 running），前端不再无条件采信：记录权威 idle 时间，并用「末条 assistant 是否已定稿」过滤残留
+- fix(sync): 「只刷元数据」两条早退分支补上权威 idle 落地与定稿校正，中途打开的会话不再永久停在「处理中」、也不会跳过轮次结束时的服务端对账
+- fix(android): 修复安卓无法一键更新。原实现调用 `plugin-opener` 的 `openPath()`，而该插件的 Android 侧只注册了 `open`、没有 `open_path`，且只发 file:// Intent（Android 7+ 会抛 FileUriExposedException）。改为原生桥 + FileProvider content:// URI
+- fix(android): Manifest 补 `REQUEST_INSTALL_PACKAGES`（缺它「安装未知应用」判定恒为 false）；缺权限时自动跳授权页并给出明确提示
+- fix(android): FileProvider 可共享范围收窄到 `cacheDir/updates`，不再暴露整个缓存与外部存储
 
 ## [v2.0.52] - 2026-10-31
 
