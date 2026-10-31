@@ -77,8 +77,8 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
   }, [messages])
 
   const contextUsagePercent = useMemo(() => {
-    // contextPercent 为 null 表示「窗口未知」，不能当成 0% 展示
-    if (stats.contextUsed <= 0 || stats.contextPercent === null) return null
+    // contextPercent 为 null 表示「窗口未知」或「占用未知」，不能当成 0% 展示
+    if (!stats.contextUsed || stats.contextPercent === null) return null
     return Math.round(stats.contextPercent)
   }, [stats.contextUsed, stats.contextPercent])
 

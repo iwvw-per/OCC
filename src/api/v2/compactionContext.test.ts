@@ -89,17 +89,21 @@ describe('compaction marker end-to-end', () => {
     expect(stats.contextUsed).toBe(1100)
   })
 
-  it('uses the marker when no newer turn has run yet', () => {
+  it('reports unknown for the marker because it carries no server tokens', () => {
     const page = adaptMessagePage(v2Page())
     const marker = page.compaction!
 
-    // 压缩后还没有新消息（消息尚未重拉）：必须按 marker 显示，
-    // 否则圆环会回落到 0 或停留在压缩前的高水位。
+    /**
+     * 语义变更：压缩后占用**只认服务端实测值**。
+     *
+     * marker 只有「摘要字符数 + 近期字符数」，换算出来是估算；而估算系统性
+     * 偏低（图片/附件不计入），用户会据此误判「还很空」。因此压缩后若还没有
+     * 新的实测值，显示未知，等下一轮 assistant 的 tokens。
+     */
     const stats = computeSessionStats([], 200_000, undefined, undefined, marker)
 
-    expect(stats.contextUsed).toBe(Math.ceil((5442 + 92_322) / 4))
-    expect(stats.contextUsed).toBeLessThan(30_000)
-    // 字符数换算而来，如实标注为估算
-    expect(stats.contextEstimated).toBe(true)
+    expect(stats.contextUsed).toBeNull()
+    expect(stats.contextPercent).toBeNull()
+    expect(stats.contextEstimated).toBe(false)
   })
 })

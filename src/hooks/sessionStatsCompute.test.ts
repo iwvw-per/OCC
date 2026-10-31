@@ -77,17 +77,17 @@ describe('context usage snapshot（骨架投影不带 tokens 的兜底）', () =
 
   it('uses the snapshot when no message carries tokens', () => {
     // 典型场景：走网关骨架投影进入会话，消息里没有 tokens。
-    // 没有快照只能按字符估算（这里只有十几个字 → 极小值）。
+    // 没有快照就是「未知」—— 不再按字符估算（图片/附件不计入，估算系统性偏低）。
     const messages = [userMessage('u1', '问题', 0), skeletonAssistant('a1', 5)]
-    const estimated = computeSessionStats(messages, 200000)
+    const unknown = computeSessionStats(messages, 200000)
     const withSnapshot = computeSessionStats(messages, 200000, undefined, undefined, undefined, {
       at: BASE,
       tokens: { input: 8000, output: 300, reasoning: 200, cache: { read: 4000, write: 0 } },
       cost: 0,
     })
 
-    expect(estimated.contextEstimated).toBe(true)
-    expect(estimated.contextUsed).toBeLessThan(100)
+    expect(unknown.contextUsed).toBeNull()
+    expect(unknown.contextPercent).toBeNull()
 
     // 官方口径：input + output + reasoning + cache.read + cache.write
     expect(withSnapshot.contextUsed).toBe(12500)
@@ -124,7 +124,7 @@ describe('context usage snapshot（骨架投影不带 tokens 的兜底）', () =
     expect(stats.contextUsed).toBe(3000)
   })
 
-  it('falls back to estimation when the snapshot is empty', () => {
+  it('reports unknown (not an estimate) when the snapshot is empty', () => {
     const messages = [userMessage('u1', '问题', 0), skeletonAssistant('a1', 5)]
     const stats = computeSessionStats(messages, 200000, undefined, undefined, undefined, {
       at: BASE,
@@ -132,12 +132,14 @@ describe('context usage snapshot（骨架投影不带 tokens 的兜底）', () =
       cost: 0,
     })
 
-    expect(stats.contextEstimated).toBe(true)
+    expect(stats.contextUsed).toBeNull()
+    expect(stats.contextPercent).toBeNull()
+    expect(stats.contextEstimated).toBe(false)
   })
 })
 
 describe('computeSessionStats', () => {
-  it('switches to estimated context after a compaction turn', () => {
+  it('reports unknown context after a compaction turn with no measured tokens', () => {
     const stats = computeSessionStats(
       [
         {
@@ -201,16 +203,17 @@ describe('computeSessionStats', () => {
       200000,
     )
 
-    expect(stats.contextEstimated).toBe(true)
-    expect(stats.contextUsed).toBeLessThan(12000)
-    expect(stats.contextUsed).toBeGreaterThan(0)
+    // 压缩摘要消息不带实测 tokens → 占用未知（不再按字符估算）
+    expect(stats.contextUsed).toBeNull()
+    expect(stats.contextPercent).toBeNull()
+    expect(stats.contextEstimated).toBe(false)
   })
 
   it('reuses equality when numeric fields are unchanged', () => {
     const a = computeSessionStats([], 200000)
     const b = computeSessionStats([], 200000)
     expect(isSameSessionStats(a, b)).toBe(true)
-    expect(isSameSessionStats(a, { ...b, contextUsed: b.contextUsed + 1 })).toBe(false)
+    expect(isSameSessionStats(a, { ...b, contextUsed: (b.contextUsed ?? 0) + 1 })).toBe(false)
   })
 
   it('uses the server-reported post-compaction usage instead of estimating', () => {
@@ -245,10 +248,10 @@ describe('computeSessionStats', () => {
       { at: 1500, tokens: { input: 900, output: 100, reasoning: 0, cache: { read: 0, write: 0 } } },
     )
 
-    // 回到最近一条带 tokens 的消息口径（31000），再加上末尾尚未处理的用户输入
-    // 'next turn'（9 字符 → 3 token）。此前末尾多一条 user 消息会让整轮退回字符
-    // 估算，把实测值丢掉 —— 实测高估过 46%。
-    expect(stats.contextUsed).toBe(31003)
+    // 回到最近一条带 tokens 的消息口径（31000）。
+    // 末尾尚未处理的用户输入不再按字符加进去 —— 那是估算，与「只认服务端实测」
+    // 相冲突；真实值在下一轮 assistant 的 tokens 里出现。
+    expect(stats.contextUsed).toBe(31000)
   })
 
   it('prefers server cumulative usage over summing visible messages', () => {
@@ -340,17 +343,22 @@ describe('computeSessionStatsCached', () => {
       recentChars: 4000,
     })
     expect(after).not.toBe(before)
-    expect(after.contextUsed).toBe(3000)
+    // 没有任何服务端实测值 → 占用未知（不再按字符换算）
+    expect(after.contextUsed).toBeNull()
+    expect(after.contextPercent).toBeNull()
   })
 })
 
 describe('v2 compaction marker → context usage', () => {
   /**
    * v2 的压缩记录只在 `message.list` 里（`type: "compaction"`），没有压缩事件。
-   * 该条目的 tokens 是**压缩前**用量，不能直接用；压缩后上下文 ≈ 摘要 + 近期消息。
-   * 旧轮次若仍被算进上下文，圆环永远停在压缩前的高水位 —— 用户报的正是这个。
+   * 该条目的 tokens 是**压缩前**用量，不能直接用。
+   *
+   * 压缩后的占用**只认服务端实测值**（`session.compaction.ended` 的 tokens）。
+   * marker 只有字符数，换算出来是估算，现在不再采用 —— 因此压缩后若还没有
+   * 新的实测值，占用显示为未知，而不是一个偏低的假数字。
    */
-  it('drops the context estimate after compaction', () => {
+  it('does not invent a context estimate from the compaction marker', () => {
     const messages = [
       userMessage('u1', 'x'.repeat(200_000), 0),
       assistantMessage('a1', 1000, { input: 90_000, output: 1000, reasoning: 0, cache: { read: 0, write: 0 } }),
@@ -359,39 +367,39 @@ describe('v2 compaction marker → context usage', () => {
     const before = computeSessionStats(messages, 200000)
     expect(before.contextUsed).toBeGreaterThan(50_000)
 
-    // 压缩完成后：摘要 5.4KB + 近期 92KB ≈ 24.4k tokens（实测参考值）
-    const after = computeSessionStats(messages, 200000, undefined, undefined, {
+    // 压缩完成后：摘要 5.4KB + 近期 92KB（只有字符数，没有服务端 tokens）。
+    // 压缩事件给出 tokens 时口径见下一条用例；这里只有 marker，不该凭空造数字。
+    const after = computeSessionStats(messages, 200000, { at: BASE + 2000, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }, undefined, {
       at: BASE + 2000,
       summaryChars: 5442,
       recentChars: 92_322,
     })
 
-    expect(after.contextUsed).toBeLessThan(before.contextUsed)
-    expect(after.contextUsed).toBe(Math.ceil((5442 + 92_322) / 4))
-    // 压缩标记是服务端记录的规模，但字符→token 是换算，仍如实标注为估算
-    expect(after.contextEstimated).toBe(true)
+    // 压缩快照 tokens 全 0 + 末条实测值早于压缩 → 未知
+    expect(after.contextUsed).toBeNull()
+    expect(after.contextPercent).toBeNull()
+    expect(after.contextEstimated).toBe(false)
   })
 
-  it('lets a newer assistant turn take over from the marker', () => {
+  it('ignores the marker entirely and keeps the measured message usage', () => {
     const messages = [
       assistantMessage('a1', 1000, { input: 5000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }),
     ]
 
-    // 压缩在 a1 之后才发生 → 本轮之后的新用量不存在，用 marker
+    // marker 只有字符数、没有服务端 tokens → 不参与计算，始终用消息实测值
     const withMarker = computeSessionStats(messages, 200000, undefined, undefined, {
       at: BASE + 2000,
       summaryChars: 4000,
       recentChars: 0,
     })
-    expect(withMarker.contextUsed).toBe(1000)
+    expect(withMarker.contextUsed).toBe(5100)
 
-    // marker 早于 a1：说明压缩之后又跑了新一轮，真实用量优先
-    const withNewerTurn = computeSessionStats(messages, 200000, undefined, undefined, {
+    const withOlderMarker = computeSessionStats(messages, 200000, undefined, undefined, {
       at: BASE - 5000,
       summaryChars: 4000,
       recentChars: 0,
     })
-    expect(withNewerTurn.contextUsed).toBe(5100)
+    expect(withOlderMarker.contextUsed).toBe(5100)
   })
 
   it('ignores a marker without any size information', () => {

@@ -71,7 +71,8 @@ export const WorkStatusSessionSection = memo(function WorkStatusSessionSection({
    * 百分比虚高 5 倍。窗口未知时 `contextPercent` 为 null，这里显示「—」。
    */
   const stats = useSessionStatsFor(sessionId, contextLimit > 0 ? contextLimit : 0)
-  const hasUsage = stats.contextUsed > 0
+  // contextUsed 为 null 表示服务端还没给出实测值 —— 显示「—」，不做字符估算
+  const hasUsage = stats.contextUsed != null && stats.contextUsed > 0
   const percent = hasUsage ? stats.contextPercent : null
   const cost = stats.totalCost > 0 ? stats.totalCost : null
 

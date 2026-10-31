@@ -115,9 +115,10 @@ describe('useSessionStats', () => {
 
     const { result } = renderHook(() => useSessionStats(200000))
 
-    expect(result.current.contextEstimated).toBe(true)
-    expect(result.current.contextUsed).toBeLessThan(12000)
-    expect(result.current.contextUsed).toBeGreaterThan(0)
+    // 压缩摘要消息不带实测 tokens → 占用未知（不再按字符估算）
+    expect(result.current.contextUsed).toBeNull()
+    expect(result.current.contextPercent).toBeNull()
+    expect(result.current.contextEstimated).toBe(false)
   })
 
   it('reuses the same stats object when numeric fields do not change', async () => {

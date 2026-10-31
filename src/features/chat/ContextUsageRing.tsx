@@ -42,8 +42,8 @@ export function ContextUsageRing({ contextLimit, onOpenDetails, className }: Con
           : 'text-accent-main-100'
 
   const title = known
-    ? `${t('sidebar.contextUsage')}: ${formatTokens(stats.contextUsed)} / ${formatTokens(stats.contextLimit)} · ${Math.round(percent)}% · ${formatCost(stats.totalCost)}`
-    : `${t('sidebar.contextUsage')}: ${formatTokens(stats.contextUsed)} · ${t('sidebar.contextLimitUnknown')} · ${formatCost(stats.totalCost)}`
+    ? `${t('sidebar.contextUsage')}: ${formatTokens(stats.contextUsed ?? 0)} / ${formatTokens(stats.contextLimit)} · ${Math.round(percent)}% · ${formatCost(stats.totalCost)}`
+    : `${t('sidebar.contextUsage')}: ${stats.contextUsed === null ? '—' : formatTokens(stats.contextUsed)} · ${t('sidebar.contextLimitUnknown')} · ${formatCost(stats.totalCost)}`
 
   return (
     <button

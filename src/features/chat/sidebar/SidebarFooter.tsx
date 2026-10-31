@@ -16,7 +16,6 @@ import {
 import { CircularProgress } from '../../../components/CircularProgress'
 import { SegmentedControl } from '../../settings/components/SettingsUI'
 import { formatTokens, formatCost, useTheme, useSessionStats } from '../../../hooks'
-import { useHasMessages } from '../../../store'
 import { useServerStore, type ServerHealth } from '../../../hooks/useServerStore'
 import { interactive } from '../../../utils/interaction'
 
@@ -68,8 +67,7 @@ export function SidebarFooter({
 }: SidebarFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { mode: themeMode, setThemeWithAnimation: onThemeChange, chatContentWidth, resetChatContentWidth } = useTheme()
-  // 统计与 hasMessages 留在 footer：流式时不让整个 SidePanel 跟着 messages 重渲
-  const hasMessages = useHasMessages()
+  // 统计留在 footer：流式时不让整个 SidePanel 跟着 messages 重渲
   const stats = useSessionStats(contextLimit)
   const { activeServer, getHealth } = useServerStore()
   // 健康探测优先于 SSE 连接态：SSE 长连接在进程死后可能长时间挂着，
@@ -257,7 +255,7 @@ export function SidebarFooter({
             </div>
             <div className="flex justify-between text-[length:var(--fs-xxs)] text-text-400 tabular-nums">
               <span>
-                {formatTokens(stats.contextUsed)} /{' '}
+                {stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} /{' '}
                 {contextKnown ? formatTokens(stats.contextLimit) : t('sidebar.contextLimitUnknown')}
               </span>
               <span>{formatCost(stats.totalCost)}</span>
@@ -365,7 +363,7 @@ export function SidebarFooter({
             paddingLeft: showLabels ? 6 : 5,
             paddingRight: showLabels ? 8 : 4,
           }}
-          title={`Context: ${formatTokens(hasMessages ? stats.contextUsed : 0)} tokens • ${contextKnown ? `${Math.round(stats.contextPercent!)}%` : t('sidebar.contextLimitUnknown')} • ${formatCost(stats.totalCost)}`}
+          title={`Context: ${stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} tokens • ${contextKnown ? `${Math.round(stats.contextPercent!)}%` : t('sidebar.contextLimitUnknown')} • ${formatCost(stats.totalCost)}`}
         >
           {/* 状态指示器 */}
           <StatusIndicator percent={stats.contextPercent ?? 0} size={20} />
@@ -376,7 +374,7 @@ export function SidebarFooter({
             style={{ opacity: showLabels ? 1 : 0 }}
           >
             <span className="text-[length:var(--fs-sm)] tabular-nums text-text-300 truncate">
-              {hasMessages ? formatTokens(stats.contextUsed) : '0'} /{' '}
+              {stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} /{' '}
               {contextKnown ? formatTokens(stats.contextLimit) : t('sidebar.contextLimitUnknown')}
             </span>
             <span
