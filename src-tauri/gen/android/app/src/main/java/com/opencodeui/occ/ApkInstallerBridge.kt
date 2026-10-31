@@ -21,6 +21,10 @@ import java.io.File
  *
  * 正确做法：FileProvider 生成 `content://` URI → `ACTION_INSTALL_PACKAGE` /
  * `ACTION_VIEW`，并授予临时读权限。系统安装器负责签名校验与用户确认。
+ *
+ * 首次使用必须授权「安装未知应用」：这里**不报错**，而是把「待安装」挂起，
+ * 跳设置页；用户返回后由 MainActivity.onResume → resumePendingInstall()
+ * 自动续上，用户点一次更新就能走完。
  */
 class ApkInstallerBridge(private val activity: MainActivity) {
 
@@ -28,6 +32,9 @@ class ApkInstallerBridge(private val activity: MainActivity) {
   private fun updatesDir(): File = File(activity.cacheDir, "updates")
 
   private fun authority(): String = "${activity.packageName}.fileprovider"
+
+  /** 已下载完、但被「安装未知应用」权限挡住的 APK 文件名。用户返回后自动续装。 */
+  private var pendingInstallFileName: String? = null
 
   /** 调用方必须在 Android 8+ 打开「安装未知应用」权限，否则系统安装器会直接拒绝。 */
   @JavascriptInterface
@@ -46,7 +53,7 @@ class ApkInstallerBridge(private val activity: MainActivity) {
         Uri.parse("package:${activity.packageName}")
       )
       intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      // 同样必须回主线程（JavaBridge 线程不能拉起 Activity）
+      // JavaBridge 线程不能拉起 Activity，必须回主线程
       activity.runOnUiThread {
         try {
           activity.startActivity(intent)
@@ -63,24 +70,56 @@ class ApkInstallerBridge(private val activity: MainActivity) {
   /**
    * 打开系统安装界面。
    *
+   * 没有「安装未知应用」权限时**不返回错误**：记住这次待装的包并跳授权页，
+   * 用户返回后由 [resumePendingInstall] 自动继续。
+   *
    * @param fileName 仅文件名（不接受路径），必须在 updates 目录内 —— 防止通过
    *   JS 桥把任意路径包装成 content:// 交给安装器。
-   * @return null 表示已成功拉起安装界面；否则返回错误描述。
+   * @return null 表示已拉起安装界面、或已转去授权（两者对用户都是「进行中」）；
+   *   只有真正的失败（文件不存在、FileProvider 异常）才返回错误描述。
    */
   @JavascriptInterface
   fun install(fileName: String): String? {
-    val safeName = fileName.substringAfterLast('/').substringAfterLast('\\')
-    if (safeName.isEmpty() || safeName.contains("..")) return "invalid file name"
-
+    val safeName = sanitize(fileName) ?: return "invalid file name"
     val file = File(updatesDir(), safeName)
     if (!file.isFile || file.length() <= 0L) return "installer file missing"
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-      !activity.packageManager.canRequestPackageInstalls()
-    ) {
-      return "install permission required"
+    if (!canRequestInstall()) {
+      // 首次安装的常态路径：挂起 + 去授权，而不是报错中断
+      pendingInstallFileName = safeName
+      if (!openInstallPermissionSettings()) {
+        pendingInstallFileName = null
+        return "install permission required"
+      }
+      return null
     }
 
+    pendingInstallFileName = null
+    return launchInstaller(file)
+  }
+
+  /**
+   * 用户从「安装未知应用」设置页返回时调用（MainActivity.onResume）。
+   *
+   * 只有「之前确实挂起过一次安装」且「现在已授权」才续装，避免每次回到前台
+   * 都重复拉起安装界面。
+   */
+  fun resumePendingInstall() {
+    val name = pendingInstallFileName ?: return
+    if (!canRequestInstall()) return
+    pendingInstallFileName = null
+    val file = File(updatesDir(), name)
+    if (!file.isFile || file.length() <= 0L) return
+    launchInstaller(file)
+  }
+
+  private fun sanitize(fileName: String): String? {
+    val safe = fileName.substringAfterLast('/').substringAfterLast('\\')
+    if (safe.isEmpty() || safe.contains("..")) return null
+    return safe
+  }
+
+  private fun launchInstaller(file: File): String? {
     return try {
       val uri = FileProvider.getUriForFile(activity, authority(), file)
       val viewIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -105,9 +144,7 @@ class ApkInstallerBridge(private val activity: MainActivity) {
        * ⚠️ 必须切到主线程再 startActivity。
        *
        * `@JavascriptInterface` 方法运行在 WebView 的 JavaBridge 线程，不是 UI 线程；
-       * 从非 UI 线程拉起 Activity 在部分 ROM 上会抛
-       * "Calling startActivity() from outside of an Activity context requires
-       * the FLAG_ACTIVITY_NEW_TASK flag" 之外的时序异常，或静默失败。
+       * 从非 UI 线程拉起 Activity 在部分 ROM 上会静默失败。
        */
       activity.runOnUiThread {
         try {

@@ -1,10 +1,15 @@
-import { useCallback, useRef, useState, useSyncExternalStore, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/Button'
 import { DownloadIcon, ExternalLinkIcon, RetryIcon, UploadIcon } from '../../../components/Icons'
 import { hasUpdateAvailable, updateStore, useUpdateStore, getReleaseManifestUrl, RELEASES_PAGE_URL } from '../../../store/updateStore'
 import { desktopUpdater, isDesktopUpdaterAvailable, type UpdaterProgress } from '../../../utils/desktopUpdater'
-import { androidUpdater, isAndroidUpdaterAvailable, type AndroidUpdateProgress } from '../../../utils/androidUpdater'
+import {
+  androidUpdater,
+  isAndroidUpdaterAvailable,
+  watchAndroidUpdateResume,
+  type AndroidUpdateProgress,
+} from '../../../utils/androidUpdater'
 import { saveData } from '../../../utils/downloadUtils'
 import { exportSettingsBackup, importSettingsBackup, previewBackupMeta } from '../../../utils/settingsBackup'
 import { isTauri } from '../../../utils/tauri'
@@ -53,7 +58,12 @@ export function AboutSettings() {
     updaterProgress.phase === 'downloading' ||
     updaterProgress.phase === 'installing'
   const androidBusy =
-    androidProgress.phase === 'downloading' || androidProgress.phase === 'installing'
+    androidProgress.phase === 'downloading' ||
+    androidProgress.phase === 'awaitingPermission' ||
+    androidProgress.phase === 'installing'
+
+  // 从「安装未知应用」设置页返回后推进更新状态（否则界面会停在「等待授权」）
+  useEffect(() => watchAndroidUpdateResume(), [])
 
   const handleCheckUpdates = useCallback(() => {
     void updateStore.checkForUpdates({ force: true })
@@ -136,6 +146,9 @@ export function AboutSettings() {
     statusText = t('about.autoUpdateError', { error: androidProgress.error ?? '' })
   } else if (updaterProgress.phase === 'ready') {
     statusText = t('about.autoUpdateReady')
+  } else if (androidProgress.phase === 'awaitingPermission') {
+    // 首次更新：已跳去「安装未知应用」授权页，返回后自动续装
+    statusText = t('about.androidAwaitingPermission')
   } else if (androidProgress.phase === 'installing') {
     // Android 下载完成：系统安装界面已弹出，等用户确认
     statusText = t('about.androidInstalling')

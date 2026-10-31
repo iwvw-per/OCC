@@ -105,6 +105,10 @@ class MainActivity : TauriActivity() {
       liveUpdateRunning = true
       LiveUpdateService.restore(this)
     }
+    // 一键更新：用户刚从「安装未知应用」设置页返回。
+    // 首次更新必须先授权，这里直接续上被挂起的安装，不必让用户再点一次「立即更新」
+    // —— 也就不会弹出「无权限」的错误（那正是用户反馈的问题）。
+    apkInstallerBridge.resumePendingInstall()
   }
 
   override fun onPause() {

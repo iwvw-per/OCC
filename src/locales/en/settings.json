@@ -506,6 +506,7 @@
     "autoUpdateReady": "Update ready. Restart to apply.",
     "autoUpdateRestart": "Restart app",
     "autoUpdateError": "Auto update failed: {{error}}",
+    "androidAwaitingPermission": "Installer downloaded. Allow “Install unknown apps” in system settings; the install continues automatically when you come back.",
     "androidInstalling": "Download complete. Confirm the installation in the system dialog.",
     "androidNoApk": "No installer matching this device was found for this version.",
     "androidInstallerUnavailable": "The installer component is unavailable. Restart the app and try again.",

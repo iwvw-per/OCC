@@ -83,7 +83,15 @@ describe('androidUpdater 安装阶段', () => {
     expect(updater.getSnapshot().error).toBeNull()
   })
 
-  it('没有「安装未知应用」权限时打开设置页并给出明确提示', async () => {
+  /**
+   * 回归（用户反馈）：「首次授权后不应该弹无权限报错」。
+   *
+   * 旧实现下载完发现没权限，先跳设置页、再 `throw` —— 用户授权返回后看到的是
+   * 「更新失败：需要允许安装未知应用」，明明已经授权了。
+   * 正确行为：进入 awaitingPermission（不是 error），原生侧挂起这次安装，
+   * 用户返回后自动续装。
+   */
+  it('没有「安装未知应用」权限时进入等待授权状态，而不是报错', async () => {
     const install = vi.fn(() => null)
     const openInstallPermissionSettings = vi.fn(() => true)
     installBridge({ canRequestInstall: () => false, openInstallPermissionSettings, install })
@@ -94,9 +102,45 @@ describe('androidUpdater 安装阶段', () => {
 
     expect(openInstallPermissionSettings).toHaveBeenCalledTimes(1)
     expect(install).not.toHaveBeenCalled()
-    expect(updater.getSnapshot().phase).toBe('error')
-    // 测试环境的默认语言是 en，断言不依赖具体语种
-    expect(updater.getSnapshot().error).not.toBeNull()
+    expect(updater.getSnapshot().phase).toBe('awaitingPermission')
+    expect(updater.getSnapshot().error).toBeNull()
+  })
+
+  it('授权返回后（回前台）自动推进到安装中，且不产生错误', async () => {
+    let granted = false
+    installBridge({
+      canRequestInstall: () => granted,
+      openInstallPermissionSettings: () => true,
+      install: () => null,
+    })
+
+    const { AndroidUpdater } = await import('./androidUpdater')
+    const updater = new AndroidUpdater()
+    await updater.installLatest(release)
+    expect(updater.getSnapshot().phase).toBe('awaitingPermission')
+
+    // 用户在系统设置里点了允许，然后回到应用
+    granted = true
+    updater.syncAfterResume()
+
+    expect(updater.getSnapshot().phase).toBe('installing')
+    expect(updater.getSnapshot().error).toBeNull()
+  })
+
+  it('授权前回到前台保持等待，不误报也不误推进', async () => {
+    installBridge({
+      canRequestInstall: () => false,
+      openInstallPermissionSettings: () => true,
+      install: () => null,
+    })
+
+    const { AndroidUpdater } = await import('./androidUpdater')
+    const updater = new AndroidUpdater()
+    await updater.installLatest(release)
+
+    updater.syncAfterResume()
+    expect(updater.getSnapshot().phase).toBe('awaitingPermission')
+    expect(updater.getSnapshot().error).toBeNull()
   })
 
   it('桥返回错误时把原因带到界面上，而不是静默失败', async () => {

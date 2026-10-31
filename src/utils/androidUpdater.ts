@@ -10,7 +10,11 @@
 // 因此这里做三件事：
 //   1. 从 release 资产里挑出**与当前 CPU 架构匹配**的 APK；
 //   2. 下载到应用缓存目录（带进度）；
-//   3. 用 opener 打开该文件，触发系统安装界面。
+//   3. 交给原生桥拉起系统安装界面（见文件末尾的说明）。
+//
+// ⚠️ 首次更新需要「安装未知应用」授权。此时**不报错**：进入
+// `awaitingPermission` 状态并跳授权页；用户返回后由原生侧自动续装
+// （MainActivity.onResume → ApkInstallerBridge.resumePendingInstall）。
 //
 // 为什么按架构挑：release 同时提供 arm64 与 armv7 两个包，装错架构的包
 // 要么装不上，要么在 32 位设备上跑不起来。用 Rust 侧的 `target_arch`
@@ -26,6 +30,8 @@ import { RELEASE_REPO } from '../store/updateStore'
 export type AndroidUpdatePhase =
   | 'idle'
   | 'downloading'
+  /** 已跳转到「安装未知应用」授权页，等用户返回（返回后自动续装） */
+  | 'awaitingPermission'
   | 'installing'
   | 'error'
 
@@ -88,7 +94,12 @@ interface ApkInstallerBridge {
   canRequestInstall(): boolean
   /** 跳到本应用的「安装未知应用」授权页 */
   openInstallPermissionSettings(): boolean
-  /** 拉起系统安装界面；返回 null 表示成功，否则是错误描述 */
+  /**
+   * 拉起系统安装界面。
+   *
+   * 缺少「安装未知应用」权限时原生侧会挂起这次安装并跳授权页，同样返回 null
+   * —— 对用户来说是「进行中」，不是错误。只有文件缺失等真失败才返回描述。
+   */
   install(fileName: string): string | null
 }
 
@@ -208,10 +219,21 @@ export class AndroidUpdater {
         if (!bridge) {
           throw new Error(i18n.t('settings:about.androidInstallerUnavailable'))
         }
-        // Android 8+ 需要「安装未知应用」授权，否则系统会静默拒绝
+        /**
+         * 首次更新缺少「安装未知应用」授权时，**不当成错误**。
+         *
+         * 实测用户反馈：授权页跳出去、回来后界面报「需要允许安装未知应用」——
+         * 可用户明明已经授权了，体验就是「更新失败」。正确流程是：
+         *   1. 已下载好的 APK 由原生侧挂起；
+         *   2. 这里进入 awaitingPermission，界面上说明「正在等待授权」；
+         *   3. 用户返回后 MainActivity.onResume 自动续装，界面随之变成 installing。
+         *
+         * 所以这里只负责把状态摆对并触发跳转，不再 `throw`。
+         */
         if (!bridge.canRequestInstall()) {
+          this.setProgress({ phase: 'awaitingPermission' })
           bridge.openInstallPermissionSettings()
-          throw new Error(i18n.t('settings:about.androidNeedInstallPermission'))
+          return
         }
         const failure = bridge.install(fileName)
         if (failure) throw new Error(failure)
@@ -228,9 +250,44 @@ export class AndroidUpdater {
     return this.running
   }
 
+  /**
+   * 回到前台时同步「等待授权」的后续状态。
+   *
+   * 用户在「安装未知应用」设置页授权并返回后，**真正的续装由原生侧完成**
+   * （MainActivity.onResume → resumePendingInstall），前端拿不到回调。
+   * 这里在页面重新可见时补一次状态推进，避免界面一直停在「等待授权」。
+   */
+  syncAfterResume(): void {
+    if (this.progress.phase !== 'awaitingPermission') return
+    const bridge = getApkInstallerBridge()
+    if (!bridge) return
+    // 已授权 → 原生侧已续装（或即将续装），界面切到「正在安装」
+    if (bridge.canRequestInstall()) {
+      this.setProgress({ phase: 'installing', error: null })
+    }
+  }
+
   reset(): void {
     this.setProgress({ ...INITIAL_PROGRESS })
   }
 }
 
 export const androidUpdater = new AndroidUpdater()
+
+/**
+ * 页面重新可见时同步更新状态（仅 Android 客户端有意义）。
+ *
+ * 用户去「安装未知应用」设置页授权后返回，续装是由原生侧在 onResume 里完成的，
+ * 前端收不到原生回调；这里补一次状态推进，避免界面卡在「等待授权」。
+ *
+ * 返回取消函数，供调用方在卸载时清理。
+ */
+export function watchAndroidUpdateResume(): () => void {
+  if (typeof document === 'undefined') return () => {}
+  const handler = () => {
+    if (document.visibilityState !== 'visible') return
+    androidUpdater.syncAfterResume()
+  }
+  document.addEventListener('visibilitychange', handler)
+  return () => document.removeEventListener('visibilitychange', handler)
+}
