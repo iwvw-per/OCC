@@ -1,5 +1,5 @@
 import type { Message, ToolPart } from '../../types/message'
-import { isAbortedMessage } from '../../types/message'
+import { isAbortedMessage, isVisibleReasoningContent, isVisibleTextContent } from '../../types/message'
 import { messageCompletedAt } from '../../store/messagePartMerge'
 import { collectChangedFiles } from '../message/parts/changedFiles'
 import type { ChangedFile } from '../message/parts/changedFiles'
@@ -880,6 +880,34 @@ function isEffectiveAssistantMessage(message: Message): boolean {
   return false
 }
 
+/**
+ * 这条消息是否以**可见正文**收尾（忽略空 text / 空 reasoning / 隐藏内容）。
+ *
+ * 用途：中断/失败轮里判断「模型是否已经写出了实质回答」。
+ *
+ * 服务端的语义很稳定（实测三台主机 308 轮 / 5861 条带 finish 的消息）：
+ *   - `finish=tool-calls` 的消息**一定**以 tool 收尾（0 条反例）
+ *   - 以正文收尾的消息，正文就是它那一段执行的结论
+ *
+ * 所以「末 part 是不是可见 text」等价于「这段正文有没有被后续工具调用打断」。
+ */
+function endsWithVisibleText(message: Message): boolean {
+  for (let i = message.content.length - 1; i >= 0; i--) {
+    const part = message.content[i]
+    if (part.type === 'text') {
+      if (isVisibleTextContent(part)) return true
+      continue
+    }
+    if (part.type === 'reasoning') {
+      if (isVisibleReasoningContent(part)) return false
+      continue
+    }
+    // tool / 其他 part：打断了正文
+    return false
+  }
+  return false
+}
+
 function assistantHasLiveWork(message: Message): boolean {
   if (message.info.role !== 'assistant') return false
   if (messageCompletedAt(message) == null || message.isStreaming) return true
@@ -1194,25 +1222,57 @@ export function buildProcessTimeline(
     const finalIndexes: number[] = []
     if (interrupted) {
       /**
-       * 中断轮**没有最终回复**，不再按位置兜底。
+       * 中断/失败轮：**以正文收尾**的消息才是回答。
        *
-       * 单步中断轮（例如刚发出一个长命令就被停止）连 `finish` 都没有：
-       * 服务端只发 `session.step.failed`，不发 `step.ended`，所以这条
-       * assistant 的 `finish` 是 undefined。此时 `turnHasFinish` 为 false，
-       * 旧逻辑会走位置兜底，把那条消息里的过程说明（「这条命令会先静默等待
-       * 90 秒…」）当成最终回答挂到折叠块外面 —— 实测：折叠块已收起，但
-       * 148px 的过程说明仍然可见，正是用户反馈的「打断后泄露已处理折叠设计」。
+       * 这里有一组容易混淆的形态，必须靠「末 part 是不是 text」区分：
        *
-       * 服务端对中断轮的权威结论是「没有回复」：骨架里 `reply: null`。
+       *   ❌ 过程说明（不该外露）：finish=tool-calls、末 part = tool
+       *      实测笔电主机 ses_e6cc8b786ffepHbTstQ3zvDJ7f：那一轮最后一条带
+       *      41 字「收到，我逐条执行这 12 个 echo 命令…」，后面紧跟工具调用。
+       *      旧实现把它当回答露到折叠块外，正是「打断后泄露折叠设计」。
+       *
+       *   ✅ 已写出的回答（该外露）：finish=error(aborted)、末 part = text
+       *      实测 ARM 主机 ses_eaa3442ccffeFLuqH2Vt3aN9TA 第 4 轮：用户点停止
+       *      时，模型已经写完 2480 字的实质性分析（「## 二、次要热点…」）。
+       *      若因「中断轮一律没有回复」把它折进壳里，用户看到的就是
+       *      「回复后所有内容全部直接折叠了」——实际反馈的正是这个。
+       *
+       * 全量实测（三台主机 30 个会话 / 308 轮 / 5861 条带 finish 的消息）：
+       *   - `finish=tool-calls` 且以正文收尾：**0 条**（所以按此判据不会误选
+       *     过程说明；服务端的语义是「还要调工具」的消息一定以 tool 收尾）
+       *   - `finish=error` 且以正文收尾：3 条（含上面那个 2480 字）
+       *   - `finish=error` 且以工具收尾：65 条（真过程，保持折叠）
+       *
+       * 再看中断/失败轮的分布（68 轮）：66 轮没有任何以正文收尾的消息，
+       * 2 轮各有 1 条，**没有**任何一轮出现多条 —— 所以即使放开这个判据，
+       * 也不会把一段过程说明同时外露。
        */
+      const last = assistants.findLastIndex(m => endsWithVisibleText(m))
+      if (last >= 0) finalIndexes.push(last)
     } else if (turnHasFinish) {
       for (let i = 0; i < assistants.length; i++) {
         const finish = finishOf(assistants[i])
         if ((finish === 'stop' || finish === 'length') && hasFinalText(assistants[i])) finalIndexes.push(i)
       }
     } else {
-      // 骨架/老数据：没有服务端信号，退回位置判据
-      const last = assistants.findLastIndex(hasFinalText)
+      /**
+       * 轮内完全没有 `finish`。有两种来源，可靠性不同：
+       *
+       * 1. **骨架轮**（历史快照主路径，带 `isCompressed`）：后端合成的消息
+       *    content 末尾一定是回复正文（`replies` 每条各合成一条）。用它自己的
+       *    判据（最后一条带正文的消息），不能被「末 part 必须是 text」误伤。
+       *
+       * 2. **无 finish 的实时消息 / 老数据**：全量实测 5868 条 assistant 里只有
+       *    8 条（0.14%），且全部 `completed: null`（仍在流式）。这种数据没有
+       *    服务端结论可依，按「以正文收尾」优先；一条都没有时才退回「带正文」，
+       *    保留旧行为兜底（否则老会话的回复会整轮消失）。
+       */
+      const skeletonLike = assistants.some(m => m.isCompressed && m.compressedStats)
+      let last = skeletonLike
+        ? assistants.findLastIndex(hasFinalText)
+        : assistants.findLastIndex(m => endsWithVisibleText(m))
+      // 兜底：没有任何「以正文收尾」的消息时，退回「带正文」（兼容老数据）
+      if (last < 0 && !skeletonLike) last = assistants.findLastIndex(hasFinalText)
       if (last >= 0) finalIndexes.push(last)
     }
     const finalIndexSet = new Set(finalIndexes)
@@ -1398,6 +1458,27 @@ export function buildProcessTimeline(
     const finalOutside = finalMessages.length > 0 ? finalMessages[finalMessages.length - 1] : undefined
     /** 向后兼容：既有调用点读 `finalMessage` 的地方都指最后一条结论 */
     const primaryFinal = finalOutside
+    /**
+     * 这一轮是否**需要折叠**（有过程内容要收起来）。
+     *
+     * ⚠️ 不能只看 `children.length > 0`：结论消息里「纯正文」的那些**不进壳**
+     * （见上面的分支），所以一个真正需要折叠的轮次可能算出来 children 为空。
+     *
+     * 实测反例（三台主机 30 会话 / 308 轮，其中 8 例）：单条 assistant、
+     * `finish=error(aborted)`、内容 `[text(「这条命令会先暂停 90 秒…」), tool]`。
+     * 它没有结论（以 tool 收尾 → 按判据不该露），但 `children` 也是空
+     * （结论集合为空 → 那条消息以 `inline` 进壳……实际上它进了 children）。
+     *
+     * 真正要防的是另一种形态：**整轮只有一条消息、且它不是结论**。
+     * 旧代码在这种情况下会落到下面的 `else` 分支，把那一条**整条平铺**出去，
+     * 于是「这条命令会先暂停 90 秒…」这种过程说明就露在了折叠块外 ——
+     * 正是「打断后泄露折叠设计」的形态。
+     *
+     * 所以这里用「是否有任何需要折叠的过程」来判断，而不是「children 是否为空」。
+     */
+    const hasCollapsibleProcess = assistants.some(m => messageHasProcess(m))
+    const onlyAssistantIsNonFinal =
+      assistants.length === 1 && !finalIndexSet.has(0)
 
 
     // 进行中或有过程内容 → 挂壳
@@ -1412,7 +1493,7 @@ export function buildProcessTimeline(
      * `else` 分支把那条空消息平铺出去 —— 渲染成一个独立的「Message Aborted」
      * 错误卡片（实测刷新后就是这样），而不是折叠块下方的一行说明。
      */
-    if (children.length > 0 || turnIsActive || interrupted) {
+    if (children.length > 0 || turnIsActive || interrupted || (onlyAssistantIsNonFinal && hasCollapsibleProcess)) {
       items.push({
         kind: 'process-shell',
         key: `process-shell:${userId}`,
