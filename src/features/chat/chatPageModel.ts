@@ -783,8 +783,19 @@ export type ProcessTimelineItem =
          */
         processContentScope: 'process' | 'inline' | 'final' | 'all'
       }>
-      /** 壳外最终回答（结束后才有） */
+      /** 壳外最终回答（结束后才有）。多段执行时是**最后一条**结论。 */
       finalMessage?: Message
+      /**
+       * 壳外全部最终回答（按时间顺序）。
+       *
+       * 一个 user 轮可能包含多段执行：后台任务完成通知（`synthetic`）会把 agent
+       * 唤醒继续跑，每段各有自己的 `finish=stop` 结论（实测见
+       * `chatPageModel.multiStop.test.ts`）。只保留最后一条会让前一段的结论
+       * 被折进壳里 —— 展开「已处理」时多出内容、收起后又消失。
+       *
+       * 缺省时调用方回退到 `finalMessage`（单段执行的常见情形）。
+       */
+      finalMessages?: Message[]
     }
 
 /** 两行是否可共享同一对象（VirtualRow 靠 item 引用短路） */
@@ -807,6 +818,12 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
       a.children.length !== b.children.length
     ) {
       return false
+    }
+    const leftFinals = a.finalMessages ?? (a.finalMessage ? [a.finalMessage] : [])
+    const rightFinals = b.finalMessages ?? (b.finalMessage ? [b.finalMessage] : [])
+    if (leftFinals.length !== rightFinals.length) return false
+    for (let i = 0; i < leftFinals.length; i++) {
+      if (leftFinals[i] !== rightFinals[i]) return false
     }
     for (let i = 0; i < a.children.length; i++) {
       const left = a.children[i]
@@ -1151,7 +1168,30 @@ export function buildProcessTimeline(
      * 两者在内容上完全一样（都是若干 tool-calls + 没有 stop）。
      */
     const interrupted = assistants.some(m => isAbortedMessage(m.info))
-    let finalIndex = -1
+    /**
+     * 这一轮里**所有**「结论消息」的下标。
+     *
+     * ⚠️ 不能只取最后一个。后台任务完成通知（`synthetic`）会把一次「轮次」拆成
+     * 两段执行，两段各有自己的结论：
+     *
+     * 服务端实测（2026-11-01，ARM 主机 ses_e6e0b3d23ffe7YEJI1DItkyUuv，下标 154~186）：
+     *   154  user      继续
+     *   …    26 条 finish=tool-calls（各带一句过程说明）
+     *   179  assistant finish=stop  text(806)   "CI 还在运行，Release 需要约 13 分钟…"
+     *   180  idle      succeeded                 ← 第一段结束
+     *   181  synthetic <shell id="sh_19397e3f..." state="completed">  ← 后台任务完成通知
+     *   182-184 assistant finish=tool-calls
+     *   185  assistant finish=stop  text(1164)  "全部完成，且都已核实。v2.0.55 已发布…"
+     *   186  idle      succeeded                 ← 第二段结束
+     *
+     * 前端只在遇到下一条 user 时切轮（下面的 TurnBag 累积），所以 182~185 被并进
+     * 154 那一轮 —— 整轮出现**两个** `stop`。只取最后一个的后果：806 那句结论被
+     * 当成过程项塞进折叠块，于是「展开已处理」时多出 806 字、「收起」后又只剩
+     * 1164 字，页面上最终回答的内容随折叠状态变化（用户实测反馈）。
+     *
+     * 正确语义：**每个 stop 都是它那一段执行的结论**，都要露在折叠块外。
+     */
+    const finalIndexes: number[] = []
     if (interrupted) {
       /**
        * 中断轮**没有最终回复**，不再按位置兜底。
@@ -1165,15 +1205,19 @@ export function buildProcessTimeline(
        *
        * 服务端对中断轮的权威结论是「没有回复」：骨架里 `reply: null`。
        */
-      finalIndex = -1
     } else if (turnHasFinish) {
-      finalIndex = assistants.findLastIndex(m => finishOf(m) === 'stop' && hasFinalText(m))
-      if (finalIndex < 0) finalIndex = assistants.findLastIndex(m => finishOf(m) === 'length' && hasFinalText(m))
+      for (let i = 0; i < assistants.length; i++) {
+        const finish = finishOf(assistants[i])
+        if ((finish === 'stop' || finish === 'length') && hasFinalText(assistants[i])) finalIndexes.push(i)
+      }
     } else {
       // 骨架/老数据：没有服务端信号，退回位置判据
-      finalIndex = assistants.findLastIndex(hasFinalText)
+      const last = assistants.findLastIndex(hasFinalText)
+      if (last >= 0) finalIndexes.push(last)
     }
-    const finalAssistant = finalIndex >= 0 ? assistants[finalIndex] : null
+    const finalIndexSet = new Set(finalIndexes)
+    /** 最后一个结论消息：改动文件汇总、耗时页脚、操作按钮挂在它上面 */
+    const finalAssistant = finalIndexes.length > 0 ? assistants[finalIndexes[finalIndexes.length - 1]] : null
     const finalId = finalAssistant?.info.id ?? null
     // 缺 time（v2 轻量投影）时保持 undefined：回落成 0 会让「进行中」
     // 计时器从 1970 年起算，界面显示成 Working for 56y…
@@ -1315,13 +1359,22 @@ export function buildProcessTimeline(
          * 正常分支进壳即可：它的正文属于过程，`interrupted` 已保证不会被当成回答。
          */
         if (isAbortedMessage(m.info) && m.content.length === 0) continue
-        if (index === finalIndex) {
+        if (finalIndexSet.has(index)) {
           /**
-           * 既有正文又有过程的最终回答消息：以 `final` 作用域留在壳内，
-           * 只渲染正文；过程部分由同一轮的 inline 消息承载。
-           * 纯正文（没有可折叠过程）的最终回答不进壳 —— 壳里只有标题没有内容。
+           * 结论消息：**正文一律不进壳**。
+           *
+           * 旧写法在 `messageHasProcess(m)` 时把它以 `final` 作用域挂进壳内
+           * （壳内只画正文）。单段执行时那样没问题（正文本来就要露在壳外，
+           * 壳内这份是给「展开时能看到完整上下文」用的）。
+           *
+           * 但多段执行时会出现多个 stop（见上方 `finalIndexes` 的说明），
+           * 结果就是**同一段正文在壳内外各渲染一次**：收起时壳内那份被裁掉、
+           * 只剩壳外一份；展开时壳内那份又出现 —— 用户看到的就是「展开/收起
+           * 后最终回复多了或者换了内容」。
+           *
+           * 所以结论消息的过程部分（reasoning / tool）仍进壳，正文只留在壳外。
            */
-          if (messageHasProcess(m)) children.push({ message: m, processContentScope: 'final' })
+          if (messageHasProcess(m)) children.push({ message: m, processContentScope: 'process' })
         } else {
           children.push({ message: m, processContentScope: 'inline' })
         }
@@ -1329,13 +1382,22 @@ export function buildProcessTimeline(
     }
 
     /**
-     * 折叠块外的最终回答。
+     * 折叠块外的最终回答（可能有多条）。
      *
-     * `finalMessage` 仍指向那条 assistant 消息：改动文件汇总（turnFiles）、
-     * 耗时页脚、操作按钮都挂在它上面。渲染范围由 `processContentScope: 'final'`
-     * 决定 —— 只渲染 `split.finalItems`，不会把过程内容再画一遍。
+     * 一个 user 轮可能包含**多段执行**（后台任务完成通知会把 agent 唤醒继续跑），
+     * 每段都有自己的 `finish=stop` 结论。全部都要露在壳外，否则「展开/收起」
+     * 会让页面上最终回答的内容变化（用户实测反馈）。
+     *
+     * `finalMessages` 的每一条都以 `processContentScope: 'final'` 渲染 ——
+     * 只画正文（`split.finalItems`），不会把过程内容再画一遍。
+     * 最后一条同时承担改动文件汇总（turnFiles）、耗时页脚与操作按钮。
      */
-    const finalOutside = !turnIsActive && finalAssistant ? finalAssistant : undefined
+    const finalMessages = !turnIsActive
+      ? finalIndexes.map(i => assistants[i]).filter((m): m is Message => m != null)
+      : []
+    const finalOutside = finalMessages.length > 0 ? finalMessages[finalMessages.length - 1] : undefined
+    /** 向后兼容：既有调用点读 `finalMessage` 的地方都指最后一条结论 */
+    const primaryFinal = finalOutside
 
 
     // 进行中或有过程内容 → 挂壳
@@ -1359,7 +1421,8 @@ export function buildProcessTimeline(
         durationMs,
         isActive: turnIsActive,
         children,
-        finalMessage: finalOutside,
+        finalMessage: primaryFinal,
+        ...(finalMessages.length > 0 ? { finalMessages } : {}),
         ...(interrupted ? { interrupted: true } : {}),
       })
     } else if (finalOutside) {

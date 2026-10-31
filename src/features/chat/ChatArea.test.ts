@@ -1002,16 +1002,21 @@ describe('buildProcessTimeline', () => {
     expect(shell.isActive).toBe(false)
     expect(shell.durationMs).toBe(500)
     /**
-     * ⚠️ 最终回答那条以 `final` 作用域留在壳内（只渲染正文）。
+     * ⚠️ 最终回答那条以 `process` 作用域进壳（只渲染过程项）。
      *
      * 2026-10-31 实测：多工具长回合里，带回答的那条 assistant 自身也以工具
      * 收尾（`[reasoning, text(回答), tool]`）。若把它整条以 `process` 挂进壳，
      * MarkdownRenderer 按 `split.processItems` 渲染 → 正文属于 finalItems，
      * 一个字都不画；折叠块一收起，整轮回答就"消失"，只能刷新。
+     *
+     * ⚠️ 2026-11-01 修正：**不能再把它以 `final` 挂进壳**。`final` 作用域渲染
+     * 的是 `split.finalItems`（正文），而壳外的 `finalMessage` 渲染的也是同一份
+     * 正文 —— 同一段回答会渲染两次。展开折叠块时多出这一份，收起后又消失，
+     * 正是用户反馈的「最终回复多了或者换了内容」。正文只留在壳外。
      */
     expect(shell.children.map(c => [c.message.info.id, c.processContentScope])).toEqual([
       ['assistant-1', 'inline'],
-      ['assistant-2', 'final'],
+      ['assistant-2', 'process'],
     ])
     expect(shell.finalMessage?.info.id).toBe('assistant-2')
   })

@@ -109,10 +109,18 @@ describe('多工具长回合的最终回答定位（真实形状）', () => {
     ])
   })
 
-  it('最终回答那条自身也带过程时，以 final 作用域进壳（只画正文）', () => {
+  it('最终回答那条自身也带过程时，壳内只画过程、正文留在壳外', () => {
     /**
      * 真实形状之一：`[reasoning, text(回答), tool]` —— 回答那条以工具收尾。
-     * 这条消息必须拆成两半：过程进壳、正文放壳外，否则收起后回答消失。
+     *
+     * ⚠️ 2026-11-01 语义修正：壳内必须是 `process`（只画过程项），
+     * 不能用 `final`。
+     *
+     * `final` 作用域在 MessageRenderer 里渲染 `split.finalItems`（正文），
+     * 而壳外的 `finalMessage` 渲染的也是同一份正文 —— 两者同时存在就是
+     * **同一段回答渲染两次**。单段执行时壳内那份被折叠裁掉、看不出来；
+     * 一旦展开，或一轮里有多段执行（多个 stop，见 multiStop 用例），
+     * 用户就会看到「展开/收起后最终回复多了或者换了内容」。
      */
     const turn: Message[] = [
       userMessage('u1'),
@@ -125,7 +133,7 @@ describe('多工具长回合的最终回答定位（真实形状）', () => {
     expect(shell.finalMessage?.info.id).toBe('m2')
     expect(shell.children.map(child => `${child.message.info.id}:${child.processContentScope}`)).toEqual([
       'm1:inline',
-      'm2:final',
+      'm2:process',
     ])
   })
 

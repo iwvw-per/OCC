@@ -98,7 +98,9 @@ export function estimateTimelineItemSize(item: ProcessTimelineItem | undefined):
     return PROCESS_SHELL_HEADER + body
   }
   // 结束后默认折叠：只估 header + 壳外 final，避免刷新时 120→36 的假高度再回弹
-  return PROCESS_SHELL_HEADER + (item.finalMessage ? ROW_ESTIMATE : 0)
+  // 壳外 final 可能有多条（多段执行，见 chatPageModel.multiStop.test.ts）
+  const finalCount = item.finalMessages?.length ?? (item.finalMessage ? 1 : 0)
+  return PROCESS_SHELL_HEADER + finalCount * ROW_ESTIMATE
 }
 
 /** 壳内是否有「整条原样渲染」的子消息（最后一轮） */

@@ -28,8 +28,29 @@ export interface SkeletonTurnRaw {
   /**
    * 最终回复（v2 assistant 形状）。
    * 该轮没有任何正文时缺省——纯工具轮由折叠块本身表达。
+   *
+   * @deprecated 单段执行的旧字段。多段执行（后台任务完成通知会把 agent 唤醒
+   * 继续跑）时一轮有**多个** `finish=stop` 结论，必须用 `replies`。
+   * 新后端同时给出两者：`replies` 是权威数组，`reply` 仅为兼容保留
+   * （等于 `replies` 的最后一条）。
    */
   reply?: Record<string, unknown>
+  /**
+   * 该轮**全部**最终回复（按时间顺序）。
+   *
+   * 实测（2026-11-01，ARM 主机 ses_e6e0b3d23ffe7YEJI1DItkyUuv）：
+   *   user「继续」
+   *   … 26 条 tool-calls …
+   *   stop(806)  "CI 还在运行，Release 需要约 13 分钟…"
+   *   idle succeeded
+   *   synthetic <shell state="completed">      ← 后台任务完成通知
+   *   tool-calls ×3
+   *   stop(1164) "全部完成，且都已核实。v2.0.55 已发布…"
+   *   idle succeeded
+   * 旧后端只保留最后一条，刷新后第一段结论凭空消失（页面上的最终回答
+   * 与实时视图不一致）。
+   */
+  replies?: Array<Record<string, unknown>>
   /** 该轮累计的过程规模 */
   reasoningCount: number
   stepCount: number
@@ -243,18 +264,9 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
       ...(files.length > 0 ? { files } : {}),
     })
 
-    // 最终回复
-    const reply = rec(item.reply)
-    const replyText = str(reply.text) ?? ''
-    const replyMessageId = str(reply.messageID) ?? `${userId}-reply`
-    /**
-     * text 序号。
-     *
-     * 前端 partID 规则是 `${messageID}-text-${ordinal}`（见 adaptMessage），
-     * 实时 `session.text.delta` 也用同一规则定位 part。骨架必须带回真实序号，
-     * 否则「该轮最后一个 text 不是第 0 段」时 delta 会拼到错误位置。
-     */
-    const replyOrdinal = num(reply.ordinal) ?? 0
+    // 最终回复（可能有多条：多段执行，见 SkeletonTurnRaw.replies 的说明）
+    const replyList = list(item.replies).length > 0 ? list(item.replies) : item.reply != null ? [item.reply] : []
+    const replies = replyList.map(entry => rec(entry)).filter(r => (str(r.text) ?? '').trim().length > 0)
     const hasProcess = reasoningCount > 0 || stepCount > 0
     const durationMs = num(item.durationMs)
     const changedFiles = list(item.changedFiles)
@@ -270,20 +282,7 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry != null)
 
-    if (replyText.trim() || hasProcess || changedFiles.length > 0) {
-      /**
-       * content 里 text 的序号必须与真实消息对齐。
-       *
-       * `adaptMessage` 按 content 数组顺序给 text 编号（0、1、2…），而实时 delta
-       * 用 `${messageID}-text-${ordinal}` 定位。若骨架的最终回复真实 ordinal 是 1，
-       * 就必须先放一个占位 text 把序号顶到 1，否则 delta 会追加到第 0 段上。
-       *
-       * 占位段是空字符串 —— `isVisibleTextContent` 会把它过滤掉，不影响渲染。
-       */
-      const content: Array<Record<string, unknown>> = []
-      for (let i = 0; i < replyOrdinal; i += 1) content.push({ type: 'text', text: '' })
-      if (replyText.trim()) content.push({ type: 'text', text: replyText })
-
+    if (replies.length > 0 || hasProcess || changedFiles.length > 0) {
       /**
        * ⚠️ 这条合成消息的 `created` **不能**直接用轮次起点（`item.time.created`）。
        *
@@ -304,8 +303,10 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
        * 所以这里用「轮次起点 + 轮次总耗时」近似回复发生的时刻（骨架只给了总时长，
        * 没有逐条时间戳）。缺 durationMs 时退化为轮次起点 —— 至少不早于该轮任何
        * 消息，排序上仍稳定在过程消息之后（同值时按数组插入顺序）。
+       *
+       * 多条回复时按序号递增（+i），保证它们的相对顺序稳定，且都排在过程消息之后。
        */
-      const replyCreated = createdAt + (durationMs ?? 0)
+      const replyCreatedBase = createdAt + (durationMs ?? 0)
       /**
        * 中断轮：还原成服务端的真实形状。
        *
@@ -319,16 +320,8 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
        * 的过程说明当成最终回答露到折叠块外。
        */
       const turnInterrupted = outcomeAfterTurn.get(index) === 'interrupted'
-
-      raw.push({
-        type: 'assistant',
-        id: replyMessageId,
-        time: { created: replyCreated, completed: replyCreated },
-        content,
-        ...(turnInterrupted
-          ? { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }
-          : {}),
-        ...(hasProcess || changedFiles.length > 0
+      const lightweightPayload =
+        hasProcess || changedFiles.length > 0
           ? {
               lightweight: {
                 reasoningCount,
@@ -340,12 +333,75 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
                 ...(durationMs != null ? { durationMs } : {}),
               },
             }
-          : {}),
-      })
+          : {}
+
+      if (replies.length === 0) {
+        // 纯过程轮（没有正文）：合成一条只带过程统计的消息，供折叠块承载 header
+        raw.push({
+          type: 'assistant',
+          id: `${userId}-reply`,
+          time: { created: replyCreatedBase, completed: replyCreatedBase },
+          content: [],
+          ...(turnInterrupted
+            ? { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }
+            : {}),
+          ...lightweightPayload,
+        })
+      } else {
+        /**
+         * 每条回复各自一条合成消息。
+         *
+         * 多段执行时一轮有多个 `finish=stop` 结论（实测见
+         * `chatPageModel.multiStop.test.ts`）。只合成一条会把前几段结论丢掉，
+         * 刷新后页面上就少了内容 —— 与实时视图不一致。
+         *
+         * 过程统计（lightweight）只挂在**最后一条**上：折叠块 header 的
+         * 「N 步 / N 段思考」按轮统计，挂多次会让计数翻倍。
+         */
+        replies.forEach((reply, replyIdx) => {
+          const replyText = str(reply.text) ?? ''
+          const replyMessageId = str(reply.messageID) ?? `${userId}-reply-${replyIdx}`
+          /**
+           * text 序号。
+           *
+           * 前端 partID 规则是 `${messageID}-text-${ordinal}`（见 adaptMessage），
+           * 实时 `session.text.delta` 也用同一规则定位 part。骨架必须带回真实序号，
+           * 否则「该轮最后一个 text 不是第 0 段」时 delta 会拼到错误位置。
+           */
+          const replyOrdinal = num(reply.ordinal) ?? 0
+          /**
+           * content 里 text 的序号必须与真实消息对齐。
+           *
+           * `adaptMessage` 按 content 数组顺序给 text 编号（0、1、2…），而实时 delta
+           * 用 `${messageID}-text-${ordinal}` 定位。若骨架的最终回复真实 ordinal 是 1，
+           * 就必须先放一个占位 text 把序号顶到 1，否则 delta 会追加到第 0 段上。
+           *
+           * 占位段是空字符串 —— `isVisibleTextContent` 会把它过滤掉，不影响渲染。
+           */
+          const content: Array<Record<string, unknown>> = []
+          for (let i = 0; i < replyOrdinal; i += 1) content.push({ type: 'text', text: '' })
+          content.push({ type: 'text', text: replyText })
+
+          const isLastReply = replyIdx === replies.length - 1
+          const replyCreated = replyCreatedBase + replyIdx
+
+          raw.push({
+            type: 'assistant',
+            id: replyMessageId,
+            time: { created: replyCreated, completed: replyCreated },
+            content,
+            ...(turnInterrupted
+              ? { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }
+              : {}),
+            ...(isLastReply ? lightweightPayload : {}),
+          })
+        })
+      }
     }
 
     const record: SkeletonTurnRecord = { reasoningCount, stepCount }
-    if (str(reply.messageID)) record.replyMessageID = str(reply.messageID)
+    const lastReply = replies[replies.length - 1]
+    if (lastReply && str(lastReply.messageID)) record.replyMessageID = str(lastReply.messageID)
     if (changedFiles.length > 0) record.changedFiles = changedFiles
     if (durationMs != null) record.durationMs = durationMs
     turns.set(userId, record)

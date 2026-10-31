@@ -370,21 +370,32 @@ const VirtualRow = memo(
                   ))}
                 </ProcessCollapseBlock>
                 {/* shell 的 gap-2 只服务 process 壳 ↔ final 文本，子消息间距由 processBody 管 */}
-                {item.finalMessage && (
-                  <MessageBody
-                    message={item.finalMessage}
-                    registerMessage={registerMessage}
-                    onUndo={onUndo}
-                    onFork={onFork}
-                    canUndo={canUndo}
-                    forkMessageId={forkMap.get(item.finalMessage.info.id)}
-                    turnDuration={turnDurationMap.get(item.finalMessage.info.id)}
-                    isTurnLatestAssistant
-                    allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
-                    processContentScope="final"
-                    sessionId={sessionId}
-                    turnFiles={turnFiles}
-                  />
+                {/*
+                  壳外最终回答**可能有多条**：一个 user 轮里若发生后台任务完成
+                  通知，agent 会被唤醒继续跑，于是有多段执行、多个 `finish=stop`
+                  结论（实测见 chatPageModel.multiStop.test.ts）。只渲染最后一条
+                  会让前一段的结论被折进壳里 —— 展开「已处理」时多出内容、收起
+                  后又消失，正是用户反馈的「最终回复多了或者换了内容」。
+                */}
+                {(item.finalMessages ?? (item.finalMessage ? [item.finalMessage] : [])).map(
+                  (finalMsg, finalIdx, finalList) => (
+                    <MessageBody
+                      key={finalMsg.info.id}
+                      message={finalMsg}
+                      registerMessage={registerMessage}
+                      onUndo={onUndo}
+                      onFork={onFork}
+                      canUndo={canUndo}
+                      forkMessageId={forkMap.get(finalMsg.info.id)}
+                      turnDuration={turnDurationMap.get(finalMsg.info.id)}
+                      isTurnLatestAssistant={finalIdx === finalList.length - 1}
+                      allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
+                      processContentScope="final"
+                      sessionId={sessionId}
+                      /* 改动文件汇总只挂在最后一条结论上，避免同一批 chip 重复 */
+                      turnFiles={finalIdx === finalList.length - 1 ? turnFiles : undefined}
+                    />
+                  ),
                 )}
               </div>
             </div>
