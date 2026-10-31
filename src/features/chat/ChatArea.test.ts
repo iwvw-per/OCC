@@ -978,9 +978,17 @@ describe('buildProcessTimeline', () => {
     if (shell?.kind !== 'process-shell') return
     expect(shell.isActive).toBe(false)
     expect(shell.durationMs).toBe(500)
+    /**
+     * ⚠️ 最终回答那条以 `final` 作用域留在壳内（只渲染正文）。
+     *
+     * 2026-10-31 实测：多工具长回合里，带回答的那条 assistant 自身也以工具
+     * 收尾（`[reasoning, text(回答), tool]`）。若把它整条以 `process` 挂进壳，
+     * MarkdownRenderer 按 `split.processItems` 渲染 → 正文属于 finalItems，
+     * 一个字都不画；折叠块一收起，整轮回答就"消失"，只能刷新。
+     */
     expect(shell.children.map(c => [c.message.info.id, c.processContentScope])).toEqual([
       ['assistant-1', 'inline'],
-      ['assistant-2', 'process'],
+      ['assistant-2', 'final'],
     ])
     expect(shell.finalMessage?.info.id).toBe('assistant-2')
   })

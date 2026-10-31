@@ -1220,7 +1220,18 @@ export const ChatPane = memo(function ChatPane({
    */
   const sessionStatus = useSessionStatus(routeSessionId ?? null)
   // busy = 正在生成；retry = 正在自动重试（同样属于「这一轮还没结束」）
-  const serverRunning = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry'
+  const rawServerRunning = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry'
+  /**
+   * ⚠️ 不能把 `/session/active` 的原始结果直接下发给渲染层。
+   *
+   * 该接口会残留已结束的会话（实测：一个 `succeeded`、`time.idle` 早 10 分钟
+   * 的会话仍被报成 running）。渲染层拿它做 `isTurnSettled` 的权威判据时，
+   * 折叠块永远不收、header 一直「Working for …」—— 而正文其实早就写完了。
+   *
+   * `sessionRunning` 已经用「末条 assistant 是否定稿」把这个残留过滤掉了，
+   * 这里与它保持一致，避免同一屏上出现「正文已结束 + 状态还在跑」的分裂。
+   */
+  const serverRunning = sessionRunning && rawServerRunning
 
   const chatContent = (
     <div ref={setChatContentRef} className="flex-1 relative overflow-hidden flex flex-col min-h-0">

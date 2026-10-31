@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { logger } from '../utils/logger'
 import { isUserUIMessage, toApiMessageWithParts, toUIMessage } from '../utils/messageConversion'
-import { messageStore, type RevertState, type SessionState } from '../store'
+import { activeSessionStore, messageStore, type RevertState, type SessionState } from '../store'
 import { sessionKeyToServerId } from '../utils/sessionKey'
 import {
   getSessionTurnPage,
@@ -369,6 +369,30 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
               title: sessionInfo?.title,
               shareUrl: sessionInfo?.share?.url,
             })
+            /**
+             * 这条分支同样是「轮次已结束」的权威校正入口。
+             *
+             * ⚠️ 实测故障（2026-10-31，arm 主机 ses_e6dc660c7ffe6Xn7Xdra1K0YpH）：
+             * 对话跑到第 6 步才打开页面 → 首屏是中途快照 → 此后只有 ephemeral
+             * delta 在补。轮次结束时服务端已 idle，但这里的 `page` 才用来取分页
+             * 游标，**没有**读 `page.idle`，也没调用 `settleByAuthoritativeIdle`：
+             *   - 本地末条 assistant 永远拿不到 completed → 界面一直「处理中」；
+             *   - `isLastTurnComplete` 永远不会判「不完整」→ 不给服务端对账；
+             *   - 正文定格在 29 字（服务端完整 739 字），刷新才恢复。
+             *
+             * 与下面 `shouldKeepStreamingOnly` 分支不同，这里必须**先**把
+             * `lastTurn` 写进 store：`settleByAuthoritativeIdle` 从 store 读它。
+             */
+            const idle = pageResult.ok ? pageResult.page?.idle : undefined
+            if (idle) {
+              const lastTurn = {
+                at: idle.at,
+                outcome: idle.outcome,
+                ...(idle.error ? { error: idle.error } : {}),
+              }
+              messageStore.updateSessionMetadata(sid, { loadState: 'loaded', lastTurn })
+              messageStore.settleByAuthoritativeIdle(sid)
+            }
           })
           .catch(() => {
             // 元数据加载失败不影响 streaming，静默忽略
@@ -738,6 +762,24 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
             ...(resolvedAgent ? { agent: resolvedAgent } : {}),
             ...(lastTurn ? { lastTurn } : {}),
           })
+          /**
+           * 保留本地消息 ≠ 放弃校正运行态。
+           *
+           * 这条分支以前在写完元数据后直接 return，于是「本地条数 ≥ 快照条数」
+           * 的中途会话永远拿不到定稿校正：`page.idle` 是服务端说「这一轮已经
+           * 结束」的唯一权威信号，而 `settleByAuthoritativeIdle` 只认它（或上一次
+           * 加载记下的 `lastTurn`）。错过之后，本地那条未定稿 assistant 会一直
+           * 显示「处理中」，也就永远走不到 `isLastTurnComplete` 的服务端对账，
+           * 正文定格在半截 —— 只有整页刷新（重建 store）才对齐。
+           *
+           * 实测（arm 主机 ses_e6dc660c7ffe6Xn7Xdra1K0YpH）：对话跑到第 6 步才
+           * 打开页面，轮次结束界面停在 Working / 正文 29 字，服务端完整 739 字，
+           * 刷新后 563 字。
+           */
+          if (lastTurn) {
+            activeSessionStore.setSessionIdleAt(sid, lastTurn.at)
+            messageStore.settleByAuthoritativeIdle(sid)
+          }
           onLoadComplete?.()
           return
         }
@@ -774,6 +816,8 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
             ...(lastTurn ? { lastTurn } : {}),
           })
         }
+        // 记下权威 idle：供「/api/session/active 残留」判据使用（见 activeSessionStore.setSessionIdleAt）
+        if (lastTurn) activeSessionStore.setSessionIdleAt(sid, lastTurn.at)
         // 首屏只覆盖最近 INITIAL_TURN_LIMIT 轮，无需压缩；保留调用以应对
         // SSE 已把更早轮次推入内存的情况。
         messageStore.compressHistoricalTurns(sid, RECENT_FULL_TURNS)

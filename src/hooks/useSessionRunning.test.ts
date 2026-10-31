@@ -36,13 +36,46 @@ function user(id: string, created: number): { info: ApiMessage; parts: unknown[]
 }
 
 describe('isSessionRunning：统一判据', () => {
-  it('trusts the server over local state (server says running)', () => {
-    // 本地快照全是完成态，但服务端仍在跑 → 必须算在跑
+  it('trusts the server while this turn is still live', () => {
+    // 本地快照显示未定稿，服务端也在跑 → 必须算在跑
     expect(
       isSessionRunning({
         serverRunning: true,
         localStreaming: false,
-        lastAssistant: { isStreaming: false, info: { time: { completed: 10 } } },
+        lastAssistant: { isStreaming: false, info: { time: { created: 5 } } },
+      }),
+    ).toBe(true)
+  })
+
+  /**
+   * 回归（2026-10-31 实测，arm 主机 ses_e6e0b3d23ffe7YEJI1DItkyUuv）：
+   * 会话已 `succeeded`、`time.idle` 早于现在 10 分钟，`/api/session/active`
+   * 却仍报 running（该会话最后一条 assistant 也没 completed）。
+   *
+   * 这时若继续无条件采信服务端，界面就永久停在「处理中」——
+   * 用户看到的是「回复已经写完并渲染出来，但标题一直 Working」。
+   */
+  it('treats a settled last assistant as finished even if the server still reports running', () => {
+    expect(
+      isSessionRunning({
+        serverRunning: true,
+        localStreaming: false,
+        lastAssistant: { isStreaming: false, info: { time: { created: 5, completed: 9 } }, content: [] },
+      }),
+    ).toBe(false)
+  })
+
+  it('still counts as running when a settled assistant has a live tool', () => {
+    // 工具循环间隙：上一条已定稿，但下一步还在执行 —— 这一轮确实没完
+    expect(
+      isSessionRunning({
+        serverRunning: true,
+        localStreaming: false,
+        lastAssistant: {
+          isStreaming: false,
+          info: { time: { created: 5, completed: 9 } },
+          content: [{ type: 'tool', state: { status: 'running' } }],
+        },
       }),
     ).toBe(true)
   })

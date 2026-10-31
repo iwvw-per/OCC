@@ -30,6 +30,8 @@ class MainActivity : TauriActivity() {
   // 持有桥实例强引用，避免被 GC 回收后 WebView 报 "Unknown object"
   private val systemBarBridge = SystemBarBridge()
   private val liveUpdateBridge = LiveUpdateBridge()
+  // 应用内一键更新：下载完 APK 后由它拉起系统安装界面
+  private val apkInstallerBridge = ApkInstallerBridge(this)
 
   // 会话进行中（实况通知/前台服务运行）标志，用于后台抵消 WebView 暂停
   @Volatile
@@ -413,6 +415,11 @@ class MainActivity : TauriActivity() {
     }
     try {
       webView.addJavascriptInterface(liveUpdateBridge, "__opencode_android_live")
+    } catch (_: Exception) {
+      // ignore - may be added already
+    }
+    try {
+      webView.addJavascriptInterface(apkInstallerBridge, "__opencode_android_apk")
     } catch (_: Exception) {
       // ignore - may be added already
     }

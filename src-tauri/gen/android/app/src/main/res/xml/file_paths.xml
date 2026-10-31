@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 可共享的路径白名单。
+
+  当前只用于「应用内一键更新」：APK 下载到 cacheDir/updates 后，需要以
+  content:// URI 交给系统安装器（Android 7+ 不允许 Intent 直接携带 file://）。
+
+  ⚠️ 必须精确到 updates 子目录，不能是 `<cache-path path="."/>`：
+  那会把整个缓存目录（含 WebView 缓存、Tauri 资源）一起暴露给拿到 URI 的应用。
+-->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-  <external-path name="my_images" path="." />
-  <cache-path name="my_cache_images" path="." />
+  <cache-path name="updates" path="updates/" />
 </paths>

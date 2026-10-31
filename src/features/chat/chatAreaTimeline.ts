@@ -13,7 +13,11 @@ import type { ProcessTimelineItem } from './chatPageModel'
 export const ROW_ESTIMATE = 60
 export const PROCESS_SHELL_HEADER = 36
 
-export type ProcessShellChild = { message: Message; processContentScope: 'process' | 'inline' | 'all' }
+export type ProcessShellChild = {
+  message: Message
+  /** `final`：只渲染正文（最终回答那条自身也以工具收尾时用） */
+  processContentScope: 'process' | 'inline' | 'final' | 'all'
+}
 
 /** 过程壳 header 统计：工具调用数（折叠时展示，避免展开才知道规模） */
 export function processStepCount(children: ProcessShellChild[]): number {

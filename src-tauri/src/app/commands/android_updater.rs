@@ -6,8 +6,19 @@
 //   - device_target_arch：告诉前端该下 arm64 还是 armv7 的包
 //   - android_download_apk：把 APK 下到缓存目录并回报进度
 //
-// 安装本身交给系统安装器（前端用 opener 打开文件），不在应用内静默安装：
-// Android 不允许普通应用静默安装 APK，必须有用户确认。
+// 安装本身交给系统安装器，不在应用内静默安装：Android 不允许普通应用静默
+// 安装 APK，必须有用户确认。
+//
+// ⚠️ 安装的入口是 MainActivity 里的 `__opencode_android_apk` 原生桥
+// （ApkInstallerBridge.kt），**不是** tauri-plugin-opener：该插件的 Android 侧
+// 只注册了 `open`，没有 `open_path`，`openPath()` 在安卓上必然失败，而且它只会
+// 发 file:// Intent（Android 7+ 抛 FileUriExposedException）。
+//
+// 因此本文件与 ApkInstallerBridge 必须对「文件落在哪」保持一致：
+//   Rust  : app_cache_dir()/updates/<name>      （无 appDirectoriesOverride 时
+//                                                 等于 Context.getCacheDir()）
+//   Kotlin: File(activity.cacheDir, "updates")/<name>
+// 另外 file_paths.xml 把 FileProvider 的可共享范围限制在这个子目录上。
 // ============================================
 
 use std::path::PathBuf;

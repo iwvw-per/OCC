@@ -394,13 +394,55 @@ async function fetchActiveScopeData(directories: string[] | undefined, serverId:
     return undefined
   }
 
+  /**
+   * ⚠️ 不能把 `/api/session/active` 里的条目当成「会话仍在运行」的证据。
+   *
+   * 该接口实现的是「相关聚合里有没有 running 状态的执行」，但实测（2026-10-31，
+   * opencode 2.x）它会残留：被中断/正常结束的会话，只要过程中有一条 assistant
+   * 消息缺 `time.completed`，就会一直出现在 active 里。
+   *
+   * 现场（本机 127.0.0.1:4096）：
+   *   22:47  `/api/session/active` 同时报两个会话 running
+   *   而 `GET /api/session/{id}` 里 `time.idle` 已存在：
+   *     ses_e73dbf… idle=1793456303944 outcome=interrupted（比「现在」早 30 分钟）
+   *     ses_e6e0b3… idle=1793457422703 outcome=succeeded  （比「现在」早 10 分钟）
+   *
+   * 前端只要把它当作 serverRunning，`isSessionRunning` 就会一直返回 true：
+   * 停止按钮可点、折叠块不收、状态栏一直「处理中」；而收尾事件是确实到过的，
+   * 所以消息本身是定稿的 —— 用户看到的就是「回复已经写出去了，但一直显示处理中」。
+   *
+   * 因此只把**没被 idle 结论证伪**的条目当作运行中：idle 时间不早于该会话最近
+   * 一条消息，就说明那次 idle 属于更早的轮次，不能据此判死（否则新一轮刚发出、
+   * 快照尚未更新的瞬间会被误判成已结束）。
+   */
+  const latestMessageAt = (sessionKey: string): number => {
+    const state = messageStore.getSessionState(sessionKey)
+    if (!state || state.messages.length === 0) return 0
+    let latest = 0
+    for (const message of state.messages) {
+      const created = message.info.time?.created ?? 0
+      if (created > latest) latest = created
+    }
+    return latest
+  }
+
   for (const [sid, status] of Object.entries(statusMap)) {
     const scopedId = makeSessionKey(serverId, sid)
+    if (status.type === 'idle') {
+      mergedStatusMap[scopedId] = status
+      continue
+    }
+    const idleAt = activeSessionStore.getSessionMeta(scopedId)?.idleAt
+    if (idleAt != null && idleAt >= latestMessageAt(scopedId)) {
+      // 该会话已被权威记录的 idle 收尾，active 里的这条是残留
+      mergedStatusMap[scopedId] = { type: 'idle' }
+      continue
+    }
     mergedStatusMap[scopedId] = status
-    if (status.type === 'idle') continue
     const directory = knownDirectory(scopedId)
     if (directory) sessionMetaEntries.push({ sessionId: scopedId, directory })
   }
+
 
   for (const permission of permissions) {
     const scopedId = makeSessionKey(serverId, permission.sessionID)
@@ -760,6 +802,8 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
              * 是否有待落定的内容由 settleByAuthoritativeIdle 自己判断。
              */
             messageStore.settleByAuthoritativeIdle(sessionKey, now)
+            // 记下这次对账的结论，供下一轮 reconcileServerStatus 识别 active 残留
+            activeSessionStore.setSessionIdleAt(sessionKey, now)
           }
           markSettledSessionsStale(serverId, scoped)
         })
@@ -860,6 +904,15 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       const settleSessionIdle = (scopedId: string, rawSessionId: string, completedAt?: number) => {
         const prevStatus = activeSessionStore.getSnapshot().statusMap[scopedId]
         const wasBusy = prevStatus && (prevStatus.type === 'busy' || prevStatus.type === 'retry')
+        /**
+         * 记下权威 idle 时间。
+         *
+         * 收尾事件（idle / execution.succeeded）是「这一轮真的结束了」的直接证据，
+         * 而 `/api/session/active` 可能残留同一条会话（见 fetchActiveScopeData 的
+         * 注释）。把时间留下，后续对账时才能判定 active 里那条是残留而不是真相 ——
+         * 否则界面会在回复已经写完的情况下一直显示「处理中」。
+         */
+        if (completedAt != null) activeSessionStore.setSessionIdleAt(scopedId, completedAt)
         // updateStatus 返回 true 表示会话真正被清除；仍有未回复 pending 时返回
         // false（条目保留），此时会话并未完成，不弹完成提示。
         const cleared = activeSessionStore.updateStatus(scopedId, { type: 'idle' })

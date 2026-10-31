@@ -78,16 +78,43 @@ async function resolveApkArch(): Promise<'arm64' | 'armv7'> {
 }
 
 /**
+ * MainActivity 暴露的安装桥（`__opencode_android_apk`）。
+ *
+ * 为什么不用插件：`@tauri-apps/plugin-opener` 的 Android 侧只实现了 `open`，
+ * 没有 `openPath`；APK 安装必须走 FileProvider + content:// URI 才不被系统拒绝。
+ */
+interface ApkInstallerBridge {
+  /** 是否已获得「安装未知应用」权限（Android 8 以下恒为 true） */
+  canRequestInstall(): boolean
+  /** 跳到本应用的「安装未知应用」授权页 */
+  openInstallPermissionSettings(): boolean
+  /** 拉起系统安装界面；返回 null 表示成功，否则是错误描述 */
+  install(fileName: string): string | null
+}
+
+function getApkInstallerBridge(): ApkInstallerBridge | null {
+  if (typeof window === 'undefined') return null
+  const bridge = (window as unknown as { __opencode_android_apk?: ApkInstallerBridge }).__opencode_android_apk
+  return bridge && typeof bridge.install === 'function' ? bridge : null
+}
+
+/**
  * 从 release 里挑出匹配当前架构的 APK 下载地址。
  *
  * 资产命名规则见 .github/workflows/release.yml：
  *   OCC-${tag}-android-${label}.apk     （label = arm64 | armv7）
  */
 export function pickApkUrl(release: UpdateRelease, arch: 'arm64' | 'armv7'): string | null {
+  const fileName = apkFileName(release, arch)
+  if (!fileName) return null
+  return `https://github.com/${RELEASE_REPO}/releases/download/${release.tagName}/${fileName}`
+}
+
+/** 该 release 对应架构的资产文件名；无 tag 时返回 null */
+export function apkFileName(release: UpdateRelease, arch: 'arm64' | 'armv7'): string | null {
   const tag = release.tagName
   if (!tag) return null
-  const fileName = `OCC-${tag}-android-${arch}.apk`
-  return `https://github.com/${RELEASE_REPO}/releases/download/${tag}/${fileName}`
+  return `OCC-${tag}-android-${arch}.apk`
 }
 
 interface DownloadEvent {
@@ -155,17 +182,39 @@ export class AndroidUpdater {
 
         const result = await invoke<AndroidDownloadResult>('android_download_apk', {
           url,
-          fileName: `OCC-${release.tagName}.apk`,
+          // 文件名必须与 pickApkUrl 里的资产名一致，否则无法判断「下的是哪个包」
+          fileName: apkFileName(release, arch),
           onEvent: channel,
           options: { timeout: DOWNLOAD_TIMEOUT_MS },
         })
 
         this.setProgress({ phase: 'installing' })
 
-        // 交给系统安装器：打开 APK 文件会触发「是否安装」的确认界面。
-        // 用 opener 插件的 openPath —— 它对 file:// 路径会走系统 Intent。
-        const { openPath } = await import('@tauri-apps/plugin-opener')
-        await openPath(result.path)
+        /**
+         * 交给系统安装器。
+         *
+         * ⚠️ 不能用 `@tauri-apps/plugin-opener` 的 `openPath`：
+         * 该插件的 Android 实现（OpenerPlugin.kt）**只注册了 `open` 命令**，
+         * 没有 `open_path`，`invoke('plugin:opener|open_path')` 在安卓上直接失败；
+         * 而且它只会发 `file://` 的 ACTION_VIEW，Android 7+ 会抛
+         * FileUriExposedException。表现就是「APK 下载完了，但完全没有反应」。
+         *
+         * 改走 MainActivity 暴露的原生桥：FileProvider 生成 content:// URI +
+         * ACTION_VIEW(application/vnd.android.package-archive)，由系统安装器
+         * 负责签名校验与用户确认（Android 不允许应用静默安装）。
+         */
+        const fileName = result.path.split(/[\\/]/).pop() ?? ''
+        const bridge = getApkInstallerBridge()
+        if (!bridge) {
+          throw new Error(i18n.t('settings:about.androidInstallerUnavailable'))
+        }
+        // Android 8+ 需要「安装未知应用」授权，否则系统会静默拒绝
+        if (!bridge.canRequestInstall()) {
+          bridge.openInstallPermissionSettings()
+          throw new Error(i18n.t('settings:about.androidNeedInstallPermission'))
+        }
+        const failure = bridge.install(fileName)
+        if (failure) throw new Error(failure)
       } catch (error) {
         this.setProgress({
           phase: 'error',

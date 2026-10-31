@@ -507,7 +507,9 @@
     "autoUpdateRestart": "重启应用",
     "autoUpdateError": "自动更新失败：{{error}}",
     "androidInstalling": "安装包已下载，请在系统弹出的安装界面中确认。",
-    "androidNoApk": "该版本没有找到匹配当前设备的安装包。"
+    "androidNoApk": "该版本没有找到匹配当前设备的安装包。",
+    "androidInstallerUnavailable": "安装组件未就绪，请重启应用后重试。",
+    "androidNeedInstallPermission": "需要允许「安装未知应用」才能完成更新，已为你打开设置页，授权后请重试。"
   },
   "scheduledTasks": {
     "title": "定时任务",

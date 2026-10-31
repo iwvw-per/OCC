@@ -253,10 +253,33 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
       for (let i = 0; i < replyOrdinal; i += 1) content.push({ type: 'text', text: '' })
       if (replyText.trim()) content.push({ type: 'text', text: replyText })
 
+      /**
+       * ⚠️ 这条合成消息的 `created` **不能**直接用轮次起点（`item.time.created`）。
+       *
+       * 轮次起点是**用户消息**的时间；而这条合成消息代表的是「该轮最后一条
+       * assistant」。两者混进同一个消息数组、按 `created` 排序后，回复会被排到
+       * 本轮所有过程消息**之前**。
+       *
+       * 后果（2026-10-31 实测，笔电主机 ses_e6da629a0ffeWtRJFlpikPE9df）：
+       * 中途打开会话 → 投影落地 → 后续过程消息按真实时间追加在后面 →
+       * 渲染层按「最后一条带正文的消息」挑最终回答时，选中过程里的最后一句
+       * 说明，真正的回答被折进默认收起的过程块 —— 页面只剩一行过程文字，
+       * Ctrl+R 刷新（重新投影、顺序又对）才正常。
+       *
+       * 现场对比：
+       *   store:  user → reply(created=user.created) → 过程1 → 过程2 …
+       *   server: user → 过程1 → 过程2 → … → reply(created=最后一条的时间)
+       *
+       * 所以这里用「轮次起点 + 轮次总耗时」近似回复发生的时刻（骨架只给了总时长，
+       * 没有逐条时间戳）。缺 durationMs 时退化为轮次起点 —— 至少不早于该轮任何
+       * 消息，排序上仍稳定在过程消息之后（同值时按数组插入顺序）。
+       */
+      const replyCreated = createdAt + (durationMs ?? 0)
+
       raw.push({
         type: 'assistant',
         id: replyMessageId,
-        time: { created: createdAt, completed: createdAt },
+        time: { created: replyCreated, completed: replyCreated },
         content,
         ...(hasProcess || changedFiles.length > 0
           ? {

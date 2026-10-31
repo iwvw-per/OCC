@@ -761,11 +761,13 @@ export type ProcessTimelineItem =
         message: Message
         /**
          * 内容范围：
-         * - `inline` / `process`：只渲染一部分（历史轮次的折叠视图）；
+         * - `inline` / `process`：只渲染过程项（历史轮次的折叠视图）；
+         * - `final`：只渲染正文 —— 最终回答那条消息自身也以工具调用收尾时用它，
+         *   否则正文会被整个折进折叠块（实测整轮回答「消失」）；
          * - `all`：整条原样渲染 —— 最后一轮用它，服务端写什么就显示什么，
          *   不做「哪句是最终回复」的猜测。
          */
-        processContentScope: 'process' | 'inline' | 'all'
+        processContentScope: 'process' | 'inline' | 'final' | 'all'
       }>
       /** 壳外最终回答（结束后才有） */
       finalMessage?: Message
@@ -1198,7 +1200,13 @@ export function buildProcessTimeline(
     }
 
     // 进行中：全部进壳；结束：中间全进 + 末尾仅 process
-    const children: Array<{ message: Message; processContentScope: 'process' | 'inline' }> = []
+    /**
+     * 壳内子消息的作用域。
+     *
+     * `process`/`inline`：只渲染过程项；`final`：只渲染正文（最终回答那条既有
+     * 正文又有过程时用，见下方说明）。
+     */
+    const children: Array<{ message: Message; processContentScope: 'process' | 'inline' | 'final' }> = []
     if (turnIsActive) {
       for (const m of assistants) {
         children.push({
@@ -1207,19 +1215,46 @@ export function buildProcessTimeline(
         })
       }
     } else {
-      for (const m of assistants) {
-        if (m.info.id === finalId) {
-          if (messageHasProcess(m)) {
-            children.push({ message: m, processContentScope: 'process' })
-          }
+      /**
+       * ⚠️ 最终回答那条消息**不能整个塞进过程块**。
+       *
+       * 工具密集型回合里，真正带回答的那条 assistant 常常是
+       * `[reasoning, text(回答), tool]` —— 它以工具调用收尾，但正文就是回答。
+       * 2026-10-31 实测（arm 主机 ses_e6dcd22dbffe67R75bZIbrBWHI）：六条
+       * assistant 全部 finish=tool-calls，末条只有工具，回答在倒数第一条里。
+       *
+       * 旧写法在「最终回答消息本身也有过程内容」时把**整条**以
+       * `process` 作用域挂进壳内：MarkdownRenderer 对 `process` 作用域只渲染
+       * 过程项（`split.processItems`），而正文属于 finalItems → 答案不渲染；
+       * 折叠块收起后页面上只剩一句过程说明，用户以为回复被吞了，只能刷新。
+       *
+       * 正确做法：把它拆成两半 —— 过程部分进壳，正文（finalItems）放壳外。
+       * 同一轮里**其他**消息即使带正文也只算中间说明（`inline`），
+       * 避免把每条说明都摊到壳外。
+       */
+      for (let index = 0; index < assistants.length; index++) {
+        const m = assistants[index]
+        if (index === finalIndex) {
+          /**
+           * 既有正文又有过程的最终回答消息：以 `final` 作用域留在壳内，
+           * 只渲染正文；过程部分由同一轮的 inline 消息承载。
+           * 纯正文（没有可折叠过程）的最终回答不进壳 —— 壳里只有标题没有内容。
+           */
+          if (messageHasProcess(m)) children.push({ message: m, processContentScope: 'final' })
         } else {
           children.push({ message: m, processContentScope: 'inline' })
         }
       }
     }
 
-    const finalOutside =
-      !turnIsActive && finalAssistant && messageHasFinal(finalAssistant) ? finalAssistant : undefined
+    /**
+     * 折叠块外的最终回答。
+     *
+     * `finalMessage` 仍指向那条 assistant 消息：改动文件汇总（turnFiles）、
+     * 耗时页脚、操作按钮都挂在它上面。渲染范围由 `processContentScope: 'final'`
+     * 决定 —— 只渲染 `split.finalItems`，不会把过程内容再画一遍。
+     */
+    const finalOutside = !turnIsActive && finalAssistant ? finalAssistant : undefined
 
 
     // 进行中或有过程内容 → 挂壳

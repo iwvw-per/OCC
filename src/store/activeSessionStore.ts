@@ -61,7 +61,11 @@ interface SessionMetaEntry {
   sessionId: string
   title?: string
   directory?: string
+  /** 最近一次权威 idle 的时间（消息流里的 `type: 'idle'` 记录） */
+  idleAt?: number
 }
+
+type SessionMetaValue = { title?: string; directory?: string; idleAt?: number }
 
 interface ActiveSessionState {
   statusMap: SessionStatusMap
@@ -123,7 +127,7 @@ class ActiveSessionStore {
   private subscribers = new Set<Subscriber>()
 
   // session 元信息缓存（title, directory）
-  private sessionMeta = new Map<string, { title?: string; directory?: string }>()
+  private sessionMeta = new Map<string, SessionMetaValue>()
 
   // 未回复的 permission/question 请求 — requestId → PendingRequest
   private pendingRequests = new Map<string, PendingRequest>()
@@ -701,7 +705,7 @@ class ActiveSessionStore {
     const newTitle = title ?? existing?.title
     const newDir = directory ?? existing?.directory
     if (newTitle !== existing?.title || newDir !== existing?.directory) {
-      this.sessionMeta.set(sessionId, { title: newTitle, directory: newDir })
+      this.sessionMeta.set(sessionId, { ...existing, title: newTitle, directory: newDir })
       this.notify()
     }
   }
@@ -713,9 +717,14 @@ class ActiveSessionStore {
       const existing = this.sessionMeta.get(entry.sessionId)
       const newTitle = entry.title ?? existing?.title
       const newDir = entry.directory ?? existing?.directory
+      const newIdleAt = entry.idleAt ?? existing?.idleAt
 
-      if (newTitle !== existing?.title || newDir !== existing?.directory) {
-        this.sessionMeta.set(entry.sessionId, { title: newTitle, directory: newDir })
+      if (
+        newTitle !== existing?.title ||
+        newDir !== existing?.directory ||
+        newIdleAt !== existing?.idleAt
+      ) {
+        this.sessionMeta.set(entry.sessionId, { ...existing, title: newTitle, directory: newDir, idleAt: newIdleAt })
         changed = true
       }
     }
@@ -727,6 +736,21 @@ class ActiveSessionStore {
 
   getSessionMeta(sessionId: string) {
     return this.sessionMeta.get(sessionId)
+  }
+
+  /**
+   * 记下该会话最近一次**权威 idle** 的时间。
+   *
+   * 用途：`/api/session/active` 会残留已结束的会话（见 fetchActiveScopeData 的
+   * 注释）。有了这条记录，上层就能区分「active 里说它在跑」和「它其实早就
+   * 收到过 idle 结论」—— 否则界面会一直显示「处理中」，而消息本身已经定稿，
+   * 用户只能看着一句写好的回复发呆，直到刷新。
+   */
+  setSessionIdleAt(sessionId: string, idleAt: number) {
+    const existing = this.sessionMeta.get(sessionId)
+    if (existing?.idleAt != null && existing.idleAt >= idleAt) return
+    this.sessionMeta.set(sessionId, { ...(existing ?? {}), idleAt })
+    this.notify()
   }
 
   getBusySessions(): ActiveSessionEntry[] {

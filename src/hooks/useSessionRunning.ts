@@ -32,11 +32,29 @@ export function isSessionRunning(input: {
   lastAssistant?: {
     isStreaming?: boolean
     info?: { time?: { created?: number; completed?: number } | null } | null
+    content?: ReadonlyArray<{ type?: string; state?: { status?: string } }>
   } | null
 }): boolean {
   const { serverRunning, localStreaming, lastAssistant } = input
-  // 服务端说在跑 → 一定在跑（快照可能比本地旧，这条压过一切）
-  if (serverRunning) return true
+  /**
+   * 服务端说在跑 → 在跑（快照可能比本地旧，优先级最高）。
+   *
+   * ⚠️ 但 `/api/session/active` 会残留：实测（2026-10-31，opencode 2.x）一个已
+   * `succeeded`、`time.idle` 早于现在 10 分钟的会话，仍然被它报成 running。
+   * 那条会话的最后一条 assistant 也确实没有 `time.completed`（消息在结束那一帧
+   * 之前就断流了），于是「服务端说 running」+「消息未定稿」两边互相印证，
+   * 界面就永久停在「处理中」—— 用户看到的就是「回复已经写出来了，却一直处理中」。
+   *
+   * 所以：**服务端说在跑，但本地末条 assistant 已经定稿**时，说明那条 running
+   * 是残留，以消息为准。真正的生成中不可能出现「末条已 completed 且没有在跑的
+   * 工具」这种形态 —— 那正是这一轮写完的标志。
+   */
+  const hasSettledAssistant =
+    !!lastAssistant &&
+    !lastAssistant.isStreaming &&
+    lastAssistant.info?.time?.completed != null &&
+    !lastAssistantHasLiveTool(lastAssistant)
+  if (serverRunning) return !hasSettledAssistant
   if (!lastAssistant) return Boolean(localStreaming)
   /**
    * 有 assistant 时以**消息本身是否定稿**为准。
@@ -48,6 +66,18 @@ export function isSessionRunning(input: {
   if (lastAssistant.isStreaming) return true
   if (messageCompletedAt(lastAssistant) == null) return true
   return Boolean(localStreaming)
+}
+
+/** 末条 assistant 里是否还有在跑/待执行的工具（有 = 这一轮其实还没完） */
+function lastAssistantHasLiveTool(message: {
+  content?: ReadonlyArray<{ type?: string; state?: { status?: string } }>
+}): boolean {
+  const content = message.content ?? []
+  return content.some(
+    part =>
+      part.type === 'tool' &&
+      (part.state?.status === 'running' || part.state?.status === 'pending'),
+  )
 }
 
 /** 从 store 现算（非 hook 场景，如事件回调、发送链路） */

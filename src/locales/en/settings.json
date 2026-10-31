@@ -507,7 +507,9 @@
     "autoUpdateRestart": "Restart app",
     "autoUpdateError": "Auto update failed: {{error}}",
     "androidInstalling": "Download complete. Confirm the installation in the system dialog.",
-    "androidNoApk": "No installer matching this device was found for this version."
+    "androidNoApk": "No installer matching this device was found for this version.",
+    "androidInstallerUnavailable": "The installer component is unavailable. Restart the app and try again.",
+    "androidNeedInstallPermission": "Allow “Install unknown apps” to finish the update. Settings has been opened — retry after granting it."
   },
   "scheduledTasks": {
     "title": "Scheduled Tasks",

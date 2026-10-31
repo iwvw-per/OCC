@@ -8,6 +8,13 @@
     <!-- 会话进行中保持进程存活，避免 WebView 被冻结导致实况通知停更 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!--
+      应用内一键更新：下载 APK 后交给系统安装器。
+      Android 8+ 必须声明该权限，否则 PackageManager.canRequestPackageInstalls()
+      恒为 false、跳「安装未知应用」设置页也无效 —— 表现就是点了更新毫无反应。
+      分发走 GitHub Releases（不上架 Google Play），因此不受该权限的上架限制。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
