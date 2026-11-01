@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+- fix(chat): 新设备打开**正在运行**的会话时，最后一轮不再只剩折叠块。骨架只覆盖已定稿轮次，而有些运行中的轮次后端并没有标 `settled: false`（实测 `ses_eaa3442ccffeFLuqH2Vt3aN9TA`：末轮 92 步全部 completed、骨架 `reply: null`，`/api/session/active` 却报 running），于是这一轮既不在骨架里、也没被补拉，页面上就只剩折叠块。现在按「末轮 + 会话仍运行」补拉完整消息；判据必须叠会话运行状态，因为纯工具轮与中断轮的 `reply` 同样是 null
+- fix(chat): 上述补拉的状态查询按键形态修正 —— `loadSession` 收到的是复合 key（`serverId::sessionId`），而 `getSessionStatus` 的 map 以裸 id 为键，直接用复合 key 查会恒不命中，补偿分支静默失效
+
 ## [v2.0.57] - 2026-11-01
 
 - fix(chat): 修复「同一轮多条结论只显示最后一条」（骨架/刷新路径）。骨架合成的回复消息原先**不带 `finish`**，前端因此以为这一轮没有服务端结论、退化为按位置兜底，多条 `replies` 时只剩最后一条。实测 ARM 主机 `ses_e754c2c25ffeR6bIwbgwgBmLQ6`：一轮 2 个 stop（90 字 + 101 字），页面只显示 101 字

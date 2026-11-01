@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { logger } from '../utils/logger'
 import { isUserUIMessage, toApiMessageWithParts, toUIMessage } from '../utils/messageConversion'
 import { activeSessionStore, messageStore, type RevertState, type SessionState } from '../store'
-import { sessionKeyToServerId } from '../utils/sessionKey'
+import { sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
 import {
   getSessionTurnPage,
   getSessionFirstScreen,
@@ -21,6 +21,7 @@ import {
   probeLightweightSupport,
   encodeBeforeCursor,
   getSession,
+  getSessionStatus,
   revertMessage,
   unrevertSession,
   extractUserMessageContent,
@@ -39,6 +40,40 @@ import type { BackgroundJobStatus } from '../features/workStatus/backgroundJobs'
 import { estimateHistoryPageSize } from '../constants/pagination'
 import i18n from '../i18n'
 import type { MessageError } from '../types/message'
+
+/**
+ * 计算「需要按完整消息补拉」的轮次 id 集合。
+ *
+ * 骨架只覆盖**已定稿**的轮次；正在生成的那一轮必须先标记出来，调用方再用完整
+ * 消息拉取代（骨架给的是截断快照，而实时 delta 是 ephemeral、不重放，直接拼接
+ * 会重复或错位）。
+ *
+ * 两条判据，缺一不可：
+ *
+ * 1. **后端标记**（`settled: false`）：某条 assistant 还缺 `completed`。
+ *    这是最准的，优先使用。
+ *
+ * 2. **前端补偿**：后端漏判的一类形态 —— 该轮所有 assistant 都已 `completed`，
+ *    但会话仍在运行（agent 正在准备下一步），于是骨架里最后一轮 `reply: null`。
+ *
+ * 实测（2026-11-01，ARM 主机 ses_eaa3442ccffeFLuqH2Vt3aN9TA）：最后一轮
+ * 92 步全部 completed、骨架 `reply: null`、`settled` 未标记，而
+ * `/api/session/active` 里该会话是 `running`。新设备打开时这一轮只剩折叠块，
+ * 用户看到的就是「正在处理的消息显示不全，只显示最新几条」。
+ *
+ * ⚠️ 第 2 条**必须**叠「会话正在运行」。只看 `reply === null` 会误伤：
+ * 纯工具轮与中断轮的 `reply` 同样是 null（实测该会话 22 轮里有 4 个），
+ * 那些轮次是正常的，补拉只会白白多拉几 MB。
+ */
+export function resolveUnsettledTurnIds(
+  backendUnsettled: string[] | undefined,
+  tailTurnId: string | undefined,
+  sessionIsRunning: boolean,
+): string[] {
+  const ids = [...(backendUnsettled ?? [])]
+  if (tailTurnId && sessionIsRunning && !ids.includes(tailTurnId)) ids.push(tailTurnId)
+  return ids
+}
 
 function toLoadMessageError(error: unknown): MessageError {
   const message = error instanceof Error ? error.message : String(error || i18n.t('chat:errors.loadSession'))
@@ -476,7 +511,31 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
            * 而不是直接放弃。
            */
           let tailMessages: ApiMessageWithParts[] = []
-          const unsettledTurns = skeleton.unsettledTurns ?? []
+          /**
+           * 需要按完整消息补拉的轮次。
+           *
+           * 后端标记（`settled: false`）之外，还要补偿「会话仍在运行但骨架没标
+           * 未定稿」的最后一轮 —— 详见 `resolveUnsettledTurnIds` 的说明。
+           */
+          const turnsMap = skeleton.turns
+          const tailTurnId = turnsMap && turnsMap.size > 0 ? [...turnsMap.keys()].pop() : undefined
+          let sessionIsRunning = false
+          if (tailTurnId && !(skeleton.unsettledTurns ?? []).includes(tailTurnId)) {
+            try {
+              /**
+               * ⚠️ `sid` 是**服务器作用域复合 key**（`serverId::sessionId`），而
+               * `getSessionStatus` 返回的 map 以**裸 session id** 为键（见
+               * `nativeActiveSessions`：直接透传 `/api/session/active` 的键）。
+               * 这里必须先解析成裸 id 再查，否则永远查不到 —— 补偿分支会静默失效。
+               */
+              const statusMap = await getSessionStatus(dir, serverId).catch(() => null)
+              const state = statusMap?.[sessionKeyToSessionId(sid)]
+              sessionIsRunning = state?.type === 'busy' || state?.type === 'retry'
+            } catch {
+              // 状态查询失败：不影响正常加载，只是不做这次补偿
+            }
+          }
+          const unsettledTurns = resolveUnsettledTurnIds(skeleton.unsettledTurns, tailTurnId, sessionIsRunning)
           if (unsettledTurns.length > 0) {
             /**
              * 取「正在进行的这一轮」的完整消息。

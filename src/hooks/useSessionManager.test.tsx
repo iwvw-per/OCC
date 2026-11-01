@@ -9,6 +9,7 @@ const {
   lightweightMessagesMock,
   probeLightweightSupportMock,
   peekLightweightSupportMock,
+  getSessionStatusMock,
   messageStoreMock,
   sessionErrorHandlerMock,
   revertMessageMock,
@@ -20,6 +21,7 @@ const {
   lightweightMessagesMock: vi.fn(),
   probeLightweightSupportMock: vi.fn(async () => false),
   peekLightweightSupportMock: vi.fn(),
+  getSessionStatusMock: vi.fn(async () => ({})),
   messageStoreMock: {
     getSessionState: vi.fn(),
     setLoadState: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock('../api', () => ({
   getSessionLightweightMessages: (...args: unknown[]) => lightweightMessagesMock(...args),
   probeLightweightSupport: (...args: unknown[]) => probeLightweightSupportMock(...(args as [])),
   peekLightweightSupport: (...args: unknown[]) => peekLightweightSupportMock(...(args as [])),
+  getSessionStatus: (...args: unknown[]) => getSessionStatusMock(...(args as [])),
   revertMessage: (...args: unknown[]) => revertMessageMock(...args),
   unrevertSession: vi.fn(),
   encodeBeforeCursor: (message: unknown) => `cursor:${(message as { info?: { id?: string } }).info?.id ?? ''}`,
@@ -96,6 +99,8 @@ describe('useSessionManager', () => {
     probeLightweightSupportMock.mockResolvedValue(false)
     peekLightweightSupportMock.mockReset()
     peekLightweightSupportMock.mockReturnValue(undefined)
+    getSessionStatusMock.mockReset()
+    getSessionStatusMock.mockResolvedValue({})
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
@@ -969,5 +974,100 @@ describe('超长轮次：单页挤掉 user 时必须向前翻页', () => {
     expect(ids).toContain('live-0')
     // 超出本轮的更早内容被截掉
     expect(ids).not.toContain('older_user')
+  })
+})
+
+describe('运行中会话但骨架未标 unsettled：末轮也要补拉', () => {
+  /**
+   * 回归：新设备打开进行中的会话，最后一轮只剩折叠块。
+   *
+   * 实测（2026-11-01，ARM 主机 ses_eaa3442ccffeFLuqH2Vt3aN9TA）：最后一轮 92 步
+   * 全部 completed、骨架 `reply: null`、后端没标 `settled: false`，而
+   * `/api/session/active` 里该会话是 running。
+   *
+   * 注意 key 形态：`loadSession` 收到的 sid 是**复合 key**（`serverId::sessionId`），
+   * 而 `getSessionStatus` 返回的 map 以**裸 id** 为键。用错的一方查不到状态，
+   * 整个补偿分支会静默失效 —— 这里就是钉住这一点。
+   */
+  const TAIL_TURN = 'msg_tail_turn'
+
+  function skeletonWithNullTail() {
+    return {
+      messages: [
+        { info: { id: 'hist_user', role: 'user', time: { created: 100 } }, parts: [] },
+        { info: { id: 'hist_reply', role: 'assistant', time: { created: 200, completed: 210 } }, parts: [] },
+      ],
+      nextCursor: undefined,
+      hasMore: false,
+      config: {},
+      // 后端没标未定稿；末轮 reply 为 null 的形态由骨架 messages 体现
+      unsettledTurns: [],
+      turns: new Map([[TAIL_TURN, { reasoningCount: 0, stepCount: 92 }]]),
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    peekLightweightSupportMock.mockReset()
+    peekLightweightSupportMock.mockReturnValue(true)
+    probeLightweightSupportMock.mockReset()
+    lightweightMessagesMock.mockReset()
+    getSessionTurnPageMock.mockReset()
+    getSessionStatusMock.mockReset()
+    // 这些 mock 的实现不会随 clearAllMocks 复位，必须显式给回默认值，
+    // 否则会继承上一个 describe 里留下的 getSessionState 返回值。
+    messageStoreMock.getSessionState.mockReset()
+    messageStoreMock.getSessionState.mockReturnValue(null)
+    messageStoreMock.setMessages.mockReset()
+    messageStoreMock.setLoadState.mockReset()
+    messageStoreMock.updateSessionMetadata.mockReset()
+    messageStoreMock.compressHistoricalTurns.mockReset()
+    messageStoreMock.compressHistoricalTurns.mockReturnValue(false)
+    messageStoreMock.settleByAuthoritativeIdle.mockReset()
+    messageStoreMock.settleByAuthoritativeIdle.mockReturnValue(false)
+    messageStoreMock.getTrimmedCount.mockReset()
+    messageStoreMock.getTrimmedCount.mockReturnValue(0)
+    messageStoreMock.getSessionChangeVersion.mockReset()
+    messageStoreMock.getSessionChangeVersion.mockReturnValue(0)
+    getSessionMock.mockReset()
+    getSessionMock.mockResolvedValue({ id: 'srv::session-tail', directory: '/w' })
+  })
+
+  it('会话 running（裸 id 命中）→ 用末轮 id 补拉完整消息', async () => {
+    lightweightMessagesMock.mockResolvedValue(skeletonWithNullTail())
+    // 服务端 active 的键是「裸会话 id」，不是复合 key（也不是轮次 id）
+    getSessionStatusMock.mockResolvedValue({ 'session-tail': { type: 'busy' } })
+    getSessionTurnPageMock.mockResolvedValue({
+      messages: [
+        { info: { id: TAIL_TURN, role: 'user', time: { created: 1000 } }, parts: [] },
+        { info: { id: 'live_reply', role: 'assistant', time: { created: 1010 } }, parts: [] },
+      ],
+      nextCursor: undefined,
+      hasMore: false,
+    })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'srv::session-tail', directory: '/w' }))
+    await act(async () => {
+      await result.current.loadSession('srv::session-tail')
+    })
+
+    // 查状态时用的必须是裸 id
+    expect(getSessionStatusMock).toHaveBeenCalled()
+    const applied = messageStoreMock.setMessages.mock.calls.at(-1)?.[1] as Array<{ info: { id: string } }>
+    expect(applied.map(m => m.info.id)).toContain('live_reply')
+  })
+
+  it('会话 idle → 不补拉（纯工具轮 / 中断轮的 reply 同样是 null）', async () => {
+    lightweightMessagesMock.mockResolvedValue(skeletonWithNullTail())
+    getSessionStatusMock.mockResolvedValue({})
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'srv::session-tail', directory: '/w' }))
+    await act(async () => {
+      await result.current.loadSession('srv::session-tail')
+    })
+
+    const applied = messageStoreMock.setMessages.mock.calls.at(-1)?.[1] as Array<{ info: { id: string } }>
+    expect(applied.map(m => m.info.id)).not.toContain('live_reply')
   })
 })
