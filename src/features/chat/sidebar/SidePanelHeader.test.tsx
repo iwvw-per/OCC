@@ -46,6 +46,9 @@ vi.mock('../../../hooks/useServerStore', () => ({
 vi.mock('./SidebarFooter', () => ({ SidebarFooter: () => null }))
 vi.mock('./FolderRecentList', () => ({ FolderRecentList: () => null }))
 vi.mock('./HostQuickSwitcher', () => ({ HostQuickSwitcher: () => null }))
+// 主机资源条会订阅 serverStore 并轮询网关；本用例只关心顶栏结构，
+// 不 mock 会让真实组件跑起来（mock 的 store 快照不稳定会触发无限重渲染）。
+vi.mock('./HostMetricsBar', () => ({ HostMetricsBar: () => null }))
 vi.mock('./useProjectGroups', () => ({
   useProjectGroups: () => ({
     folderProjects: [],

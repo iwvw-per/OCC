@@ -10,59 +10,46 @@
 // ============================================
 
 import { useCallback, useSyncExternalStore } from 'react'
-import { useServerStore, type ServerHealth } from '../../../hooks/useServerStore'
-import { subscribeToServerConnectionState, getServerConnectionInfo, type ConnectionState } from '../../../api/events'
+import { useServerStore } from '../../../hooks/useServerStore'
 import { cn } from '../../../utils/cn'
 import { interactive } from '../../../utils/interaction'
 import { SyncStatusIcon } from './SyncStatusRow'
 import { useSyncIndicatorAvailable } from './syncStatus'
-
-function useServerConnectionState(serverId: string): ConnectionState {
-  const subscribe = useCallback(
-    (onStoreChange: () => void) => subscribeToServerConnectionState(serverId, () => onStoreChange()),
-    [serverId],
-  )
-  const getSnapshot = useCallback(
-    () => getServerConnectionInfo(serverId).state,
-    [serverId],
-  )
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-}
-
-// 状态点颜色以健康探测为准（真实可达性），SSE 仅补充 connecting 过渡态——
-// 进程死后 SSE 长连接可能还挂着，health 是 5s 超时的真实探测，能立刻判离线。
-function statusDotClass(health: ServerHealth | null, state: ConnectionState): string {
-  switch (health?.status) {
-    case 'online':
-      return 'bg-success-100'
-    case 'checking':
-      return 'bg-warning-100 animate-pulse'
-    case 'unauthorized':
-      return 'bg-warning-100'
-    case 'offline':
-    case 'error':
-      return 'bg-danger-100'
-    default:
-      // 从未探测过：fallback 到 SSE 连接态（connecting 用黄点提示正在握手）
-      return state === 'connecting' ? 'bg-warning-100 animate-pulse' : 'bg-text-500/50'
-  }
-}
+import { statusDotClass, useServerConnectionState } from './hostStatus'
+import { getHostMetricsCollapsed, setHostMetricsCollapsed, subscribeHostMetricsCollapsed, toggleHostMetricsCollapsed } from './hostMetricsUi'
 
 export function HostQuickSwitcher() {
   const { servers, activeServer, setActiveServer } = useServerStore()
   const activeId = activeServer?.id ?? null
   const visibleServers = servers.filter(server => server.enabled !== false)
+  const collapsed = useSyncExternalStore(
+    subscribeHostMetricsCollapsed,
+    getHostMetricsCollapsed,
+    getHostMetricsCollapsed,
+  )
 
   const handleSelect = useCallback(
     (id: string) => {
-      if (id !== activeId) setActiveServer(id)
+      if (id !== activeId) {
+        // 切到别的主机：资源监控跟随新主机，并确保它是展开的
+        setActiveServer(id)
+        setHostMetricsCollapsed(false)
+        return
+      }
+      /**
+       * 重复点击当前主机：收起 / 展开资源监控。
+       *
+       * 复用这排已有的主机按钮而不是再放一个「主机资源」标题行 —— 侧栏底部
+       * 本来就有一排主机切换按钮，再加一行标题既重复又占高度。
+       */
+      toggleHostMetricsCollapsed()
     },
     [activeId, setActiveServer],
   )
 
-  // 主机多于一台才需要切换条；但同步图标要挂在这一行右侧，所以只有「无主机可显示
-  // 且同步也不可用」时才整行省略，避免同步状态无处安放。
-  const showHosts = visibleServers.length > 1
+  // 当前主机按钮同时承担资源监控的折叠开关，因此只要有一台主机就显示这一行
+  // （此前是「多于一台才显示」，只有单机时按钮不出现，就没法折叠了）。
+  const showHosts = visibleServers.length > 0
   const syncAvailable = useSyncIndicatorAvailable()
   if (!showHosts && !syncAvailable) return null
 
@@ -76,6 +63,7 @@ export function HostQuickSwitcher() {
               serverId={server.id}
               name={server.name}
               isActive={server.id === activeId}
+              metricsExpanded={!collapsed}
               onSelect={handleSelect}
             />
           ))}
@@ -92,11 +80,14 @@ function HostQuickHostRow({
   serverId,
   name,
   isActive,
+  metricsExpanded,
   onSelect,
 }: {
   serverId: string
   name: string
   isActive: boolean
+  /** 当前主机才有意义：资源监控是否展开。用于 title 与 aria-expanded */
+  metricsExpanded: boolean
   onSelect: (id: string) => void
 }) {
   const state = useServerConnectionState(serverId)
@@ -106,7 +97,9 @@ function HostQuickHostRow({
     <button
       type="button"
       onClick={() => onSelect(serverId)}
-      title={name}
+      // 当前主机的按钮兼作「资源监控」折叠开关，用 aria-expanded 把这一语义暴露出来
+      {...(isActive ? { 'aria-expanded': metricsExpanded, 'aria-controls': 'host-metrics-panel' } : {})}
+      title={isActive ? `${name} · ${metricsExpanded ? '点击收起资源监控' : '点击展开资源监控'}` : name}
       className={cn(
         'flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[length:var(--fs-xxs)] transition-colors',
         isActive

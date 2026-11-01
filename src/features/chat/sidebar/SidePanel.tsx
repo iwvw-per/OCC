@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { DESKTOP_TITLEBAR_HEIGHT } from '../../../constants/desktopWindow'
 import { FolderRecentList, type FolderRecentProject } from './FolderRecentList'
 import { HostQuickSwitcher } from './HostQuickSwitcher'
+import { HostMetricsBar } from './HostMetricsBar'
 import { SessionSortMenu } from './SessionSortMenu'
 import { useServerStore } from '../../../hooks/useServerStore'
 import { useHostSlideState } from './hostSwitchDirection'
@@ -783,6 +784,9 @@ export function SidePanel({
 
       {/* Spacer for collapsed */}
       {!showLabels && <div className="flex-1" />}
+
+      {/* ===== 当前主机资源监控（仅展开显示；非 AI Agent 服务器自动隐藏） ===== */}
+      {showLabels && <HostMetricsBar />}
 
       {/* ===== 主机快速切换条（对话区底部，仅展开显示；同步图标在其右侧） ===== */}
       {showLabels && <HostQuickSwitcher />}

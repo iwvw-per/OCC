@@ -287,6 +287,69 @@ export function selectInstance(instance: AiAgentInstance): boolean {
   return serverStore.setActiveServer(id)
 }
 
+/**
+ * 某实例所在主机的**整机**实时指标（CPU / 内存 / 磁盘 / 负载）。
+ *
+ * 与 `/instances/{id}/status` 的进程级指标区分：那个描述 opencode 进程自身
+ * （pid / memoryBytes / cpuPercent），这里描述整台主机 —— 用户关心的「编译时
+ * 主机压力」属于后者（编译由 agent 拉起的子进程执行，进程级数字会低估）。
+ *
+ * 数据源是面板的 server_metrics_history（主机 Agent 每 10~30 秒上报一条）。
+ * 面板自身的 /api/server/metrics/latest/{id} 要求后台 session Cookie，
+ * 模块 token 进不去，因此由网关转发同一份数据。
+ *
+ * 返回 null 表示「主机还没上报过指标」（实例刚建、或 Agent 未上报），
+ * 调用方应显示「暂无数据」而不是错误。
+ */
+export interface HostMetrics {
+  serverId: string
+  /** 整机 CPU 使用率（0-100） */
+  cpuPercent?: number
+  /** 1 分钟平均负载（Linux 有意义，Windows 通常缺失） */
+  cpuLoad?: number
+  cpuCores?: number
+  cpuThreads?: number
+  /** 内存使用率（0-100） */
+  memPercent?: number
+  /**
+   * 内存用量 / 总量，单位 **MB**（不是字节）。
+   *
+   * 实测网关返回 memUsed=4020 / memTotal=23972，且 4020/23972 = 16.77% 与
+   * 接口的 memPercent 完全吻合，故确认是 MB。按字节解读会显示成 0M。
+   */
+  memUsed?: number
+  memTotal?: number
+  /** 磁盘使用率（0-100） */
+  diskPercent?: number
+  diskUsed?: number
+  diskTotal?: number
+  platform?: string
+  /** 采集时刻（RFC3339）。采集停摆时它会停在旧时间，据此判断数据新鲜度 */
+  recordedAt?: string
+}
+
+/**
+ * 从服务器 id 解析出 AI Agent 实例 id。
+ *
+ * 服务器 id 形如 `aiagent:inst_xxx`（见 serverIdForInstance）。非该形态返回 null，
+ * 表示这是一台手填 URL 的普通服务器，没有实例指标可查。
+ */
+export function instanceIdFromServerId(serverId: string): string | null {
+  if (!serverId.startsWith('aiagent:')) return null
+  const id = serverId.slice('aiagent:'.length)
+  return id || null
+}
+
+/** 读取某实例所在主机的整机指标；无数据时返回 null */
+export async function fetchHostMetrics(account: AiAgentAccount, instanceId: string): Promise<HostMetrics | null> {
+  const data = await accountRequest<HostMetrics | null>(
+    account,
+    `/api/aiagent/instances/${encodeURIComponent(instanceId)}/metrics`,
+    { method: 'GET' },
+  )
+  return data ?? null
+}
+
 /** 清除由账号同步出来的全部服务器（登出时调用） */
 export function clearAccountServers(): void {
   for (const server of serverStore.getStoredServers()) {
@@ -306,6 +369,8 @@ export const AiAgentAccountApi = {
   pruneStaleAccountServers,
   selectInstance,
   clearAccountServers,
+  instanceIdFromServerId,
+  fetchHostMetrics,
 }
 
 export default AiAgentAccountApi
