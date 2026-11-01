@@ -161,7 +161,6 @@ export interface InputBoxProps {
   isStreaming?: boolean
   agents?: ApiAgent[]
   selectedAgent?: string
-  onAgentChange?: (agentName: string) => void
   variants?: string[]
   selectedVariant?: string
   onVariantChange?: (variant: string | undefined) => void
@@ -212,7 +211,6 @@ function InputBoxComponent({
   isStreaming,
   agents = [],
   selectedAgent,
-  onAgentChange,
   variants = [],
   selectedVariant,
   onVariantChange,
@@ -1835,9 +1833,6 @@ function InputBoxComponent({
                     {/* Bottom Bar -> InputToolbar */}
                     <div ref={toolbarRef}>
                       <InputToolbar
-                        agents={agents}
-                        selectedAgent={selectedAgent}
-                        onAgentChange={onAgentChange}
                         variants={variants}
                         selectedVariant={selectedVariant}
                         onVariantChange={onVariantChange}

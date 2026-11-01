@@ -1,20 +1,15 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { logger } from '../../../utils/logger'
 import { useTranslation } from 'react-i18next'
-import { ChevronDownIcon, PaperclipIcon, AgentIcon, ThinkingIcon } from '../../../components/Icons'
+import { ChevronDownIcon, PaperclipIcon, ThinkingIcon } from '../../../components/Icons'
 import { DropdownMenu, MenuItem, IconButton, AnimatedPresence } from '../../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from '../ModelSelector'
 import { useChatViewport } from '../chatViewport'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
 import { isTauri, isTauriMobile, extToMime } from '../../../utils/tauri'
-import type { ApiAgent } from '../../../api/client'
 import type { ModelInfo, FileCapabilities } from '../../../api'
 
 interface InputToolbarProps {
-  agents: ApiAgent[]
-  selectedAgent?: string
-  onAgentChange?: (agentName: string) => void
-
   variants?: string[]
   selectedVariant?: string
   onVariantChange?: (variant: string | undefined) => void
@@ -36,9 +31,6 @@ interface InputToolbarProps {
 }
 
 export function InputToolbar({
-  agents,
-  selectedAgent,
-  onAgentChange,
   variants = [],
   selectedVariant,
   onVariantChange,
@@ -96,18 +88,13 @@ export function InputToolbar({
     }
   }, [caps.image, caps.pdf, caps.audio, caps.video, t])
   // State for menus
-  const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [variantMenuOpen, setVariantMenuOpen] = useState(false)
 
   // Refs
-  const agentTriggerRef = useRef<HTMLButtonElement>(null)
-  const agentMenuRef = useRef<HTMLDivElement>(null)
   const variantTriggerRef = useRef<HTMLButtonElement>(null)
   const variantMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const agentMenuFocusRef = useRef<'selected' | 'first' | 'last'>('selected')
   const variantMenuFocusRef = useRef<'selected' | 'first' | 'last'>('selected')
-  const agentMenuId = 'input-toolbar-agent-menu'
   const variantMenuId = 'input-toolbar-variant-menu'
 
   const focusComposerInput = useCallback(() => {
@@ -272,16 +259,6 @@ export function InputToolbar({
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
-        agentMenuOpen &&
-        !agentMenuRef.current?.contains(e.target as Node) &&
-        !agentTriggerRef.current?.contains(e.target as Node)
-      ) {
-        setAgentMenuOpen(false)
-        if (!isFocusableElement(e.target)) {
-          agentTriggerRef.current?.focus()
-        }
-      }
-      if (
         variantMenuOpen &&
         !variantMenuRef.current?.contains(e.target as Node) &&
         !variantTriggerRef.current?.contains(e.target as Node)
@@ -294,15 +271,7 @@ export function InputToolbar({
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [agentMenuOpen, variantMenuOpen, isFocusableElement])
-
-  useEffect(() => {
-    if (!agentMenuOpen) return
-    const timerId = window.setTimeout(() => {
-      focusMenuItem(agentMenuRef.current, agentMenuFocusRef.current)
-    }, 0)
-    return () => clearTimeout(timerId)
-  }, [agentMenuOpen, focusMenuItem])
+  }, [variantMenuOpen, isFocusableElement])
 
   useEffect(() => {
     if (!variantMenuOpen) return
@@ -312,105 +281,14 @@ export function InputToolbar({
     return () => clearTimeout(timerId)
   }, [variantMenuOpen, focusMenuItem])
 
-  const selectableAgents = agents.filter(a => a.mode !== 'subagent' && !a.hidden)
-  const currentAgent = agents.find(a => a.name === selectedAgent)
-
   return (
     // 右侧留出 ChatFab 的位置（FAB 绝对定位在输入框右下角，宽 32 + right 18）
     <div className="flex items-center justify-between pl-3 pr-14 pb-3 relative">
-      {/* Left side: Model + Agent + Variant selectors */}
+      {/* Left side: Model + Variant selectors */}
       <div className={`flex items-center min-w-0 ${isCompact ? 'gap-1' : 'gap-2'}`}>
-        {/* Agent Selector（模式选择） */}
-        <AnimatedPresence show={selectableAgents.length > 1} className={isCompact ? 'shrink min-w-0' : ''}>
-          <div className={isCompact ? 'relative min-w-0' : 'relative'}>
-            <button
-              ref={agentTriggerRef}
-              type="button"
-              onClick={() => {
-                agentMenuFocusRef.current = 'selected'
-                setAgentMenuOpen(!agentMenuOpen)
-              }}
-              onKeyDown={e => {
-                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                  e.preventDefault()
-                  agentMenuFocusRef.current = e.key === 'ArrowUp' ? 'last' : 'first'
-                  setAgentMenuOpen(true)
-                }
-              }}
-              disabled={controlsDisabled}
-              aria-haspopup="menu"
-              aria-expanded={agentMenuOpen}
-              aria-controls={agentMenuOpen ? agentMenuId : undefined}
-              className={`flex items-center gap-1.5 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden ${isCompact ? 'max-w-[6rem]' : 'w-full'}`}
-              title={
-                currentAgent
-                  ? `${currentAgent.name}${currentAgent.description ? ': ' + currentAgent.description : ''}`
-                  : selectedAgent || 'build'
-              }
-            >
-              {/* 紧凑信息流隐藏 AgentIcon 节省空间 */}
-              <span
-                className={`text-text-400 shrink-0 ${isCompact ? 'hidden' : ''}`}
-                style={currentAgent?.color ? { color: currentAgent.color } : undefined}
-              >
-                <AgentIcon />
-              </span>
-              <span className="text-[length:var(--fs-sm)] text-text-300 capitalize truncate">
-                {selectedAgent || 'build'}
-              </span>
-              {/* 箭头与 ModelSelector 保持一致：展开时旋转 180°，带过渡 */}
-              <span
-                className={`text-text-400 shrink-0 transition-transform duration-200 ${isCompact ? 'hidden' : ''} ${
-                  agentMenuOpen ? 'rotate-180' : ''
-                }`}
-              >
-                <ChevronDownIcon />
-              </span>
-            </button>
-
-            <DropdownMenu
-              triggerRef={agentTriggerRef}
-              isOpen={agentMenuOpen}
-              position="top"
-              align="left"
-              constrainToRef={inputContainerRef}
-            >
-              <div
-                id={agentMenuId}
-                ref={agentMenuRef}
-                role="menu"
-                aria-label={t('header.agentMenu')}
-                className="flex flex-col gap-0.5"
-                onKeyDown={event =>
-                  handleMenuKeyDown(event, agentMenuRef.current, () => setAgentMenuOpen(false), agentTriggerRef.current)
-                }
-              >
-                {selectableAgents.map(agent => (
-                  <MenuItem
-                    key={agent.name}
-                    label={agent.name.charAt(0).toUpperCase() + agent.name.slice(1)}
-                    description={agent.description}
-                    icon={
-                      <span style={agent.color ? { color: agent.color } : undefined}>
-                        <AgentIcon />
-                      </span>
-                    }
-                    selected={selectedAgent === agent.name}
-                    selectionRole="menuitemradio"
-                    onClick={() => {
-                      onAgentChange?.(agent.name)
-                      closeMenuToComposer(() => setAgentMenuOpen(false))
-                    }}
-                  />
-                ))}
-              </div>
-            </DropdownMenu>
-          </div>
-        </AnimatedPresence>
-
-        {/* Model Selector — 放在模式选择后面（桌面 + 移动端）
+        {/* Model Selector — 工具栏第一个入口（桌面 + 移动端）
             移动端必须保证入口可见可点：给它 shrink-0 与最小宽度，
-            让 Agent / Variant 先让位，而不是把模型入口挤成 0 宽 */}
+            让 Variant 先让位，而不是把模型入口挤成 0 宽 */}
         {onModelChange && (
           <div className={isCompact ? 'shrink-0 min-w-[6.5rem] max-w-[11rem]' : 'min-w-0 flex-1'}>
             <ModelSelector

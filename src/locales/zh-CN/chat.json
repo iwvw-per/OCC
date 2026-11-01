@@ -21,7 +21,6 @@
     "splitHorizontal": "水平分栏",
     "splitVertical": "垂直分栏",
     "closePane": "关闭分栏",
-    "agentMenu": "Agent 菜单",
     "variantMenu": "模型变体菜单",
     "sessionFallback": "会话 {{id}}"
   },

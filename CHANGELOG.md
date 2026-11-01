@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- feat(chat): 移除输入框工具栏的「模式选择（Build / Plan）」。工具栏现在只保留模型与变体选择，模式（agent）仍可通过快捷键 `Alt+.` 与命令面板切换
 - fix(chat): 新设备打开**正在运行**的会话时，最后一轮不再只剩折叠块。骨架只覆盖已定稿轮次，而有些运行中的轮次后端并没有标 `settled: false`（实测 `ses_eaa3442ccffeFLuqH2Vt3aN9TA`：末轮 92 步全部 completed、骨架 `reply: null`，`/api/session/active` 却报 running），于是这一轮既不在骨架里、也没被补拉，页面上就只剩折叠块。现在按「末轮 + 会话仍运行」补拉完整消息；判据必须叠会话运行状态，因为纯工具轮与中断轮的 `reply` 同样是 null
 - fix(chat): 上述补拉的状态查询按键形态修正 —— `loadSession` 收到的是复合 key（`serverId::sessionId`），而 `getSessionStatus` 的 map 以裸 id 为键，直接用复合 key 查会恒不命中，补偿分支静默失效
 

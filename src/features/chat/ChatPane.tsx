@@ -1344,7 +1344,6 @@ export const ChatPane = memo(function ChatPane({
           isStreaming,
           agents,
           selectedAgent,
-          onAgentChange: handleAgentChange,
           variants: currentModel?.variants ?? [],
           selectedVariant,
           onVariantChange: handleVariantChange,

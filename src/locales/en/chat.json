@@ -21,7 +21,6 @@
     "splitHorizontal": "Split horizontal",
     "splitVertical": "Split vertical",
     "closePane": "Close pane",
-    "agentMenu": "Agent menu",
     "variantMenu": "Variant menu",
     "sessionFallback": "Session {{id}}"
   },
