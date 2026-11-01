@@ -874,7 +874,11 @@ function isEffectiveAssistantMessage(message: Message): boolean {
   if (message.isStreaming || messageCompletedAt(message) == null) return true
   if (message.content.length > 0) return true
   if ((message.info as { error?: unknown })?.error != null) return true
-  if (message.isCompressed && message.compressedStats && (message.compressedStats.stepCount > 0 || message.compressedStats.reasoningCount > 0)) {
+  if (
+    message.isCompressed &&
+    message.compressedStats &&
+    (message.compressedStats.stepCount > 0 || message.compressedStats.reasoningCount > 0)
+  ) {
     return true
   }
   return false
@@ -908,12 +912,32 @@ function endsWithVisibleText(message: Message): boolean {
   return false
 }
 
+/**
+ * 这条消息**本地**是否真的带有可折叠的过程项（reasoning / tool）。
+ *
+ * ⚠️ 与 `messageHasProcess` 的区别很关键：后者会把**骨架轮的 lightweight 统计**
+ * 也算作「有过程」（因为它要承载折叠块 header 的「N 步 / N 段思考」）。
+ *
+ * 但骨架轮的消息 `content` 里通常**只有正文**——过程正文被主机剥掉，展开时
+ * 才回拉。这种消息不该进壳：
+ *   - 进壳（`process` 作用域）后壳内没有可画的过程项，只剩空壳；
+ *   - 同时它又因为「已在 children 里」而被挤出壳外 → 正文彻底消失。
+ *
+ * 实测（2026-11-01，ARM 主机 ses_e754c2c25ffeR6bIwbgwgBmLQ6）：一轮 2 条 stop，
+ * 第二条带 lightweight → 页面只显示第一条。
+ */
+function hasLocalProcessParts(message: Message): boolean {
+  return message.content.some(part => {
+    if (part.type === 'tool') return true
+    if (part.type === 'reasoning') return isVisibleReasoningContent(part)
+    return false
+  })
+}
+
 function assistantHasLiveWork(message: Message): boolean {
   if (message.info.role !== 'assistant') return false
   if (messageCompletedAt(message) == null || message.isStreaming) return true
-  return message.content.some(
-    p => p.type === 'tool' && (p.state.status === 'running' || p.state.status === 'pending'),
-  )
+  return message.content.some(p => p.type === 'tool' && (p.state.status === 'running' || p.state.status === 'pending'))
 }
 
 function resolveTurnDurationMs(
@@ -1222,33 +1246,36 @@ export function buildProcessTimeline(
     const finalIndexes: number[] = []
     if (interrupted) {
       /**
-       * 中断/失败轮：**以正文收尾**的消息才是回答。
+       * 中断/失败轮：判据要**叠加**，不能二选一。
        *
-       * 这里有一组容易混淆的形态，必须靠「末 part 是不是 text」区分：
+       * 一个轮次可能「先正常结束若干段，最后才被打断」——实测 ARM 主机
+       * ses_e754c2c25ffeR6bIwbgwgBmLQ6（user msg_18ab3d621001NF…）：
        *
-       *   ❌ 过程说明（不该外露）：finish=tool-calls、末 part = tool
-       *      实测笔电主机 ses_e6cc8b786ffepHbTstQ3zvDJ7f：那一轮最后一条带
-       *      41 字「收到，我逐条执行这 12 个 echo 命令…」，后面紧跟工具调用。
-       *      旧实现把它当回答露到折叠块外，正是「打断后泄露折叠设计」。
+       *   [47] finish=stop  text(90)   "`npm run audit:fast` 已在后台运行…"
+       *   [58] finish=stop  text(101)  "`gh run watch` 已在后台监听…"
+       *   …   finish=tool-calls …
+       *   [84] finish=error(aborted)   content 只有 reasoning（没有正文）
+       *   IDLE interrupted
        *
-       *   ✅ 已写出的回答（该外露）：finish=error(aborted)、末 part = text
-       *      实测 ARM 主机 ses_eaa3442ccffeFLuqH2Vt3aN9TA 第 4 轮：用户点停止
-       *      时，模型已经写完 2480 字的实质性分析（「## 二、次要热点…」）。
-       *      若因「中断轮一律没有回复」把它折进壳里，用户看到的就是
-       *      「回复后所有内容全部直接折叠了」——实际反馈的正是这个。
+       * 整轮有 2 个成功结论，最后才被打断。若中断轮只用「最后一条以正文收尾的
+       * 消息」覆盖，就会把 [47] 丢掉（实际只显示 1 条）。
        *
-       * 全量实测（三台主机 30 个会话 / 308 轮 / 5861 条带 finish 的消息）：
-       *   - `finish=tool-calls` 且以正文收尾：**0 条**（所以按此判据不会误选
-       *     过程说明；服务端的语义是「还要调工具」的消息一定以 tool 收尾）
-       *   - `finish=error` 且以正文收尾：3 条（含上面那个 2480 字）
-       *   - `finish=error` 且以工具收尾：65 条（真过程，保持折叠）
-       *
-       * 再看中断/失败轮的分布（68 轮）：66 轮没有任何以正文收尾的消息，
-       * 2 轮各有 1 条，**没有**任何一轮出现多条 —— 所以即使放开这个判据，
-       * 也不会把一段过程说明同时外露。
+       * 正确做法：先按正常规则收所有 stop/length，再补上「以正文收尾但还没被
+       * 收进来」的那条（打断前已经写完、服务端没来得及给 stop 的回答）。
        */
-      const last = assistants.findLastIndex(m => endsWithVisibleText(m))
-      if (last >= 0) finalIndexes.push(last)
+      for (let i = 0; i < assistants.length; i++) {
+        if (
+          (finishOf(assistants[i]) === 'stop' || finishOf(assistants[i]) === 'length') &&
+          hasFinalText(assistants[i])
+        ) {
+          finalIndexes.push(i)
+        }
+      }
+      if (finalIndexes.length === 0) {
+        // 整轮没有正常结论：补「以正文收尾」的那条（打断前已写出的回答）
+        const last = assistants.findLastIndex(m => endsWithVisibleText(m))
+        if (last >= 0) finalIndexes.push(last)
+      }
     } else if (turnHasFinish) {
       for (let i = 0; i < assistants.length; i++) {
         const finish = finishOf(assistants[i])
@@ -1331,8 +1358,9 @@ export function buildProcessTimeline(
      * 骨架 durationMs 只用于**已结束**的轮次 —— 也正因如此上面不能拿它
      * 反推「已结束」，否则就循环论证了。
      */
-    const durationMs =
-      turnIsActive ? undefined : (skeletonDuration ?? resolveTurnDurationMs(assistants, startedAt, turnDurationMap))
+    const durationMs = turnIsActive
+      ? undefined
+      : (skeletonDuration ?? resolveTurnDurationMs(assistants, startedAt, turnDurationMap))
 
     /**
      * 最后一轮**且仍在生成** → 原样输出，不拆过程/最终。
@@ -1348,10 +1376,7 @@ export function buildProcessTimeline(
       /** 空回合 + 会话仍在跑 → 需要空壳承载 Working（与历史设计一致） */
       const needsEmptyWorkingShell = assistants.length === 0 && turnIsActive
       const needsShell =
-        needsEmptyWorkingShell ||
-        assistants.length > 1 ||
-        turnIsActive ||
-        assistants.some(m => messageHasProcess(m))
+        needsEmptyWorkingShell || assistants.length > 1 || turnIsActive || assistants.some(m => messageHasProcess(m))
       if (needsShell) {
         const rawChildren = assistants.map(m => ({ message: m, processContentScope: 'all' as const }))
         items.push({
@@ -1421,20 +1446,20 @@ export function buildProcessTimeline(
         if (isAbortedMessage(m.info) && m.content.length === 0) continue
         if (finalIndexSet.has(index)) {
           /**
-           * 结论消息：**正文一律不进壳**。
+           * 结论消息：过程部分进壳（`process`），正文由壳外的 `finalMessages` 渲染。
            *
-           * 旧写法在 `messageHasProcess(m)` 时把它以 `final` 作用域挂进壳内
-           * （壳内只画正文）。单段执行时那样没问题（正文本来就要露在壳外，
-           * 壳内这份是给「展开时能看到完整上下文」用的）。
+           * 两个 scope 是**互补**的，不重复：
+           *   - `process` → `split.processItems`（除最后一段 text 外的全部）
+           *   - `final`   → `split.finalItems`（就是最后那段 text）
            *
-           * 但多段执行时会出现多个 stop（见上方 `finalIndexes` 的说明），
-           * 结果就是**同一段正文在壳内外各渲染一次**：收起时壳内那份被裁掉、
-           * 只剩壳外一份；展开时壳内那份又出现 —— 用户看到的就是「展开/收起
-           * 后最终回复多了或者换了内容」。
+           * ⚠️ 不用 `final` 作用域进壳：那会渲染 `finalItems`（正文），
+           * 而壳外也渲染同一份 → 同一段回答出现两次（展开时多出、收起后消失）。
            *
-           * 所以结论消息的过程部分（reasoning / tool）仍进壳，正文只留在壳外。
+           * ⚠️ 也要避免把「本地没有过程项」的消息塞进壳：骨架轮带 `lightweight`
+           * 统计但 content 只有正文，进壳会得到一个空壳（壳内无可画内容）。
+           * 这类消息**纯正文**，直接由壳外渲染即可。
            */
-          if (messageHasProcess(m)) children.push({ message: m, processContentScope: 'process' })
+          if (hasLocalProcessParts(m)) children.push({ message: m, processContentScope: 'process' })
         } else {
           children.push({ message: m, processContentScope: 'inline' })
         }
@@ -1459,27 +1484,26 @@ export function buildProcessTimeline(
     /** 向后兼容：既有调用点读 `finalMessage` 的地方都指最后一条结论 */
     const primaryFinal = finalOutside
     /**
-     * 这一轮是否**需要折叠**（有过程内容要收起来）。
+     * 这一轮是否**有过程可展示**（用于决定要不要挂折叠块）。
      *
-     * ⚠️ 不能只看 `children.length > 0`：结论消息里「纯正文」的那些**不进壳**
-     * （见上面的分支），所以一个真正需要折叠的轮次可能算出来 children 为空。
+     * 用 `messageHasProcess` 而不是 `hasLocalProcessParts`：**骨架轮**的过程
+     * 正文在服务端（content 里只有正文，统计在 `lightweight`），但它仍然必须
+     * 挂壳 —— 那是用户「展开已处理、回拉完整过程」的唯一入口。不挂壳等于把
+     * 回拉能力藏掉（实测 197 轮里 85 轮会因此整段消失）。
      *
-     * 实测反例（三台主机 30 会话 / 308 轮，其中 8 例）：单条 assistant、
-     * `finish=error(aborted)`、内容 `[text(「这条命令会先暂停 90 秒…」), tool]`。
-     * 它没有结论（以 tool 收尾 → 按判据不该露），但 `children` 也是空
-     * （结论集合为空 → 那条消息以 `inline` 进壳……实际上它进了 children）。
-     *
-     * 真正要防的是另一种形态：**整轮只有一条消息、且它不是结论**。
-     * 旧代码在这种情况下会落到下面的 `else` 分支，把那一条**整条平铺**出去，
-     * 于是「这条命令会先暂停 90 秒…」这种过程说明就露在了折叠块外 ——
-     * 正是「打断后泄露折叠设计」的形态。
-     *
-     * 所以这里用「是否有任何需要折叠的过程」来判断，而不是「children 是否为空」。
+     * 空壳问题由 children 那个分支解决：本地没有过程项的消息不进 children
+     * （避免壳内一片空白），壳外正文照常渲染。
      */
     const hasCollapsibleProcess = assistants.some(m => messageHasProcess(m))
-    const onlyAssistantIsNonFinal =
-      assistants.length === 1 && !finalIndexSet.has(0)
-
+    /**
+     * 骨架轮：过程正文在服务端，必须保留折叠块作为回拉入口。
+     *
+     * 骨架合成的结论消息带 `finish: 'stop'`（语义正确：它确实是服务端结论），
+     * 但那样会被判成「纯正文轮 → 不挂壳」，用户就失去了「展开已处理」的入口。
+     * 这里显式要求：只要这一轮是骨架数据（带 `lightweight` 统计），就挂壳。
+     */
+    const skeletonTurn = assistants.some(m => m.isCompressed && m.compressedStats)
+    const onlyAssistantIsNonFinal = assistants.length === 1 && !finalIndexSet.has(0)
 
     // 进行中或有过程内容 → 挂壳
     // 更晚的空 pending 回合：turnIsActive=false 且无 children → 不挂壳（只显示 user）
@@ -1493,7 +1517,13 @@ export function buildProcessTimeline(
      * `else` 分支把那条空消息平铺出去 —— 渲染成一个独立的「Message Aborted」
      * 错误卡片（实测刷新后就是这样），而不是折叠块下方的一行说明。
      */
-    if (children.length > 0 || turnIsActive || interrupted || (onlyAssistantIsNonFinal && hasCollapsibleProcess)) {
+    if (
+      children.length > 0 ||
+      turnIsActive ||
+      interrupted ||
+      skeletonTurn ||
+      (onlyAssistantIsNonFinal && hasCollapsibleProcess)
+    ) {
       items.push({
         kind: 'process-shell',
         key: `process-shell:${userId}`,
@@ -1506,12 +1536,18 @@ export function buildProcessTimeline(
         ...(finalMessages.length > 0 ? { finalMessages } : {}),
         ...(interrupted ? { interrupted: true } : {}),
       })
-    } else if (finalOutside) {
-      items.push({
-        kind: 'message',
-        key: finalOutside.info.id,
-        message: finalOutside,
-      })
+    } else if (finalMessages.length > 0) {
+      /**
+       * 纯正文轮（没有任何过程可折叠）：不挂壳，**逐条平铺所有结论**。
+       *
+       * ⚠️ 旧写法只推 `finalOutside`（最后一条），于是「一轮有多条正文结论、
+       * 中间没有工具调用」时前面的结论整条消失。实测（2026-11-01，
+       * ARM 主机 ses_e754c2c25ffeR6bIwbgwgBmLQ6）骨架路径：该轮 2 条 stop
+       * （90 字 + 101 字）、无工具调用 → 页面只显示 101 字。
+       */
+      for (const m of finalMessages) {
+        items.push({ kind: 'message', key: m.info.id, message: m })
+      }
     } else {
       for (const m of assistants) {
         items.push({ kind: 'message', key: m.info.id, message: m })

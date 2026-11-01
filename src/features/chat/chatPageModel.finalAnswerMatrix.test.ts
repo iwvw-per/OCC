@@ -160,19 +160,12 @@ describe('最终回答判据矩阵', () => {
      * 这种数据没有服务端结论可依：若一条「以正文收尾」的都没有，仍按旧行为
      * 取最后一条带正文的，避免老会话的回复整轮消失。
      */
-    const t = build([
-      user('u1'),
-      assistant('m1', [text('m1', 't1', '这条命令会先静默等待 90 秒…'), tool('m1', 'c1')]),
-    ])
+    const t = build([user('u1'), assistant('m1', [text('m1', 't1', '这条命令会先静默等待 90 秒…'), tool('m1', 'c1')])])
     expect(outside(t)).toEqual(['这条命令会先静默等待 90 秒…'])
   })
 
   it('无 finish 的纯工具轮 → 折叠', () => {
-    const t = build([
-      user('u1'),
-      assistant('m1', [tool('m1', 'c1')]),
-      assistant('m2', [tool('m2', 'c2')]),
-    ])
+    const t = build([user('u1'), assistant('m1', [tool('m1', 'c1')]), assistant('m2', [tool('m2', 'c2')])])
     expect(outside(t)).toEqual([])
   })
 
@@ -224,6 +217,39 @@ describe('多段执行（后台任务唤醒）', () => {
       const dup = shell.children.filter(x => x.message.info.id === c.message.info.id)
       expect(dup).toHaveLength(1)
     }
+  })
+})
+
+describe('中断轮里已写出的回答', () => {
+  it('先正常结束若干段、最后才被打断：所有 stop 结论都要保留', () => {
+    /**
+     * 实测 ARM 主机 ses_e754c2c25ffeR6bIwbgwgBmLQ6（user msg_18ab3d621001NF…）：
+     *   [47] finish=stop  text(90)   「`npm run audit:fast` 已在后台运行…」
+     *   [58] finish=stop  text(101)  「`gh run watch` 已在后台监听…」
+     *   [84] finish=error(aborted)   content 只有 reasoning
+     *   IDLE interrupted
+     *
+     * 旧实现用「最后一条以正文收尾的消息」覆盖，把 [47] 丢了（只显示 1 条）。
+     */
+    const t = build([
+      user('u1'),
+      assistant('m1', [text('m1', 't1', 'audit:fast 已在后台运行。'), tool('m1', 'c1')], 'tool-calls'),
+      assistant('m2', [text('m2', 't2', 'audit:fast 已在后台运行，等待其完成。')], 'stop'),
+      assistant('m3', [text('m3', 't3', '现在监听 CI。'), tool('m3', 'c3')], 'tool-calls'),
+      assistant('m4', [text('m4', 't4', 'gh run watch 已在后台监听 CI。')], 'stop'),
+      assistant('m5', [reasoning('m5', 'r5', '被中断')], 'error', aborted()),
+    ])
+    expect(outside(t)).toEqual(['audit:fast 已在后台运行，等待其完成。', 'gh run watch 已在后台监听 CI。'])
+  })
+
+  it('整轮没有正常结论、但已写出正文：露出来', () => {
+    const answer = '## 二、次要热点\n\n'.repeat(6) + '这份证据已经足够。'
+    const t = build([
+      user('u1'),
+      assistant('m1', [text('m1', 't1', '先取证。'), tool('m1', 'c1')], 'tool-calls'),
+      assistant('m2', [text('m2', 't2', answer)], 'error', aborted()),
+    ])
+    expect(outside(t)).toEqual([answer])
   })
 })
 

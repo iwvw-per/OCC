@@ -33,15 +33,15 @@ describe('骨架路径：中断轮次', () => {
       { type: 'idle', outcome: 'interrupted', time: { created: 9200 } },
     ])
 
-    const assistant = result.raw.find(
-      entry => (entry as { type?: string }).type === 'assistant',
-    ) as { finish?: string; error?: { type?: string }; content?: unknown[] } | undefined
+    const assistant = result.raw.find(entry => (entry as { type?: string }).type === 'assistant') as
+      | { finish?: string; error?: { type?: string }; content?: unknown[] }
+      | undefined
     expect(assistant).toBeDefined()
     expect(assistant?.finish).toBe('error')
     expect(assistant?.error?.type).toBe('aborted')
   })
 
-  it('正常结束的轮次不带 error/finish', () => {
+  it('正常结束的轮次：带 finish=stop、不带 error', () => {
     const result = adaptTurnSkeleton([
       {
         type: 'turn',
@@ -55,11 +55,13 @@ describe('骨架路径：中断轮次', () => {
       { type: 'idle', outcome: 'succeeded', time: { created: 4000 } },
     ])
 
-    const assistant = result.raw.find(
-      entry => (entry as { type?: string }).type === 'assistant',
-    ) as { finish?: string; error?: unknown } | undefined
+    const assistant = result.raw.find(entry => (entry as { type?: string }).type === 'assistant') as
+      | { finish?: string; error?: unknown }
+      | undefined
     expect(assistant).toBeDefined()
-    expect(assistant?.finish).toBeUndefined()
+    // 骨架里的 replies 就是服务端的 stop 结论 → 必须带 finish=stop，
+    // 否则前端会当成「没有服务端结论」而只显示最后一条
+    expect(assistant?.finish).toBe('stop')
     expect(assistant?.error).toBeUndefined()
   })
 
@@ -85,13 +87,14 @@ describe('骨架路径：中断轮次', () => {
       { type: 'idle', outcome: 'succeeded', time: { created: 4000 } },
     ])
 
-    const assistants = result.raw.filter(
-      entry => (entry as { type?: string }).type === 'assistant',
-    ) as Array<{ id: string; finish?: string }>
+    const assistants = result.raw.filter(entry => (entry as { type?: string }).type === 'assistant') as Array<{
+      id: string
+      finish?: string
+    }>
     expect(assistants).toHaveLength(2)
     // 第一轮被中断
     expect(assistants[0].finish).toBe('error')
     // 第二轮正常
-    expect(assistants[1].finish).toBeUndefined()
+    expect(assistants[1].finish).toBe('stop')
   })
 })

@@ -372,12 +372,7 @@ describe('buildChatPageViewModel', () => {
     const appended = buildChatPageViewModel(
       [
         ...messages,
-        createAssistantMessage(
-          'assistant-26',
-          [createTextPart('text-26', 'assistant-26', longText)],
-          26,
-          27,
-        ),
+        createAssistantMessage('assistant-26', [createTextPart('text-26', 'assistant-26', longText)], 26, 27),
       ],
       viewModel,
     )
@@ -429,11 +424,7 @@ describe('buildChatPageViewModel', () => {
     )
     const first = buildChatPageViewModel([firstAssistant])
     const secondAssistant = {
-      ...createAssistantMessage(
-        'assistant-2',
-        [createTextPart('assistant-text-2', 'assistant-2', 'second answer')],
-        3,
-      ),
+      ...createAssistantMessage('assistant-2', [createTextPart('assistant-text-2', 'assistant-2', 'second answer')], 3),
       isStreaming: true,
     }
 
@@ -537,8 +528,7 @@ describe('getTimelineRowYClass', () => {
 })
 
 describe('reuseProcessTimelineItems', () => {
-  const hasProcess = (message: Message) =>
-    message.content.some(p => p.type === 'tool' || p.type === 'reasoning')
+  const hasProcess = (message: Message) => message.content.some(p => p.type === 'tool' || p.type === 'reasoning')
   const hasFinal = (message: Message) => message.content.some(p => p.type === 'text')
 
   it('keeps historical timeline item identity when only the last message streams', () => {
@@ -547,22 +537,12 @@ describe('reuseProcessTimelineItems', () => {
         ...createUserMessage('user-1', 1),
         content: [createTextPart('user-text-1', 'user-1', 'prompt')],
       },
-      createAssistantMessage(
-        'assistant-1',
-        [createTextPart('text-1', 'assistant-1', 'old')],
-        2,
-        3,
-      ),
+      createAssistantMessage('assistant-1', [createTextPart('text-1', 'assistant-1', 'old')], 2, 3),
       {
         ...createUserMessage('user-2', 4),
         content: [createTextPart('user-text-2', 'user-2', 'next')],
       },
-      createAssistantMessage(
-        'assistant-2',
-        [createTextPart('text-2', 'assistant-2', 'hello')],
-        5,
-        undefined,
-      ),
+      createAssistantMessage('assistant-2', [createTextPart('text-2', 'assistant-2', 'hello')], 5, undefined),
     ]
 
     const first = buildProcessTimeline(messages, {
@@ -602,12 +582,7 @@ describe('reuseProcessTimelineItems', () => {
         ...createUserMessage('user-1', 1),
         content: [createTextPart('user-text-1', 'user-1', 'prompt')],
       },
-      createAssistantMessage(
-        'assistant-1',
-        [createTextPart('text-1', 'assistant-1', 'done')],
-        2,
-        3,
-      ),
+      createAssistantMessage('assistant-1', [createTextPart('text-1', 'assistant-1', 'done')], 2, 3),
     ]
     const first = buildProcessTimeline(messages, {
       turnDurationMap: new Map([['assistant-1', 500]]),
@@ -626,10 +601,8 @@ describe('reuseProcessTimelineItems', () => {
 })
 
 describe('buildProcessTimeline', () => {
-  const hasProcess = (message: Message) =>
-    message.content.some(p => p.type === 'tool' || p.type === 'reasoning')
-  const hasFinal = (message: Message) =>
-    message.content.some(p => p.type === 'text')
+  const hasProcess = (message: Message) => message.content.some(p => p.type === 'tool' || p.type === 'reasoning')
+  const hasFinal = (message: Message) => message.content.some(p => p.type === 'text')
 
   /**
    * 把被测轮次变成「非最后一轮」。
@@ -737,11 +710,7 @@ describe('buildProcessTimeline', () => {
     // 第一轮仍 live，第二轮 user 已发出 → 只挂 user-1 的 Working，user-2 暂不挂空壳
     const mid = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')], 1001)
     mid.isStreaming = true
-    const messages = [
-      createUserMessage('user-1', 1000),
-      mid,
-      createUserMessage('user-2', 2000),
-    ]
+    const messages = [createUserMessage('user-1', 1000), mid, createUserMessage('user-2', 2000)]
     const timeline = buildProcessTimeline(messages, {
       turnDurationMap: new Map(),
       sessionIsStreaming: true,
@@ -766,10 +735,7 @@ describe('buildProcessTimeline', () => {
 
   it('only arms the earliest empty turn when multiple users are pending', () => {
     // 快速连发：两轮都还没 assistant → 只在最早 user 下挂 Working
-    const messages = [
-      createUserMessage('user-1', 1000),
-      createUserMessage('user-2', 1500),
-    ]
+    const messages = [createUserMessage('user-1', 1000), createUserMessage('user-2', 1500)]
     const ready = new Set(['user-1', 'user-2'])
     const timeline = buildProcessTimeline(messages, {
       turnDurationMap: new Map(),
@@ -798,11 +764,7 @@ describe('buildProcessTimeline', () => {
       1001,
     )
     earlierStillFlaggedLive.isStreaming = true
-    const laterLive = createAssistantMessage(
-      'assistant-2',
-      [createToolPart('tool-2', 'assistant-2')],
-      2001,
-    )
+    const laterLive = createAssistantMessage('assistant-2', [createToolPart('tool-2', 'assistant-2')], 2001)
     laterLive.isStreaming = true
     const messages = [
       createUserMessage('user-1', 1000),
@@ -859,9 +821,7 @@ describe('buildProcessTimeline', () => {
     expect(shell.isActive).toBe(true)
     // 最后一轮：不拆分，正文留在壳内原样输出
     expect(shell.finalMessage).toBeUndefined()
-    expect(shell.children).toEqual([
-      { message: stepWithText, processContentScope: 'all' },
-    ])
+    expect(shell.children).toEqual([{ message: stepWithText, processContentScope: 'all' }])
   })
 
   it('does not leak a tool-calls turn body outside the shell once the session goes idle', () => {
@@ -947,6 +907,8 @@ describe('buildProcessTimeline', () => {
     )
     reply.isCompressed = true
     reply.compressedStats = { reasoningCount: 0, stepCount: 3, durationMs: 27_504 }
+    // 骨架合成的回复带 finish=stop（见 api/turnSkeleton.ts）：它代表服务端结论
+    ;(reply.info as { finish?: string }).finish = 'stop'
 
     // sessionIsStreaming=true 会让这一轮成为 active 候选，正是要验证的场景
     const messages = [createUserMessage('user-1', 1000), reply]
@@ -957,21 +919,19 @@ describe('buildProcessTimeline', () => {
       messageHasFinal: hasFinal,
     })
 
+    // 纯正文骨架轮（无过程项）不挂壳，直接平铺；关键是不能显示「Working」
     const shell = timeline.find(item => item.kind === 'process-shell')
-    expect(shell).toBeTruthy()
-    if (shell?.kind !== 'process-shell') return
-    expect(shell.durationMs).toBe(27_504)
-    // 已结束：不能显示「Working」
-    expect(shell.isActive).toBe(false)
+    if (shell?.kind === 'process-shell') {
+      expect(shell.durationMs).toBe(27_504)
+      expect(shell.isActive).toBe(false)
+    } else {
+      const flat = timeline.find(i => i.kind === 'message' && i.message.info.id === 'assistant-1')
+      expect(flat).toBeTruthy()
+    }
   })
 
   it('settles shell with process inside and final answer outside', () => {
-    const processOnly = createAssistantMessage(
-      'assistant-1',
-      [createToolPart('tool-1', 'assistant-1')],
-      1001,
-      1200,
-    )
+    const processOnly = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')], 1001, 1200)
     const finalAnswer = createAssistantMessage(
       'assistant-2',
       [
@@ -1102,12 +1062,7 @@ describe('buildProcessTimeline', () => {
       1200,
     )
     // 末条：只有工具调用，没有正文
-    const toolOnlyTail = createAssistantMessage(
-      'assistant-2',
-      [createToolPart('tool-2', 'assistant-2')],
-      1201,
-      1400,
-    )
+    const toolOnlyTail = createAssistantMessage('assistant-2', [createToolPart('tool-2', 'assistant-2')], 1201, 1400)
     const messages = [createUserMessage('user-1', 1000), withText, toolOnlyTail]
 
     const timeline = buildProcessTimeline(asHistorical(messages), {
@@ -1162,7 +1117,13 @@ describe('buildProcessTimeline', () => {
     const narration = createAssistantMessage(
       'assistant-1',
       [
-        { id: 'text-1', sessionID: 'session-1', messageID: 'assistant-1', type: 'text', text: '18 个测试全部通过。现在构建并部署 agent。' },
+        {
+          id: 'text-1',
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          type: 'text',
+          text: '18 个测试全部通过。现在构建并部署 agent。',
+        },
         createToolPart('tool-1', 'assistant-1'),
       ],
       1001,
@@ -1197,9 +1158,7 @@ describe('buildProcessTimeline', () => {
      * ——这正是「已处理内容泄露成 Agent 最后消息」的根治方式。
      */
     expect(shell.finalMessage).toBeUndefined()
-    expect(shell.children).toEqual([
-      { message: narration, processContentScope: 'inline' },
-    ])
+    expect(shell.children).toEqual([{ message: narration, processContentScope: 'inline' }])
   })
 
   /**
@@ -1213,12 +1172,7 @@ describe('buildProcessTimeline', () => {
    * 规则：过程折叠、回复在壳外。
    */
   it('keeps the last turn reply outside the shell once it has finished', () => {
-    const processOnly = createAssistantMessage(
-      'assistant-1',
-      [createToolPart('tool-1', 'assistant-1')],
-      1001,
-      1100,
-    )
+    const processOnly = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')], 1001, 1100)
     const reply = createAssistantMessage(
       'assistant-2',
       [
@@ -1252,12 +1206,7 @@ describe('buildProcessTimeline', () => {
 
   /** 历史轮次仍然遵守既有设计：过程折叠、回复在壳外 */
   it('still folds historical turns with the reply outside the shell', () => {
-    const processOnly = createAssistantMessage(
-      'assistant-1',
-      [createToolPart('tool-1', 'assistant-1')],
-      1001,
-      1100,
-    )
+    const processOnly = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')], 1001, 1100)
     const reply = createAssistantMessage(
       'assistant-2',
       [{ id: 'text-1', sessionID: 'session-1', messageID: 'assistant-2', type: 'text', text: '改好了。' }],
@@ -1320,7 +1269,8 @@ describe('buildProcessTimeline', () => {
     expect(shell.durationMs).toBe(12_000)
   })
 
-  it('keeps a process shell for skeleton turns whose body was stripped', () => {    /**
+  it('keeps a process shell for skeleton turns whose body was stripped', () => {
+    /**
      * 轮次骨架：过程正文已被主机 Agent 剥掉，助手消息只剩最终回复。
      * 若不挂折叠块，用户既看不到「已处理 N 步」，也没有展开回拉的入口。
      */
@@ -1412,14 +1362,12 @@ describe('buildChatPages', () => {
 
   it('counts blank lines before fenced code independently of indentation', () => {
     const suffix = '```ts\nconst value = 1\n```'
-    const withoutIndent = createAssistantMessage(
-      'assistant-plain-lines',
-      [createTextPart('text-plain-lines', 'assistant-plain-lines', `${'\n'.repeat(100)}${suffix}`)],
-    )
-    const withIndent = createAssistantMessage(
-      'assistant-indented-lines',
-      [createTextPart('text-indented-lines', 'assistant-indented-lines', `${' \n'.repeat(100)}${suffix}`)],
-    )
+    const withoutIndent = createAssistantMessage('assistant-plain-lines', [
+      createTextPart('text-plain-lines', 'assistant-plain-lines', `${'\n'.repeat(100)}${suffix}`),
+    ])
+    const withIndent = createAssistantMessage('assistant-indented-lines', [
+      createTextPart('text-indented-lines', 'assistant-indented-lines', `${' \n'.repeat(100)}${suffix}`),
+    ])
 
     expect(estimateMessageRenderWeight(withIndent)).toBe(estimateMessageRenderWeight(withoutIndent))
   })
@@ -1932,7 +1880,10 @@ describe('collectTurnChangedFiles', () => {
   })
 
   it('ignores non-assistant messages', () => {
-    const user = { ...createUserMessage('user-1', 1), content: [editToolPart('t1', 'user-1', 'src/a.ts', 'x\n', 'x\ny\n')] }
+    const user = {
+      ...createUserMessage('user-1', 1),
+      content: [editToolPart('t1', 'user-1', 'src/a.ts', 'x\n', 'x\ny\n')],
+    }
     const files = collectTurnChangedFiles([user])
     expect(files).toEqual([])
   })
@@ -2007,10 +1958,7 @@ describe('重新进入会话时最新一轮不应被收起', () => {
   }
 
   it('会话仍在跑 + 末尾轮次未正常收尾 → 判定为进行中（不收起）', () => {
-    const messages = [
-      createUserMessage('user-1', 1),
-      completedAssistant('assistant-1', 2, 3, 'tool-calls'),
-    ]
+    const messages = [createUserMessage('user-1', 1), completedAssistant('assistant-1', 2, 3, 'tool-calls')]
 
     const items = build(messages, true)
     const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
@@ -2021,10 +1969,7 @@ describe('重新进入会话时最新一轮不应被收起', () => {
   })
 
   it('末尾轮次已正常收尾（finish=stop）→ 视为已结束', () => {
-    const messages = [
-      createUserMessage('user-1', 1),
-      completedAssistant('assistant-1', 2, 3, 'stop'),
-    ]
+    const messages = [createUserMessage('user-1', 1), completedAssistant('assistant-1', 2, 3, 'stop')]
 
     const items = build(messages, true)
     const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
@@ -2036,10 +1981,7 @@ describe('重新进入会话时最新一轮不应被收起', () => {
   })
 
   it('会话已空闲 → 历史轮次保持已结束', () => {
-    const messages = [
-      createUserMessage('user-1', 1),
-      completedAssistant('assistant-1', 2, 3, 'tool-calls'),
-    ]
+    const messages = [createUserMessage('user-1', 1), completedAssistant('assistant-1', 2, 3, 'tool-calls')]
 
     const items = build(messages, false)
     const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean } | undefined
@@ -2137,14 +2079,8 @@ describe('骨架 durationMs 不得把正在生成的轮次判为已结束', () =
   }
 
   it('骨架带 durationMs + 服务端仍在跑 → 保持进行中（不收起）', () => {
-    const items = build(
-      [createUserMessage('u1', 1), skeletonAssistant('a1', 2, 3, 104_110)],
-      false,
-      true,
-    )
-    const shell = items.find(i => i.kind === 'process-shell') as
-      | { isActive?: boolean; durationMs?: number }
-      | undefined
+    const items = build([createUserMessage('u1', 1), skeletonAssistant('a1', 2, 3, 104_110)], false, true)
+    const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean; durationMs?: number } | undefined
 
     expect(shell).toBeDefined()
     // 关键：不能被 durationMs 判成已结束
@@ -2154,14 +2090,8 @@ describe('骨架 durationMs 不得把正在生成的轮次判为已结束', () =
   })
 
   it('骨架带 durationMs + 服务端已空闲 → 已结束，且用骨架时长', () => {
-    const items = build(
-      [createUserMessage('u1', 1), skeletonAssistant('a1', 2, 3, 104_110)],
-      false,
-      false,
-    )
-    const shell = items.find(i => i.kind === 'process-shell') as
-      | { isActive?: boolean; durationMs?: number }
-      | undefined
+    const items = build([createUserMessage('u1', 1), skeletonAssistant('a1', 2, 3, 104_110)], false, false)
+    const shell = items.find(i => i.kind === 'process-shell') as { isActive?: boolean; durationMs?: number } | undefined
 
     if (shell) {
       expect(shell.isActive).toBe(false)

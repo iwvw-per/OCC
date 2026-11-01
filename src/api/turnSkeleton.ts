@@ -342,9 +342,7 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
           id: `${userId}-reply`,
           time: { created: replyCreatedBase, completed: replyCreatedBase },
           content: [],
-          ...(turnInterrupted
-            ? { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }
-            : {}),
+          ...(turnInterrupted ? { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } } : {}),
           ...lightweightPayload,
         })
       } else {
@@ -390,12 +388,49 @@ export function adaptTurnSkeleton(data: unknown[]): SkeletonAdaptResult {
             id: replyMessageId,
             time: { created: replyCreated, completed: replyCreated },
             content,
-            ...(turnInterrupted
-              ? { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }
-              : {}),
+            /**
+             * ⚠️ 骨架的回复消息**必须带 `finish: 'stop'`**。
+             *
+             * 骨架里的 `replies` 就是服务端筛出来的 `finish=stop` 结论（后端
+             * `absorb_assistant` 只把「以正文收尾」的消息收进 replies）。若合成的
+             * 消息不带 finish，前端会以为「这一轮没有服务端结论」，只能按位置兜底
+             * ——**多条 replies 时只会显示最后一条**，前面的结论凭空消失。
+             *
+             * 实测（2026-11-01，ARM 主机 ses_e754c2c25ffeR6bIwbgwgBmLQ6）：
+             * 该轮有 2 个 stop（90 字 + 101 字）+ 末尾 aborted。骨架正确返回
+             * `replies: [90, 101]`，但合成消息没带 finish → 页面只显示 101 字。
+             *
+             * 关于中断：`replies` 里的每一条都是**已经正常收尾的结论**，
+             * 一律 `finish: 'stop'`。轮次末尾那次中断由**另一条**空消息承载
+             * （见上面 `replies.length === 0` 之外的分支 / chatPageModel 的
+             * `interrupted` 标记）。如果把最后一条 reply 改成 error，前端会
+             * 认为它不是结论 → 那条回答被折进壳里（实测只显示 1 条）。
+             */
+            finish: 'stop',
             ...(isLastReply ? lightweightPayload : {}),
           })
         })
+        /**
+         * 有结论、但这一轮最后被打断 → 追加一条**空的中断标记消息**。
+         *
+         * 前端靠「轮内存在 `error.type = aborted` 的 assistant」判定 `interrupted`
+         * （在折叠块下方显示「本轮已被中断」）。若只在纯过程轮里放这个标记，
+         * 「先成功若干段、最后被打断」的轮次就没有中断提示了。
+         *
+         * 它内容为空，`chatPageModel` 不会把它放进壳内（见
+         * `isAbortedMessage(m.info) && m.content.length === 0` 分支），
+         * 也不会被当成结论（没有正文）。
+         */
+        if (turnInterrupted) {
+          raw.push({
+            type: 'assistant',
+            id: `${userId}-interrupted`,
+            time: { created: replyCreatedBase + replies.length, completed: replyCreatedBase + replies.length },
+            content: [],
+            finish: 'error',
+            error: { type: 'aborted', message: 'Step interrupted' },
+          })
+        }
       }
     }
 

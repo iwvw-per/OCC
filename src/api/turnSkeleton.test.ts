@@ -42,9 +42,7 @@ describe('adaptTurnSkeleton', () => {
   })
 
   it('回复正文为空时不造空助手消息（纯工具轮由折叠块表达）', () => {
-    const { raw } = adaptTurnSkeleton([
-      turn({ reply: null, stats: { reasoningCount: 0, stepCount: 4 } }),
-    ])
+    const { raw } = adaptTurnSkeleton([turn({ reply: null, stats: { reasoningCount: 0, stepCount: 4 } })])
 
     // user + 带过程计数的 assistant（content 为空，但折叠块 header 要显示 4 步）
     expect(raw).toHaveLength(2)
@@ -81,18 +79,11 @@ describe('adaptTurnSkeleton', () => {
       { type: 'compaction', id: 'cmp_1', status: 'completed', time: { created: 1500 } },
     ])
 
-    expect(raw.map(item => (item as { type: string }).type)).toEqual([
-      'user',
-      'assistant',
-      'idle',
-      'compaction',
-    ])
+    expect(raw.map(item => (item as { type: string }).type)).toEqual(['user', 'assistant', 'idle', 'compaction'])
   })
 
   it('改动文件清单挂在助手消息的 lightweight 上，供 DiffChips 渲染', () => {
-    const { raw } = adaptTurnSkeleton([
-      turn({ changedFiles: [{ path: 'src/a.cs', additions: 3, deletions: 1 }] }),
-    ])
+    const { raw } = adaptTurnSkeleton([turn({ changedFiles: [{ path: 'src/a.cs', additions: 3, deletions: 1 }] })])
 
     expect(raw[1]).toMatchObject({
       lightweight: { changedFiles: [{ path: 'src/a.cs', additions: 3, deletions: 1 }] },
@@ -107,9 +98,13 @@ describe('adaptTurnSkeleton', () => {
 
     const page = adaptMessagePage({ data: raw, cursor: {} })
 
-    expect(page.messages).toHaveLength(2)
+    // user + reply + 中断标记（有结论但轮次最后被打断 → 额外一条空标记消息）
+    expect(page.messages).toHaveLength(3)
     const assistant = page.messages[1]
     expect(assistant.info.role).toBe('assistant')
+    const mark = page.messages[2]
+    expect(mark.info.role).toBe('assistant')
+    expect((mark.info as { error?: { name?: string } }).error?.name).toBe('MessageAbortedError')
     expect(page.idle).toMatchObject({ at: 2000, outcome: 'interrupted' })
   })
 
@@ -181,9 +176,7 @@ describe('adaptTurnSkeleton', () => {
      * 若最终回复真实序号是 2，骨架必须把 content 序号顶到 2，
      * 否则 delta 会追加到第 0 段上（错位）。
      */
-    const { raw } = adaptTurnSkeleton([
-      turn({ reply: { text: '最终回复', messageID: 'msg_a1', ordinal: 2 } }),
-    ])
+    const { raw } = adaptTurnSkeleton([turn({ reply: { text: '最终回复', messageID: 'msg_a1', ordinal: 2 } })])
 
     const assistant = raw[1] as { content: Array<{ type: string; text: string }> }
     expect(assistant.content).toHaveLength(3)
