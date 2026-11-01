@@ -57,6 +57,12 @@ describe('useFileExplorer change scope', () => {
   })
 
   it('updates file statuses when the shared change mode changes', async () => {
+    // 显式从 turn 范围起步：默认范围已改为 Git 变更，依赖默认值会让用例
+    // 随默认值调整而静默失效。
+    act(() => {
+      changeScopeStore.setMode('session-1', 'turn')
+    })
+
     const { result } = renderHook(() => useFileExplorer({ directory: '/repo', autoLoad: true, sessionId: 'session-1' }))
 
     await waitFor(() => {

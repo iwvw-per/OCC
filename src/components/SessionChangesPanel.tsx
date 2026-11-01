@@ -36,12 +36,23 @@ const MIN_PREVIEW_HEIGHT = 120
 
 type ChangeMode = ChangeScopeMode
 
+/**
+ * 默认展示哪个范围。
+ *
+ * 默认「Git 变更」而不是「上一轮变更」：
+ *   - 面板叫「变更」，用户第一反应是「这个仓库现在有什么改动」；
+ *   - turn 是 git 的子集，先看全量、需要聚焦时再切更符合由粗到细；
+ *   - turn 为空时显示「本轮无变更」，容易被误读成「什么都没改」
+ *     （实测踩过：那一轮助手确实没动文件，但工作区有 92 个改动）。
+ *
+ * 其余顺序：branch（有可比基线时才有意义）→ session → turn 兜底。
+ */
 function getDefaultChangeMode(options: ChangeMode[]) {
-  if (options.includes('turn')) return 'turn'
   if (options.includes('git')) return 'git'
   if (options.includes('branch')) return 'branch'
   if (options.includes('session')) return 'session'
-  return options[0] ?? 'session'
+  if (options.includes('turn')) return 'turn'
+  return options[0] ?? 'git'
 }
 
 function reconcileDiffPreviewState(diffs: FileDiff[], openFiles: string[], activeFile: string | null) {

@@ -46,6 +46,27 @@ vi.mock('./DiffViewer', () => ({
   }),
 }))
 
+/**
+ * 切换到指定范围。
+ *
+ * 默认范围是 Git 变更（见 changeScopeStore.DEFAULT_CHANGE_SCOPE_MODE），
+ * 需要验证其它范围的用例必须显式切换 —— 依赖默认值会让用例随默认值改动而
+ * 静默失效。
+ */
+async function switchScope(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: /Change mode:/ }))
+  await act(async () => {
+    vi.advanceTimersByTime(48)
+    await Promise.resolve()
+  })
+  fireEvent.click(screen.getByText(name))
+  await act(async () => {
+    vi.advanceTimersByTime(240)
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+}
+
 function renderSessionChangesPanel() {
   return render(
     <FullscreenProvider>
@@ -138,7 +159,14 @@ describe('SessionChangesPanel', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads last turn diffs and shows the first file preview by default', async () => {
+  /**
+   * 默认范围是 Git 变更，不是「上一轮变更」。
+   *
+   * 用户反馈：面板叫「变更」，第一反应是「仓库现在有什么改动」。而 turn 为空时
+   * 显示「本轮无变更」，容易被误读成「什么都没改」（实测踩过：那一轮助手没动
+   * 文件，但工作区有 92 个改动）。
+   */
+  it('defaults to Git changes and loads working-tree diffs', async () => {
     renderSessionChangesPanel()
 
     await act(async () => {
@@ -147,11 +175,27 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
+    expect(getVcsDiff).toHaveBeenCalledWith('git', '/repo', undefined)
+    expect(screen.getByRole('button', { name: /Change mode: Git changes/ })).toBeInTheDocument()
+    expect(screen.getAllByText('git.ts').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('diff-viewer')).toBeInTheDocument()
+  })
+
+  it('shows last turn diffs after switching to that scope', async () => {
+    renderSessionChangesPanel()
+
+    await act(async () => {
+      vi.runAllTimers()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await switchScope('Last turn changes')
+
     expect(getLastTurnDiff).toHaveBeenCalledWith('session-1', '/repo', undefined)
     expect(screen.getByText('1f')).toBeInTheDocument()
     expect(screen.getAllByText('+1').length).toBeGreaterThan(0)
     expect(screen.getAllByText('-1').length).toBeGreaterThan(0)
-    expect(screen.getByTestId('diff-viewer')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Change mode: Last turn changes/ })).toBeInTheDocument()
     expect(screen.getAllByText('turn.ts').length).toBeGreaterThan(0)
   })
@@ -268,9 +312,12 @@ describe('SessionChangesPanel', () => {
     const lastTurnOption = screen.getByRole('menuitemradio', { name: 'Last turn changes' })
     const gitChangesOption = screen.getByRole('menuitemradio', { name: 'Git changes' })
 
-    expect(lastTurnOption).toHaveFocus()
-    fireEvent.keyDown(menu, { key: 'ArrowDown' })
+    // 打开菜单时焦点落在「当前选中项」（默认是 Git 变更）
     expect(gitChangesOption).toHaveFocus()
+    fireEvent.keyDown(menu, { key: 'ArrowDown' })
+    // 菜单顺序是 turn → git → branch → session，从 git 往下是 branch
+    expect(screen.getByRole('menuitemradio', { name: 'Branch changes' })).toHaveFocus()
+    expect(lastTurnOption).toBeInTheDocument()
 
     // 列表/视图切换现为 Radix Tabs（role="tab" + aria-selected），
     // 取代原先手写按钮的 aria-pressed。
@@ -379,6 +426,10 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
+
+    // 该用例验证的是右键菜单本身，与范围无关；turn.ts 来自 last-turn 数据，
+    // 因此先切到该范围（默认已是 Git 变更）
+    await switchScope('Last turn changes')
 
     const fileButtons = screen.getAllByRole('button', { name: /turn\.ts/ })
     fireEvent.contextMenu(fileButtons[0])

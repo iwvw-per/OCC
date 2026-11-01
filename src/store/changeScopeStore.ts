@@ -2,6 +2,14 @@ import { useCallback, useSyncExternalStore } from 'react'
 
 export type ChangeScopeMode = 'git' | 'branch' | 'session' | 'turn'
 
+/**
+ * 未显式选择时的默认范围：Git 变更。
+ *
+ * 与 SessionChangesPanel 的 getDefaultChangeMode 保持一致 —— 两处都兜底到同一个
+ * 值，否则首次打开（store 里还没记录）会落到 turn，与面板的选择器不一致。
+ */
+export const DEFAULT_CHANGE_SCOPE_MODE: ChangeScopeMode = 'git'
+
 type Subscriber = () => void
 
 class ChangeScopeStore {
@@ -14,8 +22,8 @@ class ChangeScopeStore {
   }
 
   getMode(sessionId: string | null): ChangeScopeMode {
-    if (!sessionId) return 'turn'
-    return this.modes.get(sessionId) ?? 'turn'
+    if (!sessionId) return DEFAULT_CHANGE_SCOPE_MODE
+    return this.modes.get(sessionId) ?? DEFAULT_CHANGE_SCOPE_MODE
   }
 
   setMode(sessionId: string | null, mode: ChangeScopeMode) {
