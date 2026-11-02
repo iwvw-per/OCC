@@ -49,10 +49,12 @@ vi.mock('../store/multiServerStore', () => ({
   useMultiServerStore: () => ({}),
 }))
 
+const setDirectoryMock = vi.fn()
+
 vi.mock('../hooks/useRouter', () => ({
   useRouter: () => ({
     directory: undefined,
-    setDirectory: vi.fn(),
+    setDirectory: setDirectoryMock,
     navigateToSession: vi.fn(),
     replaceSession: vi.fn(),
   }),
@@ -77,6 +79,7 @@ describe('DirectoryContext per-server binding', () => {
     localStorage.clear()
     resetAppDataBindingForTests()
     serverChangeListeners.length = 0
+    setDirectoryMock.mockClear()
     getActiveServerIdMock.mockReset().mockReturnValue('aiagent:inst_work')
   })
 
@@ -140,4 +143,58 @@ describe('DirectoryContext per-server binding', () => {
     expect(saved.filter(p => p === '/opt/code/opencode-bg')).toHaveLength(1)
   })
 
+  /**
+   * 发送后登记工作目录。
+   *
+   * 真实故障：欢迎页选「不在项目中工作」→ 直接开聊 → 目录不出现在侧栏。
+   * 修复要求「发送成功后把这个目录登记成项目」，但**不能**顺手用
+   * addDirectory —— 它会 setCurrentDirectory，而后者写的是 sessionId=null
+   * 的 hash，会把刚建好的会话路由当场清掉。
+   */
+  it('registers a directory without touching the URL route', async () => {
+    render(
+      <DirectoryProvider>
+        <Probe />
+      </DirectoryProvider>,
+    )
+
+    await act(async () => {
+      latest?.registerDirectory('/opt/code/OutsideProject')
+    })
+
+    expect(latest?.savedDirectories.map(d => d.path)).toContain('/opt/code/OutsideProject')
+    expect(buckets('aiagent:inst_work')).toContain('/opt/code/OutsideProject')
+    // 关键断言：不发导航，session 路由不会被清
+    expect(setDirectoryMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a persisted bucket via registerDirectory (idempotent)', async () => {
+    render(
+      <DirectoryProvider>
+        <Probe />
+      </DirectoryProvider>,
+    )
+
+    await act(async () => {
+      latest?.registerDirectory('/opt/code/Dup')
+      latest?.registerDirectory('/opt/code/Dup/')
+    })
+
+    const saved = latest?.savedDirectories.map(d => d.path) ?? []
+    expect(saved.filter(p => p === '/opt/code/Dup')).toHaveLength(1)
+  })
+
+  it('rejects relative paths so the sidebar does not get隐藏的幽灵项目', async () => {
+    render(
+      <DirectoryProvider>
+        <Probe />
+      </DirectoryProvider>,
+    )
+
+    await act(async () => {
+      latest?.registerDirectory('relative/path')
+    })
+
+    expect(latest?.savedDirectories.map(d => d.path)).not.toContain('relative/path')
+  })
 })

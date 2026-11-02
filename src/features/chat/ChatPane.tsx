@@ -194,7 +194,7 @@ export const ChatPane = memo(function ChatPane({
   const modelSelectorRef = useRef<ModelSelectorHandle>(null)
   const [chatContentEl, setChatContentEl] = useState<HTMLDivElement | null>(null)
   const setChatContentRef = useCallback((node: HTMLDivElement | null) => setChatContentEl(node), [])
-  const { addDirectory, setCurrentDirectory } = useDirectory()
+  const { addDirectory, registerDirectory, setCurrentDirectory } = useDirectory()
 
   // 当前 pane 绑定的服务器（sessionId 为复合 key，split 出 serverId；home 状态跟随 active server 实时变化）
   const activeServerId = useSyncExternalStore(
@@ -272,6 +272,29 @@ export const ChatPane = memo(function ChatPane({
       navigatePaneToSession(paneId, normalizeSessionKey(sid), directory)
     },
     [paneId, navigatePaneToSession, normalizeSessionKey],
+  )
+
+  /**
+   * 发送成功后把当前工作目录登记为侧栏项目。
+   *
+   * 修的是「欢迎页点『不在项目中工作』后开聊，目录不出现在侧栏」：
+   * `setCurrentDirectory` 只写 URL + 最近使用，**不会**往 savedDirectories 里加，
+   * 而侧栏列表只来自 savedDirectories。于是从欢迎页临时选的目录（没有先
+   * 「添加项目」）发完消息后，会话在侧栏里找不到任何归属行。
+   *
+   * 时机：第一条消息真的发出去之后才登记，避免「只是点进去看看」就污染
+   * 项目列表；已有项目本来就在 savedDirectories 里，登记对重复路径幂等，
+   * 不会打乱用户已隐藏/已排序的列表。
+   */
+  const registerWorkDirectory = useCallback(
+    (directory: string | undefined) => {
+      if (!directory) return
+      // 只能用 registerDirectory：addDirectory 会 setCurrentDirectory，
+      // 而它写的是 sessionId=null 的 hash —— 发送成功那一刻 URL 里已经有
+      // 新会话的 session 路由，用 addDirectory 会把它当场清掉。
+      registerDirectory(directory)
+    },
+    [registerDirectory],
   )
 
   /**
@@ -439,6 +462,7 @@ export const ChatPane = memo(function ChatPane({
     sessionId,
     navigateToSession,
     navigateHome,
+    onWorkDirectoryUsed: registerWorkDirectory,
   })
 
   /**
@@ -1174,10 +1198,12 @@ export const ChatPane = memo(function ChatPane({
   const showWelcome = !routeSessionId && renderedMessages.length === 0 && !sessionRunning && chatAreaMountKey !== null
   const handleWelcomeSelectProject = useCallback(
     (path: string) => {
+      // 欢迎页主动选项目 = 用户明确的「我要用这个项目」，登记进侧栏。
+      // registerDirectory 不写 URL，setCurrentDirectory 会写；先落列表再切目录。
+      registerDirectory(path)
       setCurrentDirectory(path)
-      addDirectory(path)
     },
-    [addDirectory, setCurrentDirectory],
+    [registerDirectory, setCurrentDirectory],
   )
   const handleWelcomeClearProject = useCallback(() => {
     setCurrentDirectory(undefined)

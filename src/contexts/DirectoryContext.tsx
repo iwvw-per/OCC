@@ -5,13 +5,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { getPath, type ApiPath } from '../api'
 import { useRouter } from '../hooks/useRouter'
-import {
-  handleError,
-  isAbsoluteDirectory,
-  normalizeToForwardSlash,
-  getDirectoryName,
-  isSameDirectory,
-} from '../utils'
+import { handleError, isAbsoluteDirectory, normalizeToForwardSlash, getDirectoryName, isSameDirectory } from '../utils'
 import { layoutStore, useLayoutStore } from '../store/layoutStore'
 import { serverStore } from '../store/serverStore'
 import { multiServerStore, useMultiServerStore } from '../store/multiServerStore'
@@ -64,9 +58,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
         // 快照恢复竞态，把刚恢复的目录清掉。
       }
       setPathInfo(null)
-      getPath(multiServerStore.getFocusedServerId())
-        .then(setPathInfo)
-        .catch(handleError('get path info', 'api'))
+      getPath(multiServerStore.getFocusedServerId()).then(setPathInfo).catch(handleError('get path info', 'api'))
     })
   }, [setUrlDirectory])
 
@@ -130,6 +122,44 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       return true
     },
     [savedDirectories, setCurrentDirectory],
+  )
+
+  /**
+   * 只登记，不切目录、不写 URL。
+   *
+   * 与 addDirectory 共用同一套规范化与「解除隐藏」语义，唯独不走
+   * setCurrentDirectory —— 后者会写 `#/?dir=` 形式的 hash，把正在看的
+   * session 路由清掉（这正是发送后不能顺手 addDirectory 的原因）。
+   */
+  const registerDirectory = useCallback(
+    (path: string): boolean => {
+      let normalized = normalizeToForwardSlash(path)
+
+      // 与 addDirectory 一致：根路径的尾斜杠修正
+      const trimmed = path.replace(/\\/g, '/').replace(/\/+$/, '/')
+      if (!normalized && (trimmed === '/' || /^[a-zA-Z]:\/$/.test(trimmed))) {
+        normalized = trimmed.slice(0, -1) || '/'
+      }
+      // 后端只接受绝对路径，相对路径登记进去也会被侧栏当作「不存在」隐藏
+      if (!normalized || normalized === '.' || !isAbsoluteDirectory(normalized)) return false
+
+      const existing = savedDirectories.some(d => isSameDirectory(d.path, normalized))
+      // 已存在时只解除隐藏（用户可能是先隐藏、再从欢迎页直接开聊）
+      unhideProject(normalized)
+      touchRecentProject(normalized)
+      if (existing) return true
+
+      const newDir: SavedDirectory = {
+        path: normalized,
+        name: getDirectoryName(normalized) || normalized,
+        addedAt: Date.now(),
+      }
+      savedDirectoriesStore.commit(list =>
+        list.some(d => isSameDirectory(d.path, newDir.path)) ? list : [...list, newDir],
+      )
+      return false
+    },
+    [savedDirectories],
   )
 
   // 移除目录
@@ -235,6 +265,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       setCurrentDirectory,
       savedDirectories,
       addDirectory,
+      registerDirectory,
       removeDirectory,
       reorderDirectories,
       pruneInvalidDirectories,
@@ -248,6 +279,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       setCurrentDirectory,
       savedDirectories,
       addDirectory,
+      registerDirectory,
       removeDirectory,
       reorderDirectories,
       pruneInvalidDirectories,

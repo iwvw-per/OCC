@@ -11,6 +11,7 @@ vi.mock('../../../contexts/useDirectory', () => ({
     currentDirectory: 'E:/dev/OpenCodeUI',
     savedDirectories: savedDirectoriesMock,
     addDirectory: vi.fn(),
+    registerDirectory: vi.fn(),
     removeDirectory: vi.fn(),
     reorderDirectories: vi.fn(),
     setCurrentDirectory: vi.fn(),
