@@ -51,8 +51,11 @@ export function InputToolbar({
   const useBrowserFileInput = !isTauri() || isTauriMobile()
 
   // 根据模型能力计算支持的文件类型
-  const caps = fileCapabilities ?? { image: false, pdf: false, audio: false, video: false }
-  const supportsAnyFile = caps.image || caps.pdf || caps.audio || caps.video
+  //
+  // text 缺省为 true：文本类附件不依赖模型的多模态能力（服务端内联成文本），
+  // 且「大段文本→作为附件」依赖它。旧调用方不传时行为与现在一致。
+  const caps = fileCapabilities ?? { image: false, pdf: false, audio: false, video: false, text: true }
+  const supportsAnyFile = caps.image || caps.pdf || caps.audio || caps.video || caps.text === true
   const controlsDisabled = isSending
 
   // 动态构建 HTML accept 和 Tauri filter
@@ -81,12 +84,41 @@ export function InputToolbar({
       extensions.push('mp4', 'webm', 'mov', 'avi', 'mkv')
       filterNames.push(t('inputToolbar.filterVideo'))
     }
+    if (caps.text !== false) {
+      // 文本类：浏览器 accept 用 text/* + 常见 application 文本类型；
+      // Tauri 原生选择框只能按扩展名，这里列常用的一组。
+      accept.push('text/*', 'application/json', 'application/xml', 'application/x-yaml')
+      extensions.push(
+        'txt',
+        'md',
+        'markdown',
+        'csv',
+        'json',
+        'log',
+        'yaml',
+        'yml',
+        'xml',
+        'html',
+        'css',
+        'js',
+        'ts',
+        'py',
+        'java',
+        'go',
+        'rs',
+        'sh',
+        'sql',
+        'ini',
+        'toml',
+      )
+      filterNames.push(t('inputToolbar.filterText'))
+    }
 
     return {
       acceptString: accept.join(','),
       tauriFilters: extensions.length > 0 ? [{ name: filterNames.join(' / '), extensions }] : [],
     }
-  }, [caps.image, caps.pdf, caps.audio, caps.video, t])
+  }, [caps.image, caps.pdf, caps.audio, caps.video, caps.text, t])
   // State for menus
   const [variantMenuOpen, setVariantMenuOpen] = useState(false)
 

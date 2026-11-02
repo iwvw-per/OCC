@@ -27,8 +27,13 @@ export const COLLAPSED_BOX_RADIUS = 24
  * 否则主线程繁忙时会在过渡完成前摘掉 data-morphing，几何直接瞬跳。 */
 export const MORPH_FALLBACK_MS = 900
 
-export const MAX_DROPPED_FILE_SIZE = 20 * 1024 * 1024
-export const MAX_DROPPED_FILE_SIZE_LABEL = `${MAX_DROPPED_FILE_SIZE / (1024 * 1024)}MB`
+/** 附件单文件上限：见 constants/requestLimits.ts（按网关 8MiB 请求体上限反推）。
+ * 这两个别名保留给既有调用方，数值不再在这里定义 —— 这里的 20MB 是纯错误值：
+ * 6.1MB 的文件 base64 后就已经超过网关上限。 */
+export {
+  MAX_ATTACHMENT_BYTES as MAX_DROPPED_FILE_SIZE,
+  MAX_ATTACHMENT_LABEL as MAX_DROPPED_FILE_SIZE_LABEL,
+} from '../../../constants/requestLimits'
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)

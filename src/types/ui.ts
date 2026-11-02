@@ -59,6 +59,18 @@ export interface FileCapabilities {
   pdf: boolean
   audio: boolean
   video: boolean
+  /**
+   * 纯文本类文件（text/* 及其它文本编码，如 .md/.txt/.json/.csv）。
+   *
+   * 与 image/pdf/audio/video 不同，文本附件**不依赖模型的多模态能力**：
+   * 服务端会把文本内联进对话内容，任何能读文本的模型都能处理。
+   * 实测（2026-11-02）网关对 `text/markdown`、`text/plain`、`application/json`、
+   * `application/octet-stream` 四种附件 MIME 均返回 200。
+   *
+   * 缺省视为 true（见 InputBox 的 caps 合并逻辑）：旧调用方不传该字段时，
+   * 「大段文本→作为附件」这条路径仍然可用。
+   */
+  text?: boolean
 }
 
 // ============================================

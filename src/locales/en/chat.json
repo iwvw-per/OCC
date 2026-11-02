@@ -144,6 +144,8 @@
     "fileTooLargeBody": "\"{{name}}\" exceeds the {{size}} attachment limit and was not added",
     "fileTypeUnsupported": "Unsupported file type",
     "fileTypeUnsupportedBody": "\"{{name}}\" is not supported by the current model and was not added. Switch to a model that accepts this type.",
+    "sendTooLarge": "Message too large to send",
+    "sendTooLargeBody": "This message is about {{size}}, exceeding the gateway request-body limit of {{limit}}. Trim the text or remove some attachments and try again.",
     "largePasteTitle": "Paste large text",
     "largePasteBody": "The pasted content has {{count}} characters. Choose how to handle it:",
     "largePasteAsAttachment": "As attachment",
@@ -233,6 +235,7 @@
     "filterPdf": "PDF",
     "filterAudio": "Audio",
     "filterVideo": "Video",
+    "filterText": "Text",
     "attachFile": "Attach file",
     "stopGeneration": "Stop generation",
     "sendingMessage": "Sending message",
@@ -430,7 +433,13 @@
     "fetchVcs": "Failed to fetch VCS info",
     "fetchModels": "Failed to fetch models",
     "fetchSessions": "Failed to fetch sessions",
-    "fetchArchivedSessions": "Failed to fetch archived sessions"
+    "fetchArchivedSessions": "Failed to fetch archived sessions",
+    "sendFailed": "Send failed",
+    "sendTooLargeTitle": "Request body exceeds the gateway limit",
+    "sendTooLargeDesc": "The gateway limits request bodies to {{limit}}; this message is about {{size}}. Trim the text or remove some attachments.",
+    "sendTimeoutDesc": "The request did not finish within {{seconds}}s — usually a large payload on a slow uplink. Retry later or shrink the attachment.",
+    "sendNetworkDesc": "Network interrupted or the server did not respond ({{detail}}).",
+    "sendUnknownDesc": "{{detail}}"
   },
   "connectionError": {
     "noActiveServer": "No active OpenCode server is selected",

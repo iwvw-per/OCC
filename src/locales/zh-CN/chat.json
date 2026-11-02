@@ -144,6 +144,8 @@
     "fileTooLargeBody": "{{name}} 超过 {{size}} 附件上限，未添加",
     "fileTypeUnsupported": "不支持该文件类型",
     "fileTypeUnsupportedBody": "当前模型不支持 {{name}}，未添加。请切换到支持该类型的模型。",
+    "sendTooLarge": "内容过大，未发送",
+    "sendTooLargeBody": "这条消息约 {{size}}，超过网关 {{limit}} 的请求体上限。请删减正文或移除部分附件后重试。",
     "largePasteTitle": "粘贴大段文本",
     "largePasteBody": "粘贴的内容有 {{count}} 个字符，选择处理方式：",
     "largePasteAsAttachment": "作为附件",
@@ -233,6 +235,7 @@
     "filterPdf": "PDF",
     "filterAudio": "音频",
     "filterVideo": "视频",
+    "filterText": "文本",
     "attachFile": "附加文件",
     "stopGeneration": "停止生成",
     "sendingMessage": "发送消息中",
@@ -430,7 +433,13 @@
     "fetchVcs": "获取版本控制信息失败",
     "fetchModels": "获取模型列表失败",
     "fetchSessions": "获取会话列表失败",
-    "fetchArchivedSessions": "获取已归档会话失败"
+    "fetchArchivedSessions": "获取已归档会话失败",
+    "sendFailed": "发送失败",
+    "sendTooLargeTitle": "请求体超过网关上限",
+    "sendTooLargeDesc": "网关对单次请求体限制 {{limit}}，这条消息约 {{size}}。请删减正文或移除部分附件。",
+    "sendTimeoutDesc": "请求超过 {{seconds}} 秒仍未完成，通常是内容体积大、上行链路慢。可稍后重试或减小附件。",
+    "sendNetworkDesc": "网络中断或服务器无响应（{{detail}}）。",
+    "sendUnknownDesc": "{{detail}}"
   },
   "connectionError": {
     "noActiveServer": "未选择可用的 OpenCode 服务器",

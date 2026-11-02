@@ -10,6 +10,7 @@ const {
   registerSessionConsumerMock,
   updateConsumerSessionIdMock,
   sendNotificationMock,
+  sendMessageAsyncMock,
   isSystemEnabledMock,
   errorHandlerMock,
   getPaneFullAutoModeMock,
@@ -33,6 +34,7 @@ const {
   registerSessionConsumerMock: vi.fn(),
   updateConsumerSessionIdMock: vi.fn(),
   sendNotificationMock: vi.fn(),
+  sendMessageAsyncMock: vi.fn(),
   isSystemEnabledMock: vi.fn((type: string) => type !== 'permission'),
   errorHandlerMock: vi.fn(),
   getPaneFullAutoModeMock: vi.fn((_paneId: string) => 'off'),
@@ -73,6 +75,10 @@ vi.mock('../store', () => ({
     restoreSendRollback: vi.fn(),
     handleMessageUpdated: vi.fn(),
     handlePartUpdated: vi.fn(),
+    upsertLocalMessage: vi.fn(),
+    removeMessage: vi.fn(),
+    getIdleGeneration: vi.fn(() => 0),
+    handleSessionIdle: vi.fn(),
   },
   useSessionFamily: (sessionId: string | null) => useSessionFamilyMock(sessionId),
   useSessionState: (sessionId: string | null) => useSessionStateMock(sessionId),
@@ -96,6 +102,9 @@ vi.mock('../store', () => ({
   },
   useActiveSessionStore: () => ({ statusMap: activeSessionStatusMap }),
   useSessionStatus: (sessionId: string | null) => (sessionId ? activeSessionStatusMap[sessionId] : undefined),
+  notificationStore: {
+    push: vi.fn(),
+  },
   activeSessionStore: {
     applyOptimisticBusy: vi.fn(),
     updateStatus: vi.fn(() => true),
@@ -154,7 +163,7 @@ vi.mock('../store/notificationEventSettingsStore', () => ({
 }))
 
 vi.mock('../api', () => ({
-  sendMessageAsync: vi.fn(),
+  sendMessageAsync: sendMessageAsyncMock,
   getSessionMessages: vi.fn(),
   abortSession: vi.fn(),
   getSelectableAgents: (...args: unknown[]) => getSelectableAgentsMock(...args),
@@ -619,5 +628,95 @@ describe('useChatSession busy UI signal', () => {
 
     expect(result.current.isStreaming).toBe(true)
     expect(result.current.messageIsStreaming).toBe(true)
+  })
+})
+
+/**
+ * 发送成功后把工作目录登记进侧栏。
+ *
+ * 真实反馈：欢迎页选「不在项目中工作」→ 直接开聊，目录不出现在侧栏。
+ * 原因：setCurrentDirectory 只写 URL + 最近使用，侧栏只渲染 savedDirectories。
+ * 这里锁住三个语义：成功才登记、登记的是本次的目录、失败不登记。
+ */
+describe('useChatSession 工作目录登记', () => {
+  beforeEach(() => {
+    sendMessageAsyncMock.mockReset()
+    errorHandlerMock.mockReset()
+    getSelectableAgentsMock.mockReset().mockResolvedValue([])
+    useSessionStateMock.mockReturnValue(null)
+    registerSessionConsumerMock.mockReturnValue(vi.fn())
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(cb => window.setTimeout(() => cb(0), 16))
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => clearTimeout(id))
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function renderWith(onWorkDirectoryUsed: (directory: string) => void) {
+    return renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+        onWorkDirectoryUsed,
+      }),
+    )
+  }
+
+  it('registers the directory after a successful send', async () => {
+    sendMessageAsyncMock.mockResolvedValue(undefined)
+    const onUsed = vi.fn()
+    const { result } = renderWith(onUsed)
+
+    await act(async () => {
+      await result.current.handleSend('你好', [])
+    })
+
+    expect(onUsed).toHaveBeenCalledWith('/workspace/demo')
+  })
+
+  it('does not register when the send fails', async () => {
+    sendMessageAsyncMock.mockRejectedValue(
+      Object.assign(new Error('UnexpectedStatus: 413'), {
+        reason: 'UnexpectedStatus',
+        cause: { status: 413 },
+      }),
+    )
+    const onUsed = vi.fn()
+    const { result } = renderWith(onUsed)
+
+    await act(async () => {
+      const ok = await result.current.handleSend('你好', [])
+      expect(ok).toBe(false)
+    })
+
+    expect(onUsed).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the failure as an error notification instead of staying silent', async () => {
+    sendMessageAsyncMock.mockRejectedValue(
+      Object.assign(new Error('UnexpectedStatus: 413'), {
+        reason: 'UnexpectedStatus',
+        cause: { status: 413 },
+      }),
+    )
+    const { result } = renderWith(vi.fn())
+
+    await act(async () => {
+      await result.current.handleSend('你好', [])
+    })
+
+    const { notificationStore } = await import('../store')
+    const calls = vi.mocked(notificationStore.push).mock.calls
+    const limitCall = calls.find(call => call[0] === 'error' && String(call[2]).includes('8.0 MB'))
+    expect(limitCall).toBeTruthy()
+    // 会话与目录都要带上，否则通知无法归类到项目行
+    expect(limitCall?.[3]).toBe('session-1')
+    expect(limitCall?.[4]).toBe('/workspace/demo')
   })
 })

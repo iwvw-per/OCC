@@ -46,6 +46,26 @@ export function isFileSupported(mime: string, caps: FileCapabilities): boolean {
   if (mime === 'application/pdf') return caps.pdf
   if (mime.startsWith('audio/')) return caps.audio
   if (mime.startsWith('video/')) return caps.video
+  // 文本类附件：不依赖模型的多模态能力（服务端内联成文本），缺省可用。
+  // 这条分支修的是「大段文本→作为附件」永远被拒的问题：该路径生成的是
+  // text/plain 文件，此前落到最后的 return false。
+  if (isTextLikeMime(mime)) return caps.text !== false
+  return false
+}
+
+/**
+ * 是否为「文本类」附件 MIME。
+ *
+ * 除 `text/*` 外，还包含浏览器/系统常见的、实际是文本的 application 类型
+ * 与无 MIME 时的兜底（`application/octet-stream`，配合扩展名判断）。
+ * 这类内容不需要模型支持图片/PDF，服务端直接内联为文本。
+ */
+export function isTextLikeMime(mime: string): boolean {
+  if (mime.startsWith('text/')) return true
+  if (mime === 'application/json') return true
+  if (mime === 'application/xml' || mime === 'application/x-yaml') return true
+  if (mime === 'application/javascript') return true
+  if (mime === 'application/octet-stream') return true
   return false
 }
 

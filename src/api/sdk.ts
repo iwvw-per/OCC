@@ -11,6 +11,7 @@
 
 import { serverStore, makeAuthHeader } from '../store/serverStore'
 import { isTauri } from '../utils/tauri'
+import { estimateUtf8Bytes, timeoutForBodyBytes } from '../constants/requestLimits'
 
 // Tauri fetch 缓存
 let _tauriFetch: typeof globalThis.fetch | null = null
@@ -61,7 +62,30 @@ function createAbortError(message: string) {
 /** 请求超时：服务端半死时避免请求永久挂起，超时后按瞬态错误重试。 */
 const API_REQUEST_TIMEOUT_MS = 30_000
 
-export async function trackedFetch(input: RequestInfo | URL, init: RequestInit | undefined, generation: number): Promise<Response> {
+/**
+ * 估算请求体字节数，用于按体积放宽超时。
+ *
+ * 只做「够用」的判定：字符串按 UTF-8 计数（prompt 的请求体是 JSON 字符串，
+ * 附件是 base64，基本全是 ASCII），二进制按 byteLength。无法判定时返回 0，
+ * 即沿用基准超时。
+ */
+function estimateBodyBytes(body: BodyInit | null | undefined): number {
+  if (!body) return 0
+  if (typeof body === 'string') return estimateUtf8Bytes(body)
+  if (body instanceof ArrayBuffer) return body.byteLength
+  if (ArrayBuffer.isView(body)) return body.byteLength
+  if (typeof Blob !== 'undefined' && body instanceof Blob) return body.size
+  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+    return estimateUtf8Bytes(body.toString())
+  }
+  return 0
+}
+
+export async function trackedFetch(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  generation: number,
+): Promise<Response> {
   const controller = new AbortController()
   const externalSignal = init?.signal
   const abortFromExternal = () => controller.abort(externalSignal?.reason)
@@ -72,10 +96,19 @@ export async function trackedFetch(input: RequestInfo | URL, init: RequestInit |
     externalSignal?.addEventListener('abort', abortFromExternal, { once: true })
   }
 
+  /**
+   * 超时按请求体体积放大。
+   *
+   * 固定 30s 对大数据上传是不够的：实测 8.19MB 的 prompt 经网关已需 19s，
+   * 链路稍慢就会 abort，而 abort 的表现是「点了发送什么也没发生」。
+   * 小请求仍走 30s，不受影响（见 constants/requestLimits.ts 的实测数据）。
+   */
+  const timeoutMs = timeoutForBodyBytes(estimateBodyBytes(init?.body), API_REQUEST_TIMEOUT_MS)
+
   // 外部已带 signal 时不叠加超时，避免和调用方的取消语义打架
   const timeoutId = externalSignal
     ? null
-    : setTimeout(() => controller.abort(createAbortError('API request timed out')), API_REQUEST_TIMEOUT_MS)
+    : setTimeout(() => controller.abort(createAbortError('API request timed out')), timeoutMs)
 
   _apiRequestControllers.add(controller)
 

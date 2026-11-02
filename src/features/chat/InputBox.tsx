@@ -34,6 +34,14 @@ import {
   readFileAsDataUrl,
   compressImageFile,
 } from './input/inputUtils'
+import {
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_LABEL,
+  formatRequestBytes,
+  estimateUtf8Bytes,
+  estimatePromptBody,
+  REQUEST_BODY_MAX_BYTES,
+} from '../../constants/requestLimits'
 import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { inputDraftStore } from '../../store/inputDraftStore'
 import { themeStore } from '../../store/themeStore'
@@ -96,9 +104,6 @@ const COLLAPSED_BOX_RADIUS = 24
 // 「几何值未变、没有过渡」时状态卡死。必须明显大于 --chat-morph-dur(520ms)，
 // 否则主线程繁忙时会在过渡完成前摘掉 data-morphing，几何直接瞬跳。
 const MORPH_FALLBACK_MS = 900
-
-const MAX_DROPPED_FILE_SIZE = 20 * 1024 * 1024
-const MAX_DROPPED_FILE_SIZE_LABEL = `${MAX_DROPPED_FILE_SIZE / (1024 * 1024)}MB`
 
 // 大文本粘贴阈值：超过此字符数时按偏好询问/自动处理
 const LARGE_PASTE_CHAR_THRESHOLD = 2000
@@ -250,14 +255,17 @@ function InputBoxComponent({
   //
   // 因此未知时按「允许选择」处理，把最终裁决交给服务端：多带一个附件远好于
   // 静默丢掉用户的图片。真正不被支持时，下面的 handleFilesSelected 会给出提示。
+  //
+  // text 恒为 true：文本附件不依赖模型的多模态能力（服务端内联成文本），
+  // 且「大段文本→作为附件」依赖它，缺了就会永远被拒。
   const fileCaps: FileCapabilities = useMemo(
-    () =>
-      fileCapabilitiesProp ?? {
-        image: supportsImages ?? true,
-        pdf: false,
-        audio: false,
-        video: false,
-      },
+    () => ({
+      image: fileCapabilitiesProp?.image ?? supportsImages ?? true,
+      pdf: fileCapabilitiesProp?.pdf ?? false,
+      audio: fileCapabilitiesProp?.audio ?? false,
+      video: fileCapabilitiesProp?.video ?? false,
+      text: fileCapabilitiesProp?.text ?? true,
+    }),
     [fileCapabilitiesProp, supportsImages],
   )
   const { externalFileDropMode, showInputStatusBar, inputStatusBarFields } = useSyncExternalStore(
@@ -266,7 +274,7 @@ function InputBoxComponent({
   )
 
   // 是否有任何文件附件能力
-  const supportsAnyFile = fileCaps.image || fileCaps.pdf || fileCaps.audio || fileCaps.video
+  const supportsAnyFile = fileCaps.image || fileCaps.pdf || fileCaps.audio || fileCaps.video || fileCaps.text === true
 
   // 文本状态
   const [text, setText] = useState('')
@@ -276,7 +284,6 @@ function InputBoxComponent({
   // 大文本粘贴：待处理的文本与弹窗开关
   const [pendingLargePaste, setPendingLargePaste] = useState<string | null>(null)
   const { behavior: largePasteBehavior } = useLargeTextPasteSettings()
-
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false)
@@ -630,6 +637,30 @@ function InputBoxComponent({
       return
     }
 
+    // 发送前体积预检：网关对 prompt 请求体的硬上限是 8MiB（2026-11-02 实测，
+    // 见 constants/requestLimits.ts）。超限时服务端返回 413，而 SDK 把它当
+    // 「未声明的状态码」抛出，界面上什么都看不到 —— 用户只会觉得「点了没反应」。
+    //
+    // 因此这里必须**在清空草稿之前**拦下：超限就提示 + 保留内容，
+    // 让用户自己删减或改用更小的附件。预检只统计前端能确定的部分
+    // （正文 + 附件 URL），服务端上下文导致的超限仍由 413 兜底。
+    const bodyEstimate = estimatePromptBody(
+      text,
+      attachments.map(a => a.url),
+    )
+    if (bodyEstimate.exceedsLimit) {
+      notificationStore.push(
+        'error',
+        t('inputBox.sendTooLarge'),
+        t('inputBox.sendTooLargeBody', {
+          size: formatRequestBytes(bodyEstimate.totalBytes),
+          limit: formatRequestBytes(REQUEST_BODY_MAX_BYTES),
+        }),
+        sessionId ?? '',
+      )
+      return
+    }
+
     // 从 attachments 中找 agent mention
     const agentAttachment = attachments.find(a => a.type === 'agent')
     const mentionedAgent = agentAttachment?.agentName
@@ -674,9 +705,9 @@ function InputBoxComponent({
     selectedVariant,
     sessionId,
     submitCommandOptimistically,
+    t,
     text,
   ])
-
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -932,7 +963,7 @@ function InputBoxComponent({
         }
 
         // 大小上限：此前只有 Tauri 外拖路径校验，选择器/粘贴/浏览器拖拽可塞入任意大文件
-        if (file.size > MAX_DROPPED_FILE_SIZE) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
           rejected.push({ name: file.name, type: 'size' })
           continue
         }
@@ -961,7 +992,7 @@ function InputBoxComponent({
           notificationStore.push(
             'error',
             t('inputBox.fileTooLarge'),
-            t('inputBox.fileTooLargeBody', { name: tooLarge[0].name, size: MAX_DROPPED_FILE_SIZE_LABEL }),
+            t('inputBox.fileTooLargeBody', { name: tooLarge[0].name, size: MAX_ATTACHMENT_LABEL }),
             sessionId ?? '',
           )
         }
@@ -1077,9 +1108,34 @@ function InputBoxComponent({
       const pasted = e.clipboardData?.getData('text/plain') ?? ''
       if (isLargePaste(pasted)) {
         e.preventDefault()
+        const pastedBytes = estimateUtf8Bytes(pasted)
+        const inlineEstimate = estimatePromptBody(pasted)
         if (largePasteBehavior === 'attach') {
           void applyLargePasteAsAttachment(pasted)
         } else if (largePasteBehavior === 'inline') {
+          if (inlineEstimate.exceedsLimit) {
+            // 「总是内联」是一条粘性偏好，用户很可能忘了它有体积代价：
+            // 超过上限时不要让粘贴静默失败，直接说明并改走附件。
+            notificationStore.push(
+              'error',
+              t('inputBox.sendTooLarge'),
+              t('inputBox.sendTooLargeBody', {
+                size: formatRequestBytes(inlineEstimate.totalBytes),
+                limit: formatRequestBytes(REQUEST_BODY_MAX_BYTES),
+              }),
+              sessionId ?? '',
+            )
+            return
+          }
+          if (pastedBytes > MAX_ATTACHMENT_BYTES) {
+            notificationStore.push(
+              'error',
+              t('inputBox.fileTooLarge'),
+              t('inputBox.fileTooLargeBody', { name: 'text', size: MAX_ATTACHMENT_LABEL }),
+              sessionId ?? '',
+            )
+            return
+          }
           insertInlineText(pasted)
         } else {
           setPendingLargePaste(pasted)
@@ -1089,7 +1145,17 @@ function InputBoxComponent({
 
       // 普通文本粘贴：让 textarea 默认处理（天然支持换行和 undo）
     },
-    [supportsAnyFile, fileCaps, handleFilesSelected, largePasteBehavior, applyLargePasteAsAttachment, insertInlineText, isLargePaste],
+    [
+      supportsAnyFile,
+      fileCaps,
+      handleFilesSelected,
+      largePasteBehavior,
+      applyLargePasteAsAttachment,
+      insertInlineText,
+      isLargePaste,
+      sessionId,
+      t,
+    ],
   )
 
   // 拖拽文件到输入框
@@ -1225,11 +1291,11 @@ function InputBoxComponent({
 
         // 先读取元数据判断大小，避免先把整个文件读进内存再转 base64（膨胀约 1.33 倍）
         const fileStat = await stat(fileInfo.path)
-        if (fileStat.size > MAX_DROPPED_FILE_SIZE) {
+        if (fileStat.size > MAX_ATTACHMENT_BYTES) {
           notificationStore.push(
             'error',
             t('inputBox.fileTooLarge'),
-            t('inputBox.fileTooLargeBody', { name: displayName, size: MAX_DROPPED_FILE_SIZE_LABEL }),
+            t('inputBox.fileTooLargeBody', { name: displayName, size: MAX_ATTACHMENT_LABEL }),
             sessionId ?? '',
           )
           return null
@@ -1694,9 +1760,7 @@ function InputBoxComponent({
             <div className="relative">
               {/* 顶边角标（欢迎页项目选择）：做成骑在输入框顶边的「标签」——
                   底边与输入框顶边重合、只保留上方圆角，与输入框连成一体。 */}
-              {topAccessory && (
-                <div className="absolute left-6 bottom-full z-40 -mb-px">{topAccessory}</div>
-              )}
+              {topAccessory && <div className="absolute left-6 bottom-full z-40 -mb-px">{topAccessory}</div>}
               <div className="chat-fab-anchor" data-collapsed={isCollapsed}>
                 <ChatFab
                   collapsed={isCollapsed}

@@ -46,6 +46,7 @@ import {
   type Attachment,
   type ModelInfo,
 } from '../api'
+import { describeSendFailure } from '../api/sendFailure'
 import { getMessageText, isUserMessage, type AssistantMessageInfo, type Message as UIMessage } from '../types/message'
 import { clipboardErrorHandler, copyTextToClipboard, createErrorHandler } from '../utils'
 import { logger } from '../utils/logger'
@@ -98,6 +99,12 @@ interface UseChatSessionOptions {
   sessionId: string | null
   navigateToSession: (sessionId: string, directory?: string) => void
   navigateHome: () => void
+  /**
+   * 一轮内容真的落到某个工作目录时回调（新建会话 / 执行命令）。
+   *
+   * 用于把「欢迎页临时选的目录」登记成侧栏项目。可选：缺省时不做登记。
+   */
+  onWorkDirectoryUsed?: (directory: string) => void
 }
 
 interface LiveRetryStatus {
@@ -115,6 +122,7 @@ export function useChatSession({
   sessionId: routeSessionId,
   navigateToSession,
   navigateHome,
+  onWorkDirectoryUsed,
 }: UseChatSessionOptions) {
   const routeStatus = useSessionStatus(routeSessionId)
 
@@ -933,9 +941,36 @@ export function useChatSession({
             })
         }, 250)
 
+        // 这一轮确实落到某个工作目录了：把它登记进侧栏项目列表。
+        //
+        // 修的是「欢迎页点『不在项目中工作』后开聊，目录不出现在侧栏」：
+        // setCurrentDirectory 只写 URL + 最近使用，不往 savedDirectories 里加，
+        // 而侧栏只渲染 savedDirectories。于是从欢迎页临时选的目录发完消息后，
+        // 会话在侧栏里找不到任何归属行。
+        //
+        // 放在成功之后、且用 registerDirectory（不写 URL）：此刻 URL 里已经是
+        // 新会话的 session 路由，任何会 setDirectory 的调用都会把它清掉。
+        // 失败路径不登记 —— 发都没发出去，不该污染项目列表。
+        if (input.directory) onWorkDirectoryUsed?.(input.directory)
+
         return true
       } catch (error) {
         handleError('send message', error)
+        // 发送失败必须让用户看见：此前错误只进日志（errorHandling 里的 toast
+        // 一直是 TODO），乐观消息被移除、草稿回填，界面上没有任何提示，
+        // 用户只会认为「点了没反应，然后又得重发」。
+        //
+        // 两类最常见的失败各自给出可操作的文案：
+        //   - 413：网关请求体超过 8MiB（实测上限，见 constants/requestLimits.ts）
+        //   - 超时/传输中断：大请求在慢链路上被 abort
+        const failure = describeSendFailure(error)
+        notificationStore.push(
+          'error',
+          i18n.t(`chat:${failure.titleKey}`),
+          i18n.t(`chat:${failure.bodyKey}`, failure.params),
+          sessionId ?? '',
+          input.directory,
+        )
         if (sessionId) {
           if (optimisticMessageId) messageStore.removeMessage(sessionId, optimisticMessageId)
           if (rollbackSnapshot) {
@@ -951,7 +986,7 @@ export function useChatSession({
         return false
       }
     },
-    [routeSessionId, navigateToSession, createSession, paneServerId, buildLocalQueuedMessage],
+    [routeSessionId, navigateToSession, createSession, paneServerId, buildLocalQueuedMessage, onWorkDirectoryUsed],
   )
 
   // Send message handler
@@ -1130,6 +1165,9 @@ export function useChatSession({
           const newSession = await createSession(undefined, effectiveDirectory || undefined, paneServerId)
           sessionId = newSession.id
           navigateToSession(sessionId, newSession.directory)
+          // 与普通发送一致：真正执行命令后把工作目录登记进侧栏，
+          // 免得「欢迎页临时选目录 → /命令」这条路同样丢项目行。
+          if (effectiveDirectory && onWorkDirectoryUsed) onWorkDirectoryUsed(effectiveDirectory)
         }
 
         if (command === 'compact') {
@@ -1183,6 +1221,7 @@ export function useChatSession({
       navigateHome,
       handleNewChat,
       paneServerId,
+      onWorkDirectoryUsed,
     ],
   )
 
@@ -1264,9 +1303,7 @@ export function useChatSession({
       activeSessionStore.removeSession(routeSessionId)
       notificationStore.removeSessionNotifications(routeSessionId)
       // 让归档视图过期：本端动作不等 SSE 回环，下次打开面板就能看到这条。
-      sessionListIndexStore.invalidateArchivedView(
-        paneServerId ?? serverStore.getActiveServerId(),
-      )
+      sessionListIndexStore.invalidateArchivedView(paneServerId ?? serverStore.getActiveServerId())
       navigateHome()
       handleNewChat()
     } catch (error) {
