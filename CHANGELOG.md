@@ -1,5 +1,13 @@
 # Changelog
 
+## [v2.0.60] - 2026-11-02
+
+- fix(chat): **大文本发不出去**。实测网关对 prompt 请求体的硬上限是 **8MiB（8388608 字节）**，超限返回 413；而前端发送前没有任何体积检查，超时又对所有请求一律 30s，失败还只进日志（toast 一直是 TODO，413 被 SDK 当成未声明状态码、连 message 里都没有状态码）。三条叠加的表现就是「点了发送什么也没发生，草稿又回来了」。现在：发送前估算请求体（正文 UTF-8 字节 + 附件 base64 + 结构开销），超限直接提示并保留内容；超时按体积放宽（≤1MiB 仍 30s，每 MiB +5s，封顶 180s）；失败按 413 / 超时 / 断网 / 未知四类推 toast。实测分档：66KB→1.2s、2MB→8.3s、8.19MB→19s、14.3MB→413
+- fix(chat): **无法作为附件发送**。`isFileSupported` 只认 image/pdf/audio/video，其余 MIME 一律拒绝，而「大段文本→作为附件」生成的正是 text/plain，必然被拒；`extToMime` 也没有 txt/md，文件选择器里连选都选不到。服务端实测 text/markdown、text/plain、application/json、application/octet-stream 四种附件全部 200（文本由服务端内联，不依赖模型多模态能力），是前端把路堵死了。现在 `FileCapabilities` 增加 `text`（缺省 true），并补齐 txt/md/csv/json/log/yaml/xml/html/css/js/ts/py/go/rs 等扩展名映射
+- fix(chat): 附件单文件上限 20MB → 5.5MiB。20MB 是纯错误值 —— 6.1MB 的文件 base64 后就已超过 8MiB 请求体，「选得进去」和「发得出去」是两件事
+- fix(chat): 上下文过重预警线 8MB → 6MB。原阈值等于「已经超限才提示」，等于不预警；同时修正注释里残留的「上游上限 16MB」（实测 8MiB）
+- fix(sidebar): 欢迎页「不在项目中工作」开聊后，目录不出现在侧栏。侧栏只渲染 savedDirectories，而这条路径只调 setCurrentDirectory（仅写 URL + 最近使用），从不登记。现在发送成功后把工作目录登记为项目行 —— 用新增的 registerDirectory 而非 addDirectory，因为后者会 setCurrentDirectory，而它写的是 sessionId=null 的 hash，会把刚建好的会话路由当场清掉
+
 ## [v2.0.59] - 2026-11-02
 
 - feat(sidebar): 侧栏底部显示当前主机的 CPU / 内存。取「整机」口径而非 opencode 进程（编译由 agent 拉起的子进程执行，进程级数字会低估真实压力）
