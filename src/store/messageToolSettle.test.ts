@@ -80,6 +80,18 @@ describe('reconcileInFlightTools', () => {
     const { messages: next } = reconcileInFlightTools(messages, 1000)
     expect((next[0].content[0] as ToolPart).state.time?.start).toBe(500)
   })
+
+  /**
+   * 回归：start 为 0 是历史适配层缺字段时的坏值。`?? now` 只兜 null/undefined，
+   * 于是落定后得到 `end - start = now - 0` ≈ 两万天。
+   */
+  it('replaces a zero start with now instead of keeping the bad value', () => {
+    const messages = [assistantMessage([toolPart('c1', 'running', { time: { start: 0 } })])]
+    const { messages: next } = reconcileInFlightTools(messages, 1000)
+    const time = (next[0].content[0] as ToolPart).state.time
+    expect(time?.start).toBe(1000)
+    expect(time?.end).toBe(1000)
+  })
 })
 
 describe('settleToolByCallID', () => {

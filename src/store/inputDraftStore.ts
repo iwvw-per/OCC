@@ -31,6 +31,22 @@ class InputDraftStore {
   clear(sessionId: string) {
     this.drafts.delete(sessionId)
   }
+
+  /**
+   * 是否存在任何未发送的草稿。
+   *
+   * 自动更新重启前用它做闸门：用户可能停在一轮对话之后正在输入下一条，
+   * 此时重启会把未发送的内容一起丢掉。只要还有草稿，就一直等到发出去或清空。
+   *
+   * 空草稿（没有正文也没有附件）不算：输入框失焦时也会 save 一个空壳，
+   * 若把它当成「有内容」就永远等不到重启时机。
+   */
+  hasAnyDraft(): boolean {
+    for (const draft of this.drafts.values()) {
+      if (draft.text.trim().length > 0 || draft.attachments.length > 0) return true
+    }
+    return false
+  }
 }
 
 export const inputDraftStore = new InputDraftStore()

@@ -23,6 +23,7 @@
 import type { Message, Part } from '../types/message'
 import { messageCompletedAt } from '../store/messagePartMerge'
 import { mergeIntervalMs as mergeIntervals, stepGenerationWindow } from './stepThroughput'
+import { MAX_TOOL_DURATION_MS, toolTimeWindow } from '../utils/toolTiming'
 
 export interface SessionTurnStats {
   /** 轮数：用户消息数（与 DeepSeek 的 turn 计数口径一致） */
@@ -71,6 +72,9 @@ function partTimeWindow(part: Part): { start: number; end: number } | null {
   const start = time.start
   const end = time.end
   if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return null
+  // 实时 `text.ended` / `reasoning.ended` 不知道起点，会落成 0。用它算「首 token
+  // 等待」会得到负数或把窗口撑成整个 epoch，因此超过合理上限的窗口一律丢弃。
+  if (end - start > MAX_TOOL_DURATION_MS) return null
   return { start, end }
 }
 
@@ -113,13 +117,17 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
     let messageToolMs = 0
     let firstPartStart: number | null = null
     const textIntervals: { start: number; end: number }[] = []
+    /** 同一消息内多个工具可能并行执行，用于把重叠区间去重后再从模型用时里扣 */
+    const toolIntervals: { start: number; end: number }[] = []
 
     for (const part of message.content) {
       if (part.type === 'tool') {
-        const start = part.state.time?.start
-        const end = part.state.time?.end
-        if (typeof start === 'number' && typeof end === 'number' && end > start) {
-          messageToolMs += end - start
+        // 统一口径 + 坏值防护：历史数据缺时间时曾被写成 start=0，
+        // 直接做减法会得到 now-0（约两万天），统计面板显示「20763d」。
+        const window = toolTimeWindow(part.state.time)
+        if (window) {
+          messageToolMs += window.end - window.start
+          toolIntervals.push(window)
         }
         continue
       }
@@ -149,8 +157,15 @@ export function computeSessionTurnStats(messages: Message[]): SessionTurnStats {
     steps += 1 + skeletonSteps
 
     const messageMs = completed - created
-    // 扣除工具时长，还原模型自身耗时；工具时长异常大于消息时长时下限为 0
-    modelMs += Math.max(0, messageMs - messageToolMs)
+    /**
+     * 扣除工具时长，还原模型自身耗时。
+     *
+     * 相减用的必须是**合并后的工具区间**：同一消息里并行调用的工具（实测一轮
+     * 常有 2 个 shell/read 同时跑）各自计时，直接把时长相加会超过消息本身的
+     * 跨度，`max(0, …)` 于是把模型用时压成 0，或凭空多扣掉一段并不存在的等待。
+     */
+    const mergedToolMs = mergeIntervals(toolIntervals)
+    modelMs += Math.max(0, messageMs - mergedToolMs)
 
     // TTFT：消息起始到首个 part 产出之间的等待
     if (firstPartStart !== null && firstPartStart >= created) {

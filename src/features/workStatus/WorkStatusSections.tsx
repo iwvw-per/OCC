@@ -34,6 +34,7 @@ import { useSessionStatsFor } from '../../hooks/useSessionStatsFor'
 import { useSessionTurnStats } from '../../hooks/useSessionTurnStats'
 import { useVcsInfo } from '../../hooks/useVcsInfo'
 import { getMcpStatus, connectMcpServer, disconnectMcpServer } from '../../api/mcp'
+import { getPluginStatus, invalidatePluginStatus } from '../../api/plugin'
 import {
   WorkStatusCollapsibleSection,
   WorkStatusMeter,
@@ -50,6 +51,7 @@ import { useSessionNavigation } from '../../contexts/SessionNavigationContext'
 import { backgroundJobStore, useLiveBackgroundJobs } from '../../store/backgroundJobStore'
 import { useReconcileRunningShells } from '../../hooks/useReconcileRunningShells'
 import type { MCPStatus } from '../../types/api/mcp'
+import type { PluginStatus } from '../../types/api/plugin'
 
 export interface WorkStatusSectionContext {
   sessionId: string | null
@@ -642,6 +644,133 @@ export const WorkStatusMcpSection = memo(function WorkStatusMcpSection({
     </WorkStatusCollapsibleSection>
   )
 })
+
+// ─── 插件 ─────────────────────────────────────
+
+/**
+ * 只展示**非内置**插件。
+ *
+ * 服务端会把内置插件一起列出来（本机实测 93 个里 90 个是 builtin，且全部
+ * active），平铺会把面板撑满、把真正需要关注的信息挤到看不见。用户配置的
+ * 插件（package / local / sdk）数量通常是个位数，才有逐条展示的价值。
+ *
+ * 失败优先排序：加载失败的插件是这一板块存在的理由，不能被正常项挤下去。
+ */
+export const WorkStatusPluginsSection = memo(function WorkStatusPluginsSection({
+  sessionId,
+  directory,
+  serverId,
+}: WorkStatusSectionContext) {
+  const { t } = useTranslation('chat')
+  const [plugins, setPlugins] = useState<PluginStatus[] | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      setPlugins(await getPluginStatus(directory, serverId))
+    } catch {
+      // 读取失败不把板块变成错误提示：插件状态是辅助信息，
+      // 拉不到就当没有，避免面板出现一条无法处理的报错。
+      setPlugins([])
+    }
+  }, [directory, serverId])
+
+  /**
+   * 手动刷新。
+   *
+   * `plugin.updated` 事件在服务端 schema 里存在，但 OCC 的事件适配层没有映射
+   * （v2/events.ts 无对应 case），所以插件装/卸/重载后界面不会自己更新。
+   * 与之相对，MCP 板块能靠开关操作后的重读收敛；这里给一个显式入口。
+   */
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    invalidatePluginStatus(directory, serverId)
+    try {
+      await load()
+    } finally {
+      setRefreshing(false)
+    }
+  }, [directory, serverId, load])
+
+  useEffect(() => {
+    // 与 MCP 板块同一套时序处理：directory 首帧为空、随后才由会话元数据填上，
+    // 那时会重跑一次。已打开会话但目录未落定时先等，避免多发一轮请求。
+    if (sessionId && !directory) return
+    void load()
+  }, [load, directory, sessionId])
+
+  const custom = useMemo(() => (plugins ?? []).filter(plugin => plugin.source.type !== 'builtin'), [plugins])
+
+  const sorted = useMemo(() => {
+    const failed = custom.filter(plugin => plugin.state.status === 'failed')
+    const active = custom.filter(plugin => plugin.state.status !== 'failed')
+    return [...failed, ...active]
+  }, [custom])
+
+  if (sorted.length === 0) return null
+
+  const failedCount = sorted.filter(plugin => plugin.state.status === 'failed').length
+
+  return (
+    <WorkStatusCollapsibleSection
+      title={t('workStatus.section.plugins')}
+      icon={<PlugIcon size={14} />}
+      id="plugins"
+      summary={failedCount > 0 ? `${failedCount}/${sorted.length}` : String(sorted.length)}
+      actionPlacement="beforeSummary"
+      action={
+        <WorkStatusRowAction
+          tone="default"
+          disabled={refreshing}
+          onClick={() => void handleRefresh()}
+          ariaLabel={t('workStatus.plugin.refresh')}
+        >
+          {refreshing ? t('workStatus.plugin.refreshing') : t('workStatus.plugin.refresh')}
+        </WorkStatusRowAction>
+      }
+    >
+      <WorkStatusRows className="max-h-56 overflow-y-auto">
+        {sorted.map(plugin => {
+          const failed = plugin.state.status === 'failed'
+          // package 类型把版本放右侧；有更新可装时单独标出来
+          const version = plugin.source.type === 'package' ? plugin.source.version : undefined
+          const outdated = plugin.source.type === 'package' && plugin.source.outdated === true
+          return (
+            <WorkStatusRow
+              key={plugin.id}
+              muted={failed}
+              label={
+                <span className="min-w-0 truncate" title={pluginDetailTitle(plugin)}>
+                  {plugin.id}
+                </span>
+              }
+              value={
+                failed ? (
+                  <WorkStatusValue tone="error">{t('workStatus.plugin.failed')}</WorkStatusValue>
+                ) : outdated ? (
+                  <WorkStatusValue tone="warning">{t('workStatus.plugin.outdated')}</WorkStatusValue>
+                ) : version ? (
+                  <WorkStatusValue tone="muted">{version}</WorkStatusValue>
+                ) : undefined
+              }
+            />
+          )
+        })}
+      </WorkStatusRows>
+    </WorkStatusCollapsibleSection>
+  )
+})
+
+/** 行内悬停提示：失败给出 error/ref，正常则给出文件路径或包名 */
+function pluginDetailTitle(plugin: PluginStatus): string {
+  if (plugin.state.status === 'failed') {
+    const ref = plugin.state.ref ? ` (${plugin.state.ref})` : ''
+    return `${plugin.state.error || 'failed'}${ref}`
+  }
+  if (plugin.source.type === 'local') return plugin.source.path ?? plugin.id
+  if (plugin.source.type === 'package') return plugin.source.target ?? plugin.id
+  return plugin.id
+}
 
 // ─── 已固定的消息 ─────────────────────────────
 

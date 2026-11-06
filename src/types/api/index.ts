@@ -121,6 +121,14 @@ export type {
   McpServerConfig,
 } from './mcp'
 
+// Plugin types（运行时加载状态，来自 `plugin.list`；与配置里的 plugin 字段不同）
+export type {
+  PluginStatus,
+  PluginSourceInfo,
+  PluginFeaturesInfo,
+  PluginStateInfo,
+} from './plugin'
+
 
 
 

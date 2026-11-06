@@ -510,7 +510,17 @@
     "androidInstalling": "Download complete. Confirm the installation in the system dialog.",
     "androidNoApk": "No installer matching this device was found for this version.",
     "androidInstallerUnavailable": "The installer component is unavailable. Restart the app and try again.",
-    "androidNeedInstallPermission": "Allow “Install unknown apps” to finish the update. Settings has been opened — retry after granting it."
+    "androidNeedInstallPermission": "Allow “Install unknown apps” to finish the update. Settings has been opened — retry after granting it.",
+    "autoUpdateCardTitle": "Automatic updates",
+    "autoUpdateCardDesc": "Check for new versions in the background, then restart automatically once the current session goes idle.",
+    "autoUpdateEnabled": "Download and install updates automatically",
+    "autoUpdateEnabledDesc": "When off, updates are only checked manually on this page.",
+    "autoUpdateInterval": "Check interval",
+    "autoUpdateIntervalDesc": "Each check uses one GitHub API request.",
+    "autoUpdateInterval30": "30 min",
+    "autoUpdateInterval60": "1 hour",
+    "autoUpdateInterval180": "3 hours",
+    "autoUpdateInterval720": "12 hours"
   },
   "scheduledTasks": {
     "title": "Scheduled Tasks",

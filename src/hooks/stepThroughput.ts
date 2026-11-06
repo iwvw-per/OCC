@@ -29,6 +29,7 @@
 
 import type { Message } from '../types/message'
 import { messageCompletedAt } from '../store/messagePartMerge'
+import { MAX_TOOL_DURATION_MS } from '../utils/toolTiming'
 
 /** 单条 assistant 消息的「模型活跃时长」与 token 计数 */
 export interface StepThroughput {
@@ -88,6 +89,9 @@ export function stepGenerationWindow(message: Message): { durationMs: number; au
     const start = time.start
     const end = time.end
     if (typeof start !== 'number' || typeof end !== 'number' || end <= start) continue
+    // 实时 `text.ended` 不知道起点，落成 0；`end - 0` 会把分母撑成整个 epoch，
+    // 速度被算成接近 0。超过合理上限的窗口按「无法确定」处理。
+    if (end - start > MAX_TOOL_DURATION_MS) continue
     intervals.push({ start, end })
   }
   if (intervals.length > 0) {

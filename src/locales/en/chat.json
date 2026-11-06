@@ -464,6 +464,7 @@
       "backgroundJobs": "Background jobs",
       "todos": "Tasks",
       "mcp": "MCP",
+      "plugins": "Plugins",
       "pinnedMessages": "Pinned messages"
     },
     "turnStats": {
@@ -506,6 +507,12 @@
       "reclaimResult": "Reclaimed {{freed}}, {{left}} left",
       "reclaimPartial": "Reclaimed {{freed}}, {{left}} left ({{stuck}} still held by sessions; restart the server to release them)",
       "reclaimFailed": "Reclaim failed, try again later"
+    },
+    "plugin": {
+      "failed": "Failed",
+      "outdated": "Update",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…"
     },
     "pinned": {
       "unavailable": "Pinned message",

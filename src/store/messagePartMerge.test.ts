@@ -94,6 +94,39 @@ describe('mergePartPreferLiveText', () => {
     const merged = mergePartPreferLiveText(textPart('p1', 'hello'), incoming)
     expect(merged).toBe(incoming)
   })
+
+  /**
+   * 回归：实时 `text.ended` / `reasoning.ended` 不知道起点，一律填 `start: 0`。
+   * 直接采用 incoming 会把本地 `*.started` 落下的真实起点冲成 0，于是
+   * 「思考了 N 秒」在结束时归零，任何 `end - start` 也变成整个 epoch。
+   */
+  it('keeps the local start when the ended event replaces it with zero', () => {
+    const local = { ...textPart('p1', 'hello'), time: { start: 1000 } } as Part
+    const incoming = { ...textPart('p1', 'hello world'), time: { start: 0, end: 4000 } } as Part
+    const merged = mergePartPreferLiveText(local, incoming) as { time?: { start?: number; end?: number } }
+    expect(merged.time?.start).toBe(1000)
+    expect(merged.time?.end).toBe(4000)
+  })
+
+  it('adopts a valid incoming start when the local one is a bad value', () => {
+    const local = { ...textPart('p1', 'x'), time: { start: 0, end: 4000 } } as Part
+    const incoming = { ...textPart('p1', 'x'), time: { start: 2000, end: 4000 } } as Part
+    const merged = mergePartPreferLiveText(local, incoming) as { time?: { start?: number; end?: number } }
+    expect(merged.time?.start).toBe(2000)
+  })
+
+  /**
+   * 历史快照的 text part 不带 time（见 adaptAssistantParts）。若把本地时间
+   * 搬到它上面，`isLastTurnComplete` 会看到「有 start 没有 end」，判定本轮
+   * 未完成并反复重拉消息。
+   */
+  it('does not inject local timing into a snapshot part without time', () => {
+    const local = { ...textPart('p1', 'hello'), time: { start: 1000 } } as Part
+    const incoming = textPart('p1', 'hello world')
+    const merged = mergePartPreferLiveText(local, incoming) as { time?: unknown; text: string }
+    expect(merged.time).toBeUndefined()
+    expect(merged.text).toBe('hello world')
+  })
 })
 
 describe('mergePartsPreferLiveText', () => {

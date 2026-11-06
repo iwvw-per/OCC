@@ -185,6 +185,64 @@ describe('computeSessionTurnStats', () => {
     expect(stats.modelMs).toBe(0)
   })
 
+  /**
+   * 回归：v2 历史消息缺时间字段时 start 曾被补成 0，`end - start` 于是等于
+   * 整个 epoch（≈两万天）。统计面板显示「工具调用用时 20763d 2h 53m」。
+   * 0 起点必须被丢弃，不能计入工具用时，也不能把模型用时压成 0。
+   */
+  it('ignores a zero tool start instead of counting the whole epoch', () => {
+    const now = 1_793_934_084_499
+    const message = assistantMessage({ created: now - 5000, completed: now, output: 10 })
+    message.content.push({
+      type: 'tool',
+      callID: 'call-zero',
+      tool: 'shell',
+      state: { status: 'completed', time: { start: 0, end: now } },
+    } as Part)
+    const stats = computeSessionTurnStats([userMessage(now - 6000), message])
+    expect(stats.toolMs).toBe(0)
+    // 整条消息 5s 全部算回模型用时，而不是被假工具时长吃掉
+    expect(stats.modelMs).toBe(5000)
+  })
+
+  /**
+   * 同一消息里并行调用的工具各自计时。直接把时长相加会超过消息本身跨度，
+   * `max(0, messageMs - toolMs)` 于是把模型用时压成 0 —— 实测一轮常有
+   * 2 个 shell/read 同时跑，这条路径命中率很高。
+   */
+  it('deduplicates overlapping tool windows before subtracting from model time', () => {
+    const stats = computeSessionTurnStats([
+      userMessage(0),
+      assistantMessage({
+        created: 1000,
+        completed: 5000, // 4s message
+        output: 100,
+        tools: [
+          { start: 1000, end: 3000 },
+          { start: 1500, end: 2500 }, // 完全被上一个覆盖
+        ],
+      }),
+    ])
+    // 逐次相加是 3s；合并后仍是 2s
+    expect(stats.modelMs).toBe(2000)
+  })
+
+  it('sums disjoint tool windows without the gaps', () => {
+    const stats = computeSessionTurnStats([
+      userMessage(0),
+      assistantMessage({
+        created: 1000,
+        completed: 5000,
+        output: 100,
+        tools: [
+          { start: 1000, end: 2000 },
+          { start: 3500, end: 4500 }, // 中间 1.5s 是模型生成
+        ],
+      }),
+    ])
+    expect(stats.modelMs).toBe(2000)
+  })
+
   it('averages TTFT across settled messages that produced a part', () => {
     const stats = computeSessionTurnStats([
       userMessage(0),

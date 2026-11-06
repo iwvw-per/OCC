@@ -43,6 +43,62 @@ describe('v2 message adapter', () => {
     expect(tool.state.output).toBe('ok')
   })
 
+  /**
+   * 回归：v2 历史消息的工具时间在 **part 级** `time.{created,ran,completed}`，
+   * `state` 里没有 time（实测本机 956/956 个工具 part 全部如此）。
+   *
+   * 适配层此前只读 `state.time`，读不到还补了 `start: 0`。统计面板于是把
+   * 每个工具的耗时算成 `now - 0`，累计显示「工具调用用时 20763d 2h 53m」。
+   */
+  it('reads tool timing from the part-level time', () => {
+    const msg = adaptMessage({
+      id: 'msg_1',
+      sessionID: 'ses_1',
+      type: 'assistant',
+      time: { created: 10 },
+      content: [
+        {
+          type: 'tool',
+          id: 'call_1',
+          name: 'shell',
+          state: { status: 'completed', input: {}, content: [{ type: 'text', text: 'ok' }] },
+          time: { created: 100, ran: 300, completed: 500 },
+        },
+      ],
+    })!
+    const tool = msg.parts[0] as { state: { time?: { start: number; end: number } } }
+    expect(tool.state.time).toEqual({ start: 100, end: 500 })
+  })
+
+  it('prefers the running timestamp when created is absent', () => {
+    const msg = adaptMessage({
+      id: 'msg_1',
+      sessionID: 'ses_1',
+      type: 'assistant',
+      time: { created: 10 },
+      content: [
+        { type: 'tool', id: 'call_1', name: 'shell', state: { status: 'completed', input: {}, content: [{ type: 'text', text: '' }] }, time: { ran: 300, completed: 500 } },
+      ],
+    })!
+    const tool = msg.parts[0] as { state: { time?: { start: number; end: number } } }
+    expect(tool.state.time).toEqual({ start: 300, end: 500 })
+  })
+
+  it('omits tool time entirely instead of defaulting to zero', () => {
+    // 补 0 会让「未知」变成一个两万天的假读数，比不显示更糟。
+    const msg = adaptMessage({
+      id: 'msg_1',
+      sessionID: 'ses_1',
+      type: 'assistant',
+      time: { created: 10 },
+      content: [
+        { type: 'tool', id: 'call_1', name: 'shell', state: { status: 'completed', input: {}, content: [{ type: 'text', text: '' }] } },
+      ],
+    })!
+    const tool = msg.parts[0] as { state: { time?: unknown } }
+    expect(tool.state.time).toBeUndefined()
+  })
+
   it('preserves time.streamed from the assistant message', () => {
     /**
      * streamed 是官方 tok/s 的分母来源（streamed − created）。

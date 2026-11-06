@@ -40,6 +40,7 @@ import { hostWorkspaceStore } from './store/hostWorkspaceStore'
 import { serverStore } from './store/serverStore'
 import { initNotificationSound } from './utils/notificationSoundBridge'
 import { initLiveUpdateSync } from './utils/liveUpdateSync'
+import { desktopAutoUpdate } from './utils/desktopAutoUpdate'
 import { scheduleTunnelWarmup } from './utils/tunnelWarmup'
 import { createPtySession } from './api/pty'
 import type { TerminalTab } from './store/layoutStore'
@@ -140,6 +141,18 @@ function App() {
   useEffect(() => {
     if (import.meta.env.DEV) return
     void updateStore.checkForUpdates()
+  }, [])
+
+  /**
+   * 桌面端自动更新：定时检测 → 静默安装 → 空闲后重启。
+   *
+   * 与上面那次启动检查分工不同：这里按用户设定的间隔（默认 30 分钟）持续轮询，
+   * 并在装完后等会话空闲才重启。Web 端没有安装能力，协调器内部会自行跳过。
+   */
+  useEffect(() => {
+    if (import.meta.env.DEV) return
+    desktopAutoUpdate.start()
+    return () => desktopAutoUpdate.stop()
   }, [])
 
   useViewportHeight()

@@ -30,4 +30,38 @@ describe('inputDraftStore', () => {
     inputDraftStore.save('a', { text: 'second', attachments: [] })
     expect(inputDraftStore.load('a')?.text).toBe('second')
   })
+
+  /**
+   * 自动更新重启前用它做闸门：有未发送内容时不能重启，否则内容一起丢。
+   */
+  describe('hasAnyDraft', () => {
+    it('is false with no drafts at all', () => {
+      expect(inputDraftStore.hasAnyDraft()).toBe(false)
+    })
+
+    it('is true when any session has text', () => {
+      inputDraftStore.save('a', { text: 'draft', attachments: [] })
+      expect(inputDraftStore.hasAnyDraft()).toBe(true)
+    })
+
+    it('is true when a draft only has attachments', () => {
+      inputDraftStore.save('a', { text: '', attachments: [{ id: 'f1' } as never] })
+      expect(inputDraftStore.hasAnyDraft()).toBe(true)
+    })
+
+    /**
+     * 输入框失焦时也会 save 一个空壳。若把空草稿当作「有内容」，
+     * 自动更新就永远等不到重启时机。
+     */
+    it('ignores empty drafts', () => {
+      inputDraftStore.save('a', { text: '   ', attachments: [] })
+      expect(inputDraftStore.hasAnyDraft()).toBe(false)
+    })
+
+    it('becomes false again after the draft is sent or cleared', () => {
+      inputDraftStore.save('a', { text: 'draft', attachments: [] })
+      inputDraftStore.clear('a')
+      expect(inputDraftStore.hasAnyDraft()).toBe(false)
+    })
+  })
 })

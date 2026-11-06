@@ -63,7 +63,7 @@ export function isDesktopUpdaterAvailable(): boolean {
 export class DesktopUpdater {
   private progress: UpdaterProgress = INITIAL_PROGRESS
   private listeners = new Set<Listener>()
-  private running: Promise<void> | null = null
+  private running: Promise<boolean> | null = null
 
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener)
@@ -83,12 +83,17 @@ export class DesktopUpdater {
    * @param manifestUrl release 的 latest.json 地址（见 updateStore.getReleaseManifestUrl）；
    *                    不传则回退到 tauri.conf.json 配置的静态 endpoints（稳定通道）。
    *
-   * 返回后：
-   *   - Windows：安装器已启动，进程即将退出（由 Rust 侧接管），phase 停在 'ready'
-   *   - macOS / Linux：字节已就位，需要调用方调 relaunchApp() 重启
-   *   - 清单版本不高于当前版本 / 无更新：phase 回到 'idle'
+   * 返回是否**真的装好了**：
+   *   - true  ：安装完成（Windows 安装器已启动；macOS/Linux 字节已就位，需 relaunchApp）
+   *   - false ：清单版本不高于当前版本（无更新可装），或安装过程中出错
+   *
+   * 返回布尔而不是让调用方去读 phase：phase 是给 UI 展示的全局状态，
+   * 自动更新流程要的是「这次安装到底成不成」，两者语义不同。
    */
-  async installLatest(manifestUrl?: string): Promise<void> {
+  async installLatest(manifestUrl?: string): Promise<boolean> {
+    // 已有安装在跑：等它结束并复用它「到底装成了没有」的结论。
+    // 不能读 phase 代替 —— phase 是给 UI 的全局状态，安装失败也会停在 error，
+    // 而并发调用方关心的是「这次能不能算装好」。
     if (this.running) return this.running
 
     this.running = (async () => {
@@ -121,15 +126,17 @@ export class DesktopUpdater {
 
         if (!result.installedVersion) {
           this.setProgress({ phase: 'idle' })
-          return
+          return false
         }
 
         this.setProgress({ phase: 'ready' })
+        return true
       } catch (error) {
         this.setProgress({
           phase: 'error',
           error: error instanceof Error ? error.message : i18n.t('settings:about.updateFailed'),
         })
+        return false
       } finally {
         this.running = null
       }

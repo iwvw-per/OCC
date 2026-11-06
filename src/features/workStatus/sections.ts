@@ -15,6 +15,7 @@ export const WORK_STATUS_SECTION_IDS = [
   'backgroundJobs',
   'todos',
   'mcp',
+  'plugins',
   'pinnedMessages',
 ] as const
 

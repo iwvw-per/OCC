@@ -2,7 +2,18 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Ch
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/Button'
 import { DownloadIcon, ExternalLinkIcon, RetryIcon, UploadIcon } from '../../../components/Icons'
-import { hasUpdateAvailable, updateStore, useUpdateStore, getReleaseManifestUrl, RELEASES_PAGE_URL } from '../../../store/updateStore'
+import {
+  hasUpdateAvailable,
+  updateStore,
+  useUpdateStore,
+  getReleaseManifestUrl,
+  RELEASES_PAGE_URL,
+} from '../../../store/updateStore'
+import {
+  autoUpdateSettingsStore,
+  AUTO_UPDATE_INTERVAL_OPTIONS,
+  type AutoUpdateIntervalMinutes,
+} from '../../../store/autoUpdateSettings'
 import { desktopUpdater, isDesktopUpdaterAvailable, type UpdaterProgress } from '../../../utils/desktopUpdater'
 import {
   androidUpdater,
@@ -13,18 +24,14 @@ import {
 import { saveData } from '../../../utils/downloadUtils'
 import { exportSettingsBackup, importSettingsBackup, previewBackupMeta } from '../../../utils/settingsBackup'
 import { isTauri } from '../../../utils/tauri'
-import { SettingsSection } from './SettingsUI'
+import { SettingRow, SettingsSection, SegmentedControl, Toggle } from './SettingsUI'
 
 function useUpdaterProgress(): UpdaterProgress {
   return useSyncExternalStore(desktopUpdater.subscribe, desktopUpdater.getSnapshot, desktopUpdater.getSnapshot)
 }
 
 function useAndroidUpdaterProgress(): AndroidUpdateProgress {
-  return useSyncExternalStore(
-    androidUpdater.subscribe,
-    androidUpdater.getSnapshot,
-    androidUpdater.getSnapshot,
-  )
+  return useSyncExternalStore(androidUpdater.subscribe, androidUpdater.getSnapshot, androidUpdater.getSnapshot)
 }
 
 async function openExternalUrl(url: string): Promise<void> {
@@ -50,6 +57,7 @@ export function AboutSettings() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [backupBusy, setBackupBusy] = useState<'export' | 'import' | null>(null)
   const [backupError, setBackupError] = useState<string | null>(null)
+  const [autoUpdate, setAutoUpdate] = useState(autoUpdateSettingsStore.get())
 
   const canAutoUpdate = isDesktopUpdaterAvailable()
   const canAndroidUpdate = isAndroidUpdaterAvailable()
@@ -61,6 +69,25 @@ export function AboutSettings() {
     androidProgress.phase === 'downloading' ||
     androidProgress.phase === 'awaitingPermission' ||
     androidProgress.phase === 'installing'
+
+  // store 是单一事实来源，本地 state 只做渲染镜像，避免直接读快照导致不重渲
+  useEffect(
+    () =>
+      autoUpdateSettingsStore.subscribe(() => {
+        setAutoUpdate(autoUpdateSettingsStore.get())
+      }),
+    [],
+  )
+
+  const handleToggleAutoUpdate = useCallback(() => {
+    autoUpdateSettingsStore.commit(prev => ({ ...prev, enabled: !prev.enabled }))
+  }, [])
+
+  const handleAutoUpdateInterval = useCallback((value: string) => {
+    const minutes = Number(value)
+    if (!(AUTO_UPDATE_INTERVAL_OPTIONS as readonly number[]).includes(minutes)) return
+    autoUpdateSettingsStore.commit(prev => ({ ...prev, intervalMinutes: minutes as AutoUpdateIntervalMinutes }))
+  }, [])
 
   // 从「安装未知应用」设置页返回后推进更新状态（否则界面会停在「等待授权」）
   useEffect(() => watchAndroidUpdateResume(), [])
@@ -194,7 +221,9 @@ export function AboutSettings() {
           </div>
           <div className="flex items-center justify-between gap-4 py-2.5">
             <div className="text-[length:var(--fs-sm)] text-text-300">{t('about.latestVersion')}</div>
-            <div className="shrink-0 text-[length:var(--fs-sm)] font-semibold text-text-100 tabular-nums">{latestVersion}</div>
+            <div className="shrink-0 text-[length:var(--fs-sm)] font-semibold text-text-100 tabular-nums">
+              {latestVersion}
+            </div>
           </div>
         </div>
 
@@ -233,6 +262,34 @@ export function AboutSettings() {
           </Button>
         </div>
       </SettingsSection>
+
+      {/* 自动更新只对桌面端有意义：Web 端没有安装能力，Android 走系统安装器 */}
+      {canAutoUpdate ? (
+        <SettingsSection title={t('about.autoUpdateCardTitle')} description={t('about.autoUpdateCardDesc')}>
+          <SettingRow label={t('about.autoUpdateEnabled')} description={t('about.autoUpdateEnabledDesc')}>
+            <Toggle
+              enabled={autoUpdate.enabled}
+              onChange={handleToggleAutoUpdate}
+              ariaLabel={t('about.autoUpdateEnabled')}
+            />
+          </SettingRow>
+          <SettingRow
+            label={t('about.autoUpdateInterval')}
+            description={t('about.autoUpdateIntervalDesc')}
+            disabled={!autoUpdate.enabled}
+          >
+            <SegmentedControl
+              value={String(autoUpdate.intervalMinutes)}
+              size="sm"
+              options={AUTO_UPDATE_INTERVAL_OPTIONS.map(minutes => ({
+                value: String(minutes),
+                label: t(`about.autoUpdateInterval${minutes}`),
+              }))}
+              onChange={handleAutoUpdateInterval}
+            />
+          </SettingRow>
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection plain title={t('about.backupCardTitle')} description={t('about.backupCardDesc')}>
         <input

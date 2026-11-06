@@ -464,6 +464,7 @@
       "backgroundJobs": "后台任务",
       "todos": "任务",
       "mcp": "MCP",
+      "plugins": "插件",
       "pinnedMessages": "已固定的消息"
     },
     "turnStats": {
@@ -506,6 +507,12 @@
       "reclaimResult": "已回收 {{freed}} 个，剩余 {{left}} 个",
       "reclaimPartial": "已回收 {{freed}} 个，剩余 {{left}} 个（{{stuck}} 个仍被会话占用，需重启服务端才能释放）",
       "reclaimFailed": "回收失败，请稍后再试"
+    },
+    "plugin": {
+      "failed": "失败",
+      "outdated": "有更新",
+      "refresh": "刷新",
+      "refreshing": "刷新中…"
     },
     "pinned": {
       "unavailable": "已固定的消息",

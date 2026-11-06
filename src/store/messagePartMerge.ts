@@ -45,8 +45,41 @@ export function mergePartPreferLiveText(local: Part | undefined, incoming: Part)
   if (!local || local.id !== incoming.id) return incoming
   if (!partHasText(local) || !partHasText(incoming)) return incoming
   const text = preferCompatibleText(local.text, incoming.text)
-  if (text === incoming.text) return incoming
-  return { ...incoming, text } as Part
+  const mergedTime = mergePartTime(local, incoming)
+  const incomingTime = (incoming as { time?: { start?: number; end?: number } }).time
+  // 文本与时间都与 incoming 一致时返回原引用，避免流式期间每帧都换对象。
+  if (text === incoming.text && mergedTime?.start === incomingTime?.start && mergedTime?.end === incomingTime?.end) {
+    return incoming
+  }
+  return { ...incoming, text, ...(mergedTime ? { time: mergedTime } : {}) } as Part
+}
+
+/**
+ * 合并 part 时间戳，避免「结束事件冲掉起点」。
+ *
+ * 实时 `session.text.ended` / `session.reasoning.ended` 只知道结束时刻，
+ * 起点一律填 0（见 v2/events.ts）。本地已有 `text.started` /
+ * `reasoning.started` 落下的真实起点时，若直接采用 incoming，起点就变回 0：
+ *
+ *   - 推理块的「思考了 N 秒」在结束时突然归零；
+ *   - 任何 `end - start` 都会变成 `end - 0`（整个 epoch，约两万天）。
+ *
+ * 因此起点取「本地有效值优先」，结束时刻取「incoming 优先」；本地起点本身
+ * 是坏值（0/负数）时改用 incoming 的，让坏值有机会被后续事件修正。
+ *
+ * 只在 **incoming 带时间** 时合并：历史快照的 text part 不带 time，
+ * 若把本地时间搬运到它上面，会注入一条「有 start 没有 end」的 part，
+ * `isLastTurnComplete` 会据此判定本轮未完成并反复重拉。
+ */
+function mergePartTime(local: Part, incoming: Part): { start?: number; end?: number } | undefined {
+  const localTime = (local as { time?: { start?: number; end?: number } }).time
+  const incomingTime = (incoming as { time?: { start?: number; end?: number } }).time
+  if (!incomingTime) return undefined
+  const localStart = localTime?.start
+  const start =
+    typeof localStart === 'number' && Number.isFinite(localStart) && localStart > 0 ? localStart : incomingTime.start
+  const end = incomingTime.end ?? localTime?.end
+  return { ...(start !== undefined ? { start } : {}), ...(end !== undefined ? { end } : {}) }
 }
 
 /**

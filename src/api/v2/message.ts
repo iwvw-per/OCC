@@ -2,13 +2,46 @@ import type { MessageWithParts, Part, TextPart, ReasoningPart, ToolPart, FilePar
 import { rec, str, num, list, toMessageError } from './adapt'
 import { mapInSlices } from '../../utils/chunkedWork'
 
-function adaptToolState(raw: unknown): ToolPart['state'] {
+/** 时间戳必须为正数；0 / 负数 / 非数字一律视为「未知」。 */
+function positive(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+/**
+ * 组装 `state.time`；起点未知时**整块省略**，绝不补 0。
+ *
+ * 补 0 的后果不是「少显示一个数」而是「显示一个离谱的错数」：
+ * 落定逻辑用 `end - start` 算耗时，start=0 会得到 `now - 0` ≈ 当前 epoch
+ * 毫秒 ≈ 两万天。实测统计面板因此显示「工具调用用时 20763d 2h 53m」。
+ */
+function toolTime(start: number | undefined, end?: number): { start: number; end?: number } | undefined {
+  if (start === undefined) return undefined
+  if (end === undefined) return { start }
+  return { start, end }
+}
+
+/**
+ * v2 工具时间有两套落点，必须都认：
+ *   - 历史消息（`message.list`）：在 **part 级** `time.{created,ran,completed}`，
+ *     `state` 里没有 time（实测 956/956 个工具 part 都是如此）；
+ *   - 实时事件（`session.tool.*`）：在 `state.time.{start,end}`。
+ *
+ * 只读 `state.time` 会让所有历史轮次的工具耗时丢失；补 0 则会把丢失变成
+ * 一个两万天的假读数。
+ */
+function adaptToolState(raw: unknown, partTime?: unknown): ToolPart['state'] {
   const state = rec(raw)
   const status = str(state.status)
   const input = rec(state.input)
   const metadata = rec(state.metadata)
   const time = rec(state.time)
-  const start = num(time.start) ?? num(time.created) ?? 0
+  const legacyTime = rec(partTime)
+  const start =
+    positive(num(time.start)) ??
+    positive(num(time.created)) ??
+    positive(num(legacyTime.created)) ??
+    positive(num(legacyTime.ran))
+  const end = positive(num(time.end)) ?? positive(num(legacyTime.completed))
   // title 与状态无关：v2 在 running 阶段也会给出标题（如命令摘要），
   // 只有 completed 分支读它会让运行中的工具退化成类型名（全都显示 "Execute"）。
   const title = str(state.title) ?? ''
@@ -17,7 +50,13 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
     case 'streaming':
       return { status: 'pending', input, raw: str(state.input) ?? '', title } as ToolPart['state']
     case 'running':
-      return { status: 'running', input, metadata, title, time: { start } } as ToolPart['state']
+      return {
+        status: 'running',
+        input,
+        metadata,
+        title,
+        ...(start !== undefined ? { time: { start } } : {}),
+      } as ToolPart['state']
     case 'error':
       return {
         status: 'error',
@@ -25,7 +64,7 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
         error: str(rec(state.error).message) ?? str(state.error) ?? 'tool error',
         metadata,
         title,
-        time: { start, end: num(time.end) ?? start },
+        ...(start !== undefined ? { time: toolTime(start, end ?? start) } : {}),
       } as ToolPart['state']
     case 'completed':
     default: {
@@ -61,7 +100,7 @@ function adaptToolState(raw: unknown): ToolPart['state'] {
         output,
         title,
         metadata,
-        time: { start, end: num(time.end) ?? start },
+        ...(start !== undefined ? { time: toolTime(start, end ?? start) } : {}),
         ...(omittedFileBytes > 0 ? { omittedFileBytes } : {}),
       } as ToolPart['state']
     }
@@ -107,7 +146,9 @@ function adaptAssistantParts(raw: Record<string, unknown>): Part[] {
         type: 'tool',
         callID: toolID,
         tool: str(c.name) ?? '',
-        state: adaptToolState(c.state),
+        // 历史消息的工具时间在 part 级（`time.{created,ran,completed}`），
+        // 不在 state 里；两处都要传，否则统计面板拿不到工具耗时。
+        state: adaptToolState(c.state, c.time),
       } as ToolPart)
     }
   }

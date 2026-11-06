@@ -510,7 +510,17 @@
     "androidInstalling": "安装包已下载，请在系统弹出的安装界面中确认。",
     "androidNoApk": "该版本没有找到匹配当前设备的安装包。",
     "androidInstallerUnavailable": "安装组件未就绪，请重启应用后重试。",
-    "androidNeedInstallPermission": "需要允许「安装未知应用」才能完成更新，已为你打开设置页，授权后请重试。"
+    "androidNeedInstallPermission": "需要允许「安装未知应用」才能完成更新，已为你打开设置页，授权后请重试。",
+    "autoUpdateCardTitle": "自动更新",
+    "autoUpdateCardDesc": "在后台定时检查新版本，装好后等当前会话空闲再自动重启。",
+    "autoUpdateEnabled": "自动下载并安装更新",
+    "autoUpdateEnabledDesc": "关闭后仅在「关于」页手动检查。",
+    "autoUpdateInterval": "检查间隔",
+    "autoUpdateIntervalDesc": "每次检查约消耗一次 GitHub API 请求。",
+    "autoUpdateInterval30": "30 分钟",
+    "autoUpdateInterval60": "1 小时",
+    "autoUpdateInterval180": "3 小时",
+    "autoUpdateInterval720": "12 小时"
   },
   "scheduledTasks": {
     "title": "定时任务",

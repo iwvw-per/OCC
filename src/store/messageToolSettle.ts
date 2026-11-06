@@ -65,6 +65,16 @@ export function isUnsettledToolPart(part: Part): part is ToolPart {
 }
 
 /**
+ * 取工具起点；缺失或不可信（0/负数/非有限）时返回 undefined。
+ *
+ * 不能用 `?? now` 之外再依赖 0 会被当成合法值：`time.start` 为 0 是历史适配层
+ * 缺字段时留下的坏值，用它当起点会算出 `now - 0` ≈ 两万天。
+ */
+function validStart(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+/**
  * 把仍处于 running/pending 的工具 part 落定为 interrupted。
  * 用于会话已结束（idle/error）但仍悬空的工具。返回新的 messages 与是否有变更。
  */
@@ -76,7 +86,7 @@ export function reconcileInFlightTools(messages: Message[], now: number): { mess
       if (!isUnsettledToolPart(part)) return part
       partsChanged = true
       changed = true
-      const start = part.state.time?.start ?? now
+      const start = validStart(part.state.time?.start) ?? now
       return {
         ...part,
         state: {
@@ -120,7 +130,7 @@ export function settleToolByCallID(
       if (!isUnsettledToolPart(part)) return part
       partsChanged = true
       changed = true
-      const start = part.state.time?.start ?? now
+      const start = validStart(part.state.time?.start) ?? now
       const metadata = outcome.metadata ? { ...(part.state.metadata ?? {}), ...outcome.metadata } : part.state.metadata
       if (outcome.status === 'error') {
         return {
