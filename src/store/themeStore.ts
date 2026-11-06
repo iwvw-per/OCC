@@ -149,6 +149,63 @@ const DEFAULT_DESKTOP_COLLAPSED_INPUT_DOCK = true
 /** 输入框下方信息栏（自动放行 / 会话统计 / 任务进度）默认隐藏 */
 const DEFAULT_SHOW_INPUT_STATUS_BAR = false
 
+/** 会话统计指标项（模型用时、工具用时、TTFT、TPS、缓存命中率、输出 token） */
+export interface SessionStatsDisplayFields {
+  /** 模型用时 */
+  modelTime: boolean
+  /** 工具调用用时 */
+  toolTime: boolean
+  /** 首 token 平均（TTFT） */
+  ttft: boolean
+  /** 输出速度（TPS） */
+  tps: boolean
+  /** 缓存命中率 */
+  cacheHit: boolean
+  /** 输出 token */
+  outputTokens: boolean
+}
+
+export const DEFAULT_SESSION_STATS_FIELDS_DESKTOP: SessionStatsDisplayFields = {
+  modelTime: false,
+  toolTime: false,
+  ttft: false,
+  tps: true,
+  cacheHit: false,
+  outputTokens: false,
+}
+
+export const DEFAULT_SESSION_STATS_FIELDS_MOBILE: SessionStatsDisplayFields = {
+  modelTime: false,
+  toolTime: false,
+  ttft: false,
+  tps: true,
+  cacheHit: false,
+  outputTokens: false,
+}
+
+function parseSessionStatsDisplayFields(raw: unknown, fallback: SessionStatsDisplayFields): SessionStatsDisplayFields {
+  if (!raw || typeof raw !== 'object') return { ...fallback }
+  const parsed = raw as Partial<SessionStatsDisplayFields>
+  return {
+    modelTime: typeof parsed.modelTime === 'boolean' ? parsed.modelTime : fallback.modelTime,
+    toolTime: typeof parsed.toolTime === 'boolean' ? parsed.toolTime : fallback.toolTime,
+    ttft: typeof parsed.ttft === 'boolean' ? parsed.ttft : fallback.ttft,
+    tps: typeof parsed.tps === 'boolean' ? parsed.tps : fallback.tps,
+    cacheHit: typeof parsed.cacheHit === 'boolean' ? parsed.cacheHit : fallback.cacheHit,
+    outputTokens: typeof parsed.outputTokens === 'boolean' ? parsed.outputTokens : fallback.outputTokens,
+  }
+}
+
+function readSessionStatsFields(key: string, fallback: SessionStatsDisplayFields): SessionStatsDisplayFields {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return { ...fallback }
+    return parseSessionStatsDisplayFields(JSON.parse(raw), fallback)
+  } catch {
+    return { ...fallback }
+  }
+}
+
 /** 读取信息栏字段配置；损坏或缺失时回落默认（三项全开） */
 function readInputStatusBarFields(): InputStatusBarFields {
   try {
@@ -251,6 +308,10 @@ export interface ThemeState {
   showInputStatusBar: boolean
   /** 信息栏里具体展示哪几项（三项独立开关） */
   inputStatusBarFields: InputStatusBarFields
+  /** 桌面端底部会话统计展示哪些指标项 */
+  sessionStatsFieldsDesktop: SessionStatsDisplayFields
+  /** 移动端底部会话统计展示哪些指标项 */
+  sessionStatsFieldsMobile: SessionStatsDisplayFields
   /** 过程折叠：用户发送后显示 Working 计时，结束后收成折叠块，最终回答留在外面 */
   processCollapseEnabled: boolean
   /** 代码块语法高亮主题（亮色模式），Shiki theme id */
@@ -293,6 +354,8 @@ const STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY = 'actions-on-latest-assistan
 const STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK = 'desktop-collapsed-input-dock'
 const STORAGE_KEY_SHOW_INPUT_STATUS_BAR = 'show-input-status-bar'
 const STORAGE_KEY_INPUT_STATUS_BAR_FIELDS = 'input-status-bar-fields'
+const STORAGE_KEY_SESSION_STATS_FIELDS_DESKTOP = 'session-stats-fields-desktop'
+const STORAGE_KEY_SESSION_STATS_FIELDS_MOBILE = 'session-stats-fields-mobile'
 const STORAGE_KEY_PROCESS_COLLAPSE_ENABLED = 'process-collapse-enabled'
 const STORAGE_KEY_CODE_BLOCK_THEME_LIGHT = 'code-block-theme-light'
 const STORAGE_KEY_CODE_BLOCK_THEME_DARK = 'code-block-theme-dark'
@@ -366,9 +429,8 @@ class ThemeStore {
 
     const savedChatContentWidthRaw = localStorage.getItem(STORAGE_KEY_CHAT_CONTENT_WIDTH)
     const savedChatContentWidthValue = savedChatContentWidthRaw === null ? NaN : Number(savedChatContentWidthRaw)
-    const chatContentWidth = Number.isFinite(savedChatContentWidthValue) && savedChatContentWidthValue > 0
-      ? savedChatContentWidthValue
-      : null
+    const chatContentWidth =
+      Number.isFinite(savedChatContentWidthValue) && savedChatContentWidthValue > 0 ? savedChatContentWidthValue : null
     const savedDiffStyle = localStorage.getItem(STORAGE_KEY_DIFF_STYLE) as DiffStyle | null
     const diffStyle: DiffStyle = savedDiffStyle === 'changeBars' ? 'changeBars' : DEFAULT_DIFF_STYLE
 
@@ -439,12 +501,18 @@ class ThemeStore {
       savedShowInputStatusBar === null ? DEFAULT_SHOW_INPUT_STATUS_BAR : savedShowInputStatusBar === 'true'
 
     const inputStatusBarFields = readInputStatusBarFields()
+    const sessionStatsFieldsDesktop = readSessionStatsFields(
+      STORAGE_KEY_SESSION_STATS_FIELDS_DESKTOP,
+      DEFAULT_SESSION_STATS_FIELDS_DESKTOP,
+    )
+    const sessionStatsFieldsMobile = readSessionStatsFields(
+      STORAGE_KEY_SESSION_STATS_FIELDS_MOBILE,
+      DEFAULT_SESSION_STATS_FIELDS_MOBILE,
+    )
 
     const savedProcessCollapseEnabled = localStorage.getItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED)
     const processCollapseEnabled =
-      savedProcessCollapseEnabled === null
-        ? DEFAULT_PROCESS_COLLAPSE_ENABLED
-        : savedProcessCollapseEnabled === 'true'
+      savedProcessCollapseEnabled === null ? DEFAULT_PROCESS_COLLAPSE_ENABLED : savedProcessCollapseEnabled === 'true'
 
     const codeBlockThemeLight = normalizeCodeBlockTheme(
       localStorage.getItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT) || DEFAULT_CODE_BLOCK_THEME_LIGHT,
@@ -484,6 +552,8 @@ class ThemeStore {
       desktopCollapsedInputDock,
       showInputStatusBar,
       inputStatusBarFields,
+      sessionStatsFieldsDesktop,
+      sessionStatsFieldsMobile,
       processCollapseEnabled,
       codeBlockThemeLight,
       codeBlockThemeDark,
@@ -595,6 +665,48 @@ class ThemeStore {
     if (same) return
     this.state = { ...this.state, inputStatusBarFields: next }
     localStorage.setItem(STORAGE_KEY_INPUT_STATUS_BAR_FIELDS, JSON.stringify(next))
+    this.emit()
+  }
+
+  get sessionStatsFieldsDesktop() {
+    return this.state.sessionStatsFieldsDesktop
+  }
+
+  get sessionStatsFieldsMobile() {
+    return this.state.sessionStatsFieldsMobile
+  }
+
+  /** 更新桌面端底部会话统计指标展示项 */
+  setSessionStatsFieldsDesktop(fields: Partial<SessionStatsDisplayFields>) {
+    const next: SessionStatsDisplayFields = { ...this.state.sessionStatsFieldsDesktop, ...fields }
+    const prev = this.state.sessionStatsFieldsDesktop
+    const same =
+      next.modelTime === prev.modelTime &&
+      next.toolTime === prev.toolTime &&
+      next.ttft === prev.ttft &&
+      next.tps === prev.tps &&
+      next.cacheHit === prev.cacheHit &&
+      next.outputTokens === prev.outputTokens
+    if (same) return
+    this.state = { ...this.state, sessionStatsFieldsDesktop: next }
+    localStorage.setItem(STORAGE_KEY_SESSION_STATS_FIELDS_DESKTOP, JSON.stringify(next))
+    this.emit()
+  }
+
+  /** 更新移动端底部会话统计指标展示项 */
+  setSessionStatsFieldsMobile(fields: Partial<SessionStatsDisplayFields>) {
+    const next: SessionStatsDisplayFields = { ...this.state.sessionStatsFieldsMobile, ...fields }
+    const prev = this.state.sessionStatsFieldsMobile
+    const same =
+      next.modelTime === prev.modelTime &&
+      next.toolTime === prev.toolTime &&
+      next.ttft === prev.ttft &&
+      next.tps === prev.tps &&
+      next.cacheHit === prev.cacheHit &&
+      next.outputTokens === prev.outputTokens
+    if (same) return
+    this.state = { ...this.state, sessionStatsFieldsMobile: next }
+    localStorage.setItem(STORAGE_KEY_SESSION_STATS_FIELDS_MOBILE, JSON.stringify(next))
     this.emit()
   }
 
@@ -1144,7 +1256,9 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
       typeof parsed?.reasoningDisplayMode === 'string' ? parsed.reasoningDisplayMode : undefined,
     ),
     chatContentWidth:
-      typeof parsed?.chatContentWidth === 'number' && Number.isFinite(parsed.chatContentWidth) && parsed.chatContentWidth > 0
+      typeof parsed?.chatContentWidth === 'number' &&
+      Number.isFinite(parsed.chatContentWidth) &&
+      parsed.chatContentWidth > 0
         ? parsed.chatContentWidth
         : null,
     diffStyle: parsed?.diffStyle === 'changeBars' ? 'changeBars' : DEFAULT_DIFF_STYLE,
@@ -1168,9 +1282,7 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
         : DEFAULT_COMPACT_INLINE_PERMISSION,
     glassEffect: typeof parsed?.glassEffect === 'boolean' ? parsed.glassEffect : DEFAULT_GLASS_EFFECT,
     manualTerminalTitles:
-      typeof parsed?.manualTerminalTitles === 'boolean'
-        ? parsed.manualTerminalTitles
-        : DEFAULT_MANUAL_TERMINAL_TITLES,
+      typeof parsed?.manualTerminalTitles === 'boolean' ? parsed.manualTerminalTitles : DEFAULT_MANUAL_TERMINAL_TITLES,
     externalFileDropMode: parsed?.externalFileDropMode === 'mention' ? 'mention' : DEFAULT_EXTERNAL_FILE_DROP_MODE,
     outlineCurrentHighlight:
       typeof parsed?.outlineCurrentHighlight === 'boolean'
@@ -1196,6 +1308,14 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
         taskProgress: typeof fields.taskProgress === 'boolean' ? fields.taskProgress : true,
       }
     })(),
+    sessionStatsFieldsDesktop: parseSessionStatsDisplayFields(
+      parsed?.sessionStatsFieldsDesktop,
+      DEFAULT_SESSION_STATS_FIELDS_DESKTOP,
+    ),
+    sessionStatsFieldsMobile: parseSessionStatsDisplayFields(
+      parsed?.sessionStatsFieldsMobile,
+      DEFAULT_SESSION_STATS_FIELDS_MOBILE,
+    ),
     processCollapseEnabled:
       typeof parsed?.processCollapseEnabled === 'boolean'
         ? parsed.processCollapseEnabled
@@ -1254,13 +1374,12 @@ export function importThemeBackup(raw: unknown): void {
   localStorage.setItem(STORAGE_KEY_MANUAL_TERMINAL_TITLES, String(backup.manualTerminalTitles))
   localStorage.setItem(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, backup.externalFileDropMode)
   localStorage.setItem(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(backup.outlineCurrentHighlight))
-  localStorage.setItem(
-    STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY,
-    String(backup.actionsOnLatestAssistantOnly),
-  )
+  localStorage.setItem(STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY, String(backup.actionsOnLatestAssistantOnly))
   localStorage.setItem(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(backup.desktopCollapsedInputDock))
   localStorage.setItem(STORAGE_KEY_SHOW_INPUT_STATUS_BAR, String(backup.showInputStatusBar))
   localStorage.setItem(STORAGE_KEY_INPUT_STATUS_BAR_FIELDS, JSON.stringify(backup.inputStatusBarFields))
+  localStorage.setItem(STORAGE_KEY_SESSION_STATS_FIELDS_DESKTOP, JSON.stringify(backup.sessionStatsFieldsDesktop))
+  localStorage.setItem(STORAGE_KEY_SESSION_STATS_FIELDS_MOBILE, JSON.stringify(backup.sessionStatsFieldsMobile))
   localStorage.setItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(backup.processCollapseEnabled))
   localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, backup.codeBlockThemeLight)
   localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_DARK, backup.codeBlockThemeDark)

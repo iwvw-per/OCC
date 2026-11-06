@@ -3,7 +3,13 @@ import { flushSync } from 'react-dom'
 import { THEME_SWITCH_DISABLE_MS } from '../constants'
 import { themeStore, type ColorMode } from '../store/themeStore'
 import type { StepFinishDisplay, CustomCSSSnippet } from '../store/themeStore'
-import type { ReasoningDisplayMode, DiffStyle, ToolCardStyle, CompletedAtFormat, ExternalFileDropMode } from '../store/themeStore'
+import type {
+  ReasoningDisplayMode,
+  DiffStyle,
+  ToolCardStyle,
+  CompletedAtFormat,
+  ExternalFileDropMode,
+} from '../store/themeStore'
 
 // 保持向后兼容的类型别名
 export type ThemeMode = ColorMode
@@ -367,6 +373,10 @@ export function useTheme() {
     setShowInputStatusBar,
     inputStatusBarFields: state.inputStatusBarFields,
     setInputStatusBarFields: themeStore.setInputStatusBarFields.bind(themeStore),
+    sessionStatsFieldsDesktop: state.sessionStatsFieldsDesktop,
+    setSessionStatsFieldsDesktop: themeStore.setSessionStatsFieldsDesktop.bind(themeStore),
+    sessionStatsFieldsMobile: state.sessionStatsFieldsMobile,
+    setSessionStatsFieldsMobile: themeStore.setSessionStatsFieldsMobile.bind(themeStore),
 
     // 过程折叠
     processCollapseEnabled: state.processCollapseEnabled,

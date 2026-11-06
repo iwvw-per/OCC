@@ -261,7 +261,15 @@
     "tps": "Output speed (TPS)",
     "cacheHit": "Cache hit rate",
     "outputTokens": "Output tokens",
-    "counts": "{{turns}} turns · {{steps}} steps"
+    "counts": "{{turns}} turns · {{steps}} steps",
+    "labels": {
+      "modelTime": "Model",
+      "toolTime": "Tools",
+      "ttft": "TTFT",
+      "tps": "TPS",
+      "cacheHit": "Cache",
+      "outputTokens": "Out"
+    }
   },
   "inputActions": {
     "scrollToBottom": "Scroll to bottom",

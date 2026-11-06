@@ -6,7 +6,11 @@ import { usePathMode, useTheme, useModels } from '../../../hooks'
 import { themeStore, type ReasoningDisplayMode, type CompletedAtFormat } from '../../../store/themeStore'
 import { useLayoutStore, layoutStore } from '../../../store/layoutStore'
 import { useHiddenModelKeys, aiRenameModelStore, useAiRenameModelKey } from '../../../store'
-import { largeTextPasteStore, useLargeTextPasteSettings, type LargeTextPasteBehavior } from '../../../store/largeTextPasteStore'
+import {
+  largeTextPasteStore,
+  useLargeTextPasteSettings,
+  type LargeTextPasteBehavior,
+} from '../../../store/largeTextPasteStore'
 import { getModelKey } from '../../../utils/modelUtils'
 import { Toggle, SegmentedControl, SettingRow, SettingsSection, SettingsCardRow } from './SettingsUI'
 import type { PathMode } from '../../../utils/directoryUtils'
@@ -35,6 +39,18 @@ const INPUT_STATUS_BAR_FIELDS = [
   { key: 'taskProgress', label: 'chat.statusBarTaskProgress', desc: 'chat.statusBarTaskProgressDesc' },
 ] as const
 
+/**
+ * 会话统计在底部具体展示哪些指标（支持桌面端与移动端分开配置）。
+ */
+const SESSION_STATS_METRIC_FIELDS = [
+  { key: 'tps', label: 'chat.sessionStatsTps', desc: 'chat.sessionStatsTpsDesc' },
+  { key: 'modelTime', label: 'chat.sessionStatsModelTime', desc: 'chat.sessionStatsModelTimeDesc' },
+  { key: 'toolTime', label: 'chat.sessionStatsToolTime', desc: 'chat.sessionStatsToolTimeDesc' },
+  { key: 'ttft', label: 'chat.sessionStatsTtft', desc: 'chat.sessionStatsTtftDesc' },
+  { key: 'cacheHit', label: 'chat.sessionStatsCacheHit', desc: 'chat.sessionStatsCacheHitDesc' },
+  { key: 'outputTokens', label: 'chat.sessionStatsOutputTokens', desc: 'chat.sessionStatsOutputTokensDesc' },
+] as const
+
 export function ChatSettings() {
   const { t } = useTranslation(['settings'])
   const { pathMode, setPathMode, effectiveStyle, detectedStyle, isAutoMode } = usePathMode()
@@ -51,6 +67,10 @@ export function ChatSettings() {
     setShowInputStatusBar,
     inputStatusBarFields,
     setInputStatusBarFields,
+    sessionStatsFieldsDesktop,
+    setSessionStatsFieldsDesktop,
+    sessionStatsFieldsMobile,
+    setSessionStatsFieldsMobile,
     renderUserMarkdown,
     setRenderUserMarkdown,
   } = useTheme()
@@ -63,6 +83,7 @@ export function ChatSettings() {
   const [stepFinishDisplay, setStepFinishDisplay] = useState(themeStore.stepFinishDisplay)
   const [completedAtFormat, setCompletedAtFormat] = useState(themeStore.completedAtFormat)
   const [reasoningDisplayMode, setReasoningDisplayMode] = useState(themeStore.reasoningDisplayMode)
+  const [sessionStatsDeviceTab, setSessionStatsDeviceTab] = useState<'desktop' | 'mobile'>('desktop')
 
   const externalDropAlwaysMention = externalFileDropMode === 'mention'
 
@@ -190,44 +211,85 @@ export function ChatSettings() {
             </SettingRow>
           ))}
 
+        {/* 会话统计细分指标：仅在信息栏开启且会话统计打开时展示；支持按桌面/移动设备切换分别配置 */}
+        {showInputStatusBar && inputStatusBarFields.sessionStats && (
+          <div className="rounded-lg border border-border-200/50 bg-bg-200/25 p-3 space-y-2 mt-1">
+            <div className="flex items-center justify-between gap-3 pb-1 border-b border-border-200/40">
+              <span className="text-[length:var(--fs-xs)] font-medium text-text-300">
+                {t('chat.sessionStatsDevice')}
+              </span>
+              <div className="w-48">
+                <SegmentedControl
+                  value={sessionStatsDeviceTab}
+                  options={[
+                    { value: 'desktop', label: t('chat.sessionStatsDeviceDesktop') },
+                    { value: 'mobile', label: t('chat.sessionStatsDeviceMobile') },
+                  ]}
+                  onChange={v => setSessionStatsDeviceTab(v as 'desktop' | 'mobile')}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              {SESSION_STATS_METRIC_FIELDS.map(({ key, label, desc }) => {
+                const isDesktop = sessionStatsDeviceTab === 'desktop'
+                const currentFields = isDesktop ? sessionStatsFieldsDesktop : sessionStatsFieldsMobile
+                const setFields = isDesktop ? setSessionStatsFieldsDesktop : setSessionStatsFieldsMobile
+                const enabled = currentFields[key]
+
+                return (
+                  <SettingRow
+                    key={key}
+                    label={t(label)}
+                    description={t(desc)}
+                    onClick={() => setFields({ [key]: !enabled })}
+                  >
+                    <Toggle enabled={enabled} onChange={() => setFields({ [key]: !enabled })} />
+                  </SettingRow>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         <SettingRow label={t('chat.sendMode')} description={t('chat.sendModeDesc')}>
-            <SegmentedControl
-              value={sendOnEnter ? 'enter' : 'shiftEnter'}
-              options={[
-                { value: 'enter', label: t('chat.sendModeEnter') },
-                { value: 'shiftEnter', label: t('chat.sendModeShiftEnter') },
-              ]}
-              onChange={v => layoutStore.setSendOnEnter(v === 'enter')}
-            />
+          <SegmentedControl
+            value={sendOnEnter ? 'enter' : 'shiftEnter'}
+            options={[
+              { value: 'enter', label: t('chat.sendModeEnter') },
+              { value: 'shiftEnter', label: t('chat.sendModeShiftEnter') },
+            ]}
+            onChange={v => layoutStore.setSendOnEnter(v === 'enter')}
+          />
         </SettingRow>
 
         <SettingRow label={t('chat.largePaste')} description={t('chat.largePasteDesc')}>
-            <SegmentedControl
-              value={largePasteBehavior}
-              options={[
-                { value: 'ask', label: t('chat.largePasteAsk') },
-                { value: 'attach', label: t('chat.largePasteAttach') },
-                { value: 'inline', label: t('chat.largePasteInline') },
-              ]}
-              onChange={v => largeTextPasteStore.setBehavior(v as LargeTextPasteBehavior)}
-            />
+          <SegmentedControl
+            value={largePasteBehavior}
+            options={[
+              { value: 'ask', label: t('chat.largePasteAsk') },
+              { value: 'attach', label: t('chat.largePasteAttach') },
+              { value: 'inline', label: t('chat.largePasteInline') },
+            ]}
+            onChange={v => largeTextPasteStore.setBehavior(v as LargeTextPasteBehavior)}
+          />
         </SettingRow>
 
         <SettingRow label={t('chat.thinkingDisplay')} description={t('chat.thinkingDisplayDesc')}>
-            <SegmentedControl
-              value={reasoningDisplayMode}
-              options={[
-                { value: 'capsule', label: t('chat.capsule') },
-                { value: 'italic', label: t('chat.italic') },
-                { value: 'markdown', label: t('chat.markdown') },
-                { value: 'ticker', label: t('chat.ticker') },
-                { value: 'block', label: t('chat.block') },
-              ]}
-              onChange={v => {
-                setReasoningDisplayMode(v as ReasoningDisplayMode)
-                themeStore.setReasoningDisplayMode(v as ReasoningDisplayMode)
-              }}
-            />
+          <SegmentedControl
+            value={reasoningDisplayMode}
+            options={[
+              { value: 'capsule', label: t('chat.capsule') },
+              { value: 'italic', label: t('chat.italic') },
+              { value: 'markdown', label: t('chat.markdown') },
+              { value: 'ticker', label: t('chat.ticker') },
+              { value: 'block', label: t('chat.block') },
+            ]}
+            onChange={v => {
+              setReasoningDisplayMode(v as ReasoningDisplayMode)
+              themeStore.setReasoningDisplayMode(v as ReasoningDisplayMode)
+            }}
+          />
         </SettingRow>
       </SettingsSection>
 

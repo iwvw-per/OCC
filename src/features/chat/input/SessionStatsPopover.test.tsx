@@ -37,14 +37,66 @@ describe('formatTokenRate', () => {
 })
 
 describe('SessionStatsPopover', () => {
-  it('shows the last turn rate on the trigger', () => {
+  it('shows the last turn rate on the trigger by default', () => {
     render(<SessionStatsPopover stats={baseStats} tokensPerSec={123.4} />)
     expect(screen.getByText('123 tok/s')).toBeInTheDocument()
+    expect(screen.getByText('TPS')).toBeInTheDocument()
   })
 
   it('shows 0 tok/s on the trigger when there is no completed turn', () => {
     render(<SessionStatsPopover stats={baseStats} tokensPerSec={0} />)
     expect(screen.getByText('0 tok/s')).toBeInTheDocument()
+  })
+
+  it('renders configured multiple fields on the bottom trigger with labels', () => {
+    render(
+      <SessionStatsPopover
+        stats={baseStats}
+        tokensPerSec={123.4}
+        displayFields={{
+          modelTime: true,
+          toolTime: true,
+          ttft: true,
+          tps: true,
+          cacheHit: true,
+          outputTokens: true,
+        }}
+      />,
+    )
+
+    // 各项标签存在（英文默认环境）
+    expect(screen.getByText('TPS')).toBeInTheDocument()
+    expect(screen.getByText('123 tok/s')).toBeInTheDocument()
+    expect(screen.getByText('Model')).toBeInTheDocument()
+    expect(screen.getByText('3m 24s')).toBeInTheDocument() // 204s = 3m 24s
+    expect(screen.getByText('Tools')).toBeInTheDocument()
+    expect(screen.getByText('1m 53s')).toBeInTheDocument() // 113s = 1m 53s
+    expect(screen.getByText('TTFT')).toBeInTheDocument()
+    expect(screen.getByText('1.9s')).toBeInTheDocument()
+    expect(screen.getByText('Cache')).toBeInTheDocument()
+    expect(screen.getByText('80%')).toBeInTheDocument()
+    expect(screen.getByText('Out')).toBeInTheDocument()
+    expect(screen.getByText('2.9k')).toBeInTheDocument()
+  })
+
+  it('falls back to title text when all metric fields are disabled', () => {
+    render(
+      <SessionStatsPopover
+        stats={baseStats}
+        tokensPerSec={123.4}
+        displayFields={{
+          modelTime: false,
+          toolTime: false,
+          ttft: false,
+          tps: false,
+          cacheHit: false,
+          outputTokens: false,
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Session statistics')).toBeInTheDocument()
+    expect(screen.queryByText('123 tok/s')).not.toBeInTheDocument()
   })
 
   it('renders the trigger as a collapsed popover button', () => {

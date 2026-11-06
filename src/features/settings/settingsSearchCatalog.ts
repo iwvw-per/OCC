@@ -55,6 +55,12 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     'chat.showInputStatusBar',
     'chat.statusBarAutoApprove',
     'chat.statusBarSessionStats',
+    'chat.sessionStatsModelTime',
+    'chat.sessionStatsToolTime',
+    'chat.sessionStatsTtft',
+    'chat.sessionStatsTps',
+    'chat.sessionStatsCacheHit',
+    'chat.sessionStatsOutputTokens',
     'chat.statusBarTaskProgress',
     'chat.sendMode',
     'chat.thinkingDisplay',
@@ -210,7 +216,20 @@ export function filterSettingsSearchItems<T extends SearchMenuItem>(items: T[], 
       const tabLabel = normalizeSearchText(item.tabLabel)
       const description = normalizeSearchText(item.description ?? '')
       const extra = normalizeSearchText(item.searchText ?? '')
-      const rank = label === normalizedQuery ? 0 : label.startsWith(normalizedQuery) ? 1 : label.includes(normalizedQuery) ? 2 : tabLabel.includes(normalizedQuery) ? 3 : description.includes(normalizedQuery) ? 4 : extra.includes(normalizedQuery) ? 5 : -1
+      const rank =
+        label === normalizedQuery
+          ? 0
+          : label.startsWith(normalizedQuery)
+            ? 1
+            : label.includes(normalizedQuery)
+              ? 2
+              : tabLabel.includes(normalizedQuery)
+                ? 3
+                : description.includes(normalizedQuery)
+                  ? 4
+                  : extra.includes(normalizedQuery)
+                    ? 5
+                    : -1
       return { item, index, rank }
     })
     .filter(result => result.rank >= 0)

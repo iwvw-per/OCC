@@ -13,7 +13,7 @@ import { useIsMobile } from '../../../hooks/useIsMobile'
 import { SessionStatsPopover } from './SessionStatsPopover'
 import { autoApproveStore, type FullAutoMode } from '../../../store/autoApproveStore'
 import type { TodoItem } from '../../../types/api/event'
-import type { InputStatusBarFields } from '../../../store/themeStore'
+import type { InputStatusBarFields, SessionStatsDisplayFields } from '../../../store/themeStore'
 
 // ============================================
 // Full Auto 状态 hook
@@ -38,6 +38,10 @@ interface InputFooterProps {
   inputContainerRef?: RefObject<HTMLDivElement | null>
   /** 展示哪几项；缺省全开（与旧行为一致） */
   fields?: InputStatusBarFields
+  /** 桌面端会话统计细分指标展示项 */
+  sessionStatsFieldsDesktop?: SessionStatsDisplayFields
+  /** 移动端会话统计细分指标展示项 */
+  sessionStatsFieldsMobile?: SessionStatsDisplayFields
 }
 
 export const InputFooter = memo(function InputFooter({
@@ -45,6 +49,8 @@ export const InputFooter = memo(function InputFooter({
   sessionId,
   inputContainerRef,
   fields,
+  sessionStatsFieldsDesktop,
+  sessionStatsFieldsMobile,
 }: InputFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
   const isMobile = useIsMobile()
@@ -274,8 +280,14 @@ export const InputFooter = memo(function InputFooter({
 
       {showAutoApprove && showSessionStats && <span className="text-text-400/70 shrink-0">·</span>}
 
-      {/* 会话统计：点击弹出模型用时 / 工具用时 / TTFT / TPS 等累计指标 */}
-      {showSessionStats && <SessionStatsPopover stats={turnStats} tokensPerSec={tokensPerSec} />}
+      {/* 会话统计：底部展示选中的指标项，点击弹出完整累计指标面板 */}
+      {showSessionStats && (
+        <SessionStatsPopover
+          stats={turnStats}
+          tokensPerSec={tokensPerSec}
+          displayFields={isMobile ? sessionStatsFieldsMobile : sessionStatsFieldsDesktop}
+        />
+      )}
 
       {/* 待办进度：整组保持居中，任务名按可用宽度自动截断（移动端不显示任务名） */}
       {showTaskProgress && hasTodos && (

@@ -163,6 +163,64 @@ describe('InputFooter 可配置字段', () => {
     expect(screen.getByText('43 tok/s')).toBeInTheDocument()
     expect(screen.getByText('1/3')).toBeInTheDocument()
   })
+  it('分别在桌面端和移动端使用独立的 sessionStats 细分配置', () => {
+    useIsMobileMock.mockReturnValue(false)
+    const { rerender } = render(
+      <InputFooter
+        paneId="pane-1"
+        sessionId="session-1"
+        sessionStatsFieldsDesktop={{
+          modelTime: true,
+          toolTime: false,
+          ttft: false,
+          tps: false,
+          cacheHit: false,
+          outputTokens: false,
+        }}
+        sessionStatsFieldsMobile={{
+          modelTime: false,
+          toolTime: false,
+          ttft: false,
+          tps: true,
+          cacheHit: false,
+          outputTokens: false,
+        }}
+      />,
+    )
+
+    // 桌面端生效：只展示模型用时，不展示 TPS
+    expect(screen.getByText('Model')).toBeInTheDocument()
+    expect(screen.queryByText('TPS')).not.toBeInTheDocument()
+
+    // 切换到移动端
+    useIsMobileMock.mockReturnValue(true)
+    rerender(
+      <InputFooter
+        paneId="pane-1"
+        sessionId="session-1"
+        sessionStatsFieldsDesktop={{
+          modelTime: true,
+          toolTime: false,
+          ttft: false,
+          tps: false,
+          cacheHit: false,
+          outputTokens: false,
+        }}
+        sessionStatsFieldsMobile={{
+          modelTime: false,
+          toolTime: false,
+          ttft: false,
+          tps: true,
+          cacheHit: false,
+          outputTokens: false,
+        }}
+      />,
+    )
+
+    // 移动端生效：展示 TPS，不展示模型
+    expect(screen.getByText('TPS')).toBeInTheDocument()
+    expect(screen.queryByText('Model')).not.toBeInTheDocument()
+  })
 })
 
 describe('InputFooter 移动端', () => {

@@ -268,10 +268,13 @@ function InputBoxComponent({
     }),
     [fileCapabilitiesProp, supportsImages],
   )
-  const { externalFileDropMode, showInputStatusBar, inputStatusBarFields } = useSyncExternalStore(
-    themeStore.subscribe,
-    themeStore.getSnapshot,
-  )
+  const {
+    externalFileDropMode,
+    showInputStatusBar,
+    inputStatusBarFields,
+    sessionStatsFieldsDesktop,
+    sessionStatsFieldsMobile,
+  } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
 
   // 是否有任何文件附件能力
   const supportsAnyFile = fileCaps.image || fileCaps.pdf || fileCaps.audio || fileCaps.video || fileCaps.text === true
@@ -1936,6 +1939,8 @@ function InputBoxComponent({
               sessionId={sessionId}
               inputContainerRef={inputContainerRef}
               fields={inputStatusBarFields}
+              sessionStatsFieldsDesktop={sessionStatsFieldsDesktop}
+              sessionStatsFieldsMobile={sessionStatsFieldsMobile}
             />
           )}
         </div>

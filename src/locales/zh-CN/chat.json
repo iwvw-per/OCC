@@ -261,7 +261,15 @@
     "tps": "输出速度（TPS）",
     "cacheHit": "缓存命中率",
     "outputTokens": "输出 token",
-    "counts": "{{turns}} 轮 · {{steps}} 步"
+    "counts": "{{turns}} 轮 · {{steps}} 步",
+    "labels": {
+      "modelTime": "模型",
+      "toolTime": "工具",
+      "ttft": "首 token",
+      "tps": "TPS",
+      "cacheHit": "缓存",
+      "outputTokens": "输出"
+    }
   },
   "inputActions": {
     "scrollToBottom": "滚动到底部",
