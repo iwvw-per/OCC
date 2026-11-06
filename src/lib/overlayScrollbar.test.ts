@@ -149,3 +149,150 @@ describe('overlayScrollbar lifecycle', () => {
     expect(disconnect.mock.calls.length).toBeGreaterThan(firstDisconnects)
   })
 })
+
+/**
+ * 拖拽回归。
+ *
+ * 旧实现只在 thumb 自身监听 pointermove / pointerup，收到 pointercancel
+ * 或指针捕获丢失时不会结束拖拽 —— `dragging` 永久为 true，滑块卡住。
+ * 另外 `dragging` 是布尔快照（恒 false），导致拖拽中 thumb 被淡出。
+ */
+describe('overlayScrollbar thumb drag', () => {
+  const VIEWPORT_H = 600
+  const CONTENT_H = 6000
+  const THUMB_H = 60
+
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  afterEach(() => {
+    disposeOverlayScrollbars()
+    document.body.innerHTML = ''
+    vi.restoreAllMocks()
+  })
+
+  function setup() {
+    const { parent, vp } = makeScrollContainer()
+    Object.defineProperty(vp, 'scrollHeight', { configurable: true, value: CONTENT_H })
+    Object.defineProperty(vp, 'clientHeight', { configurable: true, value: VIEWPORT_H })
+    vp.getBoundingClientRect = () => ({
+      top: 0,
+      left: 0,
+      bottom: VIEWPORT_H,
+      right: 200,
+      width: 200,
+      height: VIEWPORT_H,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    parent.getBoundingClientRect = () => ({
+      top: 0,
+      left: 0,
+      bottom: VIEWPORT_H,
+      right: 200,
+      width: 200,
+      height: VIEWPORT_H,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+
+    initOverlayScrollbars()
+    const thumb = parent.querySelector<HTMLDivElement>('.os-thumb')!
+    // jsdom 没有布局，offsetHeight 恒 0；固定成可控值让行程计算可断言
+    Object.defineProperty(thumb, 'offsetHeight', { configurable: true, value: THUMB_H })
+    thumb.getBoundingClientRect = () => ({
+      top: 0,
+      left: 0,
+      bottom: THUMB_H,
+      right: 12,
+      width: 12,
+      height: THUMB_H,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    return { parent, vp, thumb }
+  }
+
+  function pointer(type: string, init: PointerEventInit) {
+    return new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', ...init })
+  }
+
+  it('drags the viewport along with the pointer', () => {
+    const { vp, thumb } = setup()
+    const track = VIEWPORT_H - 8 * 2
+    const travel = track - THUMB_H
+    const maxScroll = CONTENT_H - VIEWPORT_H
+
+    thumb.dispatchEvent(pointer('pointerdown', { clientY: 100, button: 0 }))
+    expect(thumb.classList.contains('os-dragging')).toBe(true)
+
+    // 偏移半个行程 → 应滚到一半
+    document.dispatchEvent(pointer('pointermove', { clientY: 100 + travel / 2 }))
+    expect(vp.scrollTop).toBeCloseTo(maxScroll / 2, 0)
+
+    document.dispatchEvent(pointer('pointerup', {}))
+    expect(thumb.classList.contains('os-dragging')).toBe(false)
+  })
+
+  it('ends the drag on pointercancel — a later move must not scroll', () => {
+    const { vp, thumb } = setup()
+
+    thumb.dispatchEvent(pointer('pointerdown', { clientY: 100, button: 0 }))
+    document.dispatchEvent(pointer('pointermove', { clientY: 120 }))
+    const afterMove = vp.scrollTop
+    expect(afterMove).toBeGreaterThan(0)
+
+    document.dispatchEvent(pointer('pointercancel', {}))
+    expect(thumb.classList.contains('os-dragging')).toBe(false)
+
+    document.dispatchEvent(pointer('pointermove', { clientY: 500 }))
+    expect(vp.scrollTop).toBe(afterMove)
+  })
+
+  it('ends the drag when pointer capture is lost', () => {
+    const { vp, thumb } = setup()
+
+    thumb.dispatchEvent(pointer('pointerdown', { clientY: 100, button: 0 }))
+    document.dispatchEvent(pointer('pointermove', { clientY: 130 }))
+    const afterMove = vp.scrollTop
+
+    thumb.dispatchEvent(pointer('lostpointercapture', {}))
+    expect(thumb.classList.contains('os-dragging')).toBe(false)
+
+    document.dispatchEvent(pointer('pointermove', { clientY: 600 }))
+    expect(vp.scrollTop).toBe(afterMove)
+  })
+
+  it('keeps the thumb visible while dragging (fade must not win)', async () => {
+    const { thumb } = setup()
+    thumb.classList.add('os-visible')
+
+    thumb.dispatchEvent(pointer('pointerdown', { clientY: 100, button: 0 }))
+    // 触发一次 scroll → reveal/scheduleFade 会排一个 800ms 的淡出
+    document.dispatchEvent(pointer('pointermove', { clientY: 150 }))
+    await new Promise(resolve => setTimeout(resolve, 900))
+
+    expect(thumb.classList.contains('os-visible')).toBe(true)
+    document.dispatchEvent(pointer('pointerup', {}))
+  })
+
+  it('detaching mid-drag releases document listeners instead of leaking them', async () => {
+    const { parent, vp, thumb } = setup()
+
+    thumb.dispatchEvent(pointer('pointerdown', { clientY: 100, button: 0 }))
+    const scrollAtDown = vp.scrollTop
+
+    // 模拟容器被从 DOM 摘除：下一批 mutation（debounce 200ms）会 detach 并 destroy thumb
+    parent.remove()
+    await new Promise(resolve => setTimeout(resolve, 400))
+
+    expect(thumb.isConnected).toBe(false)
+    // destroy 已结束拖拽：之后移动指针不应再改动 vp
+    document.dispatchEvent(pointer('pointermove', { clientY: 500 }))
+    expect(vp.scrollTop).toBe(scrollAtDown)
+  })
+})

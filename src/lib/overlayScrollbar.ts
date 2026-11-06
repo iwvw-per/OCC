@@ -78,7 +78,15 @@ function isScrollable(el: HTMLElement): boolean {
 
 interface AxisThumb {
   thumb: HTMLDivElement
-  dragging: boolean
+  /**
+   * 必须用函数而不是布尔快照。
+   *
+   * 之前这里返回的是 `dragging` 的值拷贝，恒为 `false`；调用方（fadeEntry）
+   * 用 `!e.v.dragging` 判断，于是**拖拽中照样把 thumb 淡出**
+   * （`os-visible` 被摘掉 → opacity:0 + pointer-events:none），
+   * 用户看到的正是「抓住了滑块，然后它自己没了」。
+   */
+  isDragging: () => boolean
   fadeTimer: ReturnType<typeof setTimeout> | null
   onThumbDown: (e: PointerEvent) => void
   onThumbEnter: () => void
@@ -89,18 +97,38 @@ interface AxisThumb {
   destroy: () => void
 }
 
+/** 一次拖拽会话的固定参照，拖动过程中不再重算，避免边拖边抖 */
+interface DragSession {
+  pointerId: number
+  /** 起始指针坐标（按轴取 clientY / clientX） */
+  startPos: number
+  /** 起始滚动位置 */
+  startScroll: number
+  /** 滑块可走的最大像素距离（track - thumbSize）；<= 0 表示没有行程 */
+  travel: number
+}
+
 function createAxisThumb(axis: 'v' | 'h', vp: HTMLElement, parent: HTMLElement): AxisThumb {
   const thumb = document.createElement('div')
   thumb.className = axis === 'v' ? 'os-thumb' : 'os-thumb os-thumb-x'
   parent.appendChild(thumb)
 
-  let dragging = false
   let fadeTimer: ReturnType<typeof setTimeout> | null = null
+  /** 当前拖拽会话；null 表示没在拖 */
+  let drag: DragSession | null = null
+  /** 拖拽期间挂在 document/window 上的监听清理器 */
+  let dragCleanup: (() => void) | null = null
+
+  const isDragging = () => drag !== null
 
   const scheduleFade = () => {
     if (fadeTimer) clearTimeout(fadeTimer)
     fadeTimer = setTimeout(() => {
-      if (!dragging) thumb.classList.remove('os-visible')
+      fadeTimer = null
+      // 拖拽中绝不能淡出：一旦 os-visible 被摘掉，thumb 立刻 opacity:0 +
+      // pointer-events:none，手感就是「抓住滑块，然后它自己消失了」。
+      if (isDragging()) return
+      thumb.classList.remove('os-visible')
     }, FADE_MS)
   }
 
@@ -110,6 +138,14 @@ function createAxisThumb(axis: 'v' | 'h', vp: HTMLElement, parent: HTMLElement):
       thumb.classList.add('os-visible')
       scheduleFade()
     }
+  }
+
+  /** 滑块行程（track - thumbSize）。只在拖拽开始时取一次，拖拽期间不重算。 */
+  const axisMetrics = () => {
+    const vpRect = vp.getBoundingClientRect()
+    const track = (axis === 'v' ? vpRect.height : vpRect.width) - TRACK_PAD * 2
+    const thumbSize = axis === 'v' ? thumb.offsetHeight : thumb.offsetWidth
+    return { travel: Math.max(0, track - thumbSize) }
   }
 
   let updateRaf: number | null = null
@@ -126,7 +162,9 @@ function createAxisThumb(axis: 'v' | 'h', vp: HTMLElement, parent: HTMLElement):
 
       const track = vpRect.height - TRACK_PAD * 2
       let h = (clientHeight / scrollHeight) * track
-      h = Math.max(h, MIN_THUMB)
+      // 先保证可抓取的最小尺寸，再夹到轨道内：否则极小容器里 thumb 会比
+      // 轨道还高，拖拽行程 travel 变 0，表现为「按住滑块但完全拖不动」。
+      h = Math.min(Math.max(h, MIN_THUMB), Math.max(track, 0))
 
       const maxScroll = scrollHeight - clientHeight
       const maxTop = track - h
@@ -146,7 +184,7 @@ function createAxisThumb(axis: 'v' | 'h', vp: HTMLElement, parent: HTMLElement):
 
       const track = vpRect.width - TRACK_PAD * 2
       let w = (clientWidth / scrollWidth) * track
-      w = Math.max(w, MIN_THUMB)
+      w = Math.min(Math.max(w, MIN_THUMB), Math.max(track, 0))
 
       const maxScroll = scrollWidth - clientWidth
       const maxLeft = track - w
@@ -168,48 +206,131 @@ function createAxisThumb(axis: 'v' | 'h', vp: HTMLElement, parent: HTMLElement):
     })
   }
 
-  // 拖拽
-  const onThumbDown = (e: PointerEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragging = true
-    thumb.classList.add('os-dragging')
-    thumb.setPointerCapture(e.pointerId)
-
-    const startPos = axis === 'v' ? e.clientY : e.clientX
-    const startScroll = axis === 'v' ? vp.scrollTop : vp.scrollLeft
-
-    const onMove = (ev: PointerEvent) => {
-      if (axis === 'v') {
-        const maxScroll = vp.scrollHeight - vp.clientHeight
-        const maxThumb = vp.clientHeight - thumb.offsetHeight
-        if (maxThumb > 0) vp.scrollTop = startScroll + (ev.clientY - startPos) * (maxScroll / maxThumb)
-      } else {
-        const maxScroll = vp.scrollWidth - vp.clientWidth
-        const maxThumb = vp.clientWidth - thumb.offsetWidth
-        if (maxThumb > 0) vp.scrollLeft = startScroll + (ev.clientX - startPos) * (maxScroll / maxThumb)
+  // ── 拖拽 ──
+  //
+  // 旧实现的三个致命问题（侧栏项目多 / diff 卡片偶发「滑块卡住」的根因）：
+  //
+  // 1. pointermove / pointerup 只挂在 thumb 自己身上，且只监听 pointerup。
+  //    触屏被浏览器手势接管 → pointercancel；thumb 被 reconcile/detach 重建 →
+  //    指针捕获随节点消失。这两种情况都收不到 pointerup，于是 dragging 永久为
+  //    true、onMove 永久留在 DOM 上，后续移动继续带着旧的 startScroll 改
+  //    scrollTop，表现就是「滑块卡在那里 / 一抖一抖」。
+  // 2. onUp 里 releasePointerCapture 无保护，捕获已丢时会抛 DOMException，
+  //    后面「复位 dragging + 摘监听」全被跳过（相当于 1 的必然触发路径）。
+  // 3. 换算用 clientHeight - thumb.offsetHeight，而滑块实际行程是
+  //    track - thumbHeight（差 2×TRACK_PAD），长列表拖到底会偏。
+  const endDrag = () => {
+    const current = drag
+    if (!current) return
+    drag = null
+    thumb.classList.remove('os-dragging')
+    dragCleanup?.()
+    dragCleanup = null
+    // 捕获可能已经没了：先探测再释放，并吞掉异常，保证后续清理一定执行
+    if (thumb.hasPointerCapture?.(current.pointerId)) {
+      try {
+        thumb.releasePointerCapture(current.pointerId)
+      } catch {
+        // 部分 WebView 在节点已脱离文档时仍会抛，忽略即可
       }
     }
+    scheduleFade()
+  }
 
-    const onUp = (ev: PointerEvent) => {
-      dragging = false
-      thumb.classList.remove('os-dragging')
-      thumb.releasePointerCapture(ev.pointerId)
-      thumb.removeEventListener('pointermove', onMove)
-      thumb.removeEventListener('pointerup', onUp)
-      scheduleFade()
+  const applyDrag = (ev: PointerEvent) => {
+    const current = drag
+    if (!current || current.travel <= 0) return
+    const pos = axis === 'v' ? ev.clientY : ev.clientX
+    // 行程用按下时的实测值（拖拽中 thumb 尺寸变化会让手感抖），
+    // 可滚动距离按当前值取：侧栏在拖拽中懒加载出更多内容时，
+    // 仍能拖到真正的底部。
+    const maxScroll = axis === 'v' ? vp.scrollHeight - vp.clientHeight : vp.scrollWidth - vp.clientWidth
+    if (maxScroll <= 0) return
+    const delta = ((pos - current.startPos) / current.travel) * maxScroll
+    const next = current.startScroll + delta
+    if (axis === 'v') {
+      if (Math.abs(vp.scrollTop - next) >= 0.5) vp.scrollTop = next
+    } else if (Math.abs(vp.scrollLeft - next) >= 0.5) {
+      vp.scrollLeft = next
+    }
+  }
+
+  const onThumbDown = (e: PointerEvent) => {
+    // 已经在拖（多指 / 重复按下）：忽略，避免两套会话互相覆盖
+    if (drag) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    // 拖拽前把几何刷到最新：thumb 尺寸由 updateNow 写入，行程要按实测值算
+    updateNow()
+
+    const { travel } = axisMetrics()
+    drag = {
+      pointerId: e.pointerId,
+      startPos: axis === 'v' ? e.clientY : e.clientX,
+      startScroll: axis === 'v' ? vp.scrollTop : vp.scrollLeft,
+      travel,
+    }
+    thumb.classList.add('os-dragging')
+    thumb.classList.add('os-visible')
+    if (fadeTimer) {
+      clearTimeout(fadeTimer)
+      fadeTimer = null
     }
 
-    thumb.addEventListener('pointermove', onMove)
-    thumb.addEventListener('pointerup', onUp)
+    try {
+      thumb.setPointerCapture?.(e.pointerId)
+    } catch {
+      // 不支持捕获的环境（部分 WebView）退化为 document 监听，下面已覆盖
+    }
+
+    // 收尾必须挂在 document 上：指针移出 thumb、捕获丢失、被手势接管时
+    // thumb 自身收不到事件。三种终止信号都要处理，否则 dragging 会悬空。
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag?.pointerId) return
+      applyDrag(ev)
+    }
+    const onFinish = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag?.pointerId) return
+      endDrag()
+    }
+    /** 捕获被夺走（节点被移出文档 / 其他元素抢走）→ 立刻结束本次拖拽 */
+    const onLostCapture = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag?.pointerId) return
+      endDrag()
+    }
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') endDrag()
+    }
+    const onWindowBlur = () => endDrag()
+
+    document.addEventListener('pointermove', onMove, true)
+    document.addEventListener('pointerup', onFinish, true)
+    document.addEventListener('pointercancel', onFinish, true)
+    window.addEventListener('blur', onWindowBlur, true)
+    window.addEventListener('keydown', onKeyDown, true)
+    thumb.addEventListener('lostpointercapture', onLostCapture)
+
+    dragCleanup = () => {
+      document.removeEventListener('pointermove', onMove, true)
+      document.removeEventListener('pointerup', onFinish, true)
+      document.removeEventListener('pointercancel', onFinish, true)
+      window.removeEventListener('blur', onWindowBlur, true)
+      window.removeEventListener('keydown', onKeyDown, true)
+      thumb.removeEventListener('lostpointercapture', onLostCapture)
+    }
   }
 
   // thumb 自身 hover：防止从容器移向 thumb 时消失
   const onThumbEnter = () => {
-    if (fadeTimer) clearTimeout(fadeTimer)
+    if (fadeTimer) {
+      clearTimeout(fadeTimer)
+      fadeTimer = null
+    }
   }
   const onThumbLeave = () => {
-    if (!dragging) scheduleFade()
+    if (!isDragging()) scheduleFade()
   }
 
   thumb.addEventListener('pointerdown', onThumbDown)
@@ -217,16 +338,33 @@ function createAxisThumb(axis: 'v' | 'h', vp: HTMLElement, parent: HTMLElement):
   thumb.addEventListener('pointerleave', onThumbLeave)
 
   const destroy = () => {
+    // 拖拽中被销毁（reconcile 换方向 / 容器被摘除）：先把会话结束掉，
+    // 否则 document 上的监听器会永久残留。
+    endDrag()
     thumb.removeEventListener('pointerdown', onThumbDown)
     thumb.removeEventListener('pointerenter', onThumbEnter)
     thumb.removeEventListener('pointerleave', onThumbLeave)
     if (updateRaf !== null) cancelAnimationFrame(updateRaf)
     updateRaf = null
-    if (fadeTimer) clearTimeout(fadeTimer)
+    if (fadeTimer) {
+      clearTimeout(fadeTimer)
+      fadeTimer = null
+    }
     thumb.remove()
   }
 
-  return { thumb, dragging, fadeTimer, onThumbDown, onThumbEnter, onThumbLeave, update, reveal, scheduleFade, destroy }
+  return {
+    thumb,
+    isDragging,
+    fadeTimer,
+    onThumbDown,
+    onThumbEnter,
+    onThumbLeave,
+    update,
+    reveal,
+    scheduleFade,
+    destroy,
+  }
 }
 
 // ── Entry ───────────────────────────────────────────────
@@ -308,13 +446,17 @@ function attach(vp: HTMLElement) {
   }
 
   const fadeEntry = (e: Entry) => {
-    if (e.v && !e.v.dragging) {
+    if (e.v && !e.v.isDragging()) {
       if (e.v.fadeTimer) clearTimeout(e.v.fadeTimer)
-      e.v.fadeTimer = setTimeout(() => e.v!.thumb.classList.remove('os-visible'), 400)
+      e.v.fadeTimer = setTimeout(() => {
+        if (!e.v?.isDragging()) e.v?.thumb.classList.remove('os-visible')
+      }, 400)
     }
-    if (e.h && !e.h.dragging) {
+    if (e.h && !e.h.isDragging()) {
       if (e.h.fadeTimer) clearTimeout(e.h.fadeTimer)
-      e.h.fadeTimer = setTimeout(() => e.h!.thumb.classList.remove('os-visible'), 400)
+      e.h.fadeTimer = setTimeout(() => {
+        if (!e.h?.isDragging()) e.h?.thumb.classList.remove('os-visible')
+      }, 400)
     }
   }
 
@@ -366,6 +508,10 @@ function detach(vp: HTMLElement) {
 // ── 方向变化检测 ────────────────────────────────────────
 
 function reconcile(vp: HTMLElement, entry: Entry) {
+  // 拖拽进行中不改动 thumb：销毁会连带丢掉指针捕获与 document 监听，
+  // 抬手事件永久收不到，滑块就"卡死"了。等拖拽结束后的下一批 mutation 再复查。
+  if (entry.v?.isDragging() || entry.h?.isDragging()) return
+
   const needsY = isScrollableY(vp)
   const needsX = isScrollableX(vp)
   const hasY = !!entry.v
@@ -390,12 +536,7 @@ function reconcile(vp: HTMLElement, entry: Entry) {
 // ── 扫描 DOM ────────────────────────────────────────────
 
 function tryAttach(el: HTMLElement) {
-  if (
-    entries.has(el) ||
-    el.hasAttribute(ATTR) ||
-    el.classList.contains('os-thumb') ||
-    !isScrollable(el)
-  ) {
+  if (entries.has(el) || el.hasAttribute(ATTR) || el.classList.contains('os-thumb') || !isScrollable(el)) {
     return
   }
   attach(el)
