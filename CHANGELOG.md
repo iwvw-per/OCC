@@ -1,5 +1,13 @@
 # Changelog
 
+## [v2.0.62] - 2026-11-06
+
+- fix(scrollbar): **拖动滚动条滑块偶发卡死**。侧栏项目多、展开 diff 卡片这类内容高度频繁变化的场景最容易撞上：按住滑块拖到一半突然不跟手，松手后再也拖不动。根因是自绘滚动条的拖拽收尾只挂在 thumb 自身的 `pointerup` 上 —— 触屏被浏览器手势接管会发 `pointercancel`、thumb 被 `reconcile()` 重建会丢掉指针捕获，两条路径都收不到 `pointerup`，于是 `dragging` 永久为 `true`、`onMove` 永久留在 DOM 上，之后每次指针移动都带着旧的 `startScroll` 去改 `scrollTop`。同时 `releasePointerCapture` 无保护，捕获已丢时抛 `DOMException`，把「复位 dragging + 摘监听」整段跳过，是上一条的必然触发路径
+- fix(scrollbar): 拖拽中滑块**被自己淡出**。导出的 `dragging` 是创建时的布尔快照（恒为 `false`），而 `fadeEntry` 用 `!e.v.dragging` 判断，于是拖拽中照样摘掉 `os-visible` → `opacity:0` + `pointer-events:none`，手感是「抓住了，然后它自己没了」。改为 `isDragging()` 函数实时判断，`scheduleFade` 的定时器回调里也再判一次（它可能跨过拖拽结束）
+- fix(scrollbar): 拖拽期间不再被 `reconcile()` / `detach()` 换掉节点（销毁会连带丢掉指针捕获与 document 监听）；`destroy()` 里先结束拖拽，避免 document 监听泄漏
+- fix(scrollbar): 拖拽换算改用 `track - thumbSize`。原来用 `clientHeight - thumbHeight`，与滑块真实行程差 2×`TRACK_PAD`（16px），长列表拖到底会偏；行程在按下时取一次固定值（拖拽中重算会抖），可滚动距离按当前值取，这样拖拽中懒加载出新内容仍能拖到真正的底部
+- fix(scrollbar): 滑块高度夹到轨道内，极小容器里不会再出现行程为 0、按住完全拖不动的情况
+
 ## [v2.0.61] - 2026-11-06
 
 - fix(stats): **会话统计的「工具调用用时」显示成两万天**（截图实测 `20763d 2h 53m`）。根因是时间戳被填成了 0：v2 历史消息的工具时间在 **part 级** `time.{created,ran,completed}`，而适配层只读 `state.time`，读不到还补了 `start: 0`；落定逻辑用 `?? now` 只兜 null/undefined，于是 `end - start` 变成 `now - 0` = 当前 epoch 毫秒 ≈ 20763 天。实测本机会话 956/956 个工具 part 的 `state` 里都没有 `time`，只有 part 级时间。现在两处落点都认，起点未知时整块省略 `time`（绝不补 0），并新增 `utils/toolTiming.ts` 统一口径：起点 ≤0、非有限值、`end ≤ start`、超过 30 天一律视为未知
