@@ -16,9 +16,58 @@ export type MarkdownStreamProjection = {
 }
 
 const MARKUP_PREVIEW_LANGUAGES = new Set(['html', 'htm', 'xhtml', 'xml', 'svg'])
+// 明确标记为 HTML 的围栏直接预览；其余标记语言必须是可渲染的根元素，
+// 否则 `<data>` 这类 XML 数据文档会渲染成空白 iframe。
+const ALWAYS_PREVIEW_LANGUAGES = new Set(['html', 'htm'])
+const MARKUP_PREVIEW_ROOT_TAGS: Record<string, ReadonlySet<string>> = {
+  svg: new Set(['svg']),
+  xml: new Set(['html', 'svg']),
+  xhtml: new Set(['html']),
+}
 
 export function isMarkupPreviewLanguage(language?: string): boolean {
   return !!language && MARKUP_PREVIEW_LANGUAGES.has(language.toLowerCase())
+}
+
+/** 跳过 XML 声明、doctype、注释，取首个开始标签名 */
+function readMarkupRootTag(source: string): string | null {
+  let rest = source.trimStart()
+  for (;;) {
+    if (rest.startsWith('<!--')) {
+      const commentEnd = rest.indexOf('-->', 4)
+      if (commentEnd === -1) return null
+      rest = rest.slice(commentEnd + 3).trimStart()
+      continue
+    }
+    if (rest.startsWith('<?')) {
+      const declarationEnd = rest.indexOf('?>', 2)
+      if (declarationEnd === -1) return null
+      rest = rest.slice(declarationEnd + 2).trimStart()
+      continue
+    }
+    if (/^<!doctype\b/i.test(rest)) {
+      const doctypeEnd = rest.indexOf('>')
+      if (doctypeEnd === -1) return null
+      rest = rest.slice(doctypeEnd + 1).trimStart()
+      continue
+    }
+    break
+  }
+  return /^<\s*([a-z][a-z0-9:_-]*)/i.exec(rest)?.[1]?.toLowerCase() ?? null
+}
+
+/**
+ * 语言标签只代表「作者可能想预览」，还要内容真的是可渲染的标记。
+ * 例如 ```xml 里是 `<data><patch .../></data>` 时应保持代码块。
+ */
+export function canPreviewMarkupSource(language: string | undefined, source: string): boolean {
+  if (!language) return false
+  const normalized = language.toLowerCase()
+  if (!MARKUP_PREVIEW_LANGUAGES.has(normalized)) return false
+  if (ALWAYS_PREVIEW_LANGUAGES.has(normalized)) return true
+  const rootTags = MARKUP_PREVIEW_ROOT_TAGS[normalized]
+  const rootTag = readMarkupRootTag(source)
+  return !!rootTags && rootTag != null && rootTags.has(rootTag)
 }
 
 function hashString(value: string) {

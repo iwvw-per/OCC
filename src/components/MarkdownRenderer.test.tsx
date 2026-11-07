@@ -969,6 +969,31 @@ $$`
     expect(screen.getByTestId('code-block')).toHaveTextContent(`${language}:${source}`)
   })
 
+  it('keeps a data-shaped xml fence as a code block instead of an empty preview', () => {
+    const source = `<?xml version="1.0" encoding="utf-8"?>
+<data>
+  <display name="LUN0"/>
+  <ufs>
+    <patch filename="gpt_both0.bin"/>
+  </ufs>
+</data>`
+    render(<MarkdownRenderer content={`\`setbootablestoragedrive.xml\` 的内容是：\n\n\`\`\`xml\n${source}\n\`\`\`\n\n机制是这样的：`} />)
+
+    expect(screen.queryByTitle('HTML preview')).not.toBeInTheDocument()
+    const block = screen.getByTestId('code-block')
+    expect(block).toHaveTextContent('xml:')
+    expect(block).toHaveTextContent('gpt_both0.bin')
+    expect(block).toHaveTextContent('<data>')
+    expect(screen.getByText('机制是这样的：')).toBeInTheDocument()
+  })
+
+  it('keeps a non-svg root in an svg fence as a code block', () => {
+    render(<MarkdownRenderer content={'```svg\n<path d="M0 0"/>\n```'} />)
+
+    expect(screen.queryByTitle('HTML preview')).not.toBeInTheDocument()
+    expect(screen.getByTestId('code-block')).toHaveTextContent('svg:<path d="M0 0"/>')
+  })
+
   it('sizes the HTML iframe to content width so the parent container can scroll horizontally', async () => {
     render(<MarkdownRenderer content={'```html\n<div style="width:1200px">wide preview</div>\n```'} />)
 

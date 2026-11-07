@@ -25,7 +25,7 @@ import i18n from '../i18n'
 import { notificationStore } from '../store/notificationStore'
 import { marked } from 'marked'
 import type { Tokens } from 'marked'
-import { isMarkupPreviewLanguage, projectMarkdownStream, stripLeadingHtmlComments, type MarkdownStreamProjection } from './markdownStream'
+import { canPreviewMarkupSource, projectMarkdownStream, stripLeadingHtmlComments, type MarkdownStreamProjection } from './markdownStream'
 import { renderMarkdownToHtml, renderKatexHtml } from './markdownHtmlRenderer'
 import { getFootnoteId, scanTextSegments } from './markdownSegments'
 import type { MarkdownSegment } from './markdownSegments'
@@ -1645,7 +1645,7 @@ const MarkdownStreamBlock = memo(function MarkdownStreamBlock({
         </div>
       )
     }
-    if (isMarkupPreviewLanguage(language) && !isReasoning) {
+    if (canPreviewMarkupSource(language, src) && !isReasoning) {
       return (
         <div className="markdown-stream-block">
           <div className={MARKDOWN_BLOCK_CONTENT_CLASS}>

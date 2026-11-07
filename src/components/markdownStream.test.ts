@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { projectMarkdownStream, splitMarkdownStream } from './markdownStream'
+import { canPreviewMarkupSource, projectMarkdownStream, splitMarkdownStream } from './markdownStream'
 
 describe('splitMarkdownStream', () => {
   it('splits non-streaming markdown into full and code blocks', () => {
@@ -363,5 +363,48 @@ inside comment
     const next = projectMarkdownStream(first, 'intro\n- item', true)
 
     expect(next.blocks).toEqual(splitMarkdownStream('intro\n- item', true))
+  })
+})
+
+describe('canPreviewMarkupSource', () => {
+  it('always previews explicit html and htm fences', () => {
+    expect(canPreviewMarkupSource('html', '<div>hi</div>')).toBe(true)
+    expect(canPreviewMarkupSource('HTM', '<span>hi</span>')).toBe(true)
+    expect(canPreviewMarkupSource('html', 'plain text')).toBe(true)
+  })
+
+  it('previews svg fences only when the root element is svg', () => {
+    expect(canPreviewMarkupSource('svg', '<svg viewBox="0 0 10 10"><path d="M0 0"/></svg>')).toBe(true)
+    expect(canPreviewMarkupSource('svg', '<?xml version="1.0"?>\n<svg><text>hi</text></svg>')).toBe(true)
+    expect(canPreviewMarkupSource('svg', '<path d="M0 0"/>')).toBe(false)
+    expect(canPreviewMarkupSource('svg', '<data><item/></data>')).toBe(false)
+  })
+
+  it('previews xml fences only for html or svg roots', () => {
+    expect(canPreviewMarkupSource('xml', '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>')).toBe(true)
+    expect(canPreviewMarkupSource('xml', '<?xml version="1.0"?><html><body>hi</body></html>')).toBe(true)
+    expect(canPreviewMarkupSource('xml', '<!-- c -->\n<?xml version="1.0"?>\n<svg/>')).toBe(true)
+  })
+
+  it('keeps data-shaped xml as code instead of an empty preview', () => {
+    const source = `<?xml version="1.0" encoding="utf-8"?>
+<data>
+  <display name="LUN0"/>
+  <ufs>
+    <patch filename="gpt_both0.bin"/>
+  </ufs>
+</data>`
+
+    expect(canPreviewMarkupSource('xml', source)).toBe(false)
+  })
+
+  it('previews xhtml only for an html root', () => {
+    expect(canPreviewMarkupSource('xhtml', '<html xmlns="http://www.w3.org/1999/xhtml"><body>hi</body></html>')).toBe(true)
+    expect(canPreviewMarkupSource('xhtml', '<data><item>hi</item></data>')).toBe(false)
+  })
+
+  it('ignores non-markup languages', () => {
+    expect(canPreviewMarkupSource('json', '<div>hi</div>')).toBe(false)
+    expect(canPreviewMarkupSource(undefined, '<div>hi</div>')).toBe(false)
   })
 })
