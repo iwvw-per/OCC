@@ -1,5 +1,12 @@
 # Changelog
 
+## [v2.0.64] - 2026-11-07
+
+- fix(markdown): **非 HTML 内容被当成 HTML 片段渲染成空白**。根因是围栏的**语言标签**被当成了「内容一定是可渲染标记」的充分条件：`MARKUP_PREVIEW_LANGUAGES` 把 `xml` / `svg` / `xhtml` 和 `html` 一视同仁，只要标签命中就整段塞进沙箱 iframe。实测 ` ```xml ` 里放 `<?xml ...?><data><display name="LUN0"/><ufs><patch filename="..."/></ufs></data>` 这类数据文档时，`<data>` 不是 HTML 可见元素，iframe 里就是一片空白，只剩右上角 `</>` 按钮（截图复现）。现在新增 `canPreviewMarkupSource()`：语言标签只是必要条件，还要跳过 XML 声明 / doctype / 前导注释后，首个根元素真的是可渲染标记才预览
+- fix(markdown): 各语言的可预览根元素收窄为 `html`/`htm` 无条件预览、`svg` 要求根元素 `<svg>`、`xml` 要求 `<html>` 或 `<svg>`、`xhtml` 要求 `<html>`；不满足条件的围栏回退成普通代码块（保留高亮与复制），不再产生空 iframe
+- fix(markdown): 顺带修掉只有 `<path/>` 之类片段的 ` ```svg ` 围栏同样渲染空白的问题
+- 注：`isMarkupPreviewLanguage()` 保留未删 —— 它仍用于流式渲染的块 key 稳定性（换 key 会导致 iframe 重建），与「是否预览」是两件事
+
 ## [v2.0.63] - 2026-11-06
 
 - feat(chat): **会话统计指标支持细分开关并直接在底部展示**。输入框信息栏中的「会话统计」不再局限于单一 TPS 速率角标，现在支持将模型用时、工具用时、首 token 平均 (TTFT)、输出速度 (TPS)、缓存命中率、输出 token 6 项指标直接以「带标签的紧凑行」展示在底部状态栏中
