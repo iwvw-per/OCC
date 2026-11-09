@@ -66,6 +66,21 @@ export class SeqGapTracker {
   }
 
   /**
+   * 预设（播种）某个 aggregate 的初始 seq 水位。
+   *
+   * 场景：当从快照或本地持久化已知某会话的最大 seq 时，在接收事件前预设基线，
+   * 避免「首次见到」盲目信任可能已经发生跳号的事件。
+   */
+  seed(serverId: string, aggregateID: string, seq: number): void {
+    if (!aggregateID || !Number.isFinite(seq)) return
+    const key = this.key(serverId, aggregateID)
+    const existing = this.lastSeq.get(key)
+    if (existing === undefined || seq > existing) {
+      this.remember(key, seq)
+    }
+  }
+
+  /**
    * 判定一条事件该怎么处理，并在「可应用」时推进水位。
    *
    * 注意：**只有 apply 才推进**。duplicate 不推进（否则乱序的旧事件会把水位

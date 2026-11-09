@@ -616,10 +616,12 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
             }
           }
 
+          const localAdvanced = !force && messageStore.getSessionChangeVersion(sid) !== snapshotGeneration
           const currentState = messageStore.getSessionState(sid)
           const mergedMessages = mergeWithLocalStreamingMessages(
             tailMessages.length > 0 ? [...skeleton.messages, ...tailMessages] : skeleton.messages,
             currentState,
+            { localAdvanced },
           )
 
           const sessionModel = toSessionModelRef(sessionInfo)

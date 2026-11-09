@@ -79,7 +79,7 @@ function nextWeekly(times: string[], weekdays: number[], from: number): number |
   return candidates.length ? Math.min(...candidates) : null
 }
 
-async function runTask(task: ScheduledTask): Promise<void> {
+export async function runTask(task: ScheduledTask): Promise<void> {
   if (inFlight.has(task.id)) return
   inFlight.add(task.id)
   const serverId = serverStore.getActiveServerId()
@@ -91,6 +91,7 @@ async function runTask(task: ScheduledTask): Promise<void> {
   })
   try {
     const session = await createSession({ directory: task.execution.directory }, serverId)
+    const messageID = `msg_${crypto.randomUUID().replace(/-/g, '')}`
     await sendMessageAsync(
       {
         sessionId: session.id,
@@ -99,6 +100,7 @@ async function runTask(task: ScheduledTask): Promise<void> {
         model: { providerID: task.execution.providerID, modelID: task.execution.modelID },
         agent: task.execution.agent,
         directory: task.execution.directory,
+        messageID,
       },
       serverId,
     )

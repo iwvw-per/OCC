@@ -685,6 +685,13 @@ export function ackSeqGap(serverId: string, aggregateID: string): void {
 }
 
 /**
+ * 预设某个会话的已知 seq 基线（快照恢复或初始化使用）。
+ */
+export function seedSeq(serverId: string, aggregateID: string, seq: number): void {
+  getSeqTracker(serverId).seed(serverId, aggregateID, seq)
+}
+
+/**
  * 检查事件是否构成缺口；构成则通知订阅者并返回 true（调用方应丢弃该事件）。
  *
  * 丢弃而不是先应用再修复：缺口期间的数据本来就不可信，先写进去再被快照覆盖

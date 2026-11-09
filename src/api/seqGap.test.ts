@@ -79,6 +79,22 @@ describe('SeqGapTracker', () => {
     expect(t.getLastSeq('aiagent:inst_1', 'ses_1')).toBe(1)
   })
 
+  it('seed 可以预设基线水位，防止后续跳号事件逃逸', () => {
+    const t = new SeqGapTracker()
+    // 从快照获知该会话目前在 100
+    t.seed('local', 'ses_seeded', 100)
+    expect(t.getLastSeq('local', 'ses_seeded')).toBe(100)
+
+    // 连续序号 101：正常 apply
+    expect(t.accept('local', 'ses_seeded', 101)).toEqual({ kind: 'apply' })
+    // 跳号 105：正确识别出 gap
+    expect(t.accept('local', 'ses_seeded', 105)).toEqual({ kind: 'gap', expected: 102, received: 105 })
+
+    // seed 更小的值不会把水位拉低
+    t.seed('local', 'ses_seeded', 50)
+    expect(t.getLastSeq('local', 'ses_seeded')).toBe(101)
+  })
+
   it('reset 之后重新从「首次见到」开始', () => {
     // 缺口修复（快照重拉）完成后必须 reset，否则会一直卡在 gap 上反复重拉
     const t = new SeqGapTracker()
