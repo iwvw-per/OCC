@@ -1,5 +1,12 @@
 # Changelog
 
+## [v2.0.65] - 2026-11-09
+
+- fix(sync): **骨架首屏快照会覆盖飞行中的 SSE 增量**。普通翻页路径早已记录发起时的会话代际 `snapshotGeneration` 并据此判断 `localAdvanced`，但高性能「轮次骨架」分支调用 `mergeWithLocalStreamingMessages` 时漏传该参数。骨架请求往返的几百毫秒内若有实时文本到达，返回后会被旧快照整段压回去，表现为最新回复瞬间消失或倒退。现在骨架分支同样按代际判断，快照不再逆向覆盖本地已推进的内容
+- fix(sync): **定时任务发信缺少幂等 id**。聊天路径发送前会生成 `msg_` 前缀的唯一 `messageID` 交给服务端（重试可去重、多端回写按 id 精确替换占位），而 `scheduledTaskScheduler` 调用 `sendMessageAsync` 时遗漏了该字段。网络抖动重试会重复落消息，现补齐同格式 id
+- fix(sync): **SeqGapTracker 在 LRU 淘汰或冷启动时放行跳号事件**。原实现在 `lastSeq === undefined` 时一律按「首次见到」`apply` 并直接把水位置为收到的 seq，若某会话被淘汰后又发生丢事件（如 100 跳到 120），缺口会被永久掩盖。新增 `seed()` 预设基线（单调不回退）与 `events.ts` 的 `seedSeq` 出口，供快照恢复后锚定权威水位
+- test: 补充 `scheduledTaskScheduler` 发信幂等单测、`seqGap` seed 基线预设与防跳号逃逸单测
+
 ## [v2.0.64] - 2026-11-07
 
 - fix(markdown): **非 HTML 内容被当成 HTML 片段渲染成空白**。根因是围栏的**语言标签**被当成了「内容一定是可渲染标记」的充分条件：`MARKUP_PREVIEW_LANGUAGES` 把 `xml` / `svg` / `xhtml` 和 `html` 一视同仁，只要标签命中就整段塞进沙箱 iframe。实测 ` ```xml ` 里放 `<?xml ...?><data><display name="LUN0"/><ufs><patch filename="..."/></ufs></data>` 这类数据文档时，`<data>` 不是 HTML 可见元素，iframe 里就是一片空白，只剩右上角 `</>` 按钮（截图复现）。现在新增 `canPreviewMarkupSource()`：语言标签只是必要条件，还要跳过 XML 声明 / doctype / 前导注释后，首个根元素真的是可渲染标记才预览
