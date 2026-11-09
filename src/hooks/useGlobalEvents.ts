@@ -21,6 +21,7 @@ import { soundStore } from '../store/soundStore'
 import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
+import { contextWindowKey, looksLikeContextOverflow, recordContextOverflow } from '../utils/contextWindowObservation'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
 import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions, invalidateSessionMetaCache } from '../api'
 import { onSeqGap, ackSeqGap } from '../api/events'
@@ -1283,6 +1284,28 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             return // Don't handle errors with no sessionID
           }
           const scopedId = scope(error.sessionID)
+          /**
+           * 上下文溢出：把「溢出时的实测用量」记成真实窗口的上界。
+           *
+           * 声明窗口可能是错的（实测有站点把所有模型统一写死 context=1000000），
+           * 此时圆环分母偏大、百分比长期偏低，看着就是「圆圈不涨」。而 provider
+           * 报上下文溢出是硬证据：那一刻的 prompt 一定已经超出真实窗口。记下来
+           * 之后 `resolveContextWindow` 取 min(声明值, 上界)，分母立刻收敛。
+           *
+           * ⚠️ 只认「上下文超长」文案，不认 413 / request body too large：
+           * 后者是网关 8MiB 的**体积**上限，一张大图就能触发，token 远未触顶。
+           */
+          const errorData = error.data as { message?: unknown } | undefined
+          const errorMessage = typeof errorData?.message === 'string' ? errorData.message : undefined
+          if (looksLikeContextOverflow(errorMessage)) {
+            const measured = messageStore.getLatestMeasuredPrompt(scopedId)
+            if (measured) {
+              recordContextOverflow(
+                contextWindowKey(serverId, measured.providerID, measured.modelID),
+                measured.tokens,
+              )
+            }
+          }
           messageStore.handleSessionError(scopedId)
           childSessionStore.markError(scopedId)
           // 子 agent 以错误结束时同样自动关闭其分屏 pane（主动中止除外）

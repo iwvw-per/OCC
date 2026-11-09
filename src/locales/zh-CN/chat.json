@@ -369,7 +369,8 @@
     "sortDesc": "倒序（新 → 旧）",
     "sortAsc": "正序（旧 → 新）",
     "archivedChats": "已归档对话",
-    "archiveConversation": "归档"
+    "archiveConversation": "归档",
+    "contextAutoCompactAt": "{{value}} 触发自动压缩"
   },
   "activeSession": {
     "awaitingPermission": "等待权限",
@@ -412,7 +413,8 @@
     "outputTokens": "输出",
     "reasoning": "推理",
     "cacheRW": "缓存 (读/写)",
-    "rawMessages": "原始消息"
+    "rawMessages": "原始消息",
+    "autoCompactAt": "自动压缩触发线"
   },
   "hints": {
     "pressEscAgain": "再按一次 <1>Esc</1> 停止",

@@ -1038,6 +1038,31 @@ class MessageStore {
     return this.sessions.get(this.resolveKey(sessionId))?.compactionMarker
   }
 
+  /**
+   * 最近一条「带实测 tokens 的 assistant」的 prompt 用量与模型标识。
+   *
+   * 用途：provider 报上下文溢出时，这个用量就是真实窗口的一个上界
+   * （见 utils/contextWindowObservation.ts）。溢出往往发生在服务端即将压缩
+   * 的那一轮，此刻消息里的实测值是唯一可用的证据。
+   */
+  getLatestMeasuredPrompt(sessionId: string | null): {
+    tokens: number
+    providerID: string
+    modelID: string
+  } | null {
+    if (!sessionId) return null
+    const state = this.sessions.get(this.resolveKey(sessionId))
+    if (!state) return null
+    for (let i = state.messages.length - 1; i >= 0; i--) {
+      const info = state.messages[i].info
+      if (info.role !== 'assistant') continue
+      const total = tokenUsageTotal(info.tokens)
+      if (total <= 0) continue
+      return { tokens: total, providerID: info.providerID, modelID: info.modelID }
+    }
+    return null
+  }
+
   getContextUsageSnapshot(sessionId: string | null): SessionState['contextUsage'] {
     if (!sessionId) return undefined
     return this.sessions.get(this.resolveKey(sessionId))?.contextUsage

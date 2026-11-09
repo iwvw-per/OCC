@@ -369,7 +369,8 @@
     "sortDesc": "Newest first",
     "sortAsc": "Oldest first",
     "archivedChats": "Archived chats",
-    "archiveConversation": "Archive"
+    "archiveConversation": "Archive",
+    "contextAutoCompactAt": "auto-compact at {{value}}"
   },
   "activeSession": {
     "awaitingPermission": "Awaiting Permission",
@@ -412,7 +413,8 @@
     "outputTokens": "Output",
     "reasoning": "Reasoning",
     "cacheRW": "Cache (r/w)",
-    "rawMessages": "Raw Messages"
+    "rawMessages": "Raw Messages",
+    "autoCompactAt": "Auto-compact at"
   },
   "hints": {
     "pressEscAgain": "Press <1>Esc</1> again to stop",

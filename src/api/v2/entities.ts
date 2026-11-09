@@ -116,6 +116,9 @@ export function adaptModelToProviderEntry(raw: unknown): Record<string, unknown>
     status: str(m.status) ?? 'active',
     limit: {
       context: num(rec(m.limit).context) ?? 0,
+      // 服务端压缩判据用 `limit.input || limit.context`：必须一起透传，
+      // 否则前端分母偏大、百分比偏低（见 utils/contextWindow.ts）。
+      ...(num(rec(m.limit).input) != null ? { input: num(rec(m.limit).input) } : {}),
       output: num(rec(m.limit).output) ?? 0,
     },
     capabilities: {

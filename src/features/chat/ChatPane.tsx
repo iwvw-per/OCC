@@ -29,6 +29,7 @@ import {
   useMergeTurnOutline,
   useBackfillTurnOutline,
   useSessionRunning,
+  useEffectiveContextLimit,
 } from '../../hooks'
 import { useServerStore } from '../../hooks/useServerStore'
 import { useHostSlideState } from './sidebar/hostSwitchDirection'
@@ -988,7 +989,19 @@ export const ChatPane = memo(function ChatPane({
     modelSelectorRef.current?.openMenu()
   }, [])
 
-  const contextLimit = currentModel?.contextLimit
+  /**
+   * 上下文窗口大小：与服务端压缩判据保持同一口径，并收敛到实测上界。
+   *
+   * 服务端用 `limit.input || limit.context`（opencode 的
+   * `SessionCompaction.calculateCeiling`），而很多模型的 input 明显小于
+   * context（models.dev 快照中有 789/1563 个 < 0.9，最低 0.25）。此前这里
+   * 只传 context，导致圆环分母偏大、百分比偏低 —— 表现为「圆圈在但不涨」，
+   * 同时服务端早就按更小的窗口压缩了。
+   *
+   * 声明值本身也可能是错的（实测有站点把所有模型写死 1000000），所以再与
+   * 「provider 报溢出时观测到的用量上界」取较小者（见 utils/contextWindowObservation）。
+   */
+  const contextLimit = useEffectiveContextLimit(currentModel, paneServerId)
 
   const controllerActionsRef = useRef({
     newSession: handleNewSession,

@@ -6,6 +6,7 @@ import { ChevronDownIcon, ChevronUpIcon, CpuIcon, DollarSignIcon } from '../../.
 import { useCurrentSessionId, useMessages } from '../../../store'
 import { useSessionStats, formatTokens, formatCost } from '../../../hooks'
 import { formatLocaleDateTime } from '../../../utils/formatUtils'
+import { autoCompactCeiling } from '../../../utils/contextWindow'
 import type { Message, TokenUsage } from '../../../types/message'
 
 interface ContextDetailsDialogProps {
@@ -108,6 +109,7 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
             value={contextMsg?.info.role === 'assistant' ? contextMsg.info.modelID : '—'}
           />
           <Stat label={t('contextDetails.contextLimit')} value={formatTokens(contextLimit)} />
+          <Stat label={t('contextDetails.autoCompactAt')} value={formatTokens(autoCompactCeiling(contextLimit))} />
           <Stat label={t('contextDetails.totalTokens')} value={stats.contextUsed ? formatTokens(stats.contextUsed) : '—'} />
           <Stat
             label={t('contextDetails.usage')}

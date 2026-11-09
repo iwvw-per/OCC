@@ -41,6 +41,16 @@ export interface ModelInfo {
   providerName: string
   family: string
   contextLimit: number
+  /**
+   * 模型声明的**输入**窗口（`limit.input`），未声明时为 0。
+   *
+   * 服务端压缩判据用的是 `limit.input || limit.context`（见
+   * opencode 的 `SessionCompaction.calculateCeiling`）。很多模型把 input
+   * 声明得比 context 小得多（models.dev 快照中有 789/1563 个 < 0.9，
+   * 最低 0.25），只读 context 会让圆环百分比系统性偏低。
+   * 取值统一走 `utils/contextWindow.ts` 的 `effectiveContextWindow`。
+   */
+  inputLimit: number
   outputLimit: number
   supportsReasoning: boolean
   supportsImages: boolean

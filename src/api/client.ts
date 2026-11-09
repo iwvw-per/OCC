@@ -87,6 +87,7 @@ export async function getActiveModels(directory?: string, serverId?: string): Pr
             typeof provider.name === 'string' ? provider.name : typeof provider.id === 'string' ? provider.id : '',
           family: typeof model.family === 'string' ? model.family : '',
           contextLimit: typeof limit.context === 'number' ? limit.context : 0,
+          inputLimit: typeof limit.input === 'number' ? limit.input : 0,
           outputLimit: typeof limit.output === 'number' ? limit.output : 0,
           supportsReasoning: capabilities.reasoning === true,
           supportsImages: inputCapabilities.image === true,
