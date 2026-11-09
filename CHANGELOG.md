@@ -1,5 +1,14 @@
 # Changelog
 
+## [v2.0.66] - 2026-11-09
+
+- fix(context): **圆环百分比长期偏低（「圆圈在但不涨」）**。根因是分母口径与服务端压缩判据不一致：服务端用 `limit.input || limit.context` 算窗口（`SessionCompaction.calculateCeiling`），而前端只读 `limit.context`。实测 models.dev 快照中同时声明两者的 1563 个模型里，`input/context < 0.9` 的有 789 个、`< 0.7` 的 335 个（最低 0.25）。现在 `ModelInfo` 增加 `inputLimit` 并透传 `limit.input`，统一走新模块 `utils/contextWindow.ts` 的 `effectiveContextWindow()`
+- fix(context): **声明窗口本身可能是错的**。实测有站点把所有模型统一写死 `context: 1000000`，真实窗口远小于此，此时圆环分母偏大、百分比长期不涨。新增 `utils/contextWindowObservation.ts`：provider 报上下文溢出、或服务端触发自动压缩（`reason === 'auto'`）时，用当时的实测用量记为该模型的窗口上界，实际分母取 `min(声明值, 上界)`；上界只降不升、跨刷新持久化
+- fix(context): **刻意排除 413 / `request body too large`**。那是网关 8MiB 的**字节体积**上限，一张大图即可触发而 token 远未触顶，用它当窗口上界会把分母错误压小。识别范围对齐服务端 `packages/ai/src/provider-error.ts` 的上下文超长文案
+- feat(context): **圆环上色与 tooltip 改为相对「自动压缩触发线」**。服务端在 `window - max(10%, 16000)` 处就压缩，80% 窗口往往早已越线，沿用 70%/90% 的窗口百分比会误导演示「还早」。详情弹窗同步新增「自动压缩触发线」一行
+- fix(context): **未知窗口态与「占用 0%」视觉上无法区分**。此前窗口未知（模型列表未到手 / 该模型未声明 limit）时圆环只画轨道、进度恒为 0，看起来就是「圆圈在但不涨」。现在额外画一条居中短横，明确表示「不知道」
+- test: 新增 `contextWindow.test.ts`（11 例）与 `contextWindowObservation.test.ts`（13 例），覆盖触发线公式、`input` 优先级、溢出收敛、413 排除与持久化
+
 ## [v2.0.65] - 2026-11-09
 
 - fix(sync): **骨架首屏快照会覆盖飞行中的 SSE 增量**。普通翻页路径早已记录发起时的会话代际 `snapshotGeneration` 并据此判断 `localAdvanced`，但高性能「轮次骨架」分支调用 `mergeWithLocalStreamingMessages` 时漏传该参数。骨架请求往返的几百毫秒内若有实时文本到达，返回后会被旧快照整段压回去，表现为最新回复瞬间消失或倒退。现在骨架分支同样按代际判断，快照不再逆向覆盖本地已推进的内容
