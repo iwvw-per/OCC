@@ -1125,7 +1125,18 @@ $$`
       () => expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-0'),
       { timeout: 5000 },
     )
-  })
+    /**
+     * 整条测试显式给 20s。
+     *
+     * 上面两个 `waitFor` 各自允许 5s，但 vitest 的**默认整条测试超时也是 5000ms**
+     * （`testTimeout` 未配置）—— 最坏情况需要 10s，必然先被整条超时打断，
+     * 报出「Test timed out in 5000ms」，而不是某个 waitFor 明确失败。
+     *
+     * 实测证据：v2.0.65 的 Build Validation（run 42542581188）就是死在
+     * `MarkdownRenderer.test.tsx:1083` 的 `Test timed out in 5000ms`；
+     * 本地同一文件连跑 3 次全绿、耗时约 4s，说明是对机器速度敏感而非功能缺陷。
+     */
+  }, 20_000)
 
   it('updates a canonical HTML preview theme without reloading its document', async () => {
     const view = render(<MarkdownRenderer content={'```html\n<div>themed</div>\n```'} />)
