@@ -133,17 +133,32 @@ export async function nativeBackgroundSession(serverId: string | undefined, sess
 }
 
 /**
- * 原生回退消息（v2 session.revert.stage + commit）。
+ * 原生回退消息（v2 `session.revert.stage`）—— **只 stage，不 commit**。
  *
- * v2 的 revert 是**两段式**：`stage` 只是暂存回退点（服务端保持 pending），
- * `commit` 才真正把回退落到会话历史（GET /session 的 revert 字段才带值，
- * 才会广播 `session.revert.committed`）。官方 web/TUI 也是「stage 暂存、
- * 随后 commit」。
+ * ## 为什么不能 commit（2026-11-11 实测 + 官方源码）
  *
- * 只 stage 不 commit 的后果：前端本地乐观设置的 revertState 在服务端没有
- * 对应持久化状态，任何以服务端为准的重拉（SSE 事件驱动 force reload、
- * 重连、`setMessages` 里 `revertState: sessionInfo?.revert ?? null`）都会把
- * 本地 `revertState` 覆盖回 null —— 表现为「撤销后又恢复，需要重复好多次」。
+ * 这曾是一个错误修复：先前按「stage 只是暂存、commit 才持久化」的假设补了
+ * commit，结果撤销后消息立刻回来、界面退回发送态。实测与源码都表明假设是反的：
+ *
+ * - `stage`（packages/core/src/session/revert.ts）
+ *   → 把 `{messageID, snapshot, files}` 写进 `session.revert` 并回滚文件快照。
+ *     实测 stage 之后立刻 `GET /api/session/{id}`，`revert` 字段**已经有值**。
+ *     这就是「撤销态」，它本身就是持久化的。
+ * - `commit`（同文件，以及 projector.ts 的 RevertEvent.Committed 投影）
+ *   → **物理删除**边界 seq 及之后的所有消息与 inbox 项：
+ *       `delete from SessionMessage where seq >= boundary.seq`
+ *       `setSession(..., { revert: null })`   ← 撤销态被清空
+ *     实测 commit 后 `revert` 变成 null，且再用同一 messageID stage 会报
+ *     `MessageNotFoundError`（消息真的没了）。
+ * - `clear` → 清掉 `session.revert` 并恢复文件快照。
+ *
+ * 所以 v2 的「撤销」在协议层面就是 stage（可 continued 编辑 / redo），
+ * commit 是「确认丢弃这些消息」的破坏性动作，由服务端在用户真正发送下一条
+ * 消息时自行处理。前端绝不该在用户点「从此处撤销」时调 commit。
+ *
+ * 再次强调：调用 commit 的后果是「撤销后消息全部回来 + 撤销态消失」，
+ * 因为本地 revertState 的服务端依据被 `revert: null` 抹掉了，
+ * 任何 `setMessages(... { revertState: sessionInfo?.revert })` 都会清空它。
  */
 export async function nativeRevertMessage(
   serverId: string | undefined,
@@ -151,7 +166,6 @@ export async function nativeRevertMessage(
 ): Promise<ApiSession> {
   const client = getV2Client(serverId)
   await client.session.revert.stage({ sessionID: input.sessionID, messageID: input.messageID })
-  await client.session.revert.commit({ sessionID: input.sessionID })
   return adaptSession(await client.session.get({ sessionID: input.sessionID }))
 }
 

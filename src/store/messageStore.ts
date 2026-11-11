@@ -735,6 +735,8 @@ class MessageStore {
       historyCursor?: string
       directory?: string
       title?: string
+      /** 该 title 是否来自权威的 session.renamed 事件（写入后快照不再覆盖） */
+      titleAuthoritative?: boolean
       loadState?: SessionState['loadState']
       shareUrl?: string
       loadError?: MessageError
@@ -758,7 +760,12 @@ class MessageStore {
     // 用 in 判断：historyCursor 显式传 undefined 表示「已到最早一条」，必须清空旧游标
     if ('historyCursor' in options) state.historyCursor = options.historyCursor
     if (options.directory !== undefined) state.directory = options.directory
-    if (options.title !== undefined) state.title = options.title
+    if (options.title !== undefined) {
+      state.title = options.title
+      if (options.titleAuthoritative) state.titleAuthoritative = true
+    }
+    // 已标记权威时，后续快照/事件写入的 title 也不能把它降级为「非权威」
+    if (options.titleAuthoritative) state.titleAuthoritative = true
     if (options.loadState !== undefined) state.loadState = options.loadState
     if (options.loadError !== undefined) state.loadError = options.loadError
     if (options.shareUrl !== undefined) state.shareUrl = options.shareUrl
@@ -1312,7 +1319,21 @@ class MessageStore {
     state.hasMoreHistory = options?.hasMoreHistory ?? false
     state.historyCursor = options?.historyCursor
     state.directory = options?.directory ?? ''
-    if (options?.title !== undefined) state.title = options.title
+    /**
+     * 标题**不能**被空值或更旧的快照覆盖。
+     *
+     * 真实时序（实测事件流）：`session.created` 事件不带 title，新会话的
+     * `GET /session` 在自动命名完成前返回的就是空 title；而 `session.renamed`
+     * 比 `step.started` 更早到达，先一步把真标题写进 store。若这里再用快照的
+     * `''` 覆盖，顶栏标题就退回「新对话」，且此后没有任何事件会再写它 ——
+     * 正是「侧栏已更新、顶部标题还是旧的」。
+     *
+     * 同理，`getSession` 有 15s TTL 缓存，命中旧值时会带着旧标题回来，
+     * 也不该盖掉刚由 renamed 写入的新标题。
+     *
+     * 因此：快照标题为空时忽略；已被 renamed 定为权威时也不再被快照覆盖。
+     */
+    if (options?.title && !state.titleAuthoritative) state.title = options.title
     state.shareUrl = options?.shareUrl
     state.compactedAt = options?.compactedAt
     if (options?.compactionMarker !== undefined) state.compactionMarker = options.compactionMarker
@@ -1329,7 +1350,15 @@ class MessageStore {
     this.recordUserAnchorFromMessages(sessionId, options?.directory)
 
     // Revert 状态
-    if (options?.revertState?.messageID) {
+    //
+    // 三态语义（务必区分，否则「撤销后立刻恢复」会复发）：
+    //   - options.revertState === undefined → **本次不涉及**撤销态，保留本地值。
+    //     调用方拿不到会话详情、或详情来自撤销发生之前的请求时会走这里。
+    //   - 有 messageID → 用服务端权威回退点校正本地
+    //   - null → 服务端确认无撤销，清空本地
+    if (options?.revertState === undefined) {
+      // 保留本地 revertState，不做任何覆盖
+    } else if (options.revertState?.messageID) {
       const revertIndex = state.messages.findIndex(m => m.info.id === options.revertState!.messageID)
       if (revertIndex !== -1) {
         const revertedUserMessages = state.messages.slice(revertIndex).filter(isUserUIMessage)

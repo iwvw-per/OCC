@@ -1,10 +1,22 @@
-// nativeRevertMessage 必须 stage + commit 两段完成。
+// nativeRevertMessage 必须**只 stage、不 commit**。
 //
-// v2 的 revert 是两段式：stage 只是暂存回退点（服务端保持 pending），commit 才
-// 真正落库（GET /session 的 revert 字段才带值、广播 session.revert.committed）。
-// 只 stage 不 commit 会让本地乐观的 revertState 在服务端没有持久化对应物，
-// 任何以服务端为准的重拉都会把它覆盖回 null —— 正是「撤销后又恢复，需要重复
-// 好多次」的根因（官方对照见 opencode-mobile#751 / 官方 web/TUI 的 submit.ts）。
+// ## 为什么（2026-11-11 实测 + 官方源码，推翻了此前的错误假设）
+//
+// 曾按「stage 只是暂存、commit 才持久化」补过 commit，结果造成用户报障：
+// 点「从此处撤销」后消息立刻回来、界面退回发送态、无法编辑。
+//
+// 真实语义（packages/core/src/session/revert.ts + projector.ts）：
+//   - stage  → 把 {messageID, snapshot, files} 写入 session.revert，并回滚文件
+//              快照。**撤销态本身就是持久化的**：实测 stage 后 GET /api/session
+//              立刻能读到 revert 字段。
+//   - commit → 物理删除边界 seq 之后的全部消息：
+//                delete from SessionMessage where seq >= boundary.seq
+//                setSession(..., { revert: null })   ← 撤销态被清空
+//              实测 commit 后 revert 变 null，再 stage 同一 messageID 报
+//              MessageNotFoundError（消息真的被删了）。
+//   - clear  → 清掉 session.revert 并恢复文件快照。
+//
+// 所以 commit 是「确认丢弃这些消息」的破坏性动作，不该由「从此处撤销」触发。
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -26,7 +38,7 @@ vi.mock('./sdkV2', () => ({
 
 import { nativeRevertMessage, nativeUnrevertSession } from './v2NativeSession'
 
-describe('nativeRevertMessage (v2 stage + commit)', () => {
+describe('nativeRevertMessage（v2 只 stage）', () => {
   beforeEach(() => {
     stageMock.mockReset()
     commitMock.mockReset()
@@ -38,17 +50,20 @@ describe('nativeRevertMessage (v2 stage + commit)', () => {
     getMock.mockResolvedValue({ id: 'ses_1', revert: { messageID: 'm2' } })
   })
 
-  it('stages then commits the revert so it persists server-side', async () => {
+  it('只调用 stage，绝不调用 commit', async () => {
     await nativeRevertMessage('srv', { sessionID: 'ses_1', messageID: 'm2' })
 
     expect(stageMock).toHaveBeenCalledWith({ sessionID: 'ses_1', messageID: 'm2' })
-    // 关键：stage 之后必须 commit，否则回退一直 pending，刷新/重拉后被覆盖
-    expect(commitMock).toHaveBeenCalledWith({ sessionID: 'ses_1' })
-    // 之后 re-read 会话，返回给调用方的是 commit 后的权威快照
+    /**
+     * 关键回归：commit 会物理删除消息并把 revert 置 null，
+     * 表现为「撤销后立刻恢复发送状态、无法编辑」。
+     */
+    expect(commitMock).not.toHaveBeenCalled()
+    // stage 之后回读权威快照，返回给调用方用于校正 revert 点
     expect(getMock).toHaveBeenCalledWith({ sessionID: 'ses_1' })
   })
 
-  it('clear only calls revert.clear (undo of revert is one step)', async () => {
+  it('撤销已提交时（redo 到底）只调用 clear，不碰 stage/commit', async () => {
     getMock.mockResolvedValue({ id: 'ses_1' })
 
     await nativeUnrevertSession('srv', 'ses_1')

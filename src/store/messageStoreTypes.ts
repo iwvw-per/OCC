@@ -47,6 +47,13 @@ export interface SessionState {
   directory: string
   /** session 标题 */
   title?: string
+  /**
+   * 标题是否已由 `session.renamed` 权威事件写入。
+   *
+   * 为 true 时，HTTP 快照的 title 不再覆盖它 —— 快照可能来自 15s TTL 缓存，
+   * 或在新标题生成前就发出，带着空/旧标题晚到。详见 messageStore.setMessages。
+   */
+  titleAuthoritative?: boolean
   /** 分享链接 */
   shareUrl?: string
   /** 断线重连后是否需要重新全量拉取 */

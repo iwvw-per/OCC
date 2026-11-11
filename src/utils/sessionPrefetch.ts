@@ -62,7 +62,8 @@ export function prefetchSessionMessages(sessionId: string, directory?: string, s
       title: sessionInfo?.title,
       hasMoreHistory: page.hasMore,
       historyCursor: page.nextCursor,
-      revertState: sessionInfo?.revert ?? null,
+      // 拿不到会话详情时不覆盖本地撤销态（三态语义见 messageStore.setMessages）
+      ...(sessionInfo ? { revertState: sessionInfo.revert ?? null } : {}),
       shareUrl: sessionInfo?.share?.url,
     })
   })()

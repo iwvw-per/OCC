@@ -667,7 +667,17 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
              */
             hasMoreHistory: skeleton.nextCursor != null,
             historyCursor: skeleton.nextCursor,
-            revertState: sessionInfo?.revert ?? null,
+            /**
+             * 只有真正读到了会话详情才传达 revert 态。
+             *
+             * `sessionInfo` 可能是 null（请求失败）或来自一次**早于 stage 的**
+             * 请求（loadSession 里 sessionInfoPromise 与骨架并发，撤销刚发生时
+             * 它可能还没有 revert）。这时若传 `null`，setMessages 会认为
+             * 「服务端确认无撤销」而清掉本地刚建立的撤销态 —— 表现就是
+             * 「点了撤销、消息闪一下又全回来了」。传 undefined 表示「本次不涉及」，
+             * 保留本地状态。
+             */
+            ...(sessionInfo ? { revertState: sessionInfo.revert ?? null } : {}),
             shareUrl: sessionInfo?.share?.url,
             compactedAt: skeleton.compactedAt,
             compactionMarker: skeleton.compaction,
@@ -878,7 +888,8 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           directory: sessionInfo?.directory ?? dir ?? '',
           title: sessionInfo?.title,
           ...paging,
-          revertState: sessionInfo?.revert ?? null,
+          // 同上：拿不到会话详情时不覆盖本地撤销态
+          ...(sessionInfo ? { revertState: sessionInfo.revert ?? null } : {}),
           shareUrl: sessionInfo?.share?.url,
           compactedAt: page.compactedAt,
           compactionMarker: page.compaction,

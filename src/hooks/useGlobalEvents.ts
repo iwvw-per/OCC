@@ -1365,9 +1365,10 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             childSessionStore.registerChildSession(session, serverId)
           }
 
-          // 同步标题到 messageStore，让 Header 等依赖 messageStore 的组件实时更新
+          // 同步标题到 messageStore，让 Header 等依赖 messageStore 的组件实时更新。
+          // 这是服务端推来的 session.updated（含手动重命名），同为权威标题。
           if (session.title && messageStore.getSessionState(scopedId)) {
-            messageStore.updateSessionMetadata(scopedId, { title: session.title })
+            messageStore.updateSessionMetadata(scopedId, { title: session.title, titleAuthoritative: true })
           }
         },
 
@@ -1380,7 +1381,12 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           const patched = sessionListIndexStore.patchAll(serverId, sessionID, patch)
           activeSessionStore.setSessionMeta(scopedId, title, undefined)
           if (messageStore.getSessionState(scopedId)) {
-            messageStore.updateSessionMetadata(scopedId, { title })
+            /**
+             * 标记为权威：此后任何 HTTP 快照（可能来自 15s TTL 缓存、或在新标题
+             * 生成前就已发出）都不得再用空/旧标题覆盖它 —— 那正是「侧栏标题已经
+             * 更新、顶栏还是新对话」的原因，见 messageStore.setMessages。
+             */
+            messageStore.updateSessionMetadata(scopedId, { title, titleAuthoritative: true })
           }
           /**
            * 新会话的时序兜底：自动标题常在会话创建后立刻到达，此时该会话可能
