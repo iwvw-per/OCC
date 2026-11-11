@@ -93,7 +93,7 @@ jobs:
       # tauri-action 自动执行 beforeBuildCommand (npm run build) + cargo build，
       # 创建/更新 Release，并上传安装包与更新包的 .sig 签名。
       #
-      # ⚠️ uploadUpdaterJson 必须关掉：4 个平台任务并发写同一个 latest.json，
+      # ⚠️ includeUpdaterJson 必须关掉：4 个平台任务并发写同一个 latest.json，
       # action 内部是「删除旧资产 → 重新上传」，A 删掉后 B 拿着已失效的资产 ID
       # 再去删就是 404（tauri-action issue #1270，官方确认「并行构建下 latest.json
       # 上传必然偶发 404」）。更糟的是先写完的条目会被后写方覆盖 ——
@@ -116,7 +116,12 @@ jobs:
           releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, 'canary') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
-          uploadUpdaterJson: false
+          # ⚠️ 参数名必须是 includeUpdaterJson。
+          # tauri-action@v0 的输入名是 includeUpdaterJson / updaterJsonPreferNsis，
+          # 而 dev 分支已改名为 uploadUpdaterJson —— 两者不通用。写错名字时 action
+          # 会静默忽略该输入，并发写 latest.json 的竞态照旧存在（v2.0.69 实测：
+          # 设了 uploadUpdaterJson: false，latest.json 仍被各平台任务写出）。
+          includeUpdaterJson: false
   # ============================================
   # Android builds (arm64 + armv7 并行)
   # ============================================
@@ -274,7 +279,11 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     needs: [build-desktop]
-    if: ${{ always() && needs.build-desktop.result == 'success' }}
+    # ⚠️ 不能用 `needs.build-desktop.result == 'success'`：矩阵里任何一个平台失败
+    # （哪怕只是 latest.json 竞态）都会让本 job 整体 skipped，清单就停在残缺状态。
+    # 这里改成「只要跑到这一步就尝试生成」：脚本会逐个平台检查 .sig 是否存在，
+    # 缺哪个就跳过哪个，能拼出几个平台就写几个平台。
+    if: ${{ always() }}
     steps:
       - name: Build latest.json from release assets
         env:
