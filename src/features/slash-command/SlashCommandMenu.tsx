@@ -54,10 +54,22 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
       cmd => cmd.name.toLowerCase().includes(lowerQuery) || cmd.description?.toLowerCase().includes(lowerQuery),
     )
   }, [commands, isOpen, query])
+  /**
+   * 命令名列宽：按**当前过滤结果**里最长的命令自适应，不再截断。
+   *
+   * 旧实现有两个问题：
+   *   1. 上限写死 18ch（`Math.min(..., 18)`），而 `/open-code-review` 加前导 `/`
+   *      需要 18ch 以上，于是被截成 `/open-code-revie...` —— 用户根本分不清
+   *      是哪一条；
+   *   2. 用全量 `commands` 计算，过滤后列表变短时列宽也不会收窄。
+   *
+   * 这里改成按过滤后的列表计算，并设一个上限防止极端长名把描述挤没
+   * （超过上限才截断，正常命令都放得下）。
+   */
   const commandColumnWidth = useMemo(() => {
-    const maxCommandLength = commands.reduce((max, cmd) => Math.max(max, cmd.name.length + 1), 0)
-    return `${Math.min(Math.max(maxCommandLength + 1, 10), 18)}ch`
-  }, [commands])
+    const longest = filteredCommands.reduce((max, cmd) => Math.max(max, cmd.name.length + 1), 0)
+    return `${Math.min(Math.max(longest + 1, 8), 28)}ch`
+  }, [filteredCommands])
   const activeIndex = filteredCommands.length === 0 ? 0 : Math.min(selectedIndex, filteredCommands.length - 1)
 
   // 动态计算菜单最大高度，防止在小屏幕上被 header 遮挡
@@ -89,7 +101,14 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
       const ceiling = shadowEl ? shadowEl.getBoundingClientRect().bottom : 0
       // 可用空间 = 父容器顶部 - 阴影底边 - marginBottom(8px)
       const available = parentRect.top - ceiling - 8
-      if (available > 0 && available < 360) {
+      /**
+       * 只有真的「放不下」时才压高度。
+       *
+       * 旧阈值 360：可用空间 ≥360 就交回给 CSS 的默认上限（当时是 320），
+       * 等于无论如何都封在 320 左右。现在默认上限提到 520，阈值同步提到 520，
+       * 否则可用空间 400~520 之间会被错误地压到 400 出头。
+       */
+      if (available > 0 && available < 520) {
         setDynamicMaxHeight(available)
       } else {
         setDynamicMaxHeight(undefined)
@@ -221,7 +240,14 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
         bottom: '100%',
         left: 0,
         marginBottom: '8px',
-        maxHeight: dynamicMaxHeight ? `${dynamicMaxHeight}px` : 'min(320px, calc(100dvh - 10rem))',
+        /**
+         * 默认高度上限。
+         *
+         * 旧值 320px 只放得下 7 行左右，命令一多就要滚动；命令列表本身信息密度
+         * 很低（一行命令 + 一行描述），给到 520px 更接近「一眼看完」。
+         * `calc(100dvh - 10rem)` 仍然兜住矮屏（移动端键盘弹起时不会顶出视口）。
+         */
+        maxHeight: dynamicMaxHeight ? `${dynamicMaxHeight}px` : 'min(520px, calc(100dvh - 10rem))',
       }}
     >
       {/* Items List */}
@@ -245,9 +271,14 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
             onPointerEnter={() => setSelectedIndex(index)}
           >
             <span
-              className={`font-mono text-[length:var(--fs-base)] flex-shrink-0 truncate leading-5 ${
+              className={`font-mono text-[length:var(--fs-base)] flex-shrink-0 leading-5 whitespace-nowrap ${
                 index === activeIndex ? 'text-accent-main-100' : 'text-text-300'
               }`}
+              /**
+               * 统一列宽（不是 minWidth）：所有描述从同一列开始，视觉整齐。
+               * 宽度由「本次过滤结果里最长的命令名」算出，因此 /open-code-review
+               * 这种长名不会再被截成 `/open-code-revie...`。
+               */
               style={{ width: commandColumnWidth }}
             >
               /{cmd.name}

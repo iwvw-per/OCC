@@ -100,7 +100,8 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
       const ceiling = shadowEl ? shadowEl.getBoundingClientRect().bottom : 0
       // 可用空间 = 父容器顶部 - 阴影底边 - marginBottom(8px)
       const available = parentRect.top - ceiling - 8
-      if (available > 0 && available < 360) {
+      // 与 SlashCommandMenu 同口径：默认上限 520，放不下时才压高
+      if (available > 0 && available < 520) {
         setDynamicMaxHeight(available)
       } else {
         setDynamicMaxHeight(undefined)
@@ -368,7 +369,8 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
         bottom: '100%',
         left: 0,
         marginBottom: '8px',
-        maxHeight: dynamicMaxHeight ? `${dynamicMaxHeight}px` : 'min(320px, calc(100dvh - 10rem))',
+        // 与 SlashCommandMenu 保持一致（520px），避免切换 @ / 时高度跳变
+        maxHeight: dynamicMaxHeight ? `${dynamicMaxHeight}px` : 'min(520px, calc(100dvh - 10rem))',
       }}
     >
       {/* Items List */}
