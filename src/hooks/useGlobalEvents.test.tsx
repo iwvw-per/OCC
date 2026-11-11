@@ -153,6 +153,7 @@ vi.mock('../store', () => ({
     recordSessionUsage: vi.fn(),
     getSessionState: vi.fn(() => null),
     updateSessionMetadata: vi.fn(),
+    removeMessage: vi.fn(),
   },
   childSessionStore: {
     belongsToSession: childBelongsToSessionMock,
@@ -1380,5 +1381,48 @@ describe('session.renamed 标题同步', () => {
       expect(item?.title).toBe('自动生成的标题')
     })
     expect(getSessionMock).toHaveBeenCalledWith('ses_new', undefined, 'local')
+  })
+})
+
+describe('session.retry.scheduled 状态同步', () => {
+  let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+
+  beforeEach(() => {
+    callbacks = undefined
+  })
+
+  it('会话未加载进 messageStore 时，retry 状态仍要写入（否则界面停在上一轮 busy）', async () => {
+    /**
+     * 回归：旧实现有一行 `if (!messageStore.getSessionState(scopedId)) return`，
+     * 会话没在内存建档时（没打开过、或刚被 evict），重试提示与 retry 状态都不出现，
+     * 界面还停在上一轮 busy —— 用户报的「状态没有及时更新」。
+     *
+     * 这里 getSessionState 的 mock 恒返回 null，正好模拟该场景。
+     */
+    const { messageStore } = await import('../store')
+    vi.mocked(messageStore.getSessionState).mockReturnValue(undefined)
+
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    activeSessionStoreMock.updateStatus.mockClear()
+
+    callbacks!.onSessionRetryScheduled?.({
+      sessionID: 'ses_cold',
+      assistantMessageID: 'msg_1',
+      attempt: 2,
+      at: Date.now() + 5000,
+      error: { name: 'UnknownError', data: { message: 'ECONNRESET' } } as never,
+    })
+
+    // 关键：即使没有 message state，也必须落 retry 状态
+    expect(activeSessionStoreMock.updateStatus).toHaveBeenCalledWith(
+      'local::ses_cold',
+      expect.objectContaining({ type: 'retry', attempt: 2 }),
+    )
   })
 })

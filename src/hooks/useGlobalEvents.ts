@@ -1433,7 +1433,17 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         // 「卡死了、不流式」。重试成功后的 step.started 会把状态推回 busy。
         onSessionRetryScheduled: ({ sessionID, assistantMessageID, attempt, at, error }) => {
           const scopedId = scope(sessionID)
-          if (!messageStore.getSessionState(scopedId)) return
+          /**
+           * ⚠️ 不能因为「该会话没加载过消息」就丢弃这个事件。
+           *
+           * 旧实现有一行 `if (!messageStore.getSessionState(scopedId)) return`，
+           * 后果是：会话没在内存里建档时（没打开过、或刚被 evict），重试提示
+           * 与 retry 状态**一个都不出现**，而界面还停在上一轮的 busy ——
+           * 用户看到的就是「状态没有及时更新」。
+           *
+           * `removeMessage` 对不存在的会话本就是空操作（内部先判 state），
+           * 因此这里无需前置守卫。
+           */
           messageStore.removeMessage(scopedId, assistantMessageID)
           activeSessionStore.updateStatus(scopedId, {
             type: 'retry',
