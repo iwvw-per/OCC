@@ -1,5 +1,14 @@
 # Changelog
 
+## [v2.0.67] - 2026-11-11
+
+- perf(conn): **辅助请求统一走低优先级请求池**。新增 `utils/lowPriorityQueue`：并发上限 2、由 `requestIdleCallback` 驱动的辅助请求池。大纲补全 / 用量回填 / 重连后的 inbox 恢复 / seq 缺口元数据重拉统一入池，取代各自 setTimeout 魔法数调度；多服务器同时重连时不再叠加成几十个并发请求挤占首屏带宽（原实测峰值 29 个在途，骨架第 2 页被挤到 +2.5s）
+- perf(conn): **骨架能力探测后台预热**。`getSessions` 列表成功返回后用首个会话探测一次轻量骨架支持（limit=1、掐断响应体，内存+持久化两级缓存），新主机上「第一个会话打开」不再在首屏串行等待探测往返（约 1.1s/隧道）
+- perf(conn): **骨架路径会话运行态本地优先**。`loadSession` 判定「是否补偿最后一个运行轮」时先读与服务端同源的本地 statusMap（复合 key 直接命中），未命中才回源 `/session/active`，为骨架首屏省一个隧道往返；结果与旧实现语义一致（只采信本地正向证据）
+- fix(sync): **新对话自动生成的标题不同步，须刷新才显示**。`session.renamed` 到达时该会话常尚未写入任何侧栏索引桶，而 `patchAll` 只 patch 已存在条目 → 标题被静默丢弃。现在未命中时走低优先级池补拉一次完整会话元数据（带 directory）写回索引，与 seq-gap 修复同一模式
+- fix(chat): **撤销消息偶发无效、撤销后又恢复**。v2 的 revert 是 stage+commit 两段式，此前 `nativeRevertMessage` 只调 `stage` 从不调 `commit`（服务端保持 pending），任何以服务端为准的重拉（SSE force reload / 重连 / `setMessages` 的 `revertState: sessionInfo?.revert ?? null`）都会把本地撤销态覆盖回 null。现已补齐 `revert.commit`（对照官方 web/TUI 与 opencode-mobile#751）
+- test: 新增 `lowPriorityQueue`（并发/FIFO/吞错 6 例）、`session.renamed` 标题同步集成（2 例）、`v2NativeSessionRevert`（2 例）用例；全量 303 文件 2481 用例通过
+
 ## [v2.0.66] - 2026-11-09
 
 - fix(context): **圆环百分比长期偏低（「圆圈在但不涨」）**。根因是分母口径与服务端压缩判据不一致：服务端用 `limit.input || limit.context` 算窗口（`SessionCompaction.calculateCeiling`），而前端只读 `limit.context`。实测 models.dev 快照中同时声明两者的 1563 个模型里，`input/context < 0.9` 的有 789 个、`< 0.7` 的 335 个（最低 0.25）。现在 `ModelInfo` 增加 `inputLimit` 并透传 `limit.input`，统一走新模块 `utils/contextWindow.ts` 的 `effectiveContextWindow()`
