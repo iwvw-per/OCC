@@ -16,6 +16,9 @@ jobs:
   build-desktop:
     permissions:
       contents: write
+    # 兜底：正常情况下单平台构建 8~10 分钟。没有上限时，apt/网络类 hang 会让
+    # 任务空转到 GitHub 的 6 小时上限（实测卡在 apt 安装 50 分钟仍未结束）。
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -59,9 +62,25 @@ jobs:
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
+        timeout-minutes: 15
+        env:
+          # ⚠️ 必须非交互：只加 -y 不会自动回答 debconf 提问，某些依赖会卡在
+          # 「等待输入」并且永远不返回（实测 v2.0.69 连续两次卡死在该步骤，
+          # 分别在 50min / 25min 仍未完成，只能手动取消）。
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          # apt 的网络超时要显式设置：默认超时很长，镜像源抖动时表现为「静默卡住」，
+          # 而不是快速失败。给 15s 超时 + 3 次重试，卡住时尽快暴露。
+          sudo apt-get update \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - run: npm ci
 
