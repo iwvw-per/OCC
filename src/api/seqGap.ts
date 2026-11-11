@@ -9,18 +9,36 @@
 // 这让客户端可以判断「有没有漏事件」：
 //   seq === last + 1  → 连续，正常应用
 //   seq <= last       → 重复/乱序，丢弃
-//   seq >  last + 1   → 有缺口，该会话的数据不可信
+//   seq >  last + 1   → 中间有 seq 未被广播
 //
-// ## 实测约束（必须记住）
+// ## ⚠️ 跳号是**正常**的，不能据此丢弃事件（2026-11-11 实测修正）
 //
-// `GET /api/experimental/session/{id}/log?after=N` **不回放历史事件**：
-// 实测 `after=0` / `after=4790` 都只返回一条 `{type:"log.synced", seq:当前水位}`，
-// 没有任何历史事件。所以缺口**不能靠游标补发**，只能：
-//   1. 用 seq 检测出「缺了」；
-//   2. 用 HTTP 快照（重新拉该会话的消息/状态）修复。
+// 原实现把跳号当成「事件丢失」，于是**丢弃当前事件且不推进水位**，导致后续
+// 每一条事件都继续被判为跳号、继续被丢弃 —— 一次跳号会让该会话此后的实时
+// 更新全部失效，直到整页刷新。
 //
-// 这与设计文档 §1.6 的结论一致。区别在于：文档说「不可重放所以只能全量重拉」，
-// 而有了 seq 可以做到**只重拉真正缺口的会话**，而不是一律全量。
+// 实测（本机 127.0.0.1:4096，opencode 2.2.0，连抓三份真实事件流）：
+//
+//   新会话 seq：1,2,3,4,[5 缺失],6,7,…,14   ← 缺 5，`session.renamed` 在 6
+//   新会话 seq：0,…,12,[13 缺失],14          ← 缺 13，`session.renamed` 在 14
+//
+// 缺的那些 seq 是「分配了序号但**不向 SSE 客户端广播**」的 durable 事件
+// （典型是 `session.usage.recorded`，即生成标题那一次的内部用量）。因此
+// 跳号**不代表客户端漏了什么**，只代表服务端存在不可见的内部事件。
+//
+// 后果（用户实际报障）：`session.renamed` 被丢 → 标题不更新；
+// `session.execution.succeeded` 被丢 → 永不转 idle → 一直显示「进行中」；
+// 两者都只有刷新后（走 HTTP 快照）才恢复。
+//
+// 所以现在的策略是：
+//   - 跳号事件**照常应用**，并把水位推进到收到的 seq（避免永久卡死）；
+//   - 同时仍然上报缺口，让上层做一次 HTTP 快照对账兜底（真正的漏事件，
+//     如断连/背压，仍能被这条路径修复）。
+//
+// `GET /api/experimental/session/{id}/log?after=N` 验证过**不回放历史事件**：
+// 实测 `after=0` / `after=11` / `after=12` 都只返回一条
+// `{type:"log.synced", seq:当前水位}`，没有任何历史事件。所以缺口确实无法
+// 游标补发，只能靠快照对账。
 //
 // ## 为什么要按 aggregate 而不是全局
 //
@@ -35,7 +53,13 @@ export type SeqVerdict =
   | { kind: 'apply' }
   /** 重复或乱序（seq 不大于已知值）：丢弃，避免重复应用 */
   | { kind: 'duplicate' }
-  /** 跳号：中间有事件丢失，该 aggregate 的数据不可信，需要快照重拉 */
+  /**
+   * 中间有 seq 未被广播。
+   *
+   * ⚠️ 与旧语义不同：这**不再意味着「事件丢失、当前事件不可信」**。缺的 seq
+   * 通常是服务端内部不广播的事件，当前事件本身是完整可用的（见文件头实测）。
+   * 调用方应当**照常应用当前事件**，同时可选地做一次快照对账兜底。
+   */
   | { kind: 'gap'; expected: number; received: number }
 
 /**
@@ -83,9 +107,9 @@ export class SeqGapTracker {
   /**
    * 判定一条事件该怎么处理，并在「可应用」时推进水位。
    *
-   * 注意：**只有 apply 才推进**。duplicate 不推进（否则乱序的旧事件会把水位
-   * 拉回去）；gap 也不推进（保持旧水位，这样后续补拉后的第一条新事件仍能被
-   * 判为 gap，直到真正重拉完成）。
+   * 注意：**apply 与 gap 都推进水位**。gap 不推进会让该会话的所有后续事件
+   * 永久被判为缺口并丢弃（一次跳号 = 此后实时更新全废），实测跳号是服务端
+   * 正常行为，因此必须推进。duplicate 不推进（否则乱序的旧事件会把水位拉回去）。
    */
   accept(serverId: string, aggregateID: string, seq: number): SeqVerdict {
     if (!aggregateID || !Number.isFinite(seq)) return { kind: 'apply' }
@@ -106,9 +130,11 @@ export class SeqGapTracker {
       return { kind: 'apply' }
     }
 
-    // 跳号：保持旧水位，让调用方去重拉快照。
-    // 重拉完成后调用 reset(aggregate) 清掉记录，下一条事件重新从「首次见到」开始。
-    return { kind: 'gap', expected: last + 1, received: seq }
+    // 跳号：缺的 seq 是服务端内部不广播的事件，当前事件仍然可信。
+    // 推进水位，避免后续事件被连环误判；同时上报缺口让上层做快照对账。
+    const expected = last + 1
+    this.remember(key, seq)
+    return { kind: 'gap', expected, received: seq }
   }
 
   /**

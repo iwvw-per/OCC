@@ -310,7 +310,16 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
       const messageID = str(data.assistantMessageID) ?? ''
       if (!messageID) return null
       const model = rec(data.model)
-      const time = num(data.time) ?? num(e.created) ?? 0
+      /**
+       * 开始时刻取 `data.started`（服务端记录的真实步开始时间）。
+       *
+       * ⚠️ 不要用事件级 `e.created`：实测（本机 4096，4 份真实事件流）
+       * `event.created - data.started` 稳定在 **1.3~2.7 秒**，那是事件入队/
+       * 编码的开销，不是模型开始的时间。用它当 created 会让 TTFT 与总耗时
+       * 系统性偏小（分母被推迟），且与历史快照路径（v2/message.ts 读 part 级
+       * `time.created`）不一致 —— 刷新前后同一条消息的耗时数字会跳变。
+       */
+      const time = num(data.started) ?? num(data.time) ?? num(e.created) ?? 0
       return globalEvent(directory, EventTypes.MESSAGE_UPDATED, {
         info: {
           id: messageID,

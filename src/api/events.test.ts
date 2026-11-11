@@ -264,11 +264,19 @@ describe('seq 缺口检测（durable 事件序号）', () => {
     return { type, data, location: { directory: '/repo' }, created: 1, durable: { aggregateID, seq, version: 1 } }
   }
 
-  it('跳号的事件被丢弃，且触发一次缺口回调', async () => {
+  it('跳号的事件仍被应用，同时触发一次跳号回调', async () => {
     /**
-     * 场景：断连/背压期间丢了 seq 11–14，重连后直接收到 15。
-     * 该会话的数据已不可信，必须丢弃这条事件并触发快照重拉，
-     * 否则会把「缺了一段上下文」的状态写进 store。
+     * ⚠️ 语义修正（2026-11-11 真实故障）：跳号**不代表客户端漏了事件**。
+     * 官方服务端会给「分配了 seq 但不广播」的内部 durable 事件占号
+     * （典型是生成标题的 `session.usage.recorded`，见 opencode 源码
+     * packages/server/src/event-feed.ts 的 isOpenCodeEvent 过滤 +
+     * packages/core/src/session/title.ts 的 UsageRecorded 发布），
+     * 于是「每轮自动命名」都会产生一次跳号。
+     *
+     * 旧实现在跳号时丢弃当前事件且不推进水位，导致该会话此后所有事件
+     * 被连环误判并丢弃 —— 标题不更新、完成后仍显示「进行中」，刷新才好。
+     *
+     * 新契约：跳号事件照常应用，仅额外触发一次对账回调。
      */
     subscribeMock.mockReturnValue(
       source([
@@ -290,8 +298,8 @@ describe('seq 缺口检测（durable 事件序号）', () => {
 
     await vi.waitFor(() => expect(gaps.length).toBe(1))
     expect(gaps[0]).toEqual(['local', 'ses-1'])
-    // 只有 seq=10 那条被应用；跳号的 15 被丢弃
-    expect(applied).toBe(1)
+    // 两条都必须被应用：跳号的 15 不能再丢
+    await vi.waitFor(() => expect(applied).toBe(2))
     offGap()
     unsubscribe()
   })
@@ -344,7 +352,7 @@ describe('seq 缺口检测（durable 事件序号）', () => {
   it('ack 之后该会话重新从「首次见到」开始，不再反复报缺口', async () => {
     /**
      * 缺口修复（快照重拉）完成后必须 ack，否则后续每条事件都会被判为缺口，
-     * 变成无限重拉。
+     * 变成无限重拉。跳号事件本身现在照常应用（见上面的语义修正）。
      */
     subscribeMock.mockReturnValue(
       source([
@@ -365,7 +373,8 @@ describe('seq 缺口检测（durable 事件序号）', () => {
     const unsubscribe = subscribeToEvents({ onSessionStatus: () => applied++ })
 
     await vi.waitFor(() => expect(gaps.length).toBe(1))
-    expect(applied).toBe(1)
+    // 跳号那条也应用；唯一一条连续事件同样应用
+    await vi.waitFor(() => expect(applied).toBe(2))
     offGap()
     unsubscribe()
   })
@@ -387,8 +396,8 @@ describe('seq 缺口检测（durable 事件序号）', () => {
     let applied = 0
     const unsubscribe = subscribeToEvents({ onSessionStatus: () => applied++ })
 
-    // ses-1 的 seq=1 与 ses-2 的 seq=1 都应被应用；中间的 gap 被丢弃
-    await vi.waitFor(() => expect(applied).toBe(2))
+    // 三条都应被应用（跳号也已不再丢弃事件）
+    await vi.waitFor(() => expect(applied).toBe(3))
     offGap()
     unsubscribe()
   })

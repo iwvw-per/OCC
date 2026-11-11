@@ -50,12 +50,20 @@ describe('SeqGapTracker', () => {
     expect(t.getLastSeq('local', 'ses_1')).toBe(11)
   })
 
-  it('跳号判为 gap，并报告期望值与实际值', () => {
+  it('跳号判为 gap，并报告期望值与实际值，但水位仍然推进', () => {
     const t = new SeqGapTracker()
     t.accept('local', 'ses_1', 10)
     expect(t.accept('local', 'ses_1', 15)).toEqual({ kind: 'gap', expected: 11, received: 15 })
-    // gap 不推进水位：后续事件仍会被判 gap，直到重拉后 reset
-    expect(t.getLastSeq('local', 'ses_1')).toBe(10)
+    /**
+     * 关键：跳号必须推进水位。
+     *
+     * 实测服务端会给内部不广播的事件分配 seq（生成标题的 usage.recorded），
+     * 若跳号不推进，之后每一条事件都会被连环判为跳号并丢弃 —— 表现为标题不
+     * 更新、完成后仍显示进行中，只有刷新才好。见 seqGap.ts 文件头实测记录。
+     */
+    expect(t.getLastSeq('local', 'ses_1')).toBe(15)
+    // 紧接着的连续事件应正常应用，而不是继续判 gap
+    expect(t.accept('local', 'ses_1', 16)).toEqual({ kind: 'apply' })
   })
 
   it('seq 是 per-aggregate 的：不同会话互不干扰', () => {
@@ -92,7 +100,7 @@ describe('SeqGapTracker', () => {
 
     // seed 更小的值不会把水位拉低
     t.seed('local', 'ses_seeded', 50)
-    expect(t.getLastSeq('local', 'ses_seeded')).toBe(101)
+    expect(t.getLastSeq('local', 'ses_seeded')).toBe(105)
   })
 
   it('reset 之后重新从「首次见到」开始', () => {

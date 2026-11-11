@@ -91,6 +91,34 @@ describe('v2 event → GlobalEvent', () => {
     expect(info?.agent).toBe('build')
   })
 
+  it('step.started 用 data.started 作为 created（不是事件级 created）', () => {
+    /**
+     * 实测（本机 4096，4 份真实事件流）：`event.created - data.started` 稳定在
+     * 1.3~2.7 秒，是事件入队/编码开销，不是模型开始时间。若用它当 created，
+     * TTFT 与耗时会被系统性算小，且刷新后（快照路径读 part 级 time.created）
+     * 同一条消息的数字会跳变。
+     */
+    const p = payloadOf({
+      type: 'session.step.started',
+      created: 1792863274494, // 事件入队时刻（偏晚 ~2s）
+      data: { sessionID: 's', assistantMessageID: 'm', started: 1792863272000 },
+      location: { directory: '/w' },
+    })
+    const info = p?.properties.info as { time: { created: number } }
+    expect(info?.time.created).toBe(1792863272000)
+  })
+
+  it('step.started 缺 started 时回落到事件 created（老服务端兼容）', () => {
+    const p = payloadOf({
+      type: 'session.step.started',
+      created: 1792863274494,
+      data: { sessionID: 's', assistantMessageID: 'm' },
+      location: { directory: '/w' },
+    })
+    const info = p?.properties.info as { time: { created: number } }
+    expect(info?.time.created).toBe(1792863274494)
+  })
+
   it('maps step.streamed to MESSAGE_UPDATED carrying time.streamed', () => {
     /**
      * 官方 tok/s 的分母是 `streamed - created`（opencode TUI 的

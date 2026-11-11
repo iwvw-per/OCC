@@ -664,10 +664,11 @@ export type SeqGapHandler = (serverId: string, aggregateID: string) => void
 const seqGapHandlers = new Set<SeqGapHandler>()
 
 /**
- * 订阅「检测到 seq 缺口」事件。
+ * 订阅「检测到 seq 跳号」事件。
  *
- * 上层（useGlobalEvents）收到后应重拉该会话的快照，然后调用
- * `ackSeqGap(serverId, aggregateID)` 表示已修复 —— 否则后续事件会持续被判为缺口。
+ * ⚠️ 跳号不再意味着事件丢失（见 api/seqGap.ts 文件头）。上层收到后只需做一次
+ * 轻量元数据对账，然后调用 `ackSeqGap(serverId, aggregateID)` 收尾。
+ * **不要**因此把会话缓存作废或强制重载 —— 每轮自动命名都会产生跳号。
  */
 export function onSeqGap(handler: SeqGapHandler): () => void {
   seqGapHandlers.add(handler)
@@ -675,10 +676,11 @@ export function onSeqGap(handler: SeqGapHandler): () => void {
 }
 
 /**
- * 声明某会话的缺口已被修复（快照已重拉）。
+ * 声明某会话的跳号已处理完毕。
  *
- * 必须调用：重拉拿到的是权威快照，之后的事件无论 seq 是多少都应正常应用，
- * 否则会一直卡在缺口判定上反复重拉。
+ * 调用后该会话的 seq 水位被清空，下一条事件按「首次见到」放行。
+ * 注意水位在 accept 里已经推进过，这里主要用于重置（例如快照对账后要求
+ * 重新建立基线）。
  */
 export function ackSeqGap(serverId: string, aggregateID: string): void {
   seqTrackers.get(serverId)?.reset(serverId, aggregateID)
@@ -692,10 +694,18 @@ export function seedSeq(serverId: string, aggregateID: string, seq: number): voi
 }
 
 /**
- * 检查事件是否构成缺口；构成则通知订阅者并返回 true（调用方应丢弃该事件）。
+ * 检查事件是否构成 seq 跳号；构成则通知订阅者做快照对账，但**仍然应用该事件**。
  *
- * 丢弃而不是先应用再修复：缺口期间的数据本来就不可信，先写进去再被快照覆盖
- * 会让 UI 闪一下错的内容。
+ * ⚠️ 旧实现跳号时 return true（丢弃该事件），且水位不推进 —— 于是该会话此后
+ * 每一条事件都被连环判为跳号、全部丢弃。而实测证明跳号是服务端正常行为
+ * （缺的 seq 是内部不广播的事件，如生成标题的用量记录），当前事件本身是完整的。
+ * 丢弃它会直接造成「标题不更新」「完成后仍显示进行中」等只有刷新才好的故障，
+ * 详见 seqGap.ts 文件头的实测记录。
+ *
+ * 现在的语义：跳号 = 「可能有事件没广播」，照常应用当前事件，另外让上层做一次
+ * HTTP 快照对账兜底（覆盖断连/背压这类真的丢事件）。
+ *
+ * @returns 恒为 false —— 任何事件都不再被传输层丢弃
  */
 function checkSeqGap(conn: ServerConnection, raw: unknown): boolean {
   const durable = durableOf(raw)
@@ -706,7 +716,7 @@ function checkSeqGap(conn: ServerConnection, raw: unknown): boolean {
 
   if (import.meta.env.DEV) {
     logger.warn(
-      `[SSE] seq gap on ${conn.serverId}/${durable.aggregateID}: expected ${verdict.expected}, got ${verdict.received}`,
+      `[SSE] seq jump on ${conn.serverId}/${durable.aggregateID}: expected ${verdict.expected}, got ${verdict.received} (applied anyway)`,
     )
   }
   seqGapHandlers.forEach(fn => {
@@ -716,7 +726,8 @@ function checkSeqGap(conn: ServerConnection, raw: unknown): boolean {
       // 观察者异常不能打断事件流
     }
   })
-  return true
+  // 事件照常应用：跳号不代表当前事件不可信
+  return false
 }
 
 function broadcastEvent(conn: ServerConnection, globalEvent: GlobalEvent) {

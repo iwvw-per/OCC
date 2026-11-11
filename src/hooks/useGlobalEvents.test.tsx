@@ -1201,10 +1201,10 @@ describe('useGlobalEvents', () => {
   })
 })
 
-describe('seq 缺口批量处理（节流）', () => {
-  it('同一窗口内的多个缺口只触发一次批量处理，且按会话去重', async () => {
+describe('seq 跳号批量处理（节流）', () => {
+  it('同一窗口内的多个跳号只触发一次批量处理，且按会话去重', async () => {
     /**
-     * 一次断连/背压恢复后，同一台服务器上可能有多个会话同时报缺口。
+     * 同一次重连恢复后，同一台服务器上可能有多个会话同时报跳号。
      * 逐个立即重拉会在隧道上打出并发风暴（实测经网关单次往返约 1.1s）。
      */
     vi.useFakeTimers()
@@ -1217,8 +1217,9 @@ describe('seq 缺口批量处理（节流）', () => {
 
       ackSeqGapMock.mockClear()
       ;(messageStore.markSessionStale as ReturnType<typeof vi.fn>).mockClear()
+      getSessionMock.mockClear()
 
-      // 三个会话同时报缺口（其中 ses_a 报两次，应去重）
+      // 三个会话同时报跳号（其中 ses_a 报两次，应去重）
       handler!('local', 'ses_a')
       handler!('local', 'ses_b')
       handler!('local', 'ses_a')
@@ -1229,11 +1230,20 @@ describe('seq 缺口批量处理（节流）', () => {
 
       vi.advanceTimersByTime(400)
 
-      // 三个会话各 ack 一次（去重后）
-      expect(ackSeqGapMock).toHaveBeenCalledTimes(3)
-      const acked = ackSeqGapMock.mock.calls.map(c => c[1]).sort()
-      expect(acked).toEqual(['ses_a', 'ses_b', 'ses_c'])
-      expect(messageStore.markSessionStale).toHaveBeenCalledTimes(3)
+      // 跳号处理不应再 ack（reset 水位会让重复旧事件被二次应用）。
+      // 去重语义改由「元数据只补拉一次」体现。
+      expect(ackSeqGapMock).not.toHaveBeenCalled()
+      /**
+       * 跳号**不再**把整个会话缓存作废：实测跳号是服务端正常行为（缺的 seq 是
+       * 内部不广播的事件，如生成标题的用法记录），若每次跳号都标 stale /
+       * 强制重载，则每轮自动命名都会触发一次整会话重拉。
+       */
+      expect(messageStore.markSessionStale).not.toHaveBeenCalled()
+
+      // 三个会话各补拉一次元数据（轻量对账）
+      await vi.advanceTimersByTimeAsync(0)
+      const refetched = getSessionMock.mock.calls.map(c => c[0]).sort()
+      expect(refetched).toEqual(['ses_a', 'ses_b', 'ses_c'])
     } finally {
       vi.useRealTimers()
     }
@@ -1258,16 +1268,20 @@ describe('seq 缺口批量处理（节流）', () => {
     }
   })
 
-  it('侧栏里未打开的会话报缺口时，也会重拉元数据（否则只有 F5 才恢复）', async () => {
+  it('侧栏里未打开的会话报跳号时，也会重拉元数据（否则只有 F5 才恢复）', async () => {
     /**
-     * 回归：缺口修复原先只通知「打开着该会话的 pane」，没有 pane 时什么都不做。
-     * 而缺口最常发生在侧栏里有、但没打开的会话上 —— 它们照样在收事件，丢掉的
-     * 事件却永远补不回来：标题与最后回复停在断连那一刻，只有刷新页面才恢复。
+     * 回归：跳号修复原先只通知「打开着该会话的 pane」，没有 pane 时什么都不做。
+     * 而跳号最常发生在侧栏里有、但没打开的会话上 —— 它们照样在收事件，漏掉的
+     * 元数据却永远补不回来：标题停在旧值，只有刷新页面才恢复。
+     *
+     * 注意：跳号**不再**标 stale / 强制重载（实测跳号是服务端正常行为，见
+     * api/seqGap.ts 文件头），只做轻量元数据对账。
      */
     vi.useFakeTimers()
     try {
       const { messageStore } = await import('../store')
       getSessionMock.mockClear()
+      ;(messageStore.markSessionStale as ReturnType<typeof vi.fn>).mockClear()
       renderHook(() => useGlobalEvents())
 
       const handler = [...seqGapHandlers][0]
@@ -1278,13 +1292,18 @@ describe('seq 缺口批量处理（节流）', () => {
 
       handler!('local', 'ses_unopened')
       vi.advanceTimersByTime(400)
-      // 缺口窗口已触发，元数据重拉已入池（setTimeout(0) 泵）：推进一次让任务实际运行
+      // 跳号窗口已触发，元数据重拉已入池（setTimeout(0) 泵）：推进一次让任务实际运行
       await vi.advanceTimersByTimeAsync(0)
 
       // 必须去拉元数据，才能把新标题写回列表索引
       expect(getSessionMock).toHaveBeenCalledWith('ses_unopened', undefined, 'local')
-      expect(messageStore.markSessionStale).toHaveBeenCalled()
-      expect(ackSeqGapMock).toHaveBeenCalledWith('local', 'ses_unopened')
+      // 跳号不应把整个会话缓存作废（否则每次自动命名都会触发一次全量重拉）
+      expect(messageStore.markSessionStale).not.toHaveBeenCalled()
+      /**
+       * 也不能 ack（reset 水位）：跳号已在 accept 里推进过水位，reset 会让随后
+       * 到达的重复/乱序旧事件被当成首次见到而二次应用。
+       */
+      expect(ackSeqGapMock).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

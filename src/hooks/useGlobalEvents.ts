@@ -24,7 +24,7 @@ import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { contextWindowKey, looksLikeContextOverflow, recordContextOverflow } from '../utils/contextWindowObservation'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
 import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions, invalidateSessionMetaCache } from '../api'
-import { onSeqGap, ackSeqGap } from '../api/events'
+import { onSeqGap } from '../api/events'
 import { reportSessionViewed } from '../api/sessionView'
 import { recoverPendingInbox } from '../api/inboxRecovery'
 import { backfillSessionUsage } from '../api/contextBackfill'
@@ -1793,28 +1793,21 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
     )
 
     /**
-     * seq 缺口修复。
+     * seq 跳号处理（带节流与合并）。
      *
-     * 传输层只负责「发现丢了」（见 api/seqGap.ts），这里负责「怎么修」：
-     * 把该会话标记为 stale 并通知 pane 重拉快照，然后 ack 掉缺口。
+     * ⚠️ 语义已于 2026-11-11 修正：跳号**不再代表客户端漏了事件**。实测服务端
+     * 会给内部不广播的事件分配 seq（典型是生成标题的 `session.usage.recorded`），
+     * 于是「每轮自动命名」都会产生一次跳号。见 api/seqGap.ts 文件头的实测记录。
      *
-     * 为什么只能重拉快照：实测 `GET /session/{id}/log?after=N` 不回放历史事件
-     * （`after=0` 也只返回当前水位），服务端没有游标续传能力。
+     * 因此这里**不能**再做「缓存作废 + 强制重载」这类重动作：那会让每次自动
+     * 命名都触发一遍整会话重拉。真正的丢事件（断连 / 背压）由 onReconnected 与
+     * onBackpressure 各自的对账覆盖，不依赖这条路径。
      *
-     * 为什么 ack 必须在这里做：ack 之后该会话的 seq 记录被清空，下一条事件按
-     * 「首次见到」放行。若忘记 ack，会一直卡在缺口判定上反复重拉。
-     */
-    /**
-     * seq 缺口修复（带节流与合并）。
+     * 保留的动作只有一个轻量元数据对账：一次带 TTL 缓存的 GET，把标题 / 目录
+     * 这类列表元数据校正到服务端权威值。它同时兜住「确实漏了 renamed」的情况。
      *
-     * 为什么需要节流：一次断连/背压恢复后，同一台服务器上**多个会话**可能同时
-     * 报缺口。每个都立即触发一次 force 重载，就会在隧道上打出一波并发请求
-     * （实测经网关单次往返约 1.1s，几个大会话足以把后续请求全拖慢）。
-     *
-     * 策略：
-     *   - 按 serverId 合并：一个窗口内的所有缺口只触发一次「批量处理」；
-     *   - 窗口 300ms：足够吸收一次重连风暴，又不会让用户明显等待；
-     *   - 同一会话在窗口内只处理一次（Set 去重）。
+     * 为什么需要节流：同一次重连后可能有多个会话同时报跳号。300ms 窗口足够
+     * 吸收一波风暴，又不会让用户明显等待。
      */
     const pendingGaps = new Map<string, Set<string>>()
     let gapFlushTimer: ReturnType<typeof setTimeout> | null = null
@@ -1826,41 +1819,33 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
       for (const [serverId, aggregateIDs] of batches) {
         for (const aggregateID of aggregateIDs) {
           const scopedId = makeSessionKey(serverId, aggregateID)
-          messageStore.markSessionStale(scopedId)
-          // 通知打开着该会话的 pane：它的 onReconnected 会做 force 重载。
-          // 复用同一回调是刻意的 —— 对 pane 而言「数据不可信需要重拉」和
-          // 「断线重连」是同一件事，没必要再造一套。
-          let repaired = false
-          for (const consumer of sessionConsumers.values()) {
-            if (consumer.sessionId !== scopedId) continue
-            consumer.callbacks.onReconnected?.('network', serverId)
-            repaired = true
-          }
           /**
-           * 没有 pane 打开该会话时，上面那条路什么都不做 —— 而缺口恰恰最常发生
-           * 在「侧栏里有、但没打开」的会话上（它们同样在收事件）。此时被丢弃的
-           * 事件永远补不回来：标题、最后回复停在断连那一刻，只有刷新页面才恢复。
+           * 只做元数据对账，不标 stale、不强制重载。
            *
-           * 这里补一次元数据重拉，把结果写回列表索引与 session meta。只取会话
-           * 元数据（一个轻量 GET，带 TTL 缓存），不拉消息，避免为侧栏里几十个
-           * 会话打出请求风暴。
+           * 某些真实漏事件的场景（长期断连后重连）里，pane 的消息内容由
+           * onReconnected 的 force 重载负责；这里只补列表元数据，避免为侧栏里
+           * 几十个会话打出请求风暴。
+           *
+           * ⚠️ 这里也**不能**调用 `ackSeqGap` 重置水位。旧语义下跳号不推进水位，
+           * 必须靠 ack→reset 才能让后续事件重新放行；现在 `accept` 在跳号时已经
+           * 推进过水位（见 api/seqGap.ts），reset 反而会把水位清空，使随后到达的
+           * 重复/乱序旧事件被当成「首次见到」而**二次应用**（重复消息、重复通知）。
            */
-          if (!repaired) {
-            // B1：一次重连可能让多台服务器、几十个会话同时报缺口，元数据重拉
-            // 虽轻（带 TTL 缓存），堆叠起来同样会打满连接额度——交给池子逐个消化。
-            enqueueLowPriority(() => {
-              void getSession(aggregateID, undefined, serverId)
-                .then(session => {
-                  if (!session?.id) return
-                  sessionListIndexStore.applySessionChanged(serverId, session)
-                  activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
-                })
-                .catch(() => {
-                  // 会话可能已被删除；拿不到就保持现状，不能影响其它缺口修复
-                })
-            })
-          }
-          ackSeqGap(serverId, aggregateID)
+          enqueueLowPriority(() => {
+            void getSession(aggregateID, undefined, serverId)
+              .then(session => {
+                if (!session?.id) return
+                sessionListIndexStore.applySessionChanged(serverId, session)
+                activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
+                // 打开着的会话同步更新消息头里的标题，无需等下一次整体重拉
+                if (session.title && messageStore.getSessionState(scopedId)) {
+                  messageStore.updateSessionMetadata(scopedId, { title: session.title })
+                }
+              })
+              .catch(() => {
+                // 会话可能已被删除；拿不到就保持现状，不能影响其它对账
+              })
+          })
         }
       }
     }
