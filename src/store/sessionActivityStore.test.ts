@@ -78,6 +78,34 @@ describe('sessionActivityStore', () => {
     expect(sorted.map(s => s.id)).toEqual(['b', 'c', 'a'])
   })
 
+  it('sorts by time.idle before time.updated (multi-device consistency)', () => {
+    /**
+     * 用户要求「多端顺序完全一致」。
+     *
+     * `time.updated` 会被 assistant 的每次流式输出持续抬高，两端在不同时刻
+     * 拉到就得到不同数值 → 同一批会话在两端排出不同顺序。`time.idle` 是
+     * 一轮结束的权威时间，一轮内不变，因此两端读到同一个值。
+     *
+     * 这里构造一个典型分歧：A 的 updated 更晚（还在流式），但 idle 更早；
+     * B 的 updated 更早，但 idle 更晚。按 idle 排 B 应当在前。
+     */
+    const a = { ...makeSession('a', 100), time: { created: 1, updated: 900, idle: 100 } }
+    const b = { ...makeSession('b', 200), time: { created: 1, updated: 500, idle: 800 } }
+
+    const sorted = sortSessionsByAnchor([a, b])
+
+    // 按 updated 会得到 [a, b]；按 idle 必须是 [b, a]
+    expect(sorted.map(s => s.id)).toEqual(['b', 'a'])
+  })
+
+  it('falls back to time.updated when idle is missing (never ran a full turn)', () => {
+    const a = { ...makeSession('a', 100), time: { created: 1, updated: 100 } }
+    const b = { ...makeSession('b', 200), time: { created: 1, updated: 200 } }
+
+    const sorted = sortSessionsByAnchor([a, b])
+    expect(sorted.map(s => s.id)).toEqual(['b', 'a'])
+  })
+
   it('uses a stable id tie-break for equal anchors', () => {
     const sorted = sortSessionsByAnchor([makeSession('c', 5), makeSession('a', 5), makeSession('b', 5)])
     expect(sorted.map(s => s.id)).toEqual(['a', 'b', 'c'])

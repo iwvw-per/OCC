@@ -624,16 +624,16 @@ class ActiveSessionStore {
    * 服务端不一定每次都补 session.status，因此消息/工具事件才是更常见的佐证。
    */
   touchSession(sessionId: string) {
-    if (this.serverBusySessions.has(sessionId)) return
-    const current = this.state.statusMap[sessionId]
-    if (!current) return
     /**
-     * 重试结束、真的开始产出了 → 把 retry 推回 busy。
+     * ⚠️ retry → busy 的收口必须在「已有服务端佐证就早退」之前。
      *
-     * v2 的重试是「先 retry.scheduled，成功后再 step.started」。若不在这里收口，
-     * 界面会一直停在「正在重试」——即便内容已经在正常流式输出。
+     * 该会话的 retry 状态是由 `updateStatus({type:'retry'})` 写入的，而那条
+     * 路径会 markEvidence（加进 serverBusySessions）。若把早退放到前面，这里
+     * 每次都在第一行返回，下面的推回分支永远执行不到 —— 表现为
+     * 「重试早成功了、内容都在输出，『重试中』卡片一直挂着不消失」。
      */
-    if (current.type === 'retry') {
+    const current = this.state.statusMap[sessionId]
+    if (current?.type === 'retry') {
       this.state = {
         ...this.state,
         statusMap: { ...this.state.statusMap, [sessionId]: { type: 'busy' } },
@@ -642,6 +642,8 @@ class ActiveSessionStore {
       this.notify()
       return
     }
+    if (this.serverBusySessions.has(sessionId)) return
+    if (!current) return
     this.markEvidence(sessionId)
     this.notify()
   }

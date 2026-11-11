@@ -50,6 +50,20 @@ async function runWithConcurrency<T>(
 const ALL_SESSIONS_CACHE_TTL_MS = 60_000
 const allSessionsCache = new Map<string, { at: number; sessions: Map<string, number> }>()
 
+/**
+ * 会话的「最后活动时间」，用于项目排序。
+ *
+ * 与 `getSessionAnchorTime` 同口径：优先服务端 `time.idle`（每轮结束的权威
+ * 时间，一轮内不变，多端读到同一个值），缺失才退回 `updated` / `created`。
+ *
+ * ⚠️ 不要优先用 `updated`：它被 assistant 的每次流式输出持续抬高，两端在不同
+ * 时刻拉到就有不同数值 → 同一份数据在多端排出不同顺序（用户明确要求完全一致）。
+ */
+function sessionLastActivity(session: { time?: { idle?: number; updated?: number; created?: number } }): number {
+  const time = session.time
+  return time?.idle ?? time?.updated ?? time?.created ?? 0
+}
+
 async function fetchAllDirectoryLastUsed(
   serverId: string,
   worktrees: string[],
@@ -70,7 +84,7 @@ async function fetchAllDirectoryLastUsed(
       for (const session of sessions) {
         const dir = normalizeToForwardSlash(session.directory ?? '')
         if (!dir) continue
-        const time = session.time?.updated
+        const time = sessionLastActivity(session)
         if (!time) continue
         if (time > (byDirectory.get(dir) ?? 0)) byDirectory.set(dir, time)
       }
@@ -84,6 +98,20 @@ async function fetchAllDirectoryLastUsed(
   for (const worktree of worktrees) {
     const dir = normalizeToForwardSlash(worktree)
     const updated = byDirectory.get(dir)
+    /**
+     * 全量列表是**截断**的（limit 200），不能把「没出现在里面」当成「该目录没有会话」。
+     *
+     * 实测：150 条会话、20 个目录时，只要某个目录近期没有活动，它的会话就会
+     * 掉出这 200 条窗口。此时若直接回 undefined，上层会退回到本地的
+     * `recentProjects`（点击记录）—— 而另一台设备可能刚好加载过它、用的是真实
+     * 锚点，于是**同一份数据在两端排出不同顺序**，破坏「多端顺序完全一致」的要求。
+     *
+     * 这里对缺失目录单独补查一次（返回 ok:false 时上层保留旧值并退避重试）。
+     */
+    if (updated === undefined) {
+      out.set(worktree, { ok: false })
+      continue
+    }
     out.set(worktree, { ok: true, updated })
   }
   return out
@@ -105,7 +133,7 @@ async function fetchDirectoryLastUsed(serverId: string, worktree: string): Promi
     const sessions = await getSessions({ directory: worktree, limit: 50 }, serverId)
     let max = 0
     for (const session of sessions) {
-      const time = session.time?.updated
+      const time = sessionLastActivity(session)
       if (time && time > max) max = time
     }
     const updated = max || undefined
@@ -157,7 +185,25 @@ export function useProjectLastUsedAt(
       if (cancelled) return
 
       if (bulk) {
-        for (const [worktree, result] of bulk) results.push([worktree, result] as const)
+        /**
+         * 全量列表是截断的（limit 200），某些项目的最新会话可能不在窗口里。
+         * 这些目录会被标记 ok:false，这里按目录精确补查一次 —— 否则它们会退回
+         * 本地的 recentProjects，导致同一份数据在不同设备上排出不同顺序。
+         */
+        const missing: string[] = []
+        for (const [worktree, result] of bulk) {
+          results.push([worktree, result] as const)
+          if (!result.ok) missing.push(worktree)
+        }
+        if (missing.length > 0) {
+          await runWithConcurrency(missing, MAX_CONCURRENT_FETCHES, async worktree => {
+            const result = await fetchDirectoryLastUsed(serverId, worktree)
+            if (!result.ok) return // 补查也失败：保留 ok:false，交给上层重试
+            const index = results.findIndex(entry => entry[0] === worktree)
+            if (index !== -1) results[index] = [worktree, result] as const
+          })
+          if (cancelled) return
+        }
       } else {
         // 全量失败才退回按目录查（并发 3）
         await runWithConcurrency(directories, MAX_CONCURRENT_FETCHES, async worktree => {
@@ -231,11 +277,11 @@ export function useProjectLastUsedAt(
     return subscribeToServerEvents(serverId, {
       onSessionCreated: session => {
         if (session.parentID || session.time?.archived) return
-        bump(session.directory, session.time?.updated ?? session.time?.created)
+        bump(session.directory, sessionLastActivity(session))
       },
       onSessionUpdated: session => {
         if (session.parentID || session.time?.archived) return
-        bump(session.directory, session.time?.updated ?? session.time?.created)
+        bump(session.directory, sessionLastActivity(session))
       },
       // 网络重连/回前台：若此前有目录查询失败（弱网），借这次重连补拉，
       // 不必等用户手动刷新。server-switch 由 key 变化自然触发，这里跳过。

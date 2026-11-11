@@ -219,11 +219,31 @@ export const sessionActivityStore = new SessionActivityStore()
  * 会话锚定时间：优先用锚点，未记录时回退到会话自身的 updated（再退 created）。
  * 时间缺失按 0 处理，避免 NaN 打乱顺序。
  */
+/**
+ * 会话排序锚点时间。
+ *
+ * 优先级：用户消息锚点（本地实时，最贴近「最后一次对话」）→ 服务端 `time.idle`
+ * → `time.updated` → `time.created`。
+ *
+ * ## 为什么优先 `time.idle` 而不是 `time.updated`（2026-11-11）
+ *
+ * `time.updated` 会被 assistant 的每一次流式输出持续抬高，是一个**随时在变**
+ * 的时钟。多端各自在不同时刻拉到它，同一个会话在两端就会得到不同数值 ——
+ * 表现为「同一批会话在桌面端和网页端排序不一致」。实测（本机 4096，20 条会话）：
+ * 按 `updated` 与按 `idle` 排出来的前 4 条顺序完全不同。
+ *
+ * `time.idle` 是「这一轮真正结束」的权威时间戳，一轮之内不再变化，因此两端
+ * 读到的是同一个值，排序天然一致。这也符合用户要求：多端顺序完全一致才能
+ * 无缝衔接。
+ *
+ * `updated` 仍保留作为兜底：会话可能还没跑完过一轮（`idle` 缺失），此时
+ * 退回 `updated` 至少能给一个合理位置。
+ */
 export function getSessionAnchorTime(session: ApiSession): number {
   const anchor = sessionActivityStore.getSessionAnchor(session.id)
   if (anchor !== undefined) return anchor
   const time = session.time
-  return time?.updated ?? time?.created ?? 0
+  return time?.idle ?? time?.updated ?? time?.created ?? 0
 }
 
 /**

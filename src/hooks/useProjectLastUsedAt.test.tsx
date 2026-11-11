@@ -138,4 +138,25 @@ describe('useProjectLastUsedAt', () => {
     rerender({ w: ['C:/a'] })
     await waitFor(() => expect(result.current['C:/a']).toBe(777))
   })
+  it('缺目录时按目录精确补查，而不是当作「无会话」（多端排序一致）', async () => {
+    /**
+     * 真实场景：全量列表带 limit=200 且被截断（实测 150 条 / 20 个目录）。
+     * 某个项目近期没活动，它的会话就掉出窗口。旧实现把它判成「无会话」，
+     * 上层于是回退到本地的 recentProjects（点击记录）——而另一台设备可能
+     * 加载过该项目、用的是真实锚点，于是**同一份数据在两个端排出不同顺序**。
+     *
+     * 这里断言：全量结果缺该目录时，会用 directory 参数单独补查一次。
+     */
+    getSessionsMock.mockImplementation((params: { directory?: string }) => {
+      if (!params?.directory) return Promise.resolve([makeSession('C:/a', 100)])
+      if (params.directory === 'C:/b') return Promise.resolve([makeSession('C:/b', 900)])
+      return Promise.resolve([])
+    })
+
+    const { result } = renderHook(() => useProjectLastUsedAt('srv-truncated', ['C:/a', 'C:/b']))
+
+    // A 来自全量，B 虽不在全量窗口内，但被精确补查到了真实时间
+    await waitFor(() => expect(result.current['C:/a']).toBe(100))
+    await waitFor(() => expect(result.current['C:/b']).toBe(900))
+  })
 })
