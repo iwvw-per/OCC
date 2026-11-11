@@ -326,8 +326,11 @@ class SessionListIndexStore {
   /**
    * 跨该服务器所有桶对指定会话做字段补丁（重命名等只带部分字段的增量事件）。
    * 只改已存在条目的字段，不新增成员、不动位置。
+   *
+   * 返回是否命中并更新了至少一个桶；返回 false 表示该会话当前不在任何
+   * 已加载的桶里（调用方应改用「补拉完整元数据写索引」的方式落地）。
    */
-  patchAll(serverId: string, sessionId: string, patch: Partial<ApiSession>): void {
+  patchAll(serverId: string, sessionId: string, patch: Partial<ApiSession>): boolean {
     let changed = false
     for (const bucket of this.buckets.values()) {
       if (bucket.key.serverId !== serverId) continue
@@ -345,6 +348,7 @@ class SessionListIndexStore {
       changed = true
     }
     if (changed) this.emit()
+    return changed
   }
 
   /**

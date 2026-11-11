@@ -523,14 +523,29 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           if (tailTurnId && !(skeleton.unsettledTurns ?? []).includes(tailTurnId)) {
             try {
               /**
-               * ⚠️ `sid` 是**服务器作用域复合 key**（`serverId::sessionId`），而
-               * `getSessionStatus` 返回的 map 以**裸 session id** 为键（见
-               * `nativeActiveSessions`：直接透传 `/api/session/active` 的键）。
-               * 这里必须先解析成裸 id 再查，否则永远查不到 —— 补偿分支会静默失效。
+               * A2：本地运行态优先，命中才省下回源；只有本地**没有运行证据**时才
+               * 发网络请求，因此至多只会少发、不会多发。
+               *
+               * `activeSessionStore.statusMap` 与服务端同源（fetchAndInitialize /
+               * 周期对账 / SSE 都在维护，见 useGlobalEvents），键就是**复合 key**
+               * （`sid` 可直接查）；`getSessionStatus` 返回的 map 以**裸 session id**
+               * 为键（`nativeActiveSessions` 直接透传 `/api/session/active`），
+               * 回源时须解析成裸 id 再查，否则永远查不到 —— 补偿分支会静默失效。
+               *
+               * 为什么「本地非运行态」不能直接采信、必须回源：statusMap 只含
+               * busy/retry（idle 且无 pending 即被移除），且 fetchActiveScopeData
+               * 还按 directory 分片，别的目录里在跑的会话不会出现在本地，因此
+               * 「本地没有」≠「服务端没在跑」。这里只用本地**正向证据**跳过请求，
+               * 判定语义与旧实现完全一致。
                */
-              const statusMap = await getSessionStatus(dir, serverId).catch(() => null)
-              const state = statusMap?.[sessionKeyToSessionId(sid)]
-              sessionIsRunning = state?.type === 'busy' || state?.type === 'retry'
+              const localStatus = activeSessionStore.getSessionStatus(sid)
+              sessionIsRunning =
+                localStatus != null && (localStatus.type === 'busy' || localStatus.type === 'retry')
+              if (localStatus == null) {
+                const statusMap = await getSessionStatus(dir, serverId).catch(() => null)
+                const state = statusMap?.[sessionKeyToSessionId(sid)]
+                sessionIsRunning = state?.type === 'busy' || state?.type === 'retry'
+              }
             } catch {
               // 状态查询失败：不影响正常加载，只是不做这次补偿
             }

@@ -19,6 +19,7 @@ import {
   nativeListChildSessions,
   nativeActiveSessions,
 } from './v2NativeSession'
+import { peekLightweightSupport, probeLightweightSupport } from './message'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
 import { getSessionMessages } from './message'
@@ -130,6 +131,21 @@ export async function getLastTurnDiff(sessionId: string, directory?: string, ser
 // ============================================
 
 /**
+ * 后台预热「轮次骨架」能力探测（A1）。
+ *
+ * 只在列表真实返回了会话、且该主机能力尚未确认时发一次：
+ * - `peekLightweightSupport` 命中（内存或持久化已确认）→ 不发；
+ * - 并发探测由 message.ts 的 per-server 在途合并收口，只发一次网络。
+ *
+ * 失败静默：探测失败时 loadSession 首屏仍会按需自行探测，这里只是预热，
+ * 不 blocking 列表返回、也不承担任何正确性职责。
+ */
+export function prefetchLightweightProbe(sessionId: string, serverId: string): void {
+  if (peekLightweightSupport(serverId) !== undefined) return
+  void probeLightweightSupport(sessionId, undefined, serverId).catch(() => {})
+}
+
+/**
  * 获取 session 列表
  * 默认不返回归档会话（time.archived），避免归档后回显到侧栏/搜索/会话切换。
  * 传 includeArchived 时透传服务端 archived 参数（服务端语义为"也包含归档"），
@@ -199,6 +215,22 @@ export async function getSessions(
     const result = visible.map(stripSessionListDetails)
 
     writeSessionListCache(cacheServerId, cacheQuery, result)
+
+    // A1：列表成功返回后**后台预热**骨架能力探测。
+    //
+    // 探测不挑会话（limit=1 + 拿到响应头就掐断 body，见 message.ts 的
+    // probeLightweightSupport），列表是「这台主机第一个会话大概率会被打开」的
+    // 前置信号，趁热探一次，让首屏从「冷缓存，先等 ~1.1s 探测再决定骨架/分页」
+    // 变成「内存已缓存结果，零等待直接走骨架」。
+    //
+    // 安全边界（均已有机制兜底，不会产生请求风暴）：
+    // - peek 命中（内存里已有 true/false，或持久化确认支持）→ 不发；
+    // - 并发目录同时拉到列表 → probe 内部按 serverId 在途合并，只发一次；
+    // - 探测失败静默（loadSession 首屏仍会按需自行探测），不影响列表返回。
+    if (visible.length > 0) {
+      prefetchLightweightProbe(visible[0].id, cacheServerId)
+    }
+
     return result.slice()
   })
 }

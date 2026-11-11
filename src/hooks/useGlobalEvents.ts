@@ -28,6 +28,7 @@ import { onSeqGap, ackSeqGap } from '../api/events'
 import { reportSessionViewed } from '../api/sessionView'
 import { recoverPendingInbox } from '../api/inboxRecovery'
 import { backfillSessionUsage } from '../api/contextBackfill'
+import { enqueueLowPriority } from '../utils/lowPriorityQueue'
 import { invalidateSessionListCache } from '../api/sessionListCache'
 import { sessionListIndexStore } from '../store/sessionListIndexStore'
 import type { EventCallbacks } from '../types/api/event'
@@ -1376,10 +1377,32 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           if (isEphemeralSession(sessionID) || !title) return
           const scopedId = scope(sessionID)
           const patch: Partial<ApiSession> = { id: sessionID, title }
-          sessionListIndexStore.patchAll(serverId, sessionID, patch)
+          const patched = sessionListIndexStore.patchAll(serverId, sessionID, patch)
           activeSessionStore.setSessionMeta(scopedId, title, undefined)
           if (messageStore.getSessionState(scopedId)) {
             messageStore.updateSessionMetadata(scopedId, { title })
+          }
+          /**
+           * 新会话的时序兜底：自动标题常在会话创建后立刻到达，此时该会话可能
+           * 尚未写入任何索引桶 —— `patchAll` 只 patch「已存在条目」，未命中就
+           * 什么都不做。于是侧栏标题停在空/默认值，只有刷新（整桶重拉）才恢复。
+           *
+           * 未命中时补拉一次完整会话元数据写回索引：它带 directory 与当前标题，
+           * 能按目录正确路由到桶。与 seq 缺口修复的 `flushGaps` 用同一模式，
+           * 走低优先级池，不抢首屏带宽。
+           */
+          if (!patched) {
+            enqueueLowPriority(() => {
+              void getSession(sessionID, undefined, serverId)
+                .then(session => {
+                  if (!session?.id) return
+                  sessionListIndexStore.applySessionChanged(serverId, session)
+                  activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
+                })
+                .catch(() => {
+                  // 会话可能刚被删除；拿不到就保持现状，不能影响正常标题路径
+                })
+            })
           }
           /**
            * 元数据缓存也要失效。
@@ -1720,7 +1743,8 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           messageStore.markServerSessionsStale(serverId)
           reconcileServerStatus(serverId)
           fetchAndInitialize(serverId)
-          void recoverPendingInbox(serverId)
+          // B1：跨会话堆叠的纠错请求走低优先级池，避免与其它服务器的恢复请求叠加
+          enqueueLowPriority(() => recoverPendingInbox(serverId))
         },
 
         // ============================================
@@ -1750,7 +1774,9 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 漏掉就意味着「另一台设备发的消息在这台设备上永远不出现」，直到那一轮
           // 跑完、消息落进 message.list 为止。用 session.inbox.list 把还没投递的
           // 入队消息补回来，比等下一轮结束要早得多。
-          void recoverPendingInbox(serverId)
+          // B1：入队消息恢复按「已加载会话」逐个发请求，多台重连时会堆叠；
+          // 走低优先级池限制并发，不挤占重连后的对账/首屏请求。
+          enqueueLowPriority(() => recoverPendingInbox(serverId))
           // 只通知「关心的 session 属于该重连服务器」的消费者。
           // 重连是按 serverId 独立的：某台服务器网络抖动不应让其它服务器的
           // 会话缓存失效、被迫重拉。消费者 sessionId 是复合 key，用它反解 serverId 比对。
@@ -1820,15 +1846,19 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
            * 会话打出请求风暴。
            */
           if (!repaired) {
-            void getSession(aggregateID, undefined, serverId)
-              .then(session => {
-                if (!session?.id) return
-                sessionListIndexStore.applySessionChanged(serverId, session)
-                activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
-              })
-              .catch(() => {
-                // 会话可能已被删除；拿不到就保持现状，不能影响其它缺口修复
-              })
+            // B1：一次重连可能让多台服务器、几十个会话同时报缺口，元数据重拉
+            // 虽轻（带 TTL 缓存），堆叠起来同样会打满连接额度——交给池子逐个消化。
+            enqueueLowPriority(() => {
+              void getSession(aggregateID, undefined, serverId)
+                .then(session => {
+                  if (!session?.id) return
+                  sessionListIndexStore.applySessionChanged(serverId, session)
+                  activeSessionStore.setSessionMeta(scopedId, session.title, session.directory)
+                })
+                .catch(() => {
+                  // 会话可能已被删除；拿不到就保持现状，不能影响其它缺口修复
+                })
+            })
           }
           ackSeqGap(serverId, aggregateID)
         }

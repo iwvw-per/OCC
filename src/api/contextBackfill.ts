@@ -38,6 +38,7 @@ import { nativeGetSession, nativeGetSessionContext } from '../api/v2NativeSessio
 import { messageStore } from '../store/messageStore'
 import { rawSessionIdOfKey } from '../store/messagePartMerge'
 import { sessionKeyToServerId } from '../utils/sessionKey'
+import { enqueueLowPriority } from '../utils/lowPriorityQueue'
 import { logger } from '../utils'
 import type { TokenUsage } from '../types/message'
 
@@ -128,10 +129,10 @@ function usageTotal(usage: TokenUsage): number {
 /**
  * 首屏之后再做「侧边轴大纲补全」。
  *
- * ## 为什么需要调度
+ * ## 为什么走低优先级池
  *
  * 骨架首屏只取最近几页，剩余部分由 `pages=60` 的请求一次翻到底，仅用于给
- * 侧边轴补出全部轮次。这个请求不 await，但**会占满隧道带宽**：
+ * 侧边轴补出全部轮次。这个请求不 await，但它**会占满隧道带宽**：
  *
  *   实测（1089 条消息的会话，走网关）：
  *     首屏骨架 limit=200        +0.9s 发出
@@ -143,17 +144,16 @@ function usageTotal(usage: TokenUsage): number {
  * 并发额度**：首屏阶段浏览器对同域只有 6 个连接，实测同时在途请求峰值达到
  * **29 个**，骨架、session info、/context 全在排队。
  *
- * 所以它不该和首屏内容抢名额，延后 800ms 再发（等首屏那批请求退潮）。
+ * 因此交给 `enqueueLowPriority`：池并发上限 2，且由 requestIdleCallback 驱动。
+ * 旧实现是「延后 800ms」的魔法数近似 —— 延后只是把发射点挪开，并没有限制
+ * 它占住的连接数；池化后首屏内容请求和它不再互相挤兑，魔法数不再需要。
  */
 export function scheduleOutlineBackfill(run: () => void): void {
-  scheduleAfterFirstPaint(run, OUTLINE_BACKFILL_DELAY_MS)
+  enqueueLowPriority(run)
 }
 
-/** 大纲补全的延后：等首屏那批并发请求退潮 */
-const OUTLINE_BACKFILL_DELAY_MS = 800
-
 /**
- * 用量回填：首屏骨架上屏后**立即**发起。
+ * 用量回填：首屏骨架上屏后**立即**进入池子发起。
  *
  * ## 为什么不再延后
  *
@@ -166,44 +166,17 @@ const OUTLINE_BACKFILL_DELAY_MS = 800
  *   优化前  11,021 KB / 3058 ms
  *   优化后      33 KB /  428 ms
  *
- * 三十几 KB 的请求已经不值得为它牺牲体验。继续延后（原先 1.2s 静默 + 3s 兜底
- * 超时，最坏 4.2s）只会让「上下文百分比、Token 总量、提供方、模型」在刷新后
- * 空着好几秒 —— 实测用户反馈「刷新后要超过 5 秒才出来」。
+ * 三十几 KB 的请求已经不值得为它牺牲体验。继续延后只会让「上下文百分比、
+ * Token 总量、提供方、模型」在刷新后空着好几秒 —— 实测用户反馈「刷新后要
+ * 超过 5 秒才出来」。
  *
- * ## 保留调度器的原因
- *
- * 旧版 Agent 不认识 `X-Lightweight`，会原样透传 10MB 响应。那种情况下抢带宽
- * 依然有害，但前端无法预知。用 `requestIdleCallback`（不叠加额外延时）既能让
- * 首屏先画出来，又不会拖到秒级。
+ * 旧版 Agent 不认识 `X-Lightweight` 时会原样透传 10MB 响应，那种情况下抢带宽
+ * 依然有害；池的 requestIdleCallback（不叠加额外延时）既能让首屏先画出来，
+ * 又不会拖到秒级，且同一时刻在途辅助请求不超过 2 个。
  */
 export function scheduleBackfillSessionUsage(sessionKey: string): void {
-  scheduleAfterFirstPaint(() => {
-    void backfillSessionUsage(sessionKey)
-  }, 0)
+  enqueueLowPriority(() => backfillSessionUsage(sessionKey))
 }
-
-/**
- * 首屏画完后执行（不叠加额外延时）。
- *
- * 用 `requestIdleCallback` 让浏览器先把首屏渲染完；空闲回调迟迟不来时用
- * timeout 兜底，避免数字一直空着。
- */
-function scheduleAfterFirstPaint(run: () => void, delayMs: number): void {
-  const start = () => {
-    if (delayMs > 0) window.setTimeout(run, delayMs)
-    else run()
-  }
-  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
-    .requestIdleCallback
-  if (typeof ric === 'function') {
-    ric(start, { timeout: BACKFILL_IDLE_TIMEOUT_MS })
-    return
-  }
-  window.setTimeout(start, delayMs)
-}
-
-/** idle 回调的最长等待：再忙也要在此时限内排上队 */
-const BACKFILL_IDLE_TIMEOUT_MS = 600
 
 /**
  * 从轻量接口汇总会话累计用量，并按 id 回填骨架消息。

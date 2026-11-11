@@ -133,7 +133,17 @@ export async function nativeBackgroundSession(serverId: string | undefined, sess
 }
 
 /**
- * 原生回退消息（v2 session.revert.stage）。
+ * 原生回退消息（v2 session.revert.stage + commit）。
+ *
+ * v2 的 revert 是**两段式**：`stage` 只是暂存回退点（服务端保持 pending），
+ * `commit` 才真正把回退落到会话历史（GET /session 的 revert 字段才带值，
+ * 才会广播 `session.revert.committed`）。官方 web/TUI 也是「stage 暂存、
+ * 随后 commit」。
+ *
+ * 只 stage 不 commit 的后果：前端本地乐观设置的 revertState 在服务端没有
+ * 对应持久化状态，任何以服务端为准的重拉（SSE 事件驱动 force reload、
+ * 重连、`setMessages` 里 `revertState: sessionInfo?.revert ?? null`）都会把
+ * 本地 `revertState` 覆盖回 null —— 表现为「撤销后又恢复，需要重复好多次」。
  */
 export async function nativeRevertMessage(
   serverId: string | undefined,
@@ -141,6 +151,7 @@ export async function nativeRevertMessage(
 ): Promise<ApiSession> {
   const client = getV2Client(serverId)
   await client.session.revert.stage({ sessionID: input.sessionID, messageID: input.messageID })
+  await client.session.revert.commit({ sessionID: input.sessionID })
   return adaptSession(await client.session.get({ sessionID: input.sessionID }))
 }
 

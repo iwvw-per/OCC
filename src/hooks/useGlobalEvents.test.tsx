@@ -1278,6 +1278,8 @@ describe('seq 缺口批量处理（节流）', () => {
 
       handler!('local', 'ses_unopened')
       vi.advanceTimersByTime(400)
+      // 缺口窗口已触发，元数据重拉已入池（setTimeout(0) 泵）：推进一次让任务实际运行
+      await vi.advanceTimersByTimeAsync(0)
 
       // 必须去拉元数据，才能把新标题写回列表索引
       expect(getSessionMock).toHaveBeenCalledWith('ses_unopened', undefined, 'local')
@@ -1286,5 +1288,78 @@ describe('seq 缺口批量处理（节流）', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('session.renamed 标题同步', () => {
+  // useGlobalEvents 直接 import '../store/sessionListIndexStore'（单文件模块），
+  // 不受 `vi.mock('../store')` 桶 mock 影响 —— 这里是真实索引，可直接断言。
+  let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+
+  beforeEach(async () => {
+    const { sessionListIndexStore } = await import('../store/sessionListIndexStore')
+    sessionListIndexStore.reset()
+    callbacks = undefined
+  })
+
+  const bucketKey = (directory = '/workspace') => ({
+    serverId: 'local',
+    directory,
+    view: 'active' as const,
+  })
+
+  it('旧会话收到 renamed（标题变更）后，索引桶里的标题即时更新', async () => {
+    const { sessionListIndexStore } = await import('../store/sessionListIndexStore')
+    const bucket = bucketKey()
+    sessionListIndexStore.replace(
+      bucket,
+      [{ id: 'ses_1', title: '旧标题', directory: '/workspace', time: { created: 1, updated: 1 } } as never],
+      { limit: 20, hasMore: false },
+    )
+
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionRenamed?.({ sessionID: 'ses_1', title: '新标题' })
+
+    expect(sessionListIndexStore.get(bucket)?.find(s => s.id === 'ses_1')?.title).toBe('新标题')
+  })
+
+  it('新建会话只收到 renamed（尚无 created 写桶）时，标题也能写进索引', async () => {
+    // 复现「新对话自动标题」：会话由 ChatPane 创建后直接进入流式，created 事件
+    // 可能还没落地到索引桶，此时唯一带标题的信号就是 session.renamed。
+    const { sessionListIndexStore } = await import('../store/sessionListIndexStore')
+    const bucket = bucketKey()
+    // 桶已加载（空列表也算已加载），模拟侧栏已打开但新会话尚未写入
+    sessionListIndexStore.replace(bucket, [], { limit: 20, hasMore: false })
+
+    // renamed 未命中桶 → 兜底补拉完整会话元数据（带 directory）写回索引
+    getSessionMock.mockResolvedValue({
+      id: 'ses_new',
+      title: '自动生成的标题',
+      directory: '/workspace',
+      time: { created: 1, updated: 1 },
+    } as never)
+
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    // 只有 renamed 事件，没有先前的 created/upsert
+    callbacks!.onSessionRenamed?.({ sessionID: 'ses_new', title: '自动生成的标题' })
+
+    // 兜底路径：补拉 getSession → applySessionChanged 把标题写进空桶
+    await waitFor(() => {
+      const item = sessionListIndexStore.get(bucket)?.find(s => s.id === 'ses_new')
+      expect(item?.title).toBe('自动生成的标题')
+    })
+    expect(getSessionMock).toHaveBeenCalledWith('ses_new', undefined, 'local')
   })
 })

@@ -31,6 +31,12 @@ vi.mock('./v2NativeSession', () => ({
 
 
 vi.mock('./sdkV2', () => ({ getV2Client: () => ({}) }))
+// A1 预热探测：peek 恒视为「已确认支持」，getSessions 不会真的发一次探测网络请求。
+vi.mock('./message', () => ({
+  peekLightweightSupport: () => true,
+  probeLightweightSupport: () => Promise.resolve(true),
+  getSessionMessages: vi.fn(),
+}))
 vi.mock('./sessionListCache', () => ({
   readSessionListCache: () => undefined,
   writeSessionListCache: () => {},

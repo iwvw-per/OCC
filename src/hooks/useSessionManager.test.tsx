@@ -11,6 +11,7 @@ const {
   peekLightweightSupportMock,
   getSessionStatusMock,
   messageStoreMock,
+  activeSessionStoreMock,
   sessionErrorHandlerMock,
   revertMessageMock,
   extractUserMessageContentMock,
@@ -38,6 +39,10 @@ const {
     getTrimmedCount: vi.fn(() => 0),
     settleByAuthoritativeIdle: vi.fn(() => false),
     getSessionChangeVersion: vi.fn(() => 0),
+  },
+  activeSessionStoreMock: {
+    getSessionStatus: vi.fn(),
+    setSessionIdleAt: vi.fn(),
   },
   sessionErrorHandlerMock: vi.fn(),
   revertMessageMock: vi.fn(),
@@ -71,6 +76,7 @@ vi.mock('../api', () => ({
 
 vi.mock('../store', () => ({
   messageStore: messageStoreMock,
+  activeSessionStore: activeSessionStoreMock,
 }))
 
 // 上下文用量兜底会真的打网络（session.context），测试里必须隔离。
@@ -101,6 +107,9 @@ describe('useSessionManager', () => {
     peekLightweightSupportMock.mockReturnValue(undefined)
     getSessionStatusMock.mockReset()
     getSessionStatusMock.mockResolvedValue({})
+    activeSessionStoreMock.getSessionStatus.mockReset()
+    activeSessionStoreMock.getSessionStatus.mockReturnValue(undefined)
+    activeSessionStoreMock.setSessionIdleAt.mockReset()
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
@@ -204,6 +213,67 @@ describe('useSessionManager', () => {
     // 骨架路径生效：不再走分页（具体调用次数取决于 effect 是否也触发一次加载）
     expect(lightweightMessagesMock).toHaveBeenCalled()
     expect(getSessionTurnPageMock).not.toHaveBeenCalled()
+  })
+
+  it('skips the network status lookup when the local store already knows the session is running', async () => {
+    // A2：statusMap 与服务端同源，本地复合 key 命中 busy 时，不必再为
+    // 「是否补偿最后一个运行轮」发一次 /session/active（经隧道约 1.1s）。
+    peekLightweightSupportMock.mockReturnValue(true)
+    lightweightMessagesMock.mockResolvedValue({
+      messages: [
+        { info: { id: 'user-1', role: 'user', time: { created: 1 } }, parts: [] },
+        { info: { id: 'reply-1', role: 'assistant', time: { created: 2 } }, parts: [] },
+      ],
+      hasMore: false,
+      turns: new Map([['user-1', { status: 'completed' }]]),
+      unsettledTurns: [],
+    })
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+    activeSessionStoreMock.getSessionStatus.mockReturnValue({ type: 'busy' })
+    getSessionStatusMock.mockClear()
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'session-1', directory: '/workspace/demo' }),
+    )
+
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    // 本地忙 → 直接用本地状态，不再回源
+    expect(activeSessionStoreMock.getSessionStatus).toHaveBeenCalledWith('session-1')
+    expect(getSessionStatusMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the network status lookup when the local store has no running evidence', async () => {
+    // statusMap 只含 busy/retry（idle 即移除）且按 directory 分片，「本地没有」
+    // ≠「服务端没在跑」：此时必须回源，补偿分支语义与旧实现一致（回源 map 以
+    // 裸 session id 为键，须先解析 sid）。
+    peekLightweightSupportMock.mockReturnValue(true)
+    lightweightMessagesMock.mockResolvedValue({
+      messages: [
+        { info: { id: 'user-1', role: 'user', time: { created: 1 } }, parts: [] },
+        { info: { id: 'reply-1', role: 'assistant', time: { created: 2 } }, parts: [] },
+      ],
+      hasMore: false,
+      turns: new Map([['user-1', { status: 'completed' }]]),
+      unsettledTurns: [],
+    })
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+    activeSessionStoreMock.getSessionStatus.mockReturnValue(undefined)
+    getSessionStatusMock.mockResolvedValue({ 'session-1': { type: 'busy' } })
+    getSessionStatusMock.mockClear()
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'session-1', directory: '/workspace/demo' }),
+    )
+
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    // 本地没有佐证 → 回源；裸 id 命中 running → 仍走未定稿补拉
+    expect(getSessionStatusMock).toHaveBeenCalled()
   })
 
   it('backfills usage on the skeleton path (it returns early, before the shared tail call)', async () => {
