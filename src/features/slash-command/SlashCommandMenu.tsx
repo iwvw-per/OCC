@@ -210,7 +210,13 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
     <div
       ref={menuRef}
       data-dropdown-open
-      className="absolute z-50 w-full md:max-w-[360px] flex flex-col glass border border-border-200/60 rounded-xl shadow-lg overflow-hidden"
+      /**
+       * 宽度跟随输入框容器（父级是 `relative` + chat-content-width）。
+       *
+       * 这里**不能**再写 `md:max-w-[360px]`：那会让命令面板在桌面上比输入框窄一截，
+       * 视觉上像一张浮在旁边的卡片而不是输入框的延伸。`w-full` 即对齐。
+       */
+      className="absolute z-50 w-full flex flex-col glass border border-border-200/60 rounded-xl shadow-lg overflow-hidden"
       style={{
         bottom: '100%',
         left: 0,

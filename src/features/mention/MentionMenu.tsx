@@ -359,7 +359,11 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
     <div
       ref={menuRef}
       data-dropdown-open
-      className="absolute z-50 w-full md:max-w-[360px] flex flex-col glass border border-border-200/60 rounded-xl shadow-lg overflow-hidden"
+      /**
+       * 与 SlashCommandMenu 同款：宽度跟随输入框容器，不再硬限制 360px。
+       * 两个菜单都是输入框的延伸，宽度必须一致，否则切换 @ / 时面板会跳变。
+       */
+      className="absolute z-50 w-full flex flex-col glass border border-border-200/60 rounded-xl shadow-lg overflow-hidden"
       style={{
         bottom: '100%',
         left: 0,
