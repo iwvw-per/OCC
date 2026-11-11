@@ -304,6 +304,14 @@ jobs:
     # 缺哪个就跳过哪个，能拼出几个平台就写几个平台。
     if: ${{ always() }}
     steps:
+      # ⚠️ 必须 checkout：
+      #   1. 脚本要读 CHANGELOG.md 生成 notes（实测缺失时报
+      #      "[Errno 2] No such file or directory: 'CHANGELOG.md'"）；
+      #   2. `gh release upload` 依赖 git 仓库推断仓库名，缺了会报
+      #      "fatal: not a git repository"，导致清单生成成功却传不上去
+      #      （v2.0.69 实际就失败在这一步）。
+      - uses: actions/checkout@v6
+
       - name: Build latest.json from release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -401,4 +409,5 @@ jobs:
       - name: Upload latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" latest.json --clobber
+        # 显式带 --repo：即便没有 checkout（或将来步骤顺序变化）也不依赖 git 推断
+        run: gh release upload "${{ github.ref_name }}" latest.json --repo "${{ github.repository }}" --clobber
