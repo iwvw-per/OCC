@@ -1,5 +1,13 @@
 # Changelog
 
+## [v2.0.68] - 2026-11-11
+
+- fix(sync): **新对话标题不更新、完成后一直显示「进行中」，只有刷新才正常**（重要）。根因是客户端把 v2 事件的 **seq 跳号当成「漏了事件」**：丢弃该事件**且不推进水位**，导致该会话此后每一条事件都被连环误判、全部丢弃。而跳号是服务端正常行为 —— opencode 在广播前执行 `if (!isOpenCodeEvent(event)) return`（`packages/server/src/event-feed.ts`），而 `session.usage.recorded`（生成标题那一次的用量，source=title，见 `packages/core/src/session/title.ts`）是 durable 事件、占 seq 却**不广播**，官方 schema 注释原文即「that event never reaches clients」。于是每轮自动命名都会必然产生一次跳号。实测本机 4 份真实事件流：seq `1,2,3,4,[5 缺],6…14`（缺 5，`renamed` 在 6）、`0…12,[13 缺],14`（缺 13，`renamed` 在 14），缺失处与标题生成相隔 1.3s / 3.8s；连带被丢的 `execution.succeeded` 就是「永不转 idle」。现在跳号**照常应用事件并推进水位**，缺口仍上报做一次快照对账兜底（断连/背压这类真丢事件不受影响）。同一份真实流对照：旧策略 `renamed` 落地 0 次，新策略 1 次
+- fix(sync): **去掉跳号后的水位重置**。水位既已在跳号时推进，原来的 `ackSeqGap`（reset）反而会把它清空，使随后到达的重复/乱序旧事件被当成「首次见到」而二次应用（重复消息、重复通知）
+- fix(sync): **跳号不再触发「缓存作废 + 强制重载」**。否则每轮自动命名都会引发一次整会话重拉；现在只保留一次带 TTL 的轻量元数据对账，同时把新标题同步回消息头
+- fix(stats): **`step.started` 的时间基准修正**。此前读 `data.time`（该字段不存在）而回落到事件 `created`，实测偏晚 1.3~2.7 秒，导致 TTFT 与耗时系统性偏小，且与历史快照路径（读 part 级 `time.created`）不一致，刷新前后同一条消息的耗时数字会跳变。改用服务端记录的 `data.started`
+- test: 新增 `seqGapNoDropRegression`（4 例，锁住「跳号不丢事件 + 水位推进 + 不去 reset」）、`step.started` 时间来源（2 例）；同步更新 seq/事件流相关旧语义断言。全量 304 文件 2487 用例通过
+
 ## [v2.0.67] - 2026-11-11
 
 - perf(conn): **辅助请求统一走低优先级请求池**。新增 `utils/lowPriorityQueue`：并发上限 2、由 `requestIdleCallback` 驱动的辅助请求池。大纲补全 / 用量回填 / 重连后的 inbox 恢复 / seq 缺口元数据重拉统一入池，取代各自 setTimeout 魔法数调度；多服务器同时重连时不再叠加成几十个并发请求挤占首屏带宽（原实测峰值 29 个在途，骨架第 2 页被挤到 +2.5s）
