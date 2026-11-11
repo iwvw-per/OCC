@@ -1,5 +1,17 @@
 # Changelog
 
+## [v2.0.69] - 2026-11-11
+
+- fix(chat): **撤销后消息立刻恢复、无法编辑**（回归修复）。上一版按「stage 只是暂存、commit 才持久化」的理解给 `nativeRevertMessage` 补了 `revert.commit`，实测与官方源码都表明这是反的：`stage` 会把回退点写进 `session.revert` 并回滚文件快照（**撤销态本身就是持久化的**，stage 后 `GET /api/session` 立刻能读到 revert）；而 `commit` 在 `projector.ts` 里会 `delete from SessionMessage where seq >= boundary.seq` 并 `setSession(..., { revert: null })` —— **物理删消息并清空撤销态**。撤销态一没了，任何一次 `setMessages` 都会把本地 revert 清空，界面就退回发送态。现在只 stage、不 commit。真实服务端对照：只 stage → revert 连续 3 次读取稳定、消息保留；stage+commit → revert 变 null、6 条消息被删到只剩 3 条
+- fix(chat): **顶栏标题一直是「新对话」，而侧栏已经更新**。顶栏读 `messageStore` 的 `state.title`，而 `setMessages` 用快照 title 无条件覆盖。真实时序：`session.created` 事件不带 title（实测），新会话的 `GET /session` 在自动命名前返回空串；`session.renamed`（seq 6）比 `step.started`（seq 7）更早到达，先把真标题写进 store，随后那个早先并发发出的 sessionInfo 才落地，用空 title 把它清掉。现在空标题不覆盖，`renamed`/`session.updated` 写入的标题标记为权威、不再被快照降级
+- fix(sync): **`setMessages` 的撤销态改为三态语义**。此前调用方用 `revertState: sessionInfo?.revert ?? null` 把「拿不到会话详情」伪装成「确认无撤销」，撤销发生的瞬间会把本地刚建立的撤销态清掉。现在 `undefined`=本次不涉及（保留本地）、有 `messageID`=按权威点重建、`null`=确认无撤销才清空
+- fix(sidebar): **「重试中」卡片在重试成功后不消失**。`touchSession` 第一行是 `if (serverBusySessions.has(id)) return`，而 `updateStatus({type:'retry'})` 内部会 markEvidence 把会话加进该集合 —— 于是「把 retry 推回 busy」的分支永远执行不到。内容已在正常输出、工具也在跑，卡片却一直挂着。现在把 retry→busy 的收口移到早退之前
+- fix(sidebar): **桌面端与网页端列表排序/分组不一致**（用户要求多端顺序完全一致）。两个原因：一是项目最后活动时间用一次截断的全量 `getSessions({limit:200})` 推断，某些项目的最新会话掉出窗口后被当作「无会话」，回退到本地点击记录 —— 另一台设备若加载过该项目就用了真实值，于是排序不同（实测本机 150 条会话 / 20 个目录）；现在缺失目录按 directory 精确补查。二是排序基准用了 `time.updated`，它被 assistant 每次流式输出持续抬高，两端在不同时刻拉到就是不同数值（实测同一批 20 条会话，按 updated 与按 idle 排序前 4 条顺序完全不同）；改用 `time.idle`（每轮结束的权威时间，一轮内不变），缺失才退回 updated/created
+- fix(ui): **命令面板命令名被截断、面板过矮**。列宽写死上限 18ch，而 `/open-code-review-delegate` 需要 26ch，显示成 `/open-code-revie...` 无法区分；改为按过滤结果里最长命令自适应（上限 28ch），并统一列宽让描述对齐。默认高度 `min(320px, ...)` 只放得下 7 行，提到 520px，`dynamicMaxHeight` 的介入阈值同步从 360 提到 520。`@` 提及面板同步，避免切换时宽度/高度跳变
+- fix(ui): **命令面板与提及面板宽度跟随输入框**。去掉 `md:max-w-[360px]` 硬上限，父容器本就是 `relative` + chat-content-width，`w-full` 即对齐
+- ci(release): **串行生成 `latest.json`**。tauri-action 写该文件是「删旧资产→重传」，4 个平台并行时必然偶发 404（官方 issue #1270），且后写方会覆盖先写方的平台条目 —— 实测 v2.0.68 的 `latest.json` 只剩 darwin-aarch64 两个平台，Windows/Linux/macOS x64 用户全部收不到自动更新。现在桌面 job 只上传产物与 `.sig`，新增 `publish-latest-json` 在所有平台完成后统一生成一次；`publish-android` 改为「只要 Android 构建成功就上传」，不再因某个桌面平台失败而连带吞掉 APK
+- test: 新增 `messageStoreRevertState`、`messageStoreTitle`、`activeSessionStore.retrySettle`、排序 idle 优先、项目缺失目录补查等用例，均确认「旧实现失败、新实现通过」；全量 307 文件 2501 用例通过
+
 ## [v2.0.68] - 2026-11-11
 
 - fix(sync): **新对话标题不更新、完成后一直显示「进行中」，只有刷新才正常**（重要）。根因是客户端把 v2 事件的 **seq 跳号当成「漏了事件」**：丢弃该事件**且不推进水位**，导致该会话此后每一条事件都被连环误判、全部丢弃。而跳号是服务端正常行为 —— opencode 在广播前执行 `if (!isOpenCodeEvent(event)) return`（`packages/server/src/event-feed.ts`），而 `session.usage.recorded`（生成标题那一次的用量，source=title，见 `packages/core/src/session/title.ts`）是 durable 事件、占 seq 却**不广播**，官方 schema 注释原文即「that event never reaches clients」。于是每轮自动命名都会必然产生一次跳号。实测本机 4 份真实事件流：seq `1,2,3,4,[5 缺],6…14`（缺 5，`renamed` 在 6）、`0…12,[13 缺],14`（缺 13，`renamed` 在 14），缺失处与标题生成相隔 1.3s / 3.8s；连带被丢的 `execution.succeeded` 就是「永不转 idle」。现在跳号**照常应用事件并推进水位**，缺口仍上报做一次快照对账兜底（断连/背压这类真丢事件不受影响）。同一份真实流对照：旧策略 `renamed` 落地 0 次，新策略 1 次
