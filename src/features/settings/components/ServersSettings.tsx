@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button, IconButton, Switch } from '../../../components/ui'
+import { Button, IconButton, Switch, NativeTooltip } from '../../../components/ui'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import {
   TrashIcon,
@@ -119,16 +119,17 @@ function ServerItem({
           className="min-w-0 flex-1 overflow-hidden bg-transparent border-none p-0 text-left"
         >
           <div className="min-w-0">
-            <div
-              className="text-ui-base font-medium text-text-100 truncate"
-              title={server.name}
-            >
-              {server.name}
-            </div>
+            <NativeTooltip>
+              <div className="text-ui-base font-medium text-text-100 truncate" title={server.name}>
+                {server.name}
+              </div>
+            </NativeTooltip>
             <div className="text-ui-sm text-text-400 truncate font-mono flex items-center gap-1 mt-0.5 min-w-0">
-              <span className="truncate min-w-0" title={server.url}>
-                {server.url}
-              </span>
+              <NativeTooltip>
+                <span className="truncate min-w-0" title={server.url}>
+                  {server.url}
+                </span>
+              </NativeTooltip>
               {server.auth?.password && <KeyIcon size={10} className="shrink-0 text-text-400" />}
             </div>
           </div>
@@ -488,7 +489,9 @@ function AddServerForm({
             </div>
           )}
 
-          <div data-setting-desc className="text-ui-sm text-text-400 leading-relaxed">{t('servers.credentialsStorage')}</div>
+          <div data-setting-desc className="text-ui-sm text-text-400 leading-relaxed">
+            {t('servers.credentialsStorage')}
+          </div>
         </>
       )}
 
@@ -593,12 +596,7 @@ export function ServersSettings() {
               <RetryIcon size={12} />
               {t('common:refresh')}
             </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setAddingServer(true)}
-              disabled={addingServer}
-            >
+            <Button variant="secondary" size="sm" onClick={() => setAddingServer(true)} disabled={addingServer}>
               {t('common:add')}
             </Button>
           </div>
@@ -625,22 +623,22 @@ export function ServersSettings() {
             />
           ))}
 
-        {addingServer && (
-          <AddServerForm
-            onAdd={(n, u, user, pass) => {
-              const auth = pass ? { username: user || 'opencode', password: pass } : undefined
-              const s = addServer({ name: n, url: u, auth })
-              setAddingServer(false)
-              void checkHealth(s.id)
-            }}
-            onCancel={() => setAddingServer(false)}
-          />
-        )}
+          {addingServer && (
+            <AddServerForm
+              onAdd={(n, u, user, pass) => {
+                const auth = pass ? { username: user || 'opencode', password: pass } : undefined
+                const s = addServer({ name: n, url: u, auth })
+                setAddingServer(false)
+                void checkHealth(s.id)
+              }}
+              onCancel={() => setAddingServer(false)}
+            />
+          )}
 
-        {servers.length === 0 && !addingServer && (
-          <div className="text-ui-base text-text-400 text-center py-8">{t('servers.noServersConfigured')}</div>
-        )}
-      </div>
+          {servers.length === 0 && !addingServer && (
+            <div className="text-ui-base text-text-400 text-center py-8">{t('servers.noServersConfigured')}</div>
+          )}
+        </div>
       </SettingsSection>
 
       {/* 设置同步与服务器无关，独立成区块放在末尾 */}

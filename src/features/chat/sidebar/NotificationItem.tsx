@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckIcon, AlertCircleIcon, CloseIcon, HandIcon, QuestionIcon } from '../../../components/Icons'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { notificationStore } from '../../../store/notificationStore'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
 import { formatNotificationTime } from './sidebarUtils'
@@ -142,12 +143,11 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
           className={`flex-1 min-w-0 transition-[padding] duration-200 ${actionsVisible ? 'pr-9' : 'pr-1 group-hover:pr-9 group-focus-within:pr-9'}`}
         >
           <div className="flex min-w-0 items-center gap-1.5">
-            <p
-              className="min-w-0 flex-1 truncate text-ui-base font-medium text-text-200"
-              title={displayTitle}
-            >
-              {displayTitle}
-            </p>
+            <NativeTooltip>
+              <p className="min-w-0 flex-1 truncate text-ui-base font-medium text-text-200" title={displayTitle}>
+                {displayTitle}
+              </p>
+            </NativeTooltip>
             {!entry.read && !actionsVisible && (
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-main-100 group-hover:hidden group-focus-within:hidden" />
             )}
@@ -169,9 +169,11 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
             {directory && (
               <>
                 <span className="opacity-30 shrink-0">·</span>
-                <span className="truncate opacity-50" title={directory}>
-                  {directory.replace(/\\/g, '/').split('/').filter(Boolean).pop()}
-                </span>
+                <NativeTooltip>
+                  <span className="truncate opacity-50" title={directory}>
+                    {directory.replace(/\\/g, '/').split('/').filter(Boolean).pop()}
+                  </span>
+                </NativeTooltip>
               </>
             )}
           </div>

@@ -11,12 +11,18 @@
 
 import { useCallback, useSyncExternalStore } from 'react'
 import { useServerStore } from '../../../hooks/useServerStore'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { cn } from '../../../utils/cn'
 import { interactive } from '../../../utils/interaction'
 import { SyncStatusIcon } from './SyncStatusRow'
 import { useSyncIndicatorAvailable } from './syncStatus'
 import { statusDotClass, useServerConnectionState } from './hostStatus'
-import { getHostMetricsCollapsed, setHostMetricsCollapsed, subscribeHostMetricsCollapsed, toggleHostMetricsCollapsed } from './hostMetricsUi'
+import {
+  getHostMetricsCollapsed,
+  setHostMetricsCollapsed,
+  subscribeHostMetricsCollapsed,
+  toggleHostMetricsCollapsed,
+} from './hostMetricsUi'
 
 export function HostQuickSwitcher() {
   const { servers, activeServer, setActiveServer } = useServerStore()
@@ -94,22 +100,22 @@ function HostQuickHostRow({
   const { getHealth } = useServerStore()
   const health = getHealth(serverId)
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(serverId)}
-      // 当前主机的按钮兼作「资源监控」折叠开关，用 aria-expanded 把这一语义暴露出来
-      {...(isActive ? { 'aria-expanded': metricsExpanded, 'aria-controls': 'host-metrics-panel' } : {})}
-      title={isActive ? `${name} · ${metricsExpanded ? '点击收起资源监控' : '点击展开资源监控'}` : name}
-      className={cn(
-        'flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-xs transition-colors',
-        isActive
-          ? 'bg-accent-main-100/15 text-text-100'
-          : 'text-text-400 hover:bg-bg-200',
-        interactive.focusRingCompact,
-      )}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(health, state)}`} />
-      <span className="max-w-[12ch] truncate">{name}</span>
-    </button>
+    <NativeTooltip>
+      <button
+        type="button"
+        onClick={() => onSelect(serverId)}
+        // 当前主机的按钮兼作「资源监控」折叠开关，用 aria-expanded 把这一语义暴露出来
+        {...(isActive ? { 'aria-expanded': metricsExpanded, 'aria-controls': 'host-metrics-panel' } : {})}
+        title={isActive ? `${name} · ${metricsExpanded ? '点击收起资源监控' : '点击展开资源监控'}` : name}
+        className={cn(
+          'flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-xs transition-colors',
+          isActive ? 'bg-accent-main-100/15 text-text-100' : 'text-text-400 hover:bg-bg-200',
+          interactive.focusRingCompact,
+        )}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(health, state)}`} />
+        <span className="max-w-[12ch] truncate">{name}</span>
+      </button>
+    </NativeTooltip>
   )
 }

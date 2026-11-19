@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { diffLines } from 'diff'
 import { DisclosureRow } from '../../../components/ui/DisclosureRow'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { StopIcon, TaskDoneIcon, ChevronDownIcon } from '../../../components/Icons'
 import { ToolParamChip } from './ToolParamChip'
 import type { ToolPart } from '../../../types/message'
@@ -132,10 +133,7 @@ export const ToolPartView = memo(function ToolPartView({
   // 用后台回执文本作门控，避免前台子代理在「父工具已完成、子会话 idle 尚未到达」
   // 的窗口内被误标为后台运行。
   const backgroundRunning =
-    isSubagentToolName(toolName) &&
-    isBackgroundSubagentOutput(state.output) &&
-    !isActive &&
-    childStatus === 'running'
+    isSubagentToolName(toolName) && isBackgroundSubagentOutput(state.output) && !isActive && childStatus === 'running'
 
   // 运行态视觉至少保持 300ms：工具跑得极快时扫光只闪一帧，看起来像界面在抖。
   // 计时读数仍用真实 isActive，只有视觉（扫光、图标旋转）用这个。
@@ -169,11 +167,12 @@ export const ToolPartView = memo(function ToolPartView({
   // 有输出但停更的时长；从未有过输出时返回 undefined，退回「会话是否运行」判断。
   const stalledFor = progressOutput ? now - lastProgress.at : undefined
 
-  const isStuck = isActive && duration !== undefined && (
-    sessionRunning
+  const isStuck =
+    isActive &&
+    duration !== undefined &&
+    (sessionRunning
       ? stalledFor !== undefined && stalledFor >= STUCK_TOOL_STALL_MS
-      : duration >= STUCK_TOOL_THRESHOLD_MS
-  )
+      : duration >= STUCK_TOOL_THRESHOLD_MS)
   const { inlineToolRequests, immersiveMode, compactInlinePermission } = useTheme()
 
   const { pendingPermissions, pendingQuestions, onPermissionReply, onQuestionReply, onQuestionReject, isReplying } =
@@ -336,9 +335,7 @@ export const ToolPartView = memo(function ToolPartView({
       <TaskAgentBadge agentType={taskAgentLabel} tone={taskBadgeTone} sessionId={childSessionId} />
       {title && <span className="min-w-0 truncate text-ui-caption">{title}</span>}
       {backgroundRunning && (
-        <span className="shrink-0 text-ui-xs font-medium text-accent-main-100">
-          {t('task.backgroundRunning')}
-        </span>
+        <span className="shrink-0 text-ui-xs font-medium text-accent-main-100">{t('task.backgroundRunning')}</span>
       )}
     </span>
   ) : null
@@ -361,17 +358,20 @@ export const ToolPartView = memo(function ToolPartView({
     },
     [childSessionId, currentSessionId],
   )
-  const taskStopButton = isTaskTool && (isActive || backgroundRunning) && childSessionId ? (
-    <button
-      type="button"
-      onClick={handleStopTask}
-      aria-label={t('task.stop')}
-      title={t('task.stop')}
-      className="w-[18px] h-[18px] p-0 flex items-center justify-center text-text-400 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
-    >
-      <StopIcon size={10} />
-    </button>
-  ) : null
+  const taskStopButton =
+    isTaskTool && (isActive || backgroundRunning) && childSessionId ? (
+      <NativeTooltip>
+        <button
+          type="button"
+          onClick={handleStopTask}
+          aria-label={t('task.stop')}
+          title={t('task.stop')}
+          className="w-[18px] h-[18px] p-0 flex items-center justify-center text-text-400 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
+        >
+          <StopIcon size={10} />
+        </button>
+      </NativeTooltip>
+    ) : null
 
   // 非 task 工具卡住时没有单工具中止接口，只能中止整个会话；task 走上面的子会话 Stop。
   const handleAbortStuck = useCallback(
@@ -407,24 +407,28 @@ export const ToolPartView = memo(function ToolPartView({
       {!taskStopButton && (
         <>
           {/* 转后台：比「中止整个会话」温和得多 —— 工具继续跑，会话可以立刻继续 */}
-          <button
-            type="button"
-            onClick={handleBackgroundStuck}
-            aria-label={t('toolPart.moveToBackground')}
-            title={t('toolPart.moveToBackground')}
-            className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-accent-main-100 hover:bg-accent-main-100/10 active:bg-accent-main-100/20 rounded-sm transition-colors bg-transparent border-none"
-          >
-            <ChevronDownIcon size={10} />
-          </button>
-          <button
-            type="button"
-            onClick={handleAbortStuck}
-            aria-label={t('toolPart.abortStuck')}
-            title={t('toolPart.abortStuck')}
-            className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
-          >
-            <StopIcon size={10} />
-          </button>
+          <NativeTooltip>
+            <button
+              type="button"
+              onClick={handleBackgroundStuck}
+              aria-label={t('toolPart.moveToBackground')}
+              title={t('toolPart.moveToBackground')}
+              className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-accent-main-100 hover:bg-accent-main-100/10 active:bg-accent-main-100/20 rounded-sm transition-colors bg-transparent border-none"
+            >
+              <ChevronDownIcon size={10} />
+            </button>
+          </NativeTooltip>
+          <NativeTooltip>
+            <button
+              type="button"
+              onClick={handleAbortStuck}
+              aria-label={t('toolPart.abortStuck')}
+              title={t('toolPart.abortStuck')}
+              className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
+            >
+              <StopIcon size={10} />
+            </button>
+          </NativeTooltip>
         </>
       )}
     </span>
@@ -517,9 +521,7 @@ export const ToolPartView = memo(function ToolPartView({
             <>
               {stuckHint}
               {isInterrupted && (
-                <span className="shrink-0 text-ui-xs font-medium text-warning-100">
-                  {t('toolPart.interrupted')}
-                </span>
+                <span className="shrink-0 text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
               )}
               {showDuration && (
                 <span
@@ -576,16 +578,10 @@ export const ToolPartView = memo(function ToolPartView({
               <>
                 {stuckHint}
                 {isInterrupted && (
-                  <span className="text-ui-xs font-medium text-warning-100">
-                    {t('toolPart.interrupted')}
-                  </span>
+                  <span className="text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
                 )}
                 {showDuration && (
-                  <span
-                    className={`text-ui-xs tabular-nums ${
-                      isActive ? 'reasoning-shimmer-text' : 'text-text-500'
-                    }`}
-                  >
+                  <span className={`text-ui-xs tabular-nums ${isActive ? 'reasoning-shimmer-text' : 'text-text-500'}`}>
                     {formatDuration(duration!)}
                   </span>
                 )}
@@ -660,9 +656,7 @@ export const ToolPartView = memo(function ToolPartView({
               {taskStopButton}
               {stuckHint}
               {isInterrupted && (
-                <span className="text-ui-xs font-medium text-warning-100">
-                  {t('toolPart.interrupted')}
-                </span>
+                <span className="text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
               )}
               {showDuration && (
                 <span

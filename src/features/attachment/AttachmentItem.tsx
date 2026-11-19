@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { CloseIcon, ChevronDownIcon, CopyIcon, CheckIcon, DownloadIcon, ExpandIcon } from '../../components/Icons'
 import { cn } from '../../utils/cn'
 import { interactive } from '../../utils/interaction'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import { getAttachmentIcon, hasExpandableContent } from './utils'
 import { getMaterialIconUrl } from '../../utils/materialIcons'
 import { useDelayedRender } from '../../hooks/useDelayedRender'
@@ -95,9 +96,11 @@ function AttachmentItemComponent({
             <Icon />
           </span>
         )}
-        <span className="text-text-200 flex-1 min-w-0 truncate text-left" title={attachment.displayName}>
-          {attachment.displayName}
-        </span>
+        <NativeTooltip>
+          <span className="text-text-200 flex-1 min-w-0 truncate text-left" title={attachment.displayName}>
+            {attachment.displayName}
+          </span>
+        </NativeTooltip>
         {canExpand && (
           <span className={`text-text-400 transition-transform duration-300 ${isExpanded ? '' : '-rotate-90'}`}>
             <ChevronDownIcon size={10} />
@@ -350,41 +353,44 @@ function ActionBar({ attachment, hasContent, hasDownloadable, onOpenDetail, show
     <div
       className={`flex flex-wrap items-center gap-1 px-2 py-1 bg-bg-100/30 ${showBorderTop ? 'border-t border-border-300/50' : ''}`}
     >
-      <button
-        type="button"
-        onClick={handleOpenDetail}
-          className={cn(btnBase, 'text-text-400', interactive.subtle)}
-        title={t('attachment.viewDetail')}
-      >
-        <ExpandIcon size={11} />
-        <span>{t('common:detail')}</span>
-      </button>
-
-      {hasContent && (
+      <NativeTooltip>
         <button
           type="button"
-          onClick={handleCopy}
-          className={cn(
-            btnBase,
-            copied ? 'text-success-100' : cn('text-text-400', interactive.subtle),
-          )}
-          title={copied ? t('common:copied') : t('attachment.copyContent')}
+          onClick={handleOpenDetail}
+          className={cn(btnBase, 'text-text-400', interactive.subtle)}
+          title={t('attachment.viewDetail')}
         >
-          {copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
-          <span>{copied ? t('common:copied') : t('common:copy')}</span>
+          <ExpandIcon size={11} />
+          <span>{t('common:detail')}</span>
         </button>
+      </NativeTooltip>
+
+      {hasContent && (
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className={cn(btnBase, copied ? 'text-success-100' : cn('text-text-400', interactive.subtle))}
+            title={copied ? t('common:copied') : t('attachment.copyContent')}
+          >
+            {copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
+            <span>{copied ? t('common:copied') : t('common:copy')}</span>
+          </button>
+        </NativeTooltip>
       )}
 
       {hasDownloadable && (
-        <button
-          type="button"
-          onClick={handleDownload}
-        className={cn(btnBase, 'text-text-400', interactive.subtle)}
-          title={t('attachment.saveToFile')}
-        >
-          <DownloadIcon size={11} />
-          <span>{t('common:save')}</span>
-        </button>
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={handleDownload}
+            className={cn(btnBase, 'text-text-400', interactive.subtle)}
+            title={t('attachment.saveToFile')}
+          >
+            <DownloadIcon size={11} />
+            <span>{t('common:save')}</span>
+          </button>
+        </NativeTooltip>
       )}
     </div>
   )

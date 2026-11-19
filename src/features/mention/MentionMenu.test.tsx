@@ -78,7 +78,7 @@ describe('MentionMenu', () => {
       await Promise.resolve()
     })
 
-    fireEvent.click(screen.getByTitle('Go back'))
+    fireEvent.click(screen.getByLabelText('Go back'))
     expect(onNavigate).toHaveBeenCalledWith('src/')
   })
 })

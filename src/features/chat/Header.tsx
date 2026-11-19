@@ -12,7 +12,7 @@ import {
   SpinnerIcon,
   LayersIcon,
 } from '../../components/Icons'
-import { Dialog, IconButton } from '../../components/ui'
+import { Dialog, IconButton, NativeTooltip } from '../../components/ui'
 import { cn } from '../../utils/cn'
 import { interactive } from '../../utils/interaction'
 import { ShareDialog } from './ShareDialog'
@@ -101,9 +101,7 @@ function SessionTitleControl({
         // 编辑态同样不撑满，由量测出的 inputWidth 决定。
         'w-fit',
         // hover 只用底色，不用 border：border 占盒模型空间，悬停加边框会撑大 1~2px 推动相邻元素。
-        isEditingTitle
-          ? 'bg-bg-200 ring-1 ring-accent-main-100'
-          : cn('bg-transparent', interactive.subtle),
+        isEditingTitle ? 'bg-bg-200 ring-1 ring-accent-main-100' : cn('bg-transparent', interactive.subtle),
       )}
     >
       {isEditingTitle ? (
@@ -132,9 +130,11 @@ function SessionTitleControl({
           </span>
         </>
       ) : (
+        <NativeTooltip>
           <button type="button" onClick={handleStartEdit} className={buttonClass} title={clickToRenameTitle}>
             {sessionTitle}
           </button>
+        </NativeTooltip>
       )}
     </div>
   )
@@ -263,105 +263,108 @@ export function Header({
               <SidebarIcon size={16} />
             </IconButton>
           )}
-        {/* min-w-0 允许收缩；宽度贴合标题内容，不撑满容器。 */}
-        <div className="min-w-0 shrink">{titleControl}</div>
+          {/* min-w-0 允许收缩；宽度贴合标题内容，不撑满容器。 */}
+          <div className="min-w-0 shrink">{titleControl}</div>
         </div>
 
         <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
 
         <div className="flex items-center gap-1 pointer-events-auto shrink-0 z-20">
-            {showContextRing && (
-              <ContextUsageRing
-                contextLimit={contextRingLimit}
-                onOpenDetails={() => setContextDialogOpen(true)}
-              />
-            )}
+          {showContextRing && (
+            <ContextUsageRing contextLimit={contextRingLimit} onOpenDetails={() => setContextDialogOpen(true)} />
+          )}
 
-            {canOpenDirectory && (
-              <OpenDirectoryButton
-                directory={targetDirectory}
-                serverId={targetServerId}
-                onOpenInApp={() => layoutStore.openRightPanel('files')}
-              />
-            )}
+          {canOpenDirectory && (
+            <OpenDirectoryButton
+              directory={targetDirectory}
+              serverId={targetServerId}
+              onOpenInApp={() => layoutStore.openRightPanel('files')}
+            />
+          )}
 
-            {onTogglePaneFullscreen && (
-              <IconButton
-                aria-label={isPaneFullscreen ? t('header.exitFullscreenPane') : t('header.enterFullscreenPane')}
-                onClick={onTogglePaneFullscreen}
-                className={cn(
-                  isPaneFullscreen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
-                  interactive.subtle,
-                )}
-              >
-                {isPaneFullscreen ? <MinimizeIcon size={16} /> : <MaximizeIcon size={16} />}
-              </IconButton>
-            )}
-
-            {onSplitPane && (
-              <IconButton
-                aria-label={t('header.splitPane')}
-                onClick={onSplitPane}
-                className={cn('text-text-300 hover:text-text-100', interactive.subtle)}
-              >
-                <SplitHorizontalIcon size={16} />
-              </IconButton>
-            )}
-
+          {onTogglePaneFullscreen && (
             <IconButton
-              aria-label={bottomPanelOpen ? t('header.closeBottomPanel') : t('header.openBottomPanel')}
-              onClick={() => layoutStore.toggleBottomPanel()}
+              aria-label={isPaneFullscreen ? t('header.exitFullscreenPane') : t('header.enterFullscreenPane')}
+              onClick={onTogglePaneFullscreen}
               className={cn(
-                bottomPanelOpen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
+                isPaneFullscreen
+                  ? interactive.toggleActive
+                  : 'text-text-300 hover:text-text-100 border border-transparent',
                 interactive.subtle,
               )}
             >
-              <PanelBottomIcon size={16} />
+              {isPaneFullscreen ? <MinimizeIcon size={16} /> : <MaximizeIcon size={16} />}
             </IconButton>
+          )}
 
+          {onSplitPane && (
             <IconButton
-              aria-label={rightPanelOpen ? t('header.closePanel') : t('header.openPanel')}
-              onClick={onToggleRightPanel ?? (() => layoutStore.toggleRightPanel())}
-              className={cn(
-                rightPanelOpen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
-                interactive.subtle,
-              )}
-            >
-              <PanelRightIcon size={16} />
-            </IconButton>
-
-            <IconButton
-              aria-label={t('workStatus.railToggle')}
-              title={t('workStatus.railToggle')}
-              aria-pressed={workStatus.enabled}
-              onClick={() => workStatusStore.toggleEnabled()}
-              className={cn(
-                workStatus.enabled ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
-                interactive.subtle,
-              )}
-            >
-              <LayersIcon size={16} />
-            </IconButton>
-
-            <IconButton
-              aria-label={t('header.mcpStatus')}
-              title={t('header.mcpStatus')}
-              onClick={() => setMcpDialogOpen(true)}
+              aria-label={t('header.splitPane')}
+              onClick={onSplitPane}
               className={cn('text-text-300 hover:text-text-100', interactive.subtle)}
             >
-              <PlugIcon size={16} />
+              <SplitHorizontalIcon size={16} />
             </IconButton>
+          )}
 
-            {sessionId && (
-              <IconButton
-                aria-label={t('header.shareSession')}
-                title={t('header.shareSession')}
-                onClick={() => setShareDialogOpen(true)}
-                className={cn('text-text-300 hover:text-text-100', interactive.subtle)}
-              >
-                <ShareIcon size={16} />
-              </IconButton>
+          <IconButton
+            aria-label={bottomPanelOpen ? t('header.closeBottomPanel') : t('header.openBottomPanel')}
+            onClick={() => layoutStore.toggleBottomPanel()}
+            className={cn(
+              bottomPanelOpen
+                ? interactive.toggleActive
+                : 'text-text-300 hover:text-text-100 border border-transparent',
+              interactive.subtle,
             )}
+          >
+            <PanelBottomIcon size={16} />
+          </IconButton>
+
+          <IconButton
+            aria-label={rightPanelOpen ? t('header.closePanel') : t('header.openPanel')}
+            onClick={onToggleRightPanel ?? (() => layoutStore.toggleRightPanel())}
+            className={cn(
+              rightPanelOpen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
+              interactive.subtle,
+            )}
+          >
+            <PanelRightIcon size={16} />
+          </IconButton>
+
+          <IconButton
+            aria-label={t('workStatus.railToggle')}
+            title={t('workStatus.railToggle')}
+            aria-pressed={workStatus.enabled}
+            onClick={() => workStatusStore.toggleEnabled()}
+            className={cn(
+              workStatus.enabled
+                ? interactive.toggleActive
+                : 'text-text-300 hover:text-text-100 border border-transparent',
+              interactive.subtle,
+            )}
+          >
+            <LayersIcon size={16} />
+          </IconButton>
+
+          <IconButton
+            aria-label={t('header.mcpStatus')}
+            title={t('header.mcpStatus')}
+            onClick={() => setMcpDialogOpen(true)}
+            className={cn('text-text-300 hover:text-text-100', interactive.subtle)}
+          >
+            <PlugIcon size={16} />
+          </IconButton>
+
+          {sessionId && (
+            <IconButton
+              aria-label={t('header.shareSession')}
+              title={t('header.shareSession')}
+              onClick={() => setShareDialogOpen(true)}
+              className={cn('text-text-300 hover:text-text-100', interactive.subtle)}
+            >
+              <ShareIcon size={16} />
+            </IconButton>
+          )}
         </div>
 
         <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
@@ -400,7 +403,7 @@ export function Header({
     <div
       className={`chat-topbar flex justify-between items-center z-20 bg-bg-100 transition-colors duration-200 relative border-b border-border-200/60 ${isCompact ? 'px-2' : 'px-4'}`}
     >
-        <div className="flex min-w-0 flex-1 items-center gap-2 z-20">
+      <div className="flex min-w-0 flex-1 items-center gap-2 z-20">
         {interaction.sidebarBehavior === 'overlay' && onOpenSidebar && (
           <IconButton
             aria-label={t('header.openSidebar')}
@@ -411,16 +414,13 @@ export function Header({
           </IconButton>
         )}
 
-          <div className="min-w-0 flex-1 max-w-[min(720px,72%)]">{titleControl}</div>
+        <div className="min-w-0 flex-1 max-w-[min(720px,72%)]">{titleControl}</div>
       </div>
 
       <div className="flex items-center gap-1 pointer-events-auto shrink-0 z-20">
         <div className="flex items-center gap-0.5">
           {showContextRing && (
-            <ContextUsageRing
-              contextLimit={contextRingLimit}
-              onOpenDetails={() => setContextDialogOpen(true)}
-            />
+            <ContextUsageRing contextLimit={contextRingLimit} onOpenDetails={() => setContextDialogOpen(true)} />
           )}
 
           {canOpenDirectory && (
@@ -436,7 +436,9 @@ export function Header({
               aria-label={isPaneFullscreen ? t('header.exitFullscreenPane') : t('header.enterFullscreenPane')}
               onClick={onTogglePaneFullscreen}
               className={cn(
-                isPaneFullscreen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
+                isPaneFullscreen
+                  ? interactive.toggleActive
+                  : 'text-text-300 hover:text-text-100 border border-transparent',
                 interactive.subtle,
               )}
             >
@@ -458,7 +460,9 @@ export function Header({
             aria-label={bottomPanelOpen ? t('header.closeBottomPanel') : t('header.openBottomPanel')}
             onClick={() => layoutStore.toggleBottomPanel()}
             className={cn(
-              bottomPanelOpen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
+              bottomPanelOpen
+                ? interactive.toggleActive
+                : 'text-text-300 hover:text-text-100 border border-transparent',
               interactive.subtle,
             )}
           >
@@ -483,7 +487,9 @@ export function Header({
               aria-pressed={workStatus.enabled}
               onClick={() => workStatusStore.toggleEnabled()}
               className={cn(
-                workStatus.enabled ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
+                workStatus.enabled
+                  ? interactive.toggleActive
+                  : 'text-text-300 hover:text-text-100 border border-transparent',
                 interactive.subtle,
               )}
             >

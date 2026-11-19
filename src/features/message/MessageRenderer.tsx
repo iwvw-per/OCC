@@ -14,6 +14,7 @@ import {
   UndoIcon,
 } from '../../components/Icons'
 import { Spinner } from '../../components/ui/Spinner'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import { CopyButton, SmoothHeight } from '../../components/ui'
 import { DisclosureRow } from '../../components/ui/DisclosureRow'
 import { MarkdownRenderer } from '../../components/MarkdownRenderer'
@@ -32,13 +33,7 @@ import {
   findPermissionRequestForTool,
   findQuestionRequestForTool,
 } from '../chat/InlineToolRequestContext'
-import {
-  TextPartView,
-  ReasoningPartView,
-  ToolPartView,
-  SyntheticTextPartView,
-  MessageErrorView,
-} from './parts'
+import { TextPartView, ReasoningPartView, ToolPartView, SyntheticTextPartView, MessageErrorView } from './parts'
 import { ToolIconStrip } from './parts/ToolIconStrip'
 import { isSubagentToolName, getSubagentSessionId } from './subagentUtils'
 import { DiffChips } from './parts/DiffChips'
@@ -55,13 +50,7 @@ import {
   type ProcessContentScope,
   type RenderItem,
 } from './messageRenderLogic'
-import type {
-  Message,
-  TextPart,
-  ToolPart,
-  TextContent,
-  AssistantMessageInfo,
-} from '../../types/message'
+import type { Message, TextPart, ToolPart, TextContent, AssistantMessageInfo } from '../../types/message'
 import {
   ENTRY_GROW_DURATION_MS,
   isEntryGrowComplete,
@@ -148,7 +137,13 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
       growLabel={false}
       showChevron={false}
       reserveChevronSpace
-      icon={isActive ? <Spinner size="sm" tone="accent" variant="pixel" /> : <LayersIcon size={13} className="text-text-500" />}
+      icon={
+        isActive ? (
+          <Spinner size="sm" tone="accent" variant="pixel" />
+        ) : (
+          <LayersIcon size={13} className="text-text-500" />
+        )
+      }
       meta={
         hasBreakdown ? (
           <span className="flex min-w-0 items-center gap-2 overflow-hidden text-ui-xs tabular-nums text-text-500">
@@ -470,9 +465,7 @@ export function ProcessCollapseBlock({
                * 「Working for 12s」配一句「没有可展开的过程内容」，判定为坏了。
                * 运行中留空即可，header 的 Working 计时本身就是进度反馈。
                */
-              <p className="px-1 py-2 text-ui-sm text-text-400">
-                {t('process.emptyAfterExpand')}
-              </p>
+              <p className="px-1 py-2 text-ui-sm text-text-400">{t('process.emptyAfterExpand')}</p>
             ) : (
               children
             )}
@@ -480,10 +473,7 @@ export function ProcessCollapseBlock({
         )}
       </MessageExpandPanel>
       {interrupted && (
-        <p
-          className="flex items-center gap-1.5 px-1 pt-1 text-ui-sm text-text-400"
-          data-turn-interrupted
-        >
+        <p className="flex items-center gap-1.5 px-1 pt-1 text-ui-sm text-text-400" data-turn-interrupted>
           <AlertCircleIcon size={12} className="shrink-0 text-warning-100" />
           <span>{t('process.interrupted')}</span>
         </p>
@@ -501,18 +491,9 @@ export function ProcessCollapseBlock({
 const ProcessHydratePlaceholder = memo(function ProcessHydratePlaceholder() {
   const { t } = useTranslation('message')
   return (
-    <div
-      className="flex flex-col gap-2 py-1"
-      role="status"
-      aria-live="polite"
-      aria-label={t('loadingProcess')}
-    >
+    <div className="flex flex-col gap-2 py-1" role="status" aria-live="polite" aria-label={t('loadingProcess')}>
       {[0, 1, 2].map(index => (
-        <div
-          key={index}
-          className="flex items-center gap-2 animate-pulse"
-          style={{ opacity: 1 - index * 0.25 }}
-        >
+        <div key={index} className="flex items-center gap-2 animate-pulse" style={{ opacity: 1 - index * 0.25 }}>
           <span className="h-3 w-3 shrink-0 rounded-full bg-bg-300" />
           <span className="h-2.5 rounded-full bg-bg-300" style={{ width: `${72 - index * 16}%` }} />
         </div>
@@ -815,15 +796,17 @@ const ForkActionButton = memo(function ForkActionButton({ message, onFork, forkM
   if (!onFork) return null
 
   return (
-    <button
-      onClick={() => void handleFork()}
-      disabled={isForking}
-      className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500"
-      title={isForking ? t('forkingFromHere') : t('forkFromHere')}
-      aria-label={isForking ? t('forkingFromHere') : t('forkFromHere')}
-    >
-      {isForking ? <SpinnerIcon className="animate-spin" /> : <SplitIcon />}
-    </button>
+    <NativeTooltip>
+      <button
+        onClick={() => void handleFork()}
+        disabled={isForking}
+        className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500"
+        title={isForking ? t('forkingFromHere') : t('forkFromHere')}
+        aria-label={isForking ? t('forkingFromHere') : t('forkFromHere')}
+      >
+        {isForking ? <SpinnerIcon className="animate-spin" /> : <SplitIcon />}
+      </button>
+    </NativeTooltip>
   )
 })
 
@@ -858,17 +841,19 @@ const PinActionButton = memo(function PinActionButton({ message, sessionId }: Pi
   if (!sessionId) return null
 
   return (
-    <button
-      onClick={handleToggle}
-      className={`p-1.5 rounded-md transition-colors duration-150 ${
-        pinned ? 'text-accent-main-100' : 'text-text-400 hover:text-text-200'
-      }`}
-      title={pinned ? t('workStatus.pinned.unpin') : t('workStatus.pinned.pin')}
-      aria-label={pinned ? t('workStatus.pinned.unpin') : t('workStatus.pinned.pin')}
-      aria-pressed={pinned}
-    >
-      <PinIcon />
-    </button>
+    <NativeTooltip>
+      <button
+        onClick={handleToggle}
+        className={`p-1.5 rounded-md transition-colors duration-150 ${
+          pinned ? 'text-accent-main-100' : 'text-text-400 hover:text-text-200'
+        }`}
+        title={pinned ? t('workStatus.pinned.unpin') : t('workStatus.pinned.pin')}
+        aria-label={pinned ? t('workStatus.pinned.unpin') : t('workStatus.pinned.pin')}
+        aria-pressed={pinned}
+      >
+        <PinIcon />
+      </button>
+    </NativeTooltip>
   )
 })
 
@@ -905,16 +890,18 @@ const ExportImageActionButton = memo(function ExportImageActionButton({
   }, [fileName, isExporting, sessionId, t])
 
   return (
-    <button
-      ref={buttonRef}
-      onClick={() => void handleExport()}
-      disabled={isExporting}
-      className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500"
-      title={isExporting ? t('exportingImage') : t('exportImage')}
-      aria-label={isExporting ? t('exportingImage') : t('exportImage')}
-    >
-      {isExporting ? <SpinnerIcon className="animate-spin" /> : <ImageIcon />}
-    </button>
+    <NativeTooltip>
+      <button
+        ref={buttonRef}
+        onClick={() => void handleExport()}
+        disabled={isExporting}
+        className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500"
+        title={isExporting ? t('exportingImage') : t('exportImage')}
+        aria-label={isExporting ? t('exportingImage') : t('exportImage')}
+      >
+        {isExporting ? <SpinnerIcon className="animate-spin" /> : <ImageIcon />}
+      </button>
+    </NativeTooltip>
   )
 })
 
@@ -970,7 +957,8 @@ const UserMessageView = memo(function UserMessageView({
 
   const textParts = content.filter((c): c is TextContent => c.type === 'text' && !c.synthetic)
   const syntheticParts = content.filter((c): c is TextContent => c.type === 'text' && !!c.synthetic)
-  const attachments = info.role === 'user' ? (info as import('../../types/message').UserMessageInfo).attachments ?? [] : []
+  const attachments =
+    info.role === 'user' ? ((info as import('../../types/message').UserMessageInfo).attachments ?? []) : []
 
   const hasSystemContext = syntheticParts.length > 0
   const messageText = textParts.map(p => p.text).join('')
@@ -1041,13 +1029,16 @@ const UserMessageView = memo(function UserMessageView({
         <div className={actionBarClass} data-message-actions>
           {/* Undo button */}
           {canUndo && onUndo && (
-            <button
-              onClick={() => onUndo(info.id)}
-              className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200"
-              title={t('undoFromHere')}
-            >
-              <UndoIcon />
-            </button>
+            <NativeTooltip>
+              <button
+                onClick={() => onUndo(info.id)}
+                className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200"
+                title={t('undoFromHere')}
+                aria-label={t('undoFromHere')}
+              >
+                <UndoIcon />
+              </button>
+            </NativeTooltip>
           )}
           <ForkActionButton message={message} onFork={onFork} forkMessageId={forkMessageId} />
           <PinActionButton message={message} sessionId={sessionId} />
@@ -1080,34 +1071,38 @@ const UserAttachmentChip = memo(function UserAttachmentChip({
 
   if (isImage) {
     return (
-      <a
-        data-user-attachment
-        href={attachment.url}
-        target="_blank"
-        rel="noreferrer"
-        title={attachment.displayName}
-        className="block max-w-[240px] overflow-hidden rounded-lg border border-border-200 bg-bg-100"
-      >
-        <img
-          src={attachment.url}
-          alt={attachment.displayName}
-          loading="lazy"
-          onError={() => setImageFailed(true)}
-          className="max-h-48 w-full object-contain"
-        />
-      </a>
+      <NativeTooltip>
+        <a
+          data-user-attachment
+          href={attachment.url}
+          target="_blank"
+          rel="noreferrer"
+          title={attachment.displayName}
+          className="block max-w-[240px] overflow-hidden rounded-lg border border-border-200 bg-bg-100"
+        >
+          <img
+            src={attachment.url}
+            alt={attachment.displayName}
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+            className="max-h-48 w-full object-contain"
+          />
+        </a>
+      </NativeTooltip>
     )
   }
 
   return (
-    <span
-      data-user-attachment
-      title={attachment.displayName}
-      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border-200 bg-bg-100 px-2.5 py-1 text-ui-sm text-text-300"
-    >
-      <span className="shrink-0 text-text-400">{attachment.type === 'agent' ? 'agent' : 'file'}</span>
-      <span className="truncate">{attachment.displayName}</span>
-    </span>
+    <NativeTooltip>
+      <span
+        data-user-attachment
+        title={attachment.displayName}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border-200 bg-bg-100 px-2.5 py-1 text-ui-sm text-text-300"
+      >
+        <span className="shrink-0 text-text-400">{attachment.type === 'agent' ? 'agent' : 'file'}</span>
+        <span className="truncate">{attachment.displayName}</span>
+      </span>
+    </NativeTooltip>
   )
 })
 
@@ -1247,13 +1242,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
         <div className={`flex flex-col ${MSG_SPACING.stack}`}>
           {renderItems.map((item: RenderItem) => {
             if (item.type === 'tool-group') {
-              return (
-                <ToolGroup
-                  key={item.contents[0].id}
-                  parts={item.contents}
-                  isStreaming={isStreaming}
-                />
-              )
+              return <ToolGroup key={item.contents[0].id} parts={item.contents} isStreaming={isStreaming} />
             }
 
             const part = item.content
@@ -1294,7 +1283,11 @@ const AssistantMessageView = memo(function AssistantMessageView({
               <span>{t('stepFinish.totalDuration', { duration: formatDuration(turnDuration!) })}</span>
             )}
             {showCompletedAtFooter && (
-              <span title={formatDetailedDateTime(completed!)}>{formatCompletedAt(completed!, completedAtFormat)}</span>
+              <NativeTooltip>
+                <span title={formatDetailedDateTime(completed!)}>
+                  {formatCompletedAt(completed!, completedAtFormat)}
+                </span>
+              </NativeTooltip>
             )}
           </div>
         )}
@@ -1327,10 +1320,7 @@ function isReadableTool(toolName: string): boolean {
   return READABLE_TOOL_PATTERNS.test(toolName.toLowerCase())
 }
 
-const ToolGroup = memo(function ToolGroup({
-  parts,
-  isStreaming,
-}: ToolGroupProps) {
+const ToolGroup = memo(function ToolGroup({ parts, isStreaming }: ToolGroupProps) {
   const { t } = useTranslation('message')
   const { descriptiveToolSteps, inlineToolRequests, immersiveMode, processCollapseEnabled } = useTheme()
   const { pendingPermissions, pendingQuestions } = useInlineToolRequests()

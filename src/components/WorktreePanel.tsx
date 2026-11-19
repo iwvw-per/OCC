@@ -5,6 +5,7 @@
 
 import { memo, useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { NativeTooltip } from './ui/Tooltip'
 import {
   GitWorktreeIcon,
   GitBranchIcon,
@@ -279,9 +280,11 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
         <div className="relative px-3 py-2">
           <div className="flex items-center gap-2">
             <GitBranchIcon size={14} className="text-accent-main-100 shrink-0" />
-            <span className="text-ui-caption font-mono text-text-100 truncate" title={vcsInfo.branch}>
-              {vcsInfo.branch}
-            </span>
+            <NativeTooltip>
+              <span className="text-ui-caption font-mono text-text-100 truncate" title={vcsInfo.branch}>
+                {vcsInfo.branch}
+              </span>
+            </NativeTooltip>
           </div>
           <div className="pointer-events-none absolute inset-x-3 bottom-0 h-px bg-border-200/30" />
         </div>
@@ -293,16 +296,18 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
           <span className="font-medium">{t('worktreePanel.worktrees')}</span>
           {!loading && <span className="text-text-400">({worktrees.length})</span>}
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCreateForm(true)}
-          disabled={!!actionLoading || !canManageWorktrees}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-400 hover:text-text-100 hover:bg-bg-200 transition-colors"
-          title={t('worktreePanel.createWorktree')}
-          aria-label={t('worktreePanel.createWorktree')}
-        >
-          <PlusIcon size={12} />
-        </button>
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={() => setShowCreateForm(true)}
+            disabled={!!actionLoading || !canManageWorktrees}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-400 hover:text-text-100 hover:bg-bg-200 transition-colors"
+            title={t('worktreePanel.createWorktree')}
+            aria-label={t('worktreePanel.createWorktree')}
+          >
+            <PlusIcon size={12} />
+          </button>
+        </NativeTooltip>
         <div className="pointer-events-none absolute inset-x-3 bottom-0 h-px bg-border-200/30" />
       </div>
 
@@ -514,9 +519,11 @@ const WorktreeItem = memo(function WorktreeItem({
       {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="text-ui-caption text-text-100 font-medium truncate">{name}</div>
-        <div className="text-ui-xs text-text-400/70 font-mono truncate" title={directory}>
-          {directory}
-        </div>
+        <NativeTooltip>
+          <div className="text-ui-xs text-text-400/70 font-mono truncate" title={directory}>
+            {directory}
+          </div>
+        </NativeTooltip>
       </div>
 
       {/* Actions */}
@@ -524,27 +531,48 @@ const WorktreeItem = memo(function WorktreeItem({
         <SpinnerIcon size={12} className="animate-spin text-text-400 shrink-0" />
       ) : (
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          <button
-            onClick={onOpenSession}
-            className={cn('p-1 rounded-md text-text-400 hover:text-accent-main-100', interactive.accent, interactive.focusRingCompact)}
-            title={t('worktreePanel.openSession')}
-          >
-            <ExternalLinkIcon size={12} />
-          </button>
-          <button
-            onClick={onReset}
-            className={cn('p-1 rounded-md text-text-400 hover:text-warning-100', interactive.warning, interactive.focusRingCompact)}
-            title={t('worktreePanel.resetWorktreeAction')}
-          >
-            <RetryIcon size={12} />
-          </button>
-          <button
-            onClick={onDelete}
-            className={cn('p-1 rounded-md text-text-400 hover:text-danger-100', interactive.danger, interactive.focusRingCompact)}
-            title={t('worktreePanel.removeWorktreeAction')}
-          >
-            <TrashIcon size={12} />
-          </button>
+          <NativeTooltip>
+            <button
+              onClick={onOpenSession}
+              className={cn(
+                'p-1 rounded-md text-text-400 hover:text-accent-main-100',
+                interactive.accent,
+                interactive.focusRingCompact,
+              )}
+              title={t('worktreePanel.openSession')}
+              aria-label={t('worktreePanel.openSession')}
+            >
+              <ExternalLinkIcon size={12} />
+            </button>
+          </NativeTooltip>
+          <NativeTooltip>
+            <button
+              onClick={onReset}
+              className={cn(
+                'p-1 rounded-md text-text-400 hover:text-warning-100',
+                interactive.warning,
+                interactive.focusRingCompact,
+              )}
+              title={t('worktreePanel.resetWorktreeAction')}
+              aria-label={t('worktreePanel.resetWorktreeAction')}
+            >
+              <RetryIcon size={12} />
+            </button>
+          </NativeTooltip>
+          <NativeTooltip>
+            <button
+              onClick={onDelete}
+              className={cn(
+                'p-1 rounded-md text-text-400 hover:text-danger-100',
+                interactive.danger,
+                interactive.focusRingCompact,
+              )}
+              title={t('worktreePanel.removeWorktreeAction')}
+              aria-label={t('worktreePanel.removeWorktreeAction')}
+            >
+              <TrashIcon size={12} />
+            </button>
+          </NativeTooltip>
         </div>
       )}
     </div>

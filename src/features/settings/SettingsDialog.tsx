@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Dialog } from '../../components/ui/Dialog'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import {
   SunIcon,
   GlobeIcon,
@@ -274,8 +275,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
               (!item.targetContext || candidate.dataset.settingContext === item.targetContext),
           )
           const target =
-            matchingTargets[0] ??
-            candidates.find(candidate => candidate.dataset.settingLabel === item.fallbackLabel)
+            matchingTargets[0] ?? candidates.find(candidate => candidate.dataset.settingLabel === item.fallbackLabel)
           if (!target) return
 
           scrollRef.current?.querySelector('.settings-search-highlight')?.classList.remove('settings-search-highlight')
@@ -412,15 +412,17 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
         >
           <div className="mb-3 shrink-0 flex items-center gap-2">
             <div className="min-w-0 flex-1">{search}</div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md text-text-400/60 hover:text-text-200 hover:bg-bg-200 transition-colors"
-              aria-label={t('closeSettings')}
-              title={t('closeSettings')}
-            >
-              <CloseIcon size={15} />
-            </button>
+            <NativeTooltip>
+              <button
+                type="button"
+                onClick={onClose}
+                className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md text-text-400/60 hover:text-text-200 hover:bg-bg-200 transition-colors"
+                aria-label={t('closeSettings')}
+                title={t('closeSettings')}
+              >
+                <CloseIcon size={15} />
+              </button>
+            </NativeTooltip>
           </div>
           <div
             role="tablist"
@@ -448,7 +450,9 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
                         onClick={() => switchTab(vt.id)}
                         tabIndex={active ? 0 : -1}
                         className={`w-full min-h-8 flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-ui-base font-medium transition-colors border ${
-                          active ? 'bg-bg-200 text-text-100 border-border-200' : 'text-text-300 hover:bg-bg-200 border-transparent'
+                          active
+                            ? 'bg-bg-200 text-text-100 border-border-200'
+                            : 'text-text-300 hover:bg-bg-200 border-transparent'
                         }`}
                       >
                         <span className={active ? 'text-accent-main-100' : 'text-text-400'}>{vt.icon}</span>
@@ -463,12 +467,14 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
 
           {/* 版本号与菜单图标左边缘对齐，弱化为辅助信息 */}
           <div className="shrink-0 mt-2 px-2.5">
-            <div
-              className="text-ui-xs tabular-nums text-text-500/75 leading-snug truncate"
-              title={t('version', { version: __APP_VERSION__ })}
-            >
-              v{__APP_VERSION__}
-            </div>
+            <NativeTooltip>
+              <div
+                className="text-ui-xs tabular-nums text-text-500/75 leading-snug truncate"
+                title={t('version', { version: __APP_VERSION__ })}
+              >
+                v{__APP_VERSION__}
+              </div>
+            </NativeTooltip>
           </div>
         </nav>
 

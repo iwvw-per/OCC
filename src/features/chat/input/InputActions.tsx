@@ -1,5 +1,6 @@
 import { memo, type ReactNode } from 'react'
 import { PermissionListIcon, QuestionIcon } from '../../../components/Icons'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { UndoStatus } from './UndoStatus'
 import { usePresence } from '../../../hooks'
 import type { CollapsedDialogInfo } from '../InputBox'
@@ -98,12 +99,14 @@ export const FloatingActions = memo(function FloatingActions({
       {/* 上下文过重量提示：解释「只发两个字也 413」，并给出脱困路径 */}
       <PresenceItem show={!!heavyContent}>
         {heavyContent && (
-          <span
-            title={heavyContent.title}
-            className="flex items-center gap-1.5 px-3 h-[32px] rounded-full bg-bg-100/95 backdrop-blur-md border border-warning-100/40 text-ui-caption leading-[14px] text-warning-100 shadow-sm"
-          >
-            <span className="whitespace-nowrap">{heavyContent.label}</span>
-          </span>
+          <NativeTooltip>
+            <span
+              title={heavyContent.title}
+              className="flex items-center gap-1.5 px-3 h-[32px] rounded-full bg-bg-100/95 backdrop-blur-md border border-warning-100/40 text-ui-caption leading-[14px] text-warning-100 shadow-sm"
+            >
+              <span className="whitespace-nowrap">{heavyContent.label}</span>
+            </span>
+          </NativeTooltip>
         )}
       </PresenceItem>
     </div>

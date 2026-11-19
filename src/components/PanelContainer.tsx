@@ -5,6 +5,7 @@
 
 import { memo, useState, useCallback, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { NativeTooltip } from './ui/Tooltip'
 import { createPortal } from 'react-dom'
 import {
   CloseIcon,
@@ -23,7 +24,12 @@ import { updatePtySession } from '../api/pty'
 import { useTheme } from '../hooks'
 import { uiErrorHandler } from '../utils'
 import { interactive } from '../utils/interaction'
-import { getInternalDragSnapshot, startInternalDrag, subscribeInternalDrag, subscribeInternalDrop } from '../lib/internalDragCore'
+import {
+  getInternalDragSnapshot,
+  startInternalDrag,
+  subscribeInternalDrag,
+  subscribeInternalDrop,
+} from '../lib/internalDragCore'
 import { useDragEdgeAutoScroll } from '../hooks/useDragEdgeAutoScroll'
 import { IconButton } from './ui/IconButton'
 import { ContextMenuItem } from './ui/ContextMenuItem'
@@ -267,7 +273,7 @@ export const PanelContainer = memo(function PanelContainer({
     [cancelRename, directory, editingValue],
   )
 
-  const contextTab = contextMenu ? tabs.find(tab => tab.id === contextMenu.tabId) ?? null : null
+  const contextTab = contextMenu ? (tabs.find(tab => tab.id === contextMenu.tabId) ?? null) : null
 
   // 拖拽处理
   useEffect(() => {
@@ -280,7 +286,9 @@ export const PanelContainer = memo(function PanelContainer({
       }
 
       setDraggedId(active.payload.tabId)
-      const target = document.elementFromPoint(active.current.x, active.current.y)?.closest<HTMLElement>('[data-panel-tab-id]')
+      const target = document
+        .elementFromPoint(active.current.x, active.current.y)
+        ?.closest<HTMLElement>('[data-panel-tab-id]')
       const targetId = target?.dataset.panelTabId
       setDragOverId(targetId && targetId !== active.payload.tabId ? targetId : null)
     })
@@ -289,7 +297,9 @@ export const PanelContainer = memo(function PanelContainer({
   useEffect(() => {
     return subscribeInternalDrop(event => {
       if (event.payload.kind !== 'panel-tab' || event.payload.position !== position) return
-      const target = document.elementFromPoint(event.point.x, event.point.y)?.closest<HTMLElement>('[data-panel-tab-id]')
+      const target = document
+        .elementFromPoint(event.point.x, event.point.y)
+        ?.closest<HTMLElement>('[data-panel-tab-id]')
       const targetId = target?.dataset.panelTabId
       if (targetId && targetId !== event.payload.tabId) {
         layoutStore.reorderTabs(position, event.payload.tabId, targetId)
@@ -308,7 +318,9 @@ export const PanelContainer = memo(function PanelContainer({
   return (
     <>
       {/* Header with Tabs */}
-      <div className={`${position === 'right' ? 'mobile-safe-topbar-14' : ''} flex items-center justify-between px-3 z-20 bg-bg-100 relative shrink-0`}>
+      <div
+        className={`${position === 'right' ? 'mobile-safe-topbar-14' : ''} flex items-center justify-between px-3 z-20 bg-bg-100 relative shrink-0`}
+      >
         {/* Tabs Container - 水平滚动 */}
         <div
           ref={tabsContainerRef}
@@ -360,10 +372,7 @@ export const PanelContainer = memo(function PanelContainer({
                   })
                 }
               }}
-              className={cn(
-                'ml-1',
-                addMenuPos ? interactive.toggleActiveNeutral : 'text-text-400 hover:text-text-100',
-              )}
+              className={cn('ml-1', addMenuPos ? interactive.toggleActiveNeutral : 'text-text-400 hover:text-text-100')}
             >
               <PlusIcon size={16} />
             </IconButton>
@@ -570,11 +579,7 @@ const PanelTabButton = memo(function PanelTabButton({
         group flex items-center gap-1.5 px-2 py-1 rounded-md text-ui-caption shrink-0
         border border-transparent cursor-pointer select-none
         transition-all duration-150 ease-out
-        ${
-          isActive
-            ? 'bg-bg-000 text-text-100 shadow-sm border-border-200/50'
-            : 'text-text-300 hover:bg-bg-200'
-        }
+        ${isActive ? 'bg-bg-000 text-text-100 shadow-sm border-border-200/50' : 'text-text-300 hover:bg-bg-200'}
         ${isDragging ? 'opacity-40 scale-95' : ''}
         ${isDragOver ? 'border-accent-main-100 bg-accent-main-100/10' : ''}
       `}
@@ -613,25 +618,27 @@ const PanelTabButton = memo(function PanelTabButton({
 
       {/* Close Button (only for closeable tabs like terminal) */}
       {onClose && (
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation()
-            onClose(e)
-          }}
-          onMouseDown={e => e.stopPropagation()}
-          aria-label={t('common:close')}
-          className={`
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation()
+              onClose(e)
+            }}
+            onMouseDown={e => e.stopPropagation()}
+            aria-label={t('common:close')}
+            className={`
             touch-target-sm
             p-1 -mr-0.5 rounded shrink-0
             transition-all duration-150 ease-out
             hover:bg-danger-100/20 text-text-400 hover:text-danger-100
             ${isActive ? '' : 'opacity-0 group-hover:opacity-100'}
           `}
-          title={t('common:close')}
-        >
-          <CloseIcon size={12} />
-        </button>
+            title={t('common:close')}
+          >
+            <CloseIcon size={12} />
+          </button>
+        </NativeTooltip>
       )}
     </div>
   )

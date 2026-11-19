@@ -1,18 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { ShareDialog } from '../ShareDialog'
 import { ContextDetailsDialog } from './ContextDetailsDialog'
 import { ArchivedSessionsDialog } from './ArchivedSessionsDialog'
-import {
-  CogIcon,
-  SunIcon,
-  MoonIcon,
-  SystemIcon,
-  MinimizeIcon,
-  ShareIcon,
-  ArchiveIcon,
-} from '../../../components/Icons'
+import { CogIcon, SunIcon, MoonIcon, SystemIcon, MinimizeIcon, ShareIcon, ArchiveIcon } from '../../../components/Icons'
 import { CircularProgress } from '../../../components/CircularProgress'
 import { SegmentedControl } from '../../settings/components/SettingsUI'
 import { formatTokens, formatCost, useTheme, useSessionStats } from '../../../hooks'
@@ -20,13 +13,7 @@ import { useServerStore, type ServerHealth } from '../../../hooks/useServerStore
 import { interactive } from '../../../utils/interaction'
 
 // 状态指示器 - 上下文占用圆环
-function StatusIndicator({
-  percent,
-  size = 20,
-}: {
-  percent: number
-  size?: number
-}) {
+function StatusIndicator({ percent, size = 20 }: { percent: number; size?: number }) {
   const clampedPercent = Math.min(Math.max(percent, 0), 100)
 
   // 进度颜色
@@ -59,12 +46,7 @@ export interface SidebarFooterProps {
   onOpenSettings?: () => void
 }
 
-export function SidebarFooter({
-  showLabels,
-  connectionState,
-  contextLimit = 0,
-  onOpenSettings,
-}: SidebarFooterProps) {
+export function SidebarFooter({ showLabels, connectionState, contextLimit = 0, onOpenSettings }: SidebarFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { mode: themeMode, setThemeWithAnimation: onThemeChange, chatContentWidth, resetChatContentWidth } = useTheme()
   // 统计留在 footer：流式时不让整个 SidePanel 跟着 messages 重渲
@@ -105,14 +87,13 @@ export function SidebarFooter({
 
   /** 上下文窗口是否已知：未知时不画占用条、不显示百分比（见 contextPercent 为 null 的约定） */
   const contextKnown = stats.contextPercent !== null
-  const statsColor =
-    !contextKnown
-      ? 'bg-text-500/40'
-      : stats.contextPercent! >= 90
-        ? 'bg-danger-100'
-        : stats.contextPercent! >= 70
-          ? 'bg-warning-100'
-          : 'bg-accent-main-100'
+  const statsColor = !contextKnown
+    ? 'bg-text-500/40'
+    : stats.contextPercent! >= 90
+      ? 'bg-danger-100'
+      : stats.contextPercent! >= 70
+        ? 'bg-warning-100'
+        : 'bg-accent-main-100'
 
   // 打开菜单
   const openMenu = useCallback(() => {
@@ -348,50 +329,52 @@ export function SidebarFooter({
     <div className="shrink-0 pb-[var(--safe-area-inset-bottom)] border-t border-border-200/40">
       <div ref={containerRef} className="flex flex-col gap-0.5 mx-2 py-2">
         {/* 状态/设置触发按钮 */}
-        <button
-          ref={buttonRef}
-          onClick={toggleMenu}
-          className={`
+        <NativeTooltip>
+          <button
+            ref={buttonRef}
+            onClick={toggleMenu}
+            className={`
             h-8 flex items-center rounded-lg transition-all duration-300 group overflow-hidden
             ${isOpen ? interactive.toggleActiveNeutral : 'text-text-300 hover:bg-bg-200 border border-transparent'}
           `}
-          style={{
-            width: showLabels ? '100%' : 32,
-            // 本按钮带 1px 边框（hover/open 态需要），上方导航按钮无边框。
-            // 收起时圆环中心要对齐到按钮中线 16px：border(1) + padding(5) + 圆环半宽(10) = 16，
-            // 所以 paddingLeft 取 5；取 6 会让圆环右偏 1px。
-            paddingLeft: showLabels ? 6 : 5,
-            paddingRight: showLabels ? 8 : 4,
-          }}
-          title={`Context: ${stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} tokens • ${contextKnown ? `${Math.round(stats.contextPercent!)}%` : t('sidebar.contextLimitUnknown')} • ${formatCost(stats.totalCost)}`}
-        >
-          {/* 状态指示器 */}
-          <StatusIndicator percent={stats.contextPercent ?? 0} size={20} />
-
-          {/* 展开时显示详细信息 */}
-          <span
-            className="ml-2 flex-1 flex items-center justify-between min-w-0 transition-opacity duration-300"
-            style={{ opacity: showLabels ? 1 : 0 }}
+            style={{
+              width: showLabels ? '100%' : 32,
+              // 本按钮带 1px 边框（hover/open 态需要），上方导航按钮无边框。
+              // 收起时圆环中心要对齐到按钮中线 16px：border(1) + padding(5) + 圆环半宽(10) = 16，
+              // 所以 paddingLeft 取 5；取 6 会让圆环右偏 1px。
+              paddingLeft: showLabels ? 6 : 5,
+              paddingRight: showLabels ? 8 : 4,
+            }}
+            title={`Context: ${stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} tokens • ${contextKnown ? `${Math.round(stats.contextPercent!)}%` : t('sidebar.contextLimitUnknown')} • ${formatCost(stats.totalCost)}`}
           >
-            <span className="text-ui-caption tabular-nums text-text-300 truncate">
-              {stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} /{' '}
-              {contextKnown ? formatTokens(stats.contextLimit) : t('sidebar.contextLimitUnknown')}
-            </span>
+            {/* 状态指示器 */}
+            <StatusIndicator percent={stats.contextPercent ?? 0} size={20} />
+
+            {/* 展开时显示详细信息 */}
             <span
-              className={`text-ui-caption font-medium ml-2 ${
-                !contextKnown
-                  ? 'text-text-400'
-                  : stats.contextPercent! >= 90
-                    ? 'text-danger-100'
-                    : stats.contextPercent! >= 70
-                      ? 'text-warning-100'
-                      : 'text-text-400'
-              }`}
+              className="ml-2 flex-1 flex items-center justify-between min-w-0 transition-opacity duration-300"
+              style={{ opacity: showLabels ? 1 : 0 }}
             >
-              {contextKnown ? `${Math.round(stats.contextPercent!)}%` : '--'}
+              <span className="text-ui-caption tabular-nums text-text-300 truncate">
+                {stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} /{' '}
+                {contextKnown ? formatTokens(stats.contextLimit) : t('sidebar.contextLimitUnknown')}
+              </span>
+              <span
+                className={`text-ui-caption font-medium ml-2 ${
+                  !contextKnown
+                    ? 'text-text-400'
+                    : stats.contextPercent! >= 90
+                      ? 'text-danger-100'
+                      : stats.contextPercent! >= 70
+                        ? 'text-warning-100'
+                        : 'text-text-400'
+                }`}
+              >
+                {contextKnown ? `${Math.round(stats.contextPercent!)}%` : '--'}
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+        </NativeTooltip>
       </div>
 
       {floatingMenu}

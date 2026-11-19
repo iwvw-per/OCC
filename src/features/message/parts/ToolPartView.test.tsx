@@ -400,11 +400,12 @@ describe('ToolPartView parameter chip', () => {
     expect(screen.getByText('DisclosureRow')).toBeInTheDocument()
   })
 
-  it('keeps the full path in the hover title when the path is shortened', () => {
+  it('drops the native title in favor of the self-drawn tooltip', () => {
     renderInSession(toolPart('edit', { path: '/repo/src/App.tsx' }))
 
     const chip = screen.getByText('src/App.tsx')
     // 展示相对路径，hover 仍是完整绝对路径
-    expect(chip.closest('span[title]')?.getAttribute('title')).toBe('/repo/src/App.tsx')
+    expect(chip.closest('span[title]')).toBeNull()
+    expect(chip.closest('[data-state]')).not.toBeNull()
   })
 })

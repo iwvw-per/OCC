@@ -1,6 +1,7 @@
 import type { ApiPermissionRequest, PermissionReply } from '../../api'
 import { useTranslation } from 'react-i18next'
 import { PermissionListIcon, UsersIcon, ReturnIcon, ChevronDownIcon } from '../../components/Icons'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import { DiffView } from '../../components/DiffView'
 // 深导入：避免 components barrel 把 CodeMirror 等重依赖带入首屏 chunk
 import { ContentBlock } from '../../components/ContentBlock'
@@ -104,13 +105,15 @@ export function PermissionDialog({
                   </span>
                 )}
               </div>
-              <button
-                onClick={() => onCollapsedChange?.(true)}
-                className="p-1 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200 transition-colors"
-                title={t('permissionDialog.minimize')}
-              >
-                <ChevronDownIcon size={16} />
-              </button>
+              <NativeTooltip>
+                <button
+                  onClick={() => onCollapsedChange?.(true)}
+                  className="p-1 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200 transition-colors"
+                  title={t('permissionDialog.minimize')}
+                >
+                  <ChevronDownIcon size={16} />
+                </button>
+              </NativeTooltip>
             </div>
 
             {/* Child session indicator */}

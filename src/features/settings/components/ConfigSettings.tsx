@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { logger } from '../../../utils/logger'
 import { useTranslation } from 'react-i18next'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import {
   AlertCircleIcon,
   CheckIcon,
@@ -24,7 +25,12 @@ import { getConfig, getGlobalConfig, getProviderConfigs, listAvailableShells, sa
 import type { Config } from '../../../types/api/config'
 import { useCurrentDirectory, useIsMobile } from '../../../hooks'
 import { SettingsSection } from './SettingsUI'
-import { validateConfig, validationDrillTargetForError, type ValidationDrillTarget, type ValidationError } from './configEditorValidation'
+import {
+  validateConfig,
+  validationDrillTargetForError,
+  type ValidationDrillTarget,
+  type ValidationError,
+} from './configEditorValidation'
 import { ValidationDrillTargetContext } from './configEditorDrillState'
 import { DraftErrorContext, DraftNavigationContext, JsonDraftErrorContext } from './configEditorJsonDraft'
 import { SECTION_IDS, SECTION_META } from './configEditorMeta'
@@ -90,7 +96,10 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
   const dirty = !sameValue(config, original)
   const busy = loading || validating || saving
   const deferredConfig = useDeferredValue(config)
-  const searchItems = useMemo(() => buildConfigEditorSearchItems(deferredConfig as JsonRecord, lang), [deferredConfig, lang])
+  const searchItems = useMemo(
+    () => buildConfigEditorSearchItems(deferredConfig as JsonRecord, lang),
+    [deferredConfig, lang],
+  )
 
   const reportJsonDraftError = useCallback((id: string, invalid: boolean) => {
     setJsonDraftErrors(prev => {
@@ -117,7 +126,13 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
 
   const canNavigate = useCallback(() => {
     if (jsonDraftErrors.size === 0 && draftErrors.size === 0) return true
-    setError(tx('Fix the current invalid or unfinished editor before leaving it.', '离开当前页面前，请先修复无效或未完成的编辑框。', lang))
+    setError(
+      tx(
+        'Fix the current invalid or unfinished editor before leaving it.',
+        '离开当前页面前，请先修复无效或未完成的编辑框。',
+        lang,
+      ),
+    )
     return false
   }, [draftErrors, jsonDraftErrors, lang])
 
@@ -286,7 +301,13 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
         setEffective(nextEffective)
       } catch (refreshError) {
         if (request !== saveRequestRef.current) return
-        setError(tx('Config was saved, but the effective config could not be refreshed.', '配置已保存，但无法刷新生效配置。', lang))
+        setError(
+          tx(
+            'Config was saved, but the effective config could not be refreshed.',
+            '配置已保存，但无法刷新生效配置。',
+            lang,
+          ),
+        )
         logger.warn('[ConfigSettings] Failed to refresh effective config after save:', refreshError)
       }
     } catch (err) {
@@ -337,7 +358,8 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
           ? fieldTargets.filter(candidate => candidate.dataset.configField === item.fieldKey)
           : []
         const fieldTarget = matchingFields[matchingFields.length - 1]
-        const target = fieldTarget ?? scrollRef.current?.querySelector<HTMLElement>(`[data-config-section="${item.section}"]`)
+        const target =
+          fieldTarget ?? scrollRef.current?.querySelector<HTMLElement>(`[data-config-section="${item.section}"]`)
         if (!target) return
 
         scrollRef.current?.querySelector('.settings-search-highlight')?.classList.remove('settings-search-highlight')
@@ -387,7 +409,9 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
       )}
       {validationErrors.length > 0 && (
         <div className="mb-3 max-h-32 overflow-y-auto rounded-lg bg-error-100/10 px-3 py-2 text-ui-sm text-error-100 custom-scrollbar">
-          <div className="mb-1 font-medium">{t('config.validationFailed', { defaultValue: 'Config validation failed' })}</div>
+          <div className="mb-1 font-medium">
+            {t('config.validationFailed', { defaultValue: 'Config validation failed' })}
+          </div>
           <div className="space-y-1">
             {validationErrors.slice(0, 12).map(item => (
               <button
@@ -400,7 +424,13 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
               </button>
             ))}
             {validationErrors.length > 12 && (
-              <div>{tx(`${validationErrors.length - 12} more issue(s)…`, `还有 ${validationErrors.length - 12} 个问题…`, lang)}</div>
+              <div>
+                {tx(
+                  `${validationErrors.length - 12} more issue(s)…`,
+                  `还有 ${validationErrors.length - 12} 个问题…`,
+                  lang,
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -441,77 +471,91 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
         showCloseButton={false}
         ariaLabel={t('config.editorTitle')}
       >
-         <JsonDraftErrorContext.Provider value={reportJsonDraftError}>
+        <JsonDraftErrorContext.Provider value={reportJsonDraftError}>
           <DraftErrorContext.Provider value={reportDraftError}>
             <DraftNavigationContext.Provider value={canNavigate}>
               <ValidationDrillTargetContext.Provider value={validationDrillTarget}>
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="shrink-0 pt-2">
-                <div className="px-3 pb-2">{configSearch}</div>
-                <div
-                  role="tablist"
-                  aria-label={t('config.editorTitle')}
-                  onKeyDown={handleSectionKeyDown}
-                  className="flex items-center gap-1 overflow-x-auto px-3 pb-2 scrollbar-none"
-                >
-                  {SECTION_IDS.map(id => {
-                    const active = section === id
-                    return (
-                      <button
-                        key={id}
-                        id={`config-tab-${id}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={active}
-                        aria-controls={`config-panel-${id}`}
-                        tabIndex={active ? 0 : -1}
-                        onClick={() => switchSection(id)}
-                        className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-ui-base font-medium transition-colors border ${
-                          active ? 'bg-bg-200 text-text-100 border-border-200' : 'text-text-300 hover:bg-bg-200 border-transparent'
-                        }`}
-                      >
-                        {CONFIG_TAB_ICONS[id]}
-                        {tx(SECTION_META[id].en, SECTION_META[id].zh, lang)}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="shrink-0 pt-2">
+                    <div className="px-3 pb-2">{configSearch}</div>
+                    <div
+                      role="tablist"
+                      aria-label={t('config.editorTitle')}
+                      onKeyDown={handleSectionKeyDown}
+                      className="flex items-center gap-1 overflow-x-auto px-3 pb-2 scrollbar-none"
+                    >
+                      {SECTION_IDS.map(id => {
+                        const active = section === id
+                        return (
+                          <button
+                            key={id}
+                            id={`config-tab-${id}`}
+                            type="button"
+                            role="tab"
+                            aria-selected={active}
+                            aria-controls={`config-panel-${id}`}
+                            tabIndex={active ? 0 : -1}
+                            onClick={() => switchSection(id)}
+                            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-ui-base font-medium transition-colors border ${
+                              active
+                                ? 'bg-bg-200 text-text-100 border-border-200'
+                                : 'text-text-300 hover:bg-bg-200 border-transparent'
+                            }`}
+                          >
+                            {CONFIG_TAB_ICONS[id]}
+                            {tx(SECTION_META[id].en, SECTION_META[id].zh, lang)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
 
-              <main ref={scrollRef} id={activePanelId} role="tabpanel" aria-labelledby={`config-tab-${section}`} className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-3 custom-scrollbar overscroll-contain">
-                {statusBanner}
-                {!loading && <div inert={busy} aria-busy={busy}>
-                  <SectionRouter
-                    section={section}
-                    config={config}
-                    setConfig={updateConfig}
-                    lang={lang}
-                    shells={shells}
-                    models={models}
-                    agents={agents}
-                    providerCatalog={providerCatalog}
-                  />
-                </div>}
-              </main>
-
-              <div className="shrink-0 px-4 py-3">
-                <div className="flex min-w-0 gap-2">
-                  <button
-                    type="button"
-                    disabled={!dirty || busy}
-                    onClick={() => updateConfig(clone(original))}
-                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-ui-caption font-medium text-text-300 transition-colors hover:bg-bg-200 active:bg-bg-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                  <main
+                    ref={scrollRef}
+                    id={activePanelId}
+                    role="tabpanel"
+                    aria-labelledby={`config-tab-${section}`}
+                    className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-3 custom-scrollbar overscroll-contain"
                   >
-                    <UndoIcon size={14} />
-                    {t('config.reset')}
-                  </button>
-                  <Button size="sm" className="min-w-0 flex-1" disabled={!dirty || busy} onClick={save}>
-                    <CheckIcon size={14} />
-                    {saving ? t('config.saving') : validating ? tx('Validating…', '校验中…', lang) : t('config.saveAll')}
-                  </Button>
+                    {statusBanner}
+                    {!loading && (
+                      <div inert={busy} aria-busy={busy}>
+                        <SectionRouter
+                          section={section}
+                          config={config}
+                          setConfig={updateConfig}
+                          lang={lang}
+                          shells={shells}
+                          models={models}
+                          agents={agents}
+                          providerCatalog={providerCatalog}
+                        />
+                      </div>
+                    )}
+                  </main>
+
+                  <div className="shrink-0 px-4 py-3">
+                    <div className="flex min-w-0 gap-2">
+                      <button
+                        type="button"
+                        disabled={!dirty || busy}
+                        onClick={() => updateConfig(clone(original))}
+                        className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-ui-caption font-medium text-text-300 transition-colors hover:bg-bg-200 active:bg-bg-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <UndoIcon size={14} />
+                        {t('config.reset')}
+                      </button>
+                      <Button size="sm" className="min-w-0 flex-1" disabled={!dirty || busy} onClick={save}>
+                        <CheckIcon size={14} />
+                        {saving
+                          ? t('config.saving')
+                          : validating
+                            ? tx('Validating…', '校验中…', lang)
+                            : t('config.saveAll')}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
               </ValidationDrillTargetContext.Provider>
             </DraftNavigationContext.Provider>
           </DraftErrorContext.Provider>
@@ -529,87 +573,99 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
       showCloseButton={false}
       ariaLabel={t('config.editorTitle')}
     >
-       <JsonDraftErrorContext.Provider value={reportJsonDraftError}>
+      <JsonDraftErrorContext.Provider value={reportJsonDraftError}>
         <DraftErrorContext.Provider value={reportDraftError}>
           <DraftNavigationContext.Provider value={canNavigate}>
             <ValidationDrillTargetContext.Provider value={validationDrillTarget}>
-          <div className="relative flex h-[min(90vh,820px)]">
-            <button
-              type="button"
-              onClick={requestClose}
-              className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md text-text-400/60 transition-colors hover:bg-bg-200 hover:text-text-200"
-              aria-label={t('closeSettings')}
-              title={t('closeSettings')}
-            >
-              <CloseIcon size={16} />
-            </button>
+              <div className="relative flex h-[min(90vh,820px)]">
+                <NativeTooltip>
+                  <button
+                    type="button"
+                    onClick={requestClose}
+                    className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md text-text-400/60 transition-colors hover:bg-bg-200 hover:text-text-200"
+                    aria-label={t('closeSettings')}
+                    title={t('closeSettings')}
+                  >
+                    <CloseIcon size={16} />
+                  </button>
+                </NativeTooltip>
 
-            <nav
-              aria-label={t('config.editorTitle')}
-              className="flex min-h-0 w-[204px] shrink-0 flex-col pb-3 pl-6 pr-3 pt-10 xl:w-[228px] xl:pl-7"
-            >
-              <div className="mb-3 shrink-0">{configSearch}</div>
-              <div
-                role="tablist"
-                aria-orientation="vertical"
-                aria-label={t('config.editorTitle')}
-                onKeyDown={handleSectionKeyDown}
-                className="min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-2 scrollbar-none"
-              >
-                {CONFIG_SECTION_GROUPS.map(group => (
-                  <div key={group.en}>
-                    <div className="mb-1.5 px-2.5 text-ui-xs font-semibold uppercase tracking-wider text-text-400/75">
-                      {tx(group.en, group.zh, lang)}
-                    </div>
-                    <div className="space-y-0.5">
-                      {group.sections.map(id => {
-                        const active = section === id
-                        return (
-                          <button
-                            key={id}
-                            id={`config-tab-${id}`}
-                            type="button"
-                            role="tab"
-                            aria-selected={active}
-                            aria-controls={`config-panel-${id}`}
-                            tabIndex={active ? 0 : -1}
-                            onClick={() => switchSection(id)}
-                            className={`flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-ui-base font-medium transition-colors border ${
-                          active ? 'bg-bg-200 text-text-100 border-border-200' : 'text-text-300 hover:bg-bg-200 border-transparent'
-                            }`}
-                          >
-                            <span className={active ? 'text-accent-main-100' : 'text-text-400'}>{CONFIG_TAB_ICONS[id]}</span>
-                            <span className="truncate">{tx(SECTION_META[id].en, SECTION_META[id].zh, lang)}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
+                <nav
+                  aria-label={t('config.editorTitle')}
+                  className="flex min-h-0 w-[204px] shrink-0 flex-col pb-3 pl-6 pr-3 pt-10 xl:w-[228px] xl:pl-7"
+                >
+                  <div className="mb-3 shrink-0">{configSearch}</div>
+                  <div
+                    role="tablist"
+                    aria-orientation="vertical"
+                    aria-label={t('config.editorTitle')}
+                    onKeyDown={handleSectionKeyDown}
+                    className="min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-2 scrollbar-none"
+                  >
+                    {CONFIG_SECTION_GROUPS.map(group => (
+                      <div key={group.en}>
+                        <div className="mb-1.5 px-2.5 text-ui-xs font-semibold uppercase tracking-wider text-text-400/75">
+                          {tx(group.en, group.zh, lang)}
+                        </div>
+                        <div className="space-y-0.5">
+                          {group.sections.map(id => {
+                            const active = section === id
+                            return (
+                              <button
+                                key={id}
+                                id={`config-tab-${id}`}
+                                type="button"
+                                role="tab"
+                                aria-selected={active}
+                                aria-controls={`config-panel-${id}`}
+                                tabIndex={active ? 0 : -1}
+                                onClick={() => switchSection(id)}
+                                className={`flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-ui-base font-medium transition-colors border ${
+                                  active
+                                    ? 'bg-bg-200 text-text-100 border-border-200'
+                                    : 'text-text-300 hover:bg-bg-200 border-transparent'
+                                }`}
+                              >
+                                <span className={active ? 'text-accent-main-100' : 'text-text-400'}>
+                                  {CONFIG_TAB_ICONS[id]}
+                                </span>
+                                <span className="truncate">{tx(SECTION_META[id].en, SECTION_META[id].zh, lang)}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </nav>
+                </nav>
 
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <main ref={scrollRef} id={activePanelId} role="tabpanel" aria-labelledby={`config-tab-${section}`} className="min-h-0 min-w-0 flex-1 overflow-y-auto px-7 pb-8 pt-10 custom-scrollbar xl:px-8">
-                {statusBanner}
-                {!loading && <div inert={busy} aria-busy={busy}>
-                  <SectionRouter
-                    section={section}
-                    config={config}
-                    setConfig={updateConfig}
-                    lang={lang}
-                    shells={shells}
-                    models={models}
-                    agents={agents}
-                    providerCatalog={providerCatalog}
-                  />
-                </div>}
-              </main>
-              <div className="flex shrink-0 justify-end px-7 py-3 xl:px-8">
-                {actionButtons}
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <main
+                    ref={scrollRef}
+                    id={activePanelId}
+                    role="tabpanel"
+                    aria-labelledby={`config-tab-${section}`}
+                    className="min-h-0 min-w-0 flex-1 overflow-y-auto px-7 pb-8 pt-10 custom-scrollbar xl:px-8"
+                  >
+                    {statusBanner}
+                    {!loading && (
+                      <div inert={busy} aria-busy={busy}>
+                        <SectionRouter
+                          section={section}
+                          config={config}
+                          setConfig={updateConfig}
+                          lang={lang}
+                          shells={shells}
+                          models={models}
+                          agents={agents}
+                          providerCatalog={providerCatalog}
+                        />
+                      </div>
+                    )}
+                  </main>
+                  <div className="flex shrink-0 justify-end px-7 py-3 xl:px-8">{actionButtons}</div>
+                </div>
               </div>
-            </div>
-          </div>
             </ValidationDrillTargetContext.Provider>
           </DraftNavigationContext.Provider>
         </DraftErrorContext.Provider>

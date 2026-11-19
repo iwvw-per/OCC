@@ -6,6 +6,7 @@
 
 import { memo, useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { NativeTooltip } from './ui/Tooltip'
 import {
   PlugIcon,
   RetryIcon,
@@ -210,7 +211,11 @@ export const McpPanel = memo(function McpPanel({ isResizing: _isResizing, onClos
       <div className="relative flex h-10 items-center justify-between px-3">
         <div className="flex h-6 min-w-0 items-center gap-1.5 text-text-100 text-ui-sm font-medium">
           <span>{t('mcpPanel.title')}</span>
-          {!loading && <span className="inline-flex h-4 items-center text-ui-sm leading-none text-text-400">({servers.length})</span>}
+          {!loading && (
+            <span className="inline-flex h-4 items-center text-ui-sm leading-none text-text-400">
+              ({servers.length})
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <IconButton
@@ -601,9 +606,11 @@ const ServerItem = memo(function ServerItem({ server, isLoading, onConnect, onDi
             )}
           </div>
           {errorMessage && !expanded && (
-            <div className="mt-0.5 truncate text-ui-caption text-danger-100" title={errorMessage}>
-              {errorMessage}
-            </div>
+            <NativeTooltip>
+              <div className="mt-0.5 truncate text-ui-caption text-danger-100" title={errorMessage}>
+                {errorMessage}
+              </div>
+            </NativeTooltip>
           )}
         </div>
 
@@ -636,9 +643,7 @@ const ServerItem = memo(function ServerItem({ server, isLoading, onConnect, onDi
                   )}
                 </div>
                 {resource.description && (
-                  <div className="mt-0.5 line-clamp-2 text-ui-sm text-text-400">
-                    {resource.description}
-                  </div>
+                  <div className="mt-0.5 line-clamp-2 text-ui-sm text-text-400">{resource.description}</div>
                 )}
                 <div className="mt-0.5 truncate font-mono text-ui-xs text-text-500">{resource.uri}</div>
               </div>

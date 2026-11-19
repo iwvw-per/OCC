@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import type { ActiveSessionEntry } from '../../../store/activeSessionStore'
 import type { ApiSession } from '../../../api'
 import { startInternalDrag } from '../../../lib/internalDragCore'
@@ -48,15 +49,12 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
   const isDraggable = !!resolvedSession
   const handlePointerDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDraggable) return
-    startInternalDrag(
-      e,
-      {
-        kind: 'session',
-        sessionId: splitSessionKey(entry.sessionId).sessionId,
-        serverId: splitSessionKey(entry.sessionId).serverId,
-        directory,
-      },
-    )
+    startInternalDrag(e, {
+      kind: 'session',
+      sessionId: splitSessionKey(entry.sessionId).sessionId,
+      serverId: splitSessionKey(entry.sessionId).serverId,
+      directory,
+    })
   }
 
   return (
@@ -69,14 +67,14 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
     >
       {/* Content */}
       <div className="flex-1 min-w-0 pr-1">
-        <p
-          className={`text-ui-base truncate font-medium ${
-            isSelected ? 'text-text-100' : 'text-text-200'
-          }`}
-          title={displayTitle}
-        >
-          {displayTitle}
-        </p>
+        <NativeTooltip>
+          <p
+            className={`text-ui-base truncate font-medium ${isSelected ? 'text-text-100' : 'text-text-200'}`}
+            title={displayTitle}
+          >
+            {displayTitle}
+          </p>
+        </NativeTooltip>
         <div className="mt-1 flex h-4 min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-ui-xs text-text-400">
           <span className="relative shrink-0 flex h-3 w-3 items-center justify-center">
             <span className={`absolute h-1.5 w-1.5 rounded-full ${statusConfig.dotColor}`} />
@@ -103,9 +101,11 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
           {directory && (
             <>
               <span className="opacity-30 shrink-0">·</span>
-              <span className="truncate min-w-0 flex-1 opacity-50" title={directory}>
-                {directory.replace(/\\/g, '/').split('/').filter(Boolean).pop()}
-              </span>
+              <NativeTooltip>
+                <span className="truncate min-w-0 flex-1 opacity-50" title={directory}>
+                  {directory.replace(/\\/g, '/').split('/').filter(Boolean).pop()}
+                </span>
+              </NativeTooltip>
             </>
           )}
         </div>

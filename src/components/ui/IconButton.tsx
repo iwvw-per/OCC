@@ -1,6 +1,7 @@
 import { forwardRef } from 'react'
 import { cn } from '../../utils/cn'
 import { interactive } from '../../utils/interaction'
+import { Tooltip } from './Tooltip'
 
 type IconButtonSize = 'xs' | 'sm' | 'md' | 'lg'
 type IconButtonVariant = 'ghost' | 'solid' | 'danger'
@@ -33,8 +34,8 @@ const variantStyles: Record<IconButtonVariant, string> = {
 }
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
-  ({ size = 'md', variant = 'ghost', className, children, disabled, type = 'button', ...props }, ref) => {
-    return (
+  ({ size = 'md', variant = 'ghost', className, children, disabled, type = 'button', title, ...props }, ref) => {
+    const button = (
       <button
         ref={ref}
         type={type}
@@ -55,6 +56,11 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
         {children}
       </button>
     )
+
+    // 有 title 时升级为自绘提示(原生 title 无法统一延迟与样式);
+    // 元素自身已要求 aria-label,移除原生 title 不影响无障碍。
+    if (!title) return button
+    return <Tooltip content={title}>{button}</Tooltip>
   },
 )
 

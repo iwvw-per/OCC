@@ -18,6 +18,7 @@
 
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import type { CSSProperties } from 'react'
+import { NativeTooltip } from './ui/Tooltip'
 import type { Message } from '../types/message'
 import { useChatViewport, CHAT_VIEWPORT_MOBILE_BREAKPOINT } from '../features/chat/chatViewport'
 import { hapticTap } from '../utils/haptics'
@@ -175,7 +176,6 @@ function findBiasedVisibleIndex(entries: OutlineEntry[], ownerVisibleIds?: Set<s
   return last
 }
 
-
 function formatEntries(entries: OutlineSourceEntry[], visual: VisualConfig): OutlineEntry[] {
   return entries.map(entry => ({
     messageId: entry.messageId,
@@ -328,32 +328,34 @@ function TickRail({ entries, visual }: TickRailProps) {
          */
         const isLoaded = entry.loaded !== false
         return (
-          <div
-            key={entry.messageId}
-            data-oi-item
-            data-oi-loaded={isLoaded ? '1' : '0'}
-            className="relative flex items-center justify-end cursor-pointer"
-            style={{ ...itemStyle, '--oi-index': String(index) } as CSSProperties}
-            title={entry.fullTitle}
-          >
+          <NativeTooltip>
             <div
-              data-oi-label
-              className={`absolute right-full mr-2.5 whitespace-nowrap pointer-events-none ${visual.labelClassName}`}
-              style={labelStyle}
-            >
-              {entry.railLabel}
-            </div>
-            <div
-              data-oi-tick
+              key={entry.messageId}
+              data-oi-item
               data-oi-loaded={isLoaded ? '1' : '0'}
-              className="rounded-full shrink-0"
-              style={{
-                ...tickStyle,
-                // 未加载：降透明。已加载保持原样（颜色由重着色逻辑接管）。
-                opacity: isLoaded ? 1 : 0.38,
-              }}
-            />
-          </div>
+              className="relative flex items-center justify-end cursor-pointer"
+              style={{ ...itemStyle, '--oi-index': String(index) } as CSSProperties}
+              title={entry.fullTitle}
+            >
+              <div
+                data-oi-label
+                className={`absolute right-full mr-2.5 whitespace-nowrap pointer-events-none ${visual.labelClassName}`}
+                style={labelStyle}
+              >
+                {entry.railLabel}
+              </div>
+              <div
+                data-oi-tick
+                data-oi-loaded={isLoaded ? '1' : '0'}
+                className="rounded-full shrink-0"
+                style={{
+                  ...tickStyle,
+                  // 未加载：降透明。已加载保持原样（颜色由重着色逻辑接管）。
+                  opacity: isLoaded ? 1 : 0.38,
+                }}
+              />
+            </div>
+          </NativeTooltip>
         )
       })}
     </>
@@ -372,7 +374,10 @@ export const OutlineIndex = memo(function OutlineIndex({
 }: OutlineIndexProps) {
   const { interaction, presentation, layout } = useChatViewport()
   const visual = presentation.isCompact ? COMPACT_VISUAL : DESKTOP_VISUAL
-  const outlineSourceEntries = useMemo(() => sourceEntries ?? buildOutlineSourceEntries(messages), [messages, sourceEntries])
+  const outlineSourceEntries = useMemo(
+    () => sourceEntries ?? buildOutlineSourceEntries(messages),
+    [messages, sourceEntries],
+  )
   const allEntries = useMemo(() => formatEntries(outlineSourceEntries, visual), [outlineSourceEntries, visual])
   const entries = useMemo(
     () => sliceAroundVisible(allEntries, visibleMessageIds ?? [], visual.maxEntries),
@@ -408,9 +413,19 @@ export const OutlineIndex = memo(function OutlineIndex({
   if (layout.viewportWidth < CHAT_VIEWPORT_MOBILE_BREAKPOINT) return null
 
   return interaction.outlineInteraction === 'touch' ? (
-    <TouchFisheye entries={entries} onSelect={onScrollToMessageId} visual={visual} ownerVisibleIndex={ownerVisibleIndex} />
+    <TouchFisheye
+      entries={entries}
+      onSelect={onScrollToMessageId}
+      visual={visual}
+      ownerVisibleIndex={ownerVisibleIndex}
+    />
   ) : (
-    <PointerFisheye entries={entries} onSelect={onScrollToMessageId} visual={visual} ownerVisibleIndex={ownerVisibleIndex} />
+    <PointerFisheye
+      entries={entries}
+      onSelect={onScrollToMessageId}
+      visual={visual}
+      ownerVisibleIndex={ownerVisibleIndex}
+    />
   )
 })
 
@@ -481,31 +496,37 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
     repaintTicks(getTicks(), -1, ownerVisibleIndexRef.current)
   }, [setZoneActive, getTicks])
 
-  const onTickEnter = useCallback((e: React.MouseEvent) => {
-    hoveringRef.current = true
-    setZoneActive(true)
-    const rail = railRef.current
-    if (!rail) return
-    ticksRef.current = getTicks()
-    activateRail(rail, e.clientY)
-    const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
-    focusIdxRef.current = next
-    repaintTicks(ticksRef.current, next, ownerVisibleIndexRef.current)
-  }, [setZoneActive, getTicks])
-
-  const onZoneMove = useCallback((e: React.MouseEvent) => {
-    const rail = railRef.current
-    if (!rail) return
-    // 主线程每帧唯一的工作：写一个变量。其余 transform 交给合成线程。
-    rail.style.setProperty('--oi-cursor-y', String(e.clientY))
-    // 算最近焦点（纯数值），仅在变化时重新着色（paint-only，非每帧）
-    const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
-    if (next !== focusIdxRef.current) {
-      if (ticksRef.current.length === 0) ticksRef.current = getTicks()
+  const onTickEnter = useCallback(
+    (e: React.MouseEvent) => {
+      hoveringRef.current = true
+      setZoneActive(true)
+      const rail = railRef.current
+      if (!rail) return
+      ticksRef.current = getTicks()
+      activateRail(rail, e.clientY)
+      const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
       focusIdxRef.current = next
       repaintTicks(ticksRef.current, next, ownerVisibleIndexRef.current)
-    }
-  }, [getTicks])
+    },
+    [setZoneActive, getTicks],
+  )
+
+  const onZoneMove = useCallback(
+    (e: React.MouseEvent) => {
+      const rail = railRef.current
+      if (!rail) return
+      // 主线程每帧唯一的工作：写一个变量。其余 transform 交给合成线程。
+      rail.style.setProperty('--oi-cursor-y', String(e.clientY))
+      // 算最近焦点（纯数值），仅在变化时重新着色（paint-only，非每帧）
+      const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
+      if (next !== focusIdxRef.current) {
+        if (ticksRef.current.length === 0) ticksRef.current = getTicks()
+        focusIdxRef.current = next
+        repaintTicks(ticksRef.current, next, ownerVisibleIndexRef.current)
+      }
+    },
+    [getTicks],
+  )
   const onZoneLeave = useCallback(() => deactivate(), [deactivate])
 
   /**
@@ -516,16 +537,19 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
    *   2. 光标刚进入就得点击（触控板轻点）时，某些路径下 mousemove 还没触发过，
    *      `focusIdxRef` 仍是 -1 —— 表现成「点了没反应」。这里兜底再算一次。
    */
-  const onZoneClick = useCallback((e: React.MouseEvent) => {
-    const cur = entriesRef.current
-    if (cur.length === 0) return
-    const idx = nearestIndexFromY(cur.length, e.clientY, railCenterRef.current, fisheyeRef.current)
-    const target = idx >= 0 ? idx : focusIdxRef.current
-    if (target >= 0 && target < cur.length) {
-      deactivate()
-      onSelectRef.current(cur[target].messageId)
-    }
-  }, [deactivate])
+  const onZoneClick = useCallback(
+    (e: React.MouseEvent) => {
+      const cur = entriesRef.current
+      if (cur.length === 0) return
+      const idx = nearestIndexFromY(cur.length, e.clientY, railCenterRef.current, fisheyeRef.current)
+      const target = idx >= 0 ? idx : focusIdxRef.current
+      if (target >= 0 && target < cur.length) {
+        deactivate()
+        onSelectRef.current(cur[target].messageId)
+      }
+    },
+    [deactivate],
+  )
 
   return (
     <div
@@ -546,7 +570,11 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
         }}
         onMouseEnter={onTickEnter}
       >
-        <div ref={railRef} className="pointer-events-none flex flex-col items-end" style={buildRailVars(entries.length, visual.fisheye)}>
+        <div
+          ref={railRef}
+          className="pointer-events-none flex flex-col items-end"
+          style={buildRailVars(entries.length, visual.fisheye)}
+        >
           <TickRail entries={entries} visual={visual} />
         </div>
       </div>

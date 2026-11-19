@@ -27,6 +27,8 @@ interface InputToolbarProps {
   // 输入框容器 ref，用于约束菜单边界
   inputContainerRef?: React.RefObject<HTMLDivElement | null>
   modelSelectorRef?: React.RefObject<ModelSelectorHandle | null>
+  /** 模型菜单开合:菜单打开时抑制输入框滚动收起 */
+  onModelMenuOpenChange?: (open: boolean) => void
 }
 
 export function InputToolbar({
@@ -42,6 +44,7 @@ export function InputToolbar({
   modelsLoading = false,
   inputContainerRef,
   modelSelectorRef,
+  onModelMenuOpenChange,
 }: InputToolbarProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { presentation } = useChatViewport()
@@ -184,6 +187,7 @@ export function InputToolbar({
               variants={variants}
               selectedVariant={selectedVariant}
               onVariantChange={onVariantChange}
+              onMenuOpenChange={onModelMenuOpenChange}
             />
           </div>
         )}

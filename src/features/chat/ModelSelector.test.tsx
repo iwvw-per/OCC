@@ -9,8 +9,10 @@ vi.mock('../../components/ui', () => ({
     isOpen ? <div>{children}</div> : null,
 }))
 
+const inputCapabilities = vi.hoisted(() => ({ canHover: false }))
+
 vi.mock('../../hooks/useInputCapabilities', () => ({
-  useInputCapabilities: () => ({ preferTouchUi: false }),
+  useInputCapabilities: () => ({ preferTouchUi: false, canHover: inputCapabilities.canHover }),
 }))
 
 vi.mock('../../utils/modelUtils', () => ({
@@ -190,5 +192,72 @@ describe('ModelSelector', () => {
 
     expect(screen.getByText('Claude Sonnet 4.5')).toBeInTheDocument()
     expect(screen.queryByText('GPT-4o Mini')).not.toBeInTheDocument()
+  })
+
+  it('shows a loading indicator instead of the chevron and disables the trigger while models load', () => {
+    render(<ModelSelector models={[]} selectedModelKey={null} onSelect={vi.fn()} isLoading />)
+
+    const trigger = screen.getByRole('button')
+    expect(trigger).toBeDisabled()
+    expect(trigger.querySelector('[data-loading-indicator="true"]')).not.toBeNull()
+  })
+
+  it('swaps the loading indicator back to the chevron once models are available', () => {
+    const { rerender } = render(
+      <ModelSelector models={[]} selectedModelKey={null} onSelect={vi.fn()} isLoading />,
+    )
+    expect(document.querySelector('[data-loading-indicator="true"]')).not.toBeNull()
+
+    rerender(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
+
+    const trigger = screen.getByRole('button')
+    expect(trigger).not.toBeDisabled()
+    expect(trigger.querySelector('[data-loading-indicator="true"]')).toBeNull()
+  })
+
+  it('keeps the chevron when models are loaded but nothing is selected', () => {
+    render(<ModelSelector models={MODELS} selectedModelKey={null} onSelect={vi.fn()} />)
+
+    const trigger = screen.getByRole('button')
+    expect(trigger).not.toBeDisabled()
+    expect(trigger.querySelector('[data-loading-indicator="true"]')).toBeNull()
+  })
+
+  it('keeps capability icons beside the name and the check mark in its own trailing column', () => {
+    render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
+
+    fireEvent.click(screen.getByTitle('GPT-4.1'))
+
+    const selectedItem = document.querySelector('[data-model-key="openai:gpt-4.1"]') as HTMLElement
+    const cells = Array.from(selectedItem.children)
+
+    expect(cells).toHaveLength(3)
+    expect(cells[0]).toHaveTextContent('GPT-4.1')
+    expect(cells[1].querySelectorAll('[data-model-capability]')).toHaveLength(2)
+    expect(cells[2].className).toContain('ml-auto')
+    expect(cells[2].querySelector('svg')).not.toBeNull()
+
+    const unselectedItem = document.querySelector('[data-model-key="openai:gpt-4o-mini"]') as HTMLElement
+    const unselectedCheckColumn = Array.from(unselectedItem.children)[2]
+
+    expect(unselectedCheckColumn.className).toContain('ml-auto')
+    expect(unselectedCheckColumn.querySelector('svg')).toBeNull()
+  })
+
+  it('opens the endpoint list on hover when the pointer supports hover', () => {
+    inputCapabilities.canHover = true
+
+    try {
+      render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
+
+      fireEvent.click(screen.getByTitle('GPT-4.1'))
+      expect(screen.queryByRole('option', { name: /OpenAI/ })).not.toBeInTheDocument()
+
+      fireEvent.mouseEnter(screen.getByRole('button', { name: /Endpoint/ }))
+
+      expect(screen.getByRole('option', { name: /OpenAI/ })).toBeInTheDocument()
+    } finally {
+      inputCapabilities.canHover = false
+    }
   })
 })

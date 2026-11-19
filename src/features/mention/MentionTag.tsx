@@ -8,6 +8,7 @@ import type { MentionType } from './types'
 import { formatMentionLabel, getFileName, MENTION_COLORS } from './utils'
 import { CheckIcon } from '../../components/Icons'
 import { clipboardErrorHandler, copyTextToClipboard } from '../../utils'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 
 interface MentionTagProps {
   /** Mention 类型 */
@@ -72,22 +73,24 @@ export function MentionTag({ type, value, displayName, onClick, className = '', 
   )
 
   return (
-    <span
-      className={`
+    <NativeTooltip>
+      <span
+        className={`
         inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-ui-caption font-medium
         border cursor-pointer select-none transition-[filter,opacity]
         hover:brightness-95 active:brightness-90
         ${colors.bg} ${colors.text} ${colors.darkText} ${colors.border}
         ${className}
       `}
-      onClick={handleClick}
-      title={value}
-      // contentEditable 相关属性
-      {...(inEditor ? { contentEditable: 'false' } : {})}
-    >
-      {copied && <CheckIcon className="w-3 h-3 flex-shrink-0" />}
-      <span className="truncate max-w-[200px]">{label}</span>
-    </span>
+        onClick={handleClick}
+        title={value}
+        // contentEditable 相关属性
+        {...(inEditor ? { contentEditable: 'false' } : {})}
+      >
+        {copied && <CheckIcon className="w-3 h-3 flex-shrink-0" />}
+        <span className="truncate max-w-[200px]">{label}</span>
+      </span>
+    </NativeTooltip>
   )
 }
 

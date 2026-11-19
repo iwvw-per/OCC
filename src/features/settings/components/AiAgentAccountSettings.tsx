@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '../../../components/ui/Button'
 import { SettingsSection, SettingRow, settingsFieldClass } from './SettingsUI'
-import { Switch } from '../../../components/ui'
+import { Switch, NativeTooltip } from '../../../components/ui'
 import {
   login as accountLogin,
   logout as accountLogout,
@@ -55,31 +55,25 @@ export function PreferencesSyncSettings() {
 
   useEffect(() => subscribeSyncState(setSyncState), [])
 
-  const handleToggleSync = useCallback(
-    async (next: boolean) => {
-      setBusy(true)
-      setSyncEnabled(next)
-      try {
-        if (next) {
-          // startPreferencesSync 内部会读账号并自行判断是否可同步
-          await startPreferencesSync()
-        } else {
-          stopPreferencesSync()
-        }
-        setSyncEnabledState(next)
-      } finally {
-        setBusy(false)
+  const handleToggleSync = useCallback(async (next: boolean) => {
+    setBusy(true)
+    setSyncEnabled(next)
+    try {
+      if (next) {
+        // startPreferencesSync 内部会读账号并自行判断是否可同步
+        await startPreferencesSync()
+      } else {
+        stopPreferencesSync()
       }
-    },
-    [],
-  )
+      setSyncEnabledState(next)
+    } finally {
+      setBusy(false)
+    }
+  }, [])
 
   return (
     <SettingsSection title="设置同步" description="把主题、布局、快捷键等本地设置同步到面板，在多台设备间保持一致。">
-      <SettingRow
-        label="启用同步"
-        description={describeSyncState(syncState)}
-      >
+      <SettingRow label="启用同步" description={describeSyncState(syncState)}>
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"
@@ -244,12 +238,14 @@ export function AiAgentAccountSettings() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-ui-caption text-text-100">{instance.label}</span>
-                        <span
-                          className={`text-ui-xs ${online ? 'text-success-100' : 'text-text-500'}`}
-                          title={offlineLabel}
-                        >
-                          {online ? '运行中' : '离线'}
-                        </span>
+                        <NativeTooltip>
+                          <span
+                            className={`text-ui-xs ${online ? 'text-success-100' : 'text-text-500'}`}
+                            title={offlineLabel}
+                          >
+                            {online ? '运行中' : '离线'}
+                          </span>
+                        </NativeTooltip>
                       </div>
                       <div className="truncate text-ui-xs text-text-500">
                         {instance.providerLabel || instance.provider} · {instance.hostName || instance.serverId} ·{' '}

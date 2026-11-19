@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { DESKTOP_FULLSCREEN_LAYER_Z_INDEX } from '../../constants'
 import { DownloadIcon, PlusIcon, MinusIcon } from '../../components/Icons'
 import { CopyButton } from '../../components/ui'
+import { NativeTooltip, Tooltip } from '../../components/ui/Tooltip'
 import { cn } from '../../utils/cn'
 import { interactive } from '../../utils/interaction'
 import { lazy, Suspense } from 'react'
@@ -16,9 +17,7 @@ import type { FullscreenLayer } from '../../contexts'
 
 // CodePreview 依赖 CodeMirror（约 300KB）。附件预览是低频入口，
 // 静态引入会把它拖进首屏 boot 图；改为懒加载，仅打开预览时拉取。
-const CodePreview = lazy(() =>
-  import('../../components/CodePreview').then(module => ({ default: module.CodePreview })),
-)
+const CodePreview = lazy(() => import('../../components/CodePreview').then(module => ({ default: module.CodePreview })))
 
 // ============================================
 // 常量
@@ -162,15 +161,17 @@ function DownloadButton({ attachment }: { attachment: Attachment }) {
   }, [attachment])
 
   return (
-    <button
-      type="button"
-      onClick={handleDownload}
-      aria-label={t('attachment.saveToFile')}
-      className={cn('p-1.5 rounded-lg text-text-400 hover:text-text-100', interactive.subtle)}
-      title={t('attachment.saveToFile')}
-    >
-      <DownloadIcon size={16} />
-    </button>
+    <NativeTooltip>
+      <button
+        type="button"
+        onClick={handleDownload}
+        aria-label={t('attachment.saveToFile')}
+        className={cn('p-1.5 rounded-lg text-text-400 hover:text-text-100', interactive.subtle)}
+        title={t('attachment.saveToFile')}
+      >
+        <DownloadIcon size={16} />
+      </button>
+    </NativeTooltip>
   )
 }
 
@@ -469,18 +470,20 @@ function ZoomableImage({ url, alt }: { url: string; alt: string }) {
           <ZoomButton onClick={zoomOut} disabled={scale <= MIN_SCALE} title={t('attachment.zoomOut')}>
             <MinusIcon size={14} />
           </ZoomButton>
-          <button
-            type="button"
-            onClick={resetView}
-            aria-label={t('attachment.zoomReset')}
-            className={cn(
-              'px-2 py-1 rounded-md text-ui-caption font-mono text-text-400 transition-colors min-w-[52px] min-h-[44px] sm:min-h-0 flex items-center justify-center',
-              interactive.subtle,
-            )}
-            title={t('attachment.zoomReset')}
-          >
-            {scalePercent}%
-          </button>
+          <NativeTooltip>
+            <button
+              type="button"
+              onClick={resetView}
+              aria-label={t('attachment.zoomReset')}
+              className={cn(
+                'px-2 py-1 rounded-md text-ui-caption font-mono text-text-400 transition-colors min-w-[52px] min-h-[44px] sm:min-h-0 flex items-center justify-center',
+                interactive.subtle,
+              )}
+              title={t('attachment.zoomReset')}
+            >
+              {scalePercent}%
+            </button>
+          </NativeTooltip>
           <ZoomButton onClick={zoomIn} disabled={scale >= MAX_SCALE} title={t('attachment.zoomIn')}>
             <PlusIcon size={14} />
           </ZoomButton>
@@ -506,18 +509,19 @@ function ZoomButton({
   children: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={title}
-      className={cn(
-        'p-2 rounded-md text-text-400 hover:text-text-100 disabled:opacity-30 disabled:cursor-not-allowed min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center',
-        interactive.subtle,
-      )}
-      title={title}
-    >
-      {children}
-    </button>
+    <Tooltip content={title}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={title}
+        className={cn(
+          'p-2 rounded-md text-text-400 hover:text-text-100 disabled:opacity-30 disabled:cursor-not-allowed min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center',
+          interactive.subtle,
+        )}
+      >
+        {children}
+      </button>
+    </Tooltip>
   )
 }

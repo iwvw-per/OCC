@@ -9,6 +9,7 @@ import {
   SearchIcon,
 } from '../../../components/Icons'
 import { useModels } from '../../../hooks'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { modelVisibilityStore, useHiddenModelKeys } from '../../../store'
 import { groupModelsByProvider, getModelKey } from '../../../utils/modelUtils'
 import type { ModelInfo } from '../../../types/ui'
@@ -39,18 +40,19 @@ function ModelVisibilityButton({
   revealOnHover?: boolean
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={ariaLabel}
-      title={ariaLabel}
-      disabled={disabled}
-      onClick={e => {
-        e.stopPropagation()
-        if (!disabled) onChange()
-      }}
-      className={`h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md transition-all
+    <NativeTooltip>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={ariaLabel}
+        title={ariaLabel}
+        disabled={disabled}
+        onClick={e => {
+          e.stopPropagation()
+          if (!disabled) onChange()
+        }}
+        className={`h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md transition-all
         hover:bg-bg-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent-main-100 focus-visible:outline-offset-1
         ${
           enabled
@@ -60,9 +62,10 @@ function ModelVisibilityButton({
             : 'text-text-500 opacity-70 hover:opacity-100'
         }
         ${disabled ? '!opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
-    >
-      {enabled ? <EyeIcon size={14} /> : <EyeOffIcon size={14} />}
-    </button>
+      >
+        {enabled ? <EyeIcon size={14} /> : <EyeOffIcon size={14} />}
+      </button>
+    </NativeTooltip>
   )
 }
 
@@ -240,38 +243,42 @@ export function ModelsSettings() {
                     groupIndex === 0 ? 'pt-0.5' : 'pt-3'
                   }`}
                 >
-                  <button
-                    type="button"
-                    aria-expanded={!isCollapsed}
-                    onClick={() => toggleCollapse(group.providerName)}
-                    title={group.providerName}
-                    className="h-7 flex-1 min-w-0 flex items-center gap-1.5 rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100"
-                  >
-                    <span className="min-w-0 text-ui-xs font-semibold text-text-400/70 uppercase tracking-wider truncate">
-                      {group.providerName}
-                    </span>
-                    <span className="text-ui-sm text-text-500 shrink-0 tabular-nums">
-                      {providerVisibleCount}/{providerModels.length}
-                    </span>
-                    <span className="text-text-400 shrink-0" aria-hidden="true">
-                      {isCollapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={providerActionDisabled}
-                    title={providerActionDisabled ? t('models.keepOneEnabled') : undefined}
-                    onClick={() => {
-                      const nextVisible = !allProviderVisible
-                      modelVisibilityStore.setManyVisible(providerModels, nextVisible)
-                      if (providerModels[0]) anchorKeyRef.current = getModelKey(providerModels[0])
-                    }}
-                    className={`h-7 shrink-0 px-1.5 -mr-1.5 rounded-md text-ui-sm font-medium hover:bg-bg-200 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
-                      allProviderVisible ? 'text-text-400' : 'text-accent-main-100'
-                    }`}
-                  >
-                    {t(allProviderVisible ? 'models.hideAll' : 'models.showAll')}
-                  </button>
+                  <NativeTooltip>
+                    <button
+                      type="button"
+                      aria-expanded={!isCollapsed}
+                      onClick={() => toggleCollapse(group.providerName)}
+                      title={group.providerName}
+                      className="h-7 flex-1 min-w-0 flex items-center gap-1.5 rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100"
+                    >
+                      <span className="min-w-0 text-ui-xs font-semibold text-text-400/70 uppercase tracking-wider truncate">
+                        {group.providerName}
+                      </span>
+                      <span className="text-ui-sm text-text-500 shrink-0 tabular-nums">
+                        {providerVisibleCount}/{providerModels.length}
+                      </span>
+                      <span className="text-text-400 shrink-0" aria-hidden="true">
+                        {isCollapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
+                      </span>
+                    </button>
+                  </NativeTooltip>
+                  <NativeTooltip>
+                    <button
+                      type="button"
+                      disabled={providerActionDisabled}
+                      title={providerActionDisabled ? t('models.keepOneEnabled') : undefined}
+                      onClick={() => {
+                        const nextVisible = !allProviderVisible
+                        modelVisibilityStore.setManyVisible(providerModels, nextVisible)
+                        if (providerModels[0]) anchorKeyRef.current = getModelKey(providerModels[0])
+                      }}
+                      className={`h-7 shrink-0 px-1.5 -mr-1.5 rounded-md text-ui-sm font-medium hover:bg-bg-200 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
+                        allProviderVisible ? 'text-text-400' : 'text-accent-main-100'
+                      }`}
+                    >
+                      {t(allProviderVisible ? 'models.hideAll' : 'models.showAll')}
+                    </button>
+                  </NativeTooltip>
                   <span className="w-7 shrink-0" aria-hidden="true" />
                 </div>
 
@@ -293,35 +300,37 @@ export function ModelsSettings() {
                           className={`group w-full flex items-start justify-between gap-3 px-2.5 py-2 rounded-lg transition-colors select-none
                             ${disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-bg-200'}`}
                         >
-                          <button
-                            type="button"
-                            aria-pressed={enabled}
-                            title={`${model.name}\n${model.id}`}
-                            onClick={e => {
-                              e.stopPropagation()
-                              if (disabled && !e.shiftKey && !isModClick(e)) return
-                              handleModelActivate(model, e)
-                            }}
-                            className="min-w-0 flex-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100 rounded-md"
-                          >
-                            <div className="h-7 flex items-center min-w-0">
+                          <NativeTooltip>
+                            <button
+                              type="button"
+                              aria-pressed={enabled}
+                              title={`${model.name}\n${model.id}`}
+                              onClick={e => {
+                                e.stopPropagation()
+                                if (disabled && !e.shiftKey && !isModClick(e)) return
+                                handleModelActivate(model, e)
+                              }}
+                              className="min-w-0 flex-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100 rounded-md"
+                            >
+                              <div className="h-7 flex items-center min-w-0">
+                                <div
+                                  className={`min-w-0 truncate text-ui-base font-medium leading-snug ${
+                                    enabled ? 'text-text-100' : 'text-text-400'
+                                  }`}
+                                >
+                                  {model.name}
+                                </div>
+                              </div>
                               <div
-                                className={`min-w-0 truncate text-ui-base font-medium leading-snug ${
-                                  enabled ? 'text-text-100' : 'text-text-400'
+                                className={`truncate -mt-0.5 text-ui-sm font-mono leading-relaxed ${
+                                  enabled ? 'text-text-400' : 'text-text-500'
                                 }`}
                               >
-                                {model.name}
+                                {model.id}
+                                {context && <span className="sm:hidden"> · {context}</span>}
                               </div>
-                            </div>
-                            <div
-                              className={`truncate -mt-0.5 text-ui-sm font-mono leading-relaxed ${
-                                enabled ? 'text-text-400' : 'text-text-500'
-                              }`}
-                            >
-                              {model.id}
-                              {context && <span className="sm:hidden"> · {context}</span>}
-                            </div>
-                          </button>
+                            </button>
+                          </NativeTooltip>
                           {context && (
                             <span className="hidden sm:flex h-7 items-center shrink-0 text-ui-sm text-text-500 tabular-nums">
                               {context}

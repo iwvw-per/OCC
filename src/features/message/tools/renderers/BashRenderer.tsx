@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MaximizeIcon, MinimizeIcon } from '../../../../components/Icons'
+import { NativeTooltip } from '../../../../components/ui/Tooltip'
 import { useFullscreen } from '../../../../contexts'
 import { useSyntaxHighlight } from '../../../../hooks/useSyntaxHighlight'
 import { useResponsiveMaxHeight } from '../../../../hooks/useResponsiveMaxHeight'
@@ -192,7 +193,9 @@ function TerminalSurface({
   exitCodeLabel?: string
 }) {
   const { t } = useTranslation(['components', 'common'])
-  const fullscreenLabel = isFullscreen ? t('components:contentBlock.exitFullscreen') : t('components:contentBlock.fullscreen')
+  const fullscreenLabel = isFullscreen
+    ? t('components:contentBlock.exitFullscreen')
+    : t('components:contentBlock.fullscreen')
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -230,15 +233,17 @@ function TerminalSurface({
         <div className="flex min-w-0 items-baseline gap-2">
           {cwd && <WorkingDirectoryPrompt cwd={cwd} />}
           {onToggleFullscreen && (
-            <button
-              type="button"
-              onClick={onToggleFullscreen}
-              className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-500 transition-colors hover:bg-bg-200 hover:text-text-100"
-              title={fullscreenLabel}
-              aria-label={fullscreenLabel}
-            >
-              {isFullscreen ? <MinimizeIcon size={12} /> : <MaximizeIcon size={12} />}
-            </button>
+            <NativeTooltip>
+              <button
+                type="button"
+                onClick={onToggleFullscreen}
+                className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-500 transition-colors hover:bg-bg-200 hover:text-text-100"
+                title={fullscreenLabel}
+                aria-label={fullscreenLabel}
+              >
+                {isFullscreen ? <MinimizeIcon size={12} /> : <MaximizeIcon size={12} />}
+              </button>
+            </NativeTooltip>
           )}
         </div>
 
@@ -290,17 +295,21 @@ function WorkingDirectoryPrompt({ cwd }: { cwd: string }) {
 
   return (
     <div className="group/cwd mb-0.5 flex min-w-0 flex-1 items-baseline whitespace-nowrap">
-      <button
-        type="button"
-        onClick={handleClick}
-        className={`min-w-0 max-w-full truncate text-left font-mono transition-colors ${
-          copied ? 'text-success-100' : 'text-accent-main-100 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1'
-        }`}
-        title={copied ? t('copied') : t('clickToCopyPath', { path: cwd })}
-        style={{ direction: 'rtl' }}
-      >
-        <bdi>{displayPath}</bdi>
-      </button>
+      <NativeTooltip>
+        <button
+          type="button"
+          onClick={handleClick}
+          className={`min-w-0 max-w-full truncate text-left font-mono transition-colors ${
+            copied
+              ? 'text-success-100'
+              : 'text-accent-main-100 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1'
+          }`}
+          title={copied ? t('copied') : t('clickToCopyPath', { path: cwd })}
+          style={{ direction: 'rtl' }}
+        >
+          <bdi>{displayPath}</bdi>
+        </button>
+      </NativeTooltip>
     </div>
   )
 }
@@ -340,16 +349,18 @@ function ClickToCopyCommand({ command }: { command: string }) {
   }, [command])
 
   return (
-    <div
-      className="cursor-pointer group/cmd whitespace-pre-wrap break-all"
-      onClick={handleClick}
-      title={copied ? t('copied') : t('clickToCopy')}
-    >
-      <span className="inline-block w-[1ch] text-center text-accent-main-100 select-none font-semibold">
-        {copied ? '✓' : '$'}
-      </span>{' '}
-      <HighlightedCommand command={command} />
-    </div>
+    <NativeTooltip>
+      <div
+        className="cursor-pointer group/cmd whitespace-pre-wrap break-all"
+        onClick={handleClick}
+        title={copied ? t('copied') : t('clickToCopy')}
+      >
+        <span className="inline-block w-[1ch] text-center text-accent-main-100 select-none font-semibold">
+          {copied ? '✓' : '$'}
+        </span>{' '}
+        <HighlightedCommand command={command} />
+      </div>
+    </NativeTooltip>
   )
 }
 

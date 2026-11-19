@@ -7,6 +7,7 @@
 
 import { useMemo } from 'react'
 import { CheckIcon } from '../../../../components/Icons'
+import { NativeTooltip } from '../../../../components/ui/Tooltip'
 import type { ToolRendererProps } from '../types'
 
 // ============================================
@@ -90,26 +91,28 @@ function AnsweredQuestion({ qa }: { qa: QAPair }) {
         {qa.options.map((option, idx) => {
           const isSelected = qa.answers.includes(option.label)
           return (
-            <span
-              key={idx}
-              title={option.description}
-              className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-ui-caption leading-5 rounded-md ${
-                isSelected ? 'bg-bg-200 text-text-100' : 'text-text-500'
-              }`}
-            >
-              {qa.multiple && (
-                <span className="inline-flex h-5 w-3.5 shrink-0 items-center justify-center">
-                  <span
-                    className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
-                      isSelected ? 'border-text-100 bg-text-100 text-bg-000' : 'border-border-300'
-                    }`}
-                  >
-                    {isSelected && <CheckIcon size={10} className="shrink-0" />}
+            <NativeTooltip>
+              <span
+                key={idx}
+                title={option.description}
+                className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-ui-caption leading-5 rounded-md ${
+                  isSelected ? 'bg-bg-200 text-text-100' : 'text-text-500'
+                }`}
+              >
+                {qa.multiple && (
+                  <span className="inline-flex h-5 w-3.5 shrink-0 items-center justify-center">
+                    <span
+                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                        isSelected ? 'border-text-100 bg-text-100 text-bg-000' : 'border-border-300'
+                      }`}
+                    >
+                      {isSelected && <CheckIcon size={10} className="shrink-0" />}
+                    </span>
                   </span>
-                </span>
-              )}
-              <span className="min-w-0 whitespace-normal break-words text-left">{option.label}</span>
-            </span>
+                )}
+                <span className="min-w-0 whitespace-normal break-words text-left">{option.label}</span>
+              </span>
+            </NativeTooltip>
           )
         })}
 

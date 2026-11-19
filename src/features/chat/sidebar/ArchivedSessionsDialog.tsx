@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Dialog, Button, Checkbox, ConfirmDialog } from '../../../components/ui'
+import { Dialog, Button, Checkbox, ConfirmDialog, NativeTooltip } from '../../../components/ui'
 import { ArchiveIcon, ChevronDownIcon, FolderIcon, GlobeIcon, TrashIcon, UndoIcon } from '../../../components/Icons'
 import { Spinner } from '../../../components/ui/Spinner'
 import { useArchivedSessions } from '../../../hooks'
@@ -63,7 +63,9 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
       if (!group) {
         group = {
           directory,
-          name: directory ? getDirectoryName(directory) || directory : t('chat:sidebar.global', { defaultValue: 'Global' }),
+          name: directory
+            ? getDirectoryName(directory) || directory
+            : t('chat:sidebar.global', { defaultValue: 'Global' }),
           sessions: [],
         }
         map.set(key, group)
@@ -173,9 +175,7 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
     return (
       <div className="py-10 flex flex-col items-center gap-2 text-text-400">
         <ArchiveIcon size={24} className="opacity-50" />
-        <span className="text-ui-caption">
-          {t('chat:archived.empty', { defaultValue: 'No archived chats' })}
-        </span>
+        <span className="text-ui-caption">{t('chat:archived.empty', { defaultValue: 'No archived chats' })}</span>
       </div>
     )
   }
@@ -260,35 +260,35 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
                   }
                   aria-label={group.name}
                 />
-                <button
-                  type="button"
-                  onClick={() => toggleProject(group.directory)}
-                  className="group flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 text-left"
-                  title={group.directory || group.name}
-                >
-                  <span className="relative size-5 shrink-0 flex items-center justify-center">
-                    <GroupIcon
-                      size={16}
-                      className={cn(
-                        'transition-opacity duration-150 group-hover:opacity-0',
-                        group.directory ? 'text-text-400' : 'text-accent-main-100',
-                      )}
-                    />
-                    <ChevronDownIcon
-                      size={13}
-                      className={cn(
-                        'absolute text-text-300 opacity-0 transition-[opacity,transform] duration-150 group-hover:opacity-100',
-                        isExpanded ? '' : '-rotate-90',
-                      )}
-                    />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-ui-caption font-semibold text-text-100">
-                    {group.name}
-                  </span>
-                  <span className="shrink-0 text-ui-xs tabular-nums text-text-500">
-                    {group.sessions.length}
-                  </span>
-                </button>
+                <NativeTooltip>
+                  <button
+                    type="button"
+                    onClick={() => toggleProject(group.directory)}
+                    className="group flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 text-left"
+                    title={group.directory || group.name}
+                  >
+                    <span className="relative size-5 shrink-0 flex items-center justify-center">
+                      <GroupIcon
+                        size={16}
+                        className={cn(
+                          'transition-opacity duration-150 group-hover:opacity-0',
+                          group.directory ? 'text-text-400' : 'text-accent-main-100',
+                        )}
+                      />
+                      <ChevronDownIcon
+                        size={13}
+                        className={cn(
+                          'absolute text-text-300 opacity-0 transition-[opacity,transform] duration-150 group-hover:opacity-100',
+                          isExpanded ? '' : '-rotate-90',
+                        )}
+                      />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-ui-caption font-semibold text-text-100">
+                      {group.name}
+                    </span>
+                    <span className="shrink-0 text-ui-xs tabular-nums text-text-500">{group.sessions.length}</span>
+                  </button>
+                </NativeTooltip>
               </div>
 
               <ExpandableSection show={isExpanded}>
@@ -313,7 +313,9 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
                           checked={isSelected}
                           disabled={isBusy}
                           onCheckedChange={() => toggleOne(session.id)}
-                          aria-label={session.title || t('commands:sessions.untitledChat', { defaultValue: 'Untitled' })}
+                          aria-label={
+                            session.title || t('commands:sessions.untitledChat', { defaultValue: 'Untitled' })
+                          }
                         />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-ui-caption text-text-200">
@@ -340,36 +342,40 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
                           </div>
                         ) : (
                           <div className="shrink-0 flex items-center gap-1">
-                            <button
-                              type="button"
-                              title={t('chat:archived.restore', { defaultValue: 'Restore' })}
-                              disabled={isBusy}
-                              onClick={() => void handleRestore(session.id)}
-                              className={cn(
-                                'flex h-7 items-center gap-1 rounded-md px-2 text-ui-xs',
-                                'bg-bg-200 text-text-300 transition-colors duration-150',
-                                'hover:bg-bg-300 active:bg-bg-300',
-                                isBusy && 'opacity-50',
-                              )}
-                            >
-                              {isBusy ? <Spinner size="xs" tone="current" variant="ring" /> : <UndoIcon size={13} />}
-                              <span>{t('chat:archived.restore', { defaultValue: 'Restore' })}</span>
-                            </button>
-                            <button
-                              type="button"
-                              title={t('chat:archived.delete', { defaultValue: 'Delete' })}
-                              disabled={isBusy}
-                              onClick={() => setConfirmId(session.id)}
-                              className={cn(
-                                'flex h-7 items-center gap-1 rounded-md px-2 text-ui-xs',
-                                'bg-danger-100/10 text-danger-100 transition-colors duration-150',
-                                'hover:bg-danger-100/20 active:bg-danger-100/30',
-                                isBusy && 'opacity-50',
-                              )}
-                              data-session-id={rawId}
-                            >
-                              <TrashIcon size={13} />
-                            </button>
+                            <NativeTooltip>
+                              <button
+                                type="button"
+                                title={t('chat:archived.restore', { defaultValue: 'Restore' })}
+                                disabled={isBusy}
+                                onClick={() => void handleRestore(session.id)}
+                                className={cn(
+                                  'flex h-7 items-center gap-1 rounded-md px-2 text-ui-xs',
+                                  'bg-bg-200 text-text-300 transition-colors duration-150',
+                                  'hover:bg-bg-300 active:bg-bg-300',
+                                  isBusy && 'opacity-50',
+                                )}
+                              >
+                                {isBusy ? <Spinner size="xs" tone="current" variant="ring" /> : <UndoIcon size={13} />}
+                                <span>{t('chat:archived.restore', { defaultValue: 'Restore' })}</span>
+                              </button>
+                            </NativeTooltip>
+                            <NativeTooltip>
+                              <button
+                                type="button"
+                                title={t('chat:archived.delete', { defaultValue: 'Delete' })}
+                                disabled={isBusy}
+                                onClick={() => setConfirmId(session.id)}
+                                className={cn(
+                                  'flex h-7 items-center gap-1 rounded-md px-2 text-ui-xs',
+                                  'bg-danger-100/10 text-danger-100 transition-colors duration-150',
+                                  'hover:bg-danger-100/20 active:bg-danger-100/30',
+                                  isBusy && 'opacity-50',
+                                )}
+                                data-session-id={rawId}
+                              >
+                                <TrashIcon size={13} />
+                              </button>
+                            </NativeTooltip>
                           </div>
                         )}
                       </div>

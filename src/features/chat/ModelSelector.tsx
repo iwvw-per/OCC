@@ -12,16 +12,15 @@
  */
 
 import { useState, useRef, useEffect, useMemo, useCallback, memo, forwardRef, useImperativeHandle } from 'react'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import { useTranslation } from 'react-i18next'
 import {
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  EyeIcon,
   PackageIcon,
-  ServerIcon,
-  ThinkingIcon,
+  SpinnerIcon,
 } from '../../components/Icons'
 import { DropdownMenu } from '../../components/ui'
 import type { ModelInfo } from '../../api'
@@ -35,6 +34,8 @@ import { getModelKey, groupModelsByProvider, recordModelUsage } from '../../util
 export interface ModelSelectorHandle {
   openMenu: () => void
 }
+
+const HOVER_CLOSE_DELAY_MS = 160
 
 interface ModelSelectorProps {
   models: ModelInfo[]
@@ -52,6 +53,8 @@ interface ModelSelectorProps {
   variants?: string[]
   selectedVariant?: string
   onVariantChange?: (variant: string | undefined) => void
+  /** 菜单开合变化:供外部在菜单打开期间抑制输入框滚动收起 */
+  onMenuOpenChange?: (open: boolean) => void
 }
 
 // ============================================
@@ -72,11 +75,12 @@ export const ModelSelector = memo(
       variants = [],
       selectedVariant,
       onVariantChange,
+      onMenuOpenChange,
     },
     ref,
   ) {
     const { t } = useTranslation('chat')
-    const { preferTouchUi } = useInputCapabilities()
+    const { preferTouchUi, canHover } = useInputCapabilities()
     const [isOpen, setIsOpen] = useState(false)
     const [highlightedIndex, setHighlightedIndex] = useState(0)
     /** 端点(provider)浏览态:null 表示跟随当前选中模型 */
@@ -89,6 +93,7 @@ export const ModelSelector = memo(
     const listRef = useRef<HTMLDivElement>(null)
     const menuRef = useRef<HTMLDivElement>(null)
     const pendingFocusIndexRef = useRef(0)
+    const endpointHoverTimerRef = useRef<number | null>(null)
 
     const idPrefix = trigger === 'header' ? 'ms-item' : 'ms-tb-item'
     const listboxId = `${idPrefix}-listbox`
@@ -142,8 +147,7 @@ export const ModelSelector = memo(
     )
     // 第一档是「默认」(不指定思维强度),此时填充为空。
     const thoughtFilled = thoughtIndex > 0
-    const thoughtProgress =
-      thoughtLevels.length > 1 ? (thoughtIndex / (thoughtLevels.length - 1)) * 100 : 0
+    const thoughtProgress = thoughtLevels.length > 1 ? (thoughtIndex / (thoughtLevels.length - 1)) * 100 : 0
 
     // ---- Open / Close ----
 
@@ -200,6 +204,34 @@ export const ModelSelector = memo(
       },
       [disabled, isLoading, selectedModelKey, visibleModels],
     )
+
+    const cancelEndpointHoverClose = useCallback(() => {
+      if (endpointHoverTimerRef.current !== null) {
+        window.clearTimeout(endpointHoverTimerRef.current)
+        endpointHoverTimerRef.current = null
+      }
+    }, [])
+
+    const scheduleEndpointHoverClose = useCallback(() => {
+      cancelEndpointHoverClose()
+      endpointHoverTimerRef.current = window.setTimeout(() => {
+        endpointHoverTimerRef.current = null
+        setEndpointsOpen(false)
+      }, HOVER_CLOSE_DELAY_MS)
+    }, [cancelEndpointHoverClose])
+
+    useEffect(() => cancelEndpointHoverClose, [cancelEndpointHoverClose])
+
+    const handleEndpointMouseEnter = useCallback(() => {
+      if (!canHover || preferTouchUi) return
+      cancelEndpointHoverClose()
+      setEndpointsOpen(true)
+    }, [canHover, cancelEndpointHoverClose, preferTouchUi])
+
+    const handleEndpointMouseLeave = useCallback(() => {
+      if (!canHover || preferTouchUi) return
+      scheduleEndpointHoverClose()
+    }, [canHover, preferTouchUi, scheduleEndpointHoverClose])
 
     useImperativeHandle(ref, () => ({ openMenu: () => openMenu() }), [openMenu])
 
@@ -298,6 +330,10 @@ export const ModelSelector = memo(
     // ---- Side effects ----
 
     useEffect(() => {
+      onMenuOpenChange?.(isOpen)
+    }, [isOpen, onMenuOpenChange])
+
+    useEffect(() => {
       if (!isOpen) return
       // 触摸端不自动聚焦列表项:避免用户点开菜单就被焦点环和软键盘打断。
       if (preferTouchUi) return
@@ -311,11 +347,7 @@ export const ModelSelector = memo(
       if (!isOpen) return
       const handleClickOutside = (e: MouseEvent) => {
         const target = e.target as Node
-        if (
-          containerRef.current &&
-          !containerRef.current.contains(target) &&
-          !menuRef.current?.contains(target)
-        ) {
+        if (containerRef.current && !containerRef.current.contains(target) && !menuRef.current?.contains(target)) {
           closeMenu()
         }
       }
@@ -349,13 +381,30 @@ export const ModelSelector = memo(
 
     // ---- Trigger button ----
 
-    const displayName =
-      trigger === 'header'
-        ? selectedModel?.name || t('modelSelector.selectModel')
-        : selectedModel?.name || (isLoading ? '...' : t('modelSelector.model'))
+    const placeholderLabel = trigger === 'header' ? t('modelSelector.selectModel') : t('modelSelector.model')
+    const displayName = selectedModel?.name || (isLoading ? t('common:loading') : placeholderLabel)
+    const labelTone = selectedModel ? 'text-text-200' : 'text-text-400'
+    const trailingIndicator = isLoading ? (
+      <SpinnerIcon
+        size={14}
+        data-loading-indicator="true"
+        className="pointer-events-none shrink-0 animate-spin text-text-400"
+      />
+    ) : (
+      <span
+        className={`pointer-events-none inline-flex shrink-0 text-text-400 transition-transform duration-200 ${
+          isOpen ? 'rotate-180' : ''
+        }`}
+      >
+        <ChevronDownIcon size={14} />
+      </span>
+    )
 
     const thoughtLabel = thoughtLevels[thoughtIndex]?.label ?? t('inputToolbar.default')
     const triggerTitle = variants.length > 0 ? `${displayName} · ${thoughtLabel}` : displayName
+
+    const triggerDisabledClasses =
+      'disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:active:bg-transparent'
 
     const triggerButton =
       trigger === 'header' ? (
@@ -373,17 +422,13 @@ export const ModelSelector = memo(
           }}
           disabled={disabled || isLoading}
           aria-expanded={isOpen}
-          className="group flex h-7 items-center gap-1 rounded-lg pl-2 pr-1.5 text-ui-base text-text-200 transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer"
+          className={`group flex h-7 items-center gap-1 rounded-lg pl-2 pr-1.5 text-ui-base text-text-200 transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer ${triggerDisabledClasses}`}
           title={triggerTitle}
         >
           <PackageIcon size={16} className="shrink-0 text-text-400" />
-          <span className="min-w-0 max-w-[240px] truncate font-medium">{displayName}</span>
-          {variants.length > 0 && (
-            <span className="shrink-0 truncate text-ui-base text-text-500">{thoughtLabel}</span>
-          )}
-          <div className={`text-text-400 shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
-            <ChevronDownIcon size={14} />
-          </div>
+          <span className={`min-w-0 max-w-[240px] truncate font-medium ${labelTone}`}>{displayName}</span>
+          {variants.length > 0 && <span className="shrink-0 truncate text-ui-base text-text-500">{thoughtLabel}</span>}
+          {trailingIndicator}
         </button>
       ) : (
         <button
@@ -400,17 +445,13 @@ export const ModelSelector = memo(
           }}
           disabled={disabled || isLoading}
           aria-expanded={isOpen}
-          className="flex h-7 items-center gap-1 rounded-lg pl-2 pr-1.5 text-ui-base transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden w-full"
+          className={`flex h-7 items-center gap-1 rounded-lg pl-2 pr-1.5 text-ui-base transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden w-full ${triggerDisabledClasses}`}
           title={triggerTitle}
         >
           <PackageIcon size={16} className="shrink-0 text-text-400" />
-          <span className="min-w-0 flex-1 truncate text-ui-base text-text-200">{displayName}</span>
-          {variants.length > 0 && (
-            <span className="shrink-0 truncate text-ui-base text-text-500">{thoughtLabel}</span>
-          )}
-          <span className={`text-text-400 shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
-            <ChevronDownIcon size={14} />
-          </span>
+          <span className={`min-w-0 flex-1 truncate text-ui-base ${labelTone}`}>{displayName}</span>
+          {variants.length > 0 && <span className="shrink-0 truncate text-ui-base text-text-500">{thoughtLabel}</span>}
+          {trailingIndicator}
         </button>
       )
 
@@ -432,7 +473,7 @@ export const ModelSelector = memo(
             isActive ? 'text-text-100' : 'text-text-200'
           }`}
         >
-          <ServerIcon size={16} className="shrink-0 text-text-400" />
+          <PackageIcon size={16} className="shrink-0 text-text-400" />
           <span className="min-w-0 flex-1 truncate">{group.providerName}</span>
           <span className="shrink-0 text-ui-xs tabular-nums text-text-500">{group.models.length}</span>
           {isActive && <CheckIcon size={16} className="shrink-0 text-text-400" />}
@@ -447,20 +488,20 @@ export const ModelSelector = memo(
           data-focus-target="endpoint"
           aria-haspopup="listbox"
           aria-expanded={endpointsOpen}
+          aria-label={endpointLabel}
           onClick={() => setEndpointsOpen(open => !open)}
+          onMouseEnter={handleEndpointMouseEnter}
+          onMouseLeave={handleEndpointMouseLeave}
           className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-ui-base text-text-200 transition-colors duration-100 hover:bg-bg-200"
         >
-          <ServerIcon size={16} className="shrink-0 text-text-400" />
-          <span className="shrink-0 text-text-500">{endpointLabel}</span>
-          <span className="ml-auto flex min-w-0 items-center gap-1">
-            <span className="min-w-0 truncate text-text-100">{activeProviderGroup?.providerName ?? '—'}</span>
-            <ChevronRightIcon
-              size={14}
-              className={`shrink-0 text-text-400 transition-transform duration-150 ${
-                endpointsOpen ? 'rotate-90' : ''
-              }`}
-            />
-          </span>
+          <PackageIcon size={16} className="shrink-0 text-text-400" />
+          <span className="min-w-0 truncate text-text-100">{activeProviderGroup?.providerName ?? '—'}</span>
+          <ChevronRightIcon
+            size={14}
+            className={`ml-auto shrink-0 text-text-400 transition-transform duration-150 ${
+              endpointsOpen ? 'rotate-90' : ''
+            }`}
+          />
         </button>
       </div>
     )
@@ -483,28 +524,46 @@ export const ModelSelector = memo(
             const isSelected = selectedModelKey === itemKey
             const isHL = highlightedIndex === index
             return (
-              <button
-                key={itemKey}
-                id={`${idPrefix}-${index}`}
-                data-model-key={itemKey}
-                data-focus-target="item"
-                type="button"
-                onClick={() => handleSelect(model)}
-                onFocus={() => setHighlightedIndex(index)}
-                onMouseMove={() => setHighlightedIndex(index)}
-                onKeyDown={e => handleItemKeyDown(e, index)}
-                title={`${model.name} · ${model.providerName}`}
-                className={`flex min-h-7 items-center gap-2 rounded-md px-2 text-left text-ui-base transition-colors duration-100 hover:bg-bg-200 ${
-                  isSelected || isHL ? 'text-text-100' : 'text-text-200'
-                }`}
-              >
-                <span className="min-w-0 truncate">{model.name}</span>
-                <span className="flex shrink-0 items-center gap-1 text-text-400">
-                  {model.supportsReasoning && <ThinkingIcon size={13} />}
-                  {model.supportsImages && <EyeIcon size={13} />}
-                </span>
-                {isSelected && <CheckIcon size={16} className="ml-auto shrink-0 text-text-400" />}
-              </button>
+              <NativeTooltip>
+                <button
+                  key={itemKey}
+                  id={`${idPrefix}-${index}`}
+                  data-model-key={itemKey}
+                  data-focus-target="item"
+                  type="button"
+                  onClick={() => handleSelect(model)}
+                  onFocus={() => setHighlightedIndex(index)}
+                  onMouseMove={() => setHighlightedIndex(index)}
+                  onKeyDown={e => handleItemKeyDown(e, index)}
+                  title={`${model.name} · ${model.providerName}`}
+                  className={`flex w-full min-h-7 items-center gap-2 rounded-md px-2 text-left text-ui-base transition-colors duration-100 hover:bg-bg-200 ${
+                    isSelected || isHL ? 'text-text-100' : 'text-text-200'
+                  }`}
+                >
+                  <span className="min-w-0 truncate">{model.name}</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {model.supportsImages && (
+                      <span
+                        data-model-capability="vision"
+                        className="rounded-full bg-text-100/10 px-1.5 text-ui-xs leading-normal text-text-400"
+                      >
+                        {t('modelSelector.vision')}
+                      </span>
+                    )}
+                    {model.supportsReasoning && (
+                      <span
+                        data-model-capability="thinking"
+                        className="rounded-full bg-text-100/10 px-1.5 text-ui-xs leading-normal text-text-400"
+                      >
+                        {t('modelSelector.thinking')}
+                      </span>
+                    )}
+                  </span>
+                  <span className="ml-auto flex w-4 shrink-0 items-center justify-center">
+                    {isSelected && <CheckIcon size={16} className="text-text-400" />}
+                  </span>
+                </button>
+              </NativeTooltip>
             )
           })
         )}
@@ -524,7 +583,7 @@ export const ModelSelector = memo(
             <div aria-hidden="true" className="pointer-events-none absolute inset-0">
               <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-text-100/10" />
               <div
-                className="thought-slider-fill absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-accent-main-100"
+                className="thought-slider-fill absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-linear-to-r from-accent-main-100 to-info-100"
                 style={{
                   width: thoughtFilled ? `calc(7px + (100% - 14px) * ${thoughtProgress / 100})` : 0,
                 }}
@@ -619,12 +678,14 @@ export const ModelSelector = memo(
             )}
 
             {/* 桌面:端点列表向右展开,顶部与模型菜单对齐,左侧留出空隙;
-                样式(圆角/边框/背景/阴影/内边距)与模型菜单完全一致。 */}
+                圆角/边框/阴影/内边距与模型菜单一致,背景用实色避免透出背后内容。 */}
             {endpointsOpen && !preferTouchUi && (
               <div
                 role="listbox"
                 aria-label={endpointLabel}
-                className="glass absolute -top-px left-full z-20 ml-2 flex w-52 flex-col gap-0.5 rounded-xl border border-border-200/60 p-1 shadow-lg"
+                onMouseEnter={handleEndpointMouseEnter}
+                onMouseLeave={handleEndpointMouseLeave}
+                className="bg-bg-000 absolute -top-px left-full z-20 ml-2 flex w-52 flex-col gap-0.5 rounded-xl border border-border-200/60 p-1 shadow-lg"
               >
                 {allProviderGroups.map(endpointOptionButton)}
               </div>

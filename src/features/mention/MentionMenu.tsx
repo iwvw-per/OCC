@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { searchFiles, listDirectory, type ApiAgent } from '../../api/client'
 import { fileErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import type { MentionType, MentionItem } from './types'
 import { getFileName, toAbsolutePath, normalizePath } from './utils'
 
@@ -92,7 +93,9 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
       }
       if (shadowEl === undefined) {
         shadowEl =
-          parent.closest<HTMLElement>('[data-chat-pane-root]')?.querySelector<HTMLElement>('[data-chat-header-shadow]') ?? null
+          parent
+            .closest<HTMLElement>('[data-chat-pane-root]')
+            ?.querySelector<HTMLElement>('[data-chat-header-shadow]') ?? null
       }
       const parentRect = parent.getBoundingClientRect()
       // 阴影底边 = 菜单顶部不可越过的线（header + 渐变阴影）。
@@ -198,7 +201,9 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
                   .map(a => createItem('agent', a.name, a.name, a.description))
               : []
 
-          const allItems = [...agentItems, ...folders, ...files].filter(item => !excludeValuesRef.current?.has(item.value))
+          const allItems = [...agentItems, ...folders, ...files].filter(
+            item => !excludeValuesRef.current?.has(item.value),
+          )
 
           setItems(allItems)
 
@@ -282,7 +287,9 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
             .filter(a => a.name.toLowerCase().includes(lowerQuery))
             .map(a => createItem('agent', a.name, a.name, a.description))
 
-          const allItems = [...agentItems, ...folders, ...fileItems].filter(item => !excludeValuesRef.current?.has(item.value))
+          const allItems = [...agentItems, ...folders, ...fileItems].filter(
+            item => !excludeValuesRef.current?.has(item.value),
+          )
 
           setItems(allItems)
           setSelectedIndex(0)
@@ -387,22 +394,25 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
 
         {/* 返回上级 - 作为列表第一项 */}
         {currentPath !== '.' && (
-          <button
-            className="w-full px-2.5 py-2 md:py-1.5 flex items-center gap-2 text-left rounded-lg transition-colors text-text-300 hover:bg-bg-100/40 mb-0.5"
-            onClick={() => {
-              if (onNavigate) {
-                const pathParts = normalizePath(currentPath).split('/')
-                restoreFolderRef.current = pathParts[pathParts.length - 1] || null
-                const parentParts = pathParts.slice(0, -1)
-                const parentPath = parentParts.length > 0 ? parentParts.join('/') + '/' : ''
-                onNavigate(parentPath)
-              }
-            }}
-            title={t('mention.goBack')}
-          >
-            <span className="text-ui-base">←</span>
-            <span className="text-ui-caption text-text-400 truncate">{normalizePath(currentPath)}</span>
-          </button>
+          <NativeTooltip>
+            <button
+              className="w-full px-2.5 py-2 md:py-1.5 flex items-center gap-2 text-left rounded-lg transition-colors text-text-300 hover:bg-bg-100/40 mb-0.5"
+              onClick={() => {
+                if (onNavigate) {
+                  const pathParts = normalizePath(currentPath).split('/')
+                  restoreFolderRef.current = pathParts[pathParts.length - 1] || null
+                  const parentParts = pathParts.slice(0, -1)
+                  const parentPath = parentParts.length > 0 ? parentParts.join('/') + '/' : ''
+                  onNavigate(parentPath)
+                }
+              }}
+              title={t('mention.goBack')}
+              aria-label={t('mention.goBack')}
+            >
+              <span className="text-ui-base">←</span>
+              <span className="text-ui-caption text-text-400 truncate">{normalizePath(currentPath)}</span>
+            </button>
+          </NativeTooltip>
         )}
 
         {items.map((item, index) => (
@@ -428,7 +438,9 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
                 <span className="ml-1.5">{item.displayName}</span>
               </div>
               {item.relativePath && item.type !== 'agent' && (
-                <div className="text-ui-caption text-text-400 truncate ml-[calc(2ch+0.375rem)]">{item.relativePath}</div>
+                <div className="text-ui-caption text-text-400 truncate ml-[calc(2ch+0.375rem)]">
+                  {item.relativePath}
+                </div>
               )}
             </div>
             {item.type === 'folder' && <span className="text-text-400 text-ui-caption ml-2 flex-shrink-0">→</span>}

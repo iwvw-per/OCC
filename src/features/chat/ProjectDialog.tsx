@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FolderIcon, FolderOpenIcon, ArrowUpIcon, SpinnerIcon, PlusIcon, GitBranchIcon } from '../../components/Icons'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import { listDirectory, getPath, directoryExists } from '../../api'
 import { runPtyCommand } from '../../api/ptyRun'
 import { inferRepoName, isLikelyGitUrl } from './gitCloneUrl'
@@ -279,18 +280,15 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
     setInputValue(parent.endsWith(PATH_SEP) ? parent : parent + PATH_SEP)
   }, [inputValue])
 
-  const handleItemClick = useCallback(
-    (item: FileItem) => {
-      userEditedRef.current = true
-      // 列表项自带绝对路径（来自 listDirectory 的 absolute），直接用它拼尾斜杠，
-      // 不依赖输入框当时的文本 —— 即使输入框因某种原因停留在旧目录，点哪进哪。
-      const absolute = isAbsoluteDirectory(item.path) ? item.path : loadedPathRef.current + item.name
-      setInputValue(toAbsoluteStartingPath(absolute))
-      setPathError(null)
-      inputRef.current?.focus()
-    },
-    [],
-  )
+  const handleItemClick = useCallback((item: FileItem) => {
+    userEditedRef.current = true
+    // 列表项自带绝对路径（来自 listDirectory 的 absolute），直接用它拼尾斜杠，
+    // 不依赖输入框当时的文本 —— 即使输入框因某种原因停留在旧目录，点哪进哪。
+    const absolute = isAbsoluteDirectory(item.path) ? item.path : loadedPathRef.current + item.name
+    setInputValue(toAbsoluteStartingPath(absolute))
+    setPathError(null)
+    inputRef.current?.focus()
+  }, [])
 
   const handleSelectFolder = useCallback(
     (folderPath: string) => {
@@ -620,9 +618,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
         <div className="shrink-0 border-t border-border-200/40 p-3 space-y-2">
           <div className="flex items-center gap-2">
             <GitBranchIcon className="w-3.5 h-3.5 shrink-0 text-text-400" />
-            <span className="text-ui-caption font-medium text-text-200">
-              {t('projectDialog.cloneGitTitle')}
-            </span>
+            <span className="text-ui-caption font-medium text-text-200">{t('projectDialog.cloneGitTitle')}</span>
           </div>
 
           <input
@@ -647,15 +643,12 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
           />
 
           <div className="flex items-center gap-2">
-            <span className="shrink-0 font-mono text-ui-xs text-text-400">
-              {t('projectDialog.cloneInto')}
-            </span>
-            <span
-              className="min-w-0 flex-1 truncate font-mono text-ui-xs text-text-300"
-              title={inputValue}
-            >
-              {inputValue}
-            </span>
+            <span className="shrink-0 font-mono text-ui-xs text-text-400">{t('projectDialog.cloneInto')}</span>
+            <NativeTooltip>
+              <span className="min-w-0 flex-1 truncate font-mono text-ui-xs text-text-300" title={inputValue}>
+                {inputValue}
+              </span>
+            </NativeTooltip>
           </div>
 
           <input
@@ -731,47 +724,53 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
           {inputValue}
         </div>
         {canUseNativePicker && (
+          <NativeTooltip>
+            <button
+              type="button"
+              onClick={handleNativePick}
+              title={t('projectDialog.pickInFileManager')}
+              aria-label={t('projectDialog.pickInFileManager')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-ui-caption font-medium shrink-0 whitespace-nowrap max-sm:px-2',
+                interactive.subtle,
+              )}
+            >
+              <FolderOpenIcon className="w-3 h-3 shrink-0" />
+              {/* 移动端空间紧张：只留图标，文案由 title/aria-label 提供 */}
+              <span className="hidden sm:inline">{t('projectDialog.pickInFileManager')}</span>
+            </button>
+          </NativeTooltip>
+        )}
+        <NativeTooltip>
           <button
             type="button"
-            onClick={handleNativePick}
-            title={t('projectDialog.pickInFileManager')}
-            aria-label={t('projectDialog.pickInFileManager')}
+            onClick={openClone}
+            title={t('projectDialog.cloneGit')}
+            aria-label={t('projectDialog.cloneGit')}
             className={cn(
               'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-ui-caption font-medium shrink-0 whitespace-nowrap max-sm:px-2',
               interactive.subtle,
             )}
           >
-            <FolderOpenIcon className="w-3 h-3 shrink-0" />
-            {/* 移动端空间紧张：只留图标，文案由 title/aria-label 提供 */}
-            <span className="hidden sm:inline">{t('projectDialog.pickInFileManager')}</span>
+            <GitBranchIcon className="w-3 h-3 shrink-0" />
+            <span className="hidden sm:inline">{t('projectDialog.cloneGit')}</span>
           </button>
-        )}
-        <button
-          type="button"
-          onClick={openClone}
-          title={t('projectDialog.cloneGit')}
-          aria-label={t('projectDialog.cloneGit')}
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-ui-caption font-medium shrink-0 whitespace-nowrap max-sm:px-2',
-            interactive.subtle,
-          )}
-        >
-          <GitBranchIcon className="w-3 h-3 shrink-0" />
-          <span className="hidden sm:inline">{t('projectDialog.cloneGit')}</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleConfirmCurrent}
-          title={t('projectDialog.addCurrent')}
-          aria-label={t('projectDialog.addCurrent')}
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-ui-caption font-medium shrink-0 whitespace-nowrap max-sm:px-2',
-            interactive.accent,
-          )}
-        >
-          <PlusIcon className="w-3 h-3 shrink-0" />
-          <span className="hidden sm:inline">{t('projectDialog.addCurrent')}</span>
-        </button>
+        </NativeTooltip>
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={handleConfirmCurrent}
+            title={t('projectDialog.addCurrent')}
+            aria-label={t('projectDialog.addCurrent')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-ui-caption font-medium shrink-0 whitespace-nowrap max-sm:px-2',
+              interactive.accent,
+            )}
+          >
+            <PlusIcon className="w-3 h-3 shrink-0" />
+            <span className="hidden sm:inline">{t('projectDialog.addCurrent')}</span>
+          </button>
+        </NativeTooltip>
       </div>
     </Dialog>
   )

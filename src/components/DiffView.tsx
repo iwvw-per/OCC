@@ -2,6 +2,7 @@ import { memo, useState, useMemo, useEffect, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { diffLines } from 'diff'
 import { ChevronDownIcon, MaximizeIcon } from './Icons'
+import { NativeTooltip } from './ui/Tooltip'
 import { clsx } from 'clsx'
 import { detectLanguage } from '../utils/languageUtils'
 import { extractContentFromUnifiedDiff } from '../utils/diffUtils'
@@ -164,16 +165,19 @@ export const DiffView = memo(function DiffView({
           )}
 
           {/* 放大按钮 */}
-          <button
-            className="p-1 text-text-400 hover:text-text-200 hover:bg-bg-300/50 rounded transition-colors"
-            onClick={e => {
-              e.stopPropagation()
-              openFullscreen()
-            }}
-            title={t('diffView.fullscreenView')}
-          >
-            <MaximizeIcon size={14} />
-          </button>
+          <NativeTooltip>
+            <button
+              className="p-1 text-text-400 hover:text-text-200 hover:bg-bg-300/50 rounded transition-colors"
+              onClick={e => {
+                e.stopPropagation()
+                openFullscreen()
+              }}
+              title={t('diffView.fullscreenView')}
+              aria-label={t('diffView.fullscreenView')}
+            >
+              <MaximizeIcon size={14} />
+            </button>
+          </NativeTooltip>
         </div>
       </div>
 

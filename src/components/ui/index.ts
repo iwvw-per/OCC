@@ -76,7 +76,16 @@ export { Dialog } from './Dialog'
 export { ConfirmDialog } from './ConfirmDialog'
 export { DropdownMenu } from './DropdownMenu'
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor, PopoverClose } from './Popover'
-export { Tooltip, TooltipProvider, TooltipRoot, TooltipTrigger, TooltipContent } from './Tooltip'
+export {
+  Tooltip,
+  HintTooltip,
+  NativeTooltip,
+  ShortcutBadge,
+  TooltipProvider,
+  TooltipRoot,
+  TooltipTrigger,
+  TooltipContent,
+} from './Tooltip'
 export { ModalShell } from './ModalShell'
 export { AnimatedPresence, ExpandableSection } from './AnimatedPresence'
 

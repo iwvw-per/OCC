@@ -26,6 +26,8 @@ interface UseMobileCollapseOptions {
   /** 收起态的 permission/question 对话框 */
   collapsedPermission?: CollapsedDialogInfo
   collapsedQuestion?: CollapsedDialogInfo
+  /** 输入区域内浮层(模型/端点选择等)打开时,不因滚动离底而收起 */
+  suppressCollapse?: boolean
 }
 
 interface UseMobileCollapseReturn {
@@ -58,6 +60,7 @@ export function useMobileCollapse({
   registerInputBox,
   collapsedPermission,
   collapsedQuestion,
+  suppressCollapse = false,
 }: UseMobileCollapseOptions): UseMobileCollapseReturn {
   // 判断节点是否在输入区域内部（inputContainer / contentWrap / footer）
   const isInsideInputArea = useCallback(
@@ -104,7 +107,8 @@ export function useMobileCollapse({
   // isAtBottom 语义是「用户未主动离底」（ChatArea 用 !userScrolled），不是几何 dist。
   // 流式贴底跟随期间 dist 会抖，但 userScrolled 仍为 false → 不收起，Footer 不闪。
   const hasPendingDialogs = !!collapsedPermission || !!collapsedQuestion
-  const isCollapsed = enabled && !isAtBottom && !hasContent && !isFocused && !hasPendingDialogs && !justCleared
+  const isCollapsed =
+    enabled && !isAtBottom && !hasContent && !isFocused && !hasPendingDialogs && !justCleared && !suppressCollapse
 
   // 展开态内容区高度（用于收起时占位，防 isAtBottom 反馈循环）。
   //

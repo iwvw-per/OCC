@@ -7,6 +7,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import {
   CloseIcon,
   SplitHorizontalIcon,
@@ -136,10 +137,7 @@ export function PaneHeader({
     (e: React.PointerEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement
       if (target.closest('button, input')) return
-      startInternalDrag(
-        e,
-        { kind: 'pane', paneId },
-      )
+      startInternalDrag(e, { kind: 'pane', paneId })
     },
     [paneId],
   )
@@ -150,8 +148,8 @@ export function PaneHeader({
       setIsDragOver(
         Boolean(
           active?.payload.kind === 'pane' &&
-            active.payload.paneId !== paneId &&
-            isPointInsideElement(active.current, headerRef.current),
+          active.payload.paneId !== paneId &&
+          isPointInsideElement(active.current, headerRef.current),
         ),
       )
     })
@@ -192,13 +190,15 @@ export function PaneHeader({
             className="px-1.5 py-0.5 text-ui-caption font-medium text-text-100 bg-transparent border-none outline-none w-[140px]"
           />
         ) : (
-          <button
-            onClick={handleStartEdit}
-            className="px-1.5 py-0.5 text-ui-caption font-medium text-text-200 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded transition-colors truncate max-w-[200px] cursor-text select-none"
-            title={t('header.clickToRename')}
-          >
-            {title}
-          </button>
+          <NativeTooltip>
+            <button
+              onClick={handleStartEdit}
+              className="px-1.5 py-0.5 text-ui-caption font-medium text-text-200 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded transition-colors truncate max-w-[200px] cursor-text select-none"
+              title={t('header.clickToRename')}
+            >
+              {title}
+            </button>
+          </NativeTooltip>
         )}
       </div>
 
@@ -231,7 +231,9 @@ export function PaneHeader({
                 onTogglePaneFullscreen()
               }}
               className={cn(
-                isPaneFullscreen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
+                isPaneFullscreen
+                  ? interactive.toggleActive
+                  : 'text-text-300 hover:text-text-100 border border-transparent',
                 interactive.subtle,
               )}
             >
@@ -272,54 +274,56 @@ export function PaneHeader({
             子代理分屏是「后台打开」的，焦点留在原 pane，新 pane 就一个按钮都不剩。
             改为始终渲染，未聚焦时降低不透明度以保留层级提示。 */}
         <div className={cn('flex items-center gap-1 shrink-0', !isFocused && 'opacity-60')}>
-            {showSidebarButton && onOpenSidebar && (
-              <IconButton
-                size="sm"
-                aria-label={t('header.openSidebar')}
-                onClick={e => {
-                  e.stopPropagation()
-                  onOpenSidebar()
-                }}
-                className={cn('text-text-300 hover:text-text-100', interactive.subtle)}
-              >
-                <SidebarIcon size={14} />
-              </IconButton>
+          {showSidebarButton && onOpenSidebar && (
+            <IconButton
+              size="sm"
+              aria-label={t('header.openSidebar')}
+              onClick={e => {
+                e.stopPropagation()
+                onOpenSidebar()
+              }}
+              className={cn('text-text-300 hover:text-text-100', interactive.subtle)}
+            >
+              <SidebarIcon size={14} />
+            </IconButton>
+          )}
+
+          <IconButton
+            size="sm"
+            aria-label={bottomPanelOpen ? t('header.closeBottomPanel') : t('header.openBottomPanel')}
+            onClick={e => {
+              e.stopPropagation()
+              layoutStore.toggleBottomPanel()
+            }}
+            className={cn(
+              bottomPanelOpen
+                ? interactive.toggleActive
+                : 'text-text-300 hover:text-text-100 border border-transparent',
+              interactive.subtle,
             )}
+          >
+            <PanelBottomIcon size={14} />
+          </IconButton>
 
-            <IconButton
-              size="sm"
-              aria-label={bottomPanelOpen ? t('header.closeBottomPanel') : t('header.openBottomPanel')}
-              onClick={e => {
-                e.stopPropagation()
-                layoutStore.toggleBottomPanel()
-              }}
-              className={cn(
-                bottomPanelOpen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
-                interactive.subtle,
-              )}
-            >
-              <PanelBottomIcon size={14} />
-            </IconButton>
-
-            <IconButton
-              size="sm"
-              aria-label={rightPanelOpen ? t('header.closePanel') : t('header.openPanel')}
-              onClick={e => {
-                e.stopPropagation()
-                if (onToggleRightPanel) {
-                  onToggleRightPanel()
-                } else {
-                  layoutStore.toggleRightPanel()
-                }
-              }}
-              className={cn(
-                rightPanelOpen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
-                interactive.subtle,
-              )}
-            >
-              <PanelRightIcon size={14} />
-            </IconButton>
-          </div>
+          <IconButton
+            size="sm"
+            aria-label={rightPanelOpen ? t('header.closePanel') : t('header.openPanel')}
+            onClick={e => {
+              e.stopPropagation()
+              if (onToggleRightPanel) {
+                onToggleRightPanel()
+              } else {
+                layoutStore.toggleRightPanel()
+              }
+            }}
+            className={cn(
+              rightPanelOpen ? interactive.toggleActive : 'text-text-300 hover:text-text-100 border border-transparent',
+              interactive.subtle,
+            )}
+          >
+            <PanelRightIcon size={14} />
+          </IconButton>
+        </div>
       </div>
 
       <div data-chat-header-shadow className="absolute top-full left-0 right-0 h-8 pointer-events-none" />

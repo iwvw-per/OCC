@@ -4,6 +4,7 @@ import { ContentBlock } from '../../../../components'
 import { ExternalLinkIcon, StopIcon, UsersIcon, TaskDoneIcon } from '../../../../components/Icons'
 import { Chip } from '../../../../components/ui/Chip'
 import { DisclosureRow } from '../../../../components/ui/DisclosureRow'
+import { NativeTooltip } from '../../../../components/ui/Tooltip'
 import { Spinner } from '../../../../components/ui/Spinner'
 import { StatusDot } from '../../../../components/ui/StatusDot'
 import { useResponsiveMaxHeight } from '../../../../hooks'
@@ -224,26 +225,30 @@ export const TaskHeader = memo(function TaskHeader({
       meta={
         <>
           {onStop && (
-            <button
-              type="button"
-              onClick={onStop}
-              aria-label={t('task.stop')}
-              className="w-[18px] h-[18px] p-0 flex items-center justify-center text-text-400 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
-              title={t('task.stop')}
-            >
-              <StopIcon size={10} />
-            </button>
+            <NativeTooltip>
+              <button
+                type="button"
+                onClick={onStop}
+                aria-label={t('task.stop')}
+                className="w-[18px] h-[18px] p-0 flex items-center justify-center text-text-400 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
+                title={t('task.stop')}
+              >
+                <StopIcon size={10} />
+              </button>
+            </NativeTooltip>
           )}
           {sessionId && (
-            <button
-              type="button"
-              onClick={handleOpenSession}
-              aria-label={t('task.openSession')}
-              className="p-1 text-text-500 hover:text-accent-main-100 transition-all bg-transparent border-none"
-              title={t('task.openSession')}
-            >
-              <ExternalLinkIcon size={12} />
-            </button>
+            <NativeTooltip>
+              <button
+                type="button"
+                onClick={handleOpenSession}
+                aria-label={t('task.openSession')}
+                className="p-1 text-text-500 hover:text-accent-main-100 transition-all bg-transparent border-none"
+                title={t('task.openSession')}
+              >
+                <ExternalLinkIcon size={12} />
+              </button>
+            </NativeTooltip>
           )}
         </>
       }
@@ -272,19 +277,21 @@ export const TaskAgentBadge = memo(function TaskAgentBadge({
   if (!sessionId) return <Chip tone={tone}>{label}</Chip>
 
   return (
-    <button
-      type="button"
-      onClick={openSession}
-      // 整行 hover 已经给底色，内层徽标按钮不再叠加自己的底色，
-      // 否则一行里出现两层高亮。只补 cursor 与轻微透明度表达可点。
-      // data-compact 关掉移动端 button 的 32px 最小高度：徽标是行内小标签，
-      // 被撑高后 chip 会贴在顶部、与同行文字错位。
-      data-compact=""
-      className="inline-flex items-center cursor-pointer rounded-sm transition-opacity hover:opacity-80"
-      title={t('task.openSession')}
-    >
-      <Chip tone={tone}>{label}</Chip>
-    </button>
+    <NativeTooltip>
+      <button
+        type="button"
+        onClick={openSession}
+        // 整行 hover 已经给底色，内层徽标按钮不再叠加自己的底色，
+        // 否则一行里出现两层高亮。只补 cursor 与轻微透明度表达可点。
+        // data-compact 关掉移动端 button 的 32px 最小高度：徽标是行内小标签，
+        // 被撑高后 chip 会贴在顶部、与同行文字错位。
+        data-compact=""
+        className="inline-flex items-center cursor-pointer rounded-sm transition-opacity hover:opacity-80"
+        title={t('task.openSession')}
+      >
+        <Chip tone={tone}>{label}</Chip>
+      </button>
+    </NativeTooltip>
   )
 })
 

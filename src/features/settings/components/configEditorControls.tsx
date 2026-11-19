@@ -6,6 +6,7 @@ import { DraftErrorContext, JsonDraftErrorContext } from './configEditorJsonDraf
 import type { Choice, JsonRecord } from './configEditorTypes'
 import { asStringArray, hasOwn, isRecord, tx, useLang } from './configEditorUtils'
 import { cn } from '../../../utils/cn'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { interactive } from '../../../utils/interaction'
 
 let draftIDSeed = 0
@@ -56,7 +57,17 @@ export function TextField({
   )
 }
 
-export function TextArea({ value, onChange, placeholder, rows = 4 }: { value: unknown; onChange: (value: string) => void; placeholder?: string; rows?: number }) {
+export function TextArea({
+  value,
+  onChange,
+  placeholder,
+  rows = 4,
+}: {
+  value: unknown
+  onChange: (value: string) => void
+  placeholder?: string
+  rows?: number
+}) {
   return (
     <textarea
       value={value === undefined || value === null ? '' : String(value)}
@@ -144,10 +155,16 @@ export function NumberField({
       />
       {focused && draft.trim() === '' && external !== '' && (
         <div className="text-ui-sm text-text-400">
-          {tx('Empty input will not remove a saved value; enter a new number or Reset before saving.', '留空不会删除已保存值；请输入新数字，或保存前 Reset。', lang)}
+          {tx(
+            'Empty input will not remove a saved value; enter a new number or Reset before saving.',
+            '留空不会删除已保存值；请输入新数字，或保存前 Reset。',
+            lang,
+          )}
         </div>
       )}
-      {invalid && <div className="text-ui-sm text-error-100">{tx('Must be a valid number.', '必须是有效数字。', lang)}</div>}
+      {invalid && (
+        <div className="text-ui-sm text-error-100">{tx('Must be a valid number.', '必须是有效数字。', lang)}</div>
+      )}
     </div>
   )
 }
@@ -244,7 +261,11 @@ export function IntegerField({
       />
       {focused && raw === '' && external !== '' && (
         <div className="text-ui-sm text-text-400">
-          {tx('Empty input will not remove a saved value; enter a new integer or Reset before saving.', '留空不会删除已保存值；请输入新整数，或保存前 Reset。', lang)}
+          {tx(
+            'Empty input will not remove a saved value; enter a new integer or Reset before saving.',
+            '留空不会删除已保存值；请输入新整数，或保存前 Reset。',
+            lang,
+          )}
         </div>
       )}
       {invalid && (
@@ -272,7 +293,13 @@ export function BoolField({ value, onChange }: { value: unknown; onChange: (valu
   )
 }
 
-export function NumberOrFalseField({ value, onChange }: { value: unknown; onChange: (value: number | false | undefined) => void }) {
+export function NumberOrFalseField({
+  value,
+  onChange,
+}: {
+  value: unknown
+  onChange: (value: number | false | undefined) => void
+}) {
   const mode = value === false ? 'false' : 'number'
   return (
     <div className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)]">
@@ -478,7 +505,13 @@ export function StringListField({
   if (Array.isArray(value) && value.some(item => typeof item !== 'string')) {
     return (
       <div className="space-y-2">
-        <div className="text-ui-sm text-warning-100">{tx('This field contains non-string items. Repair the JSON array before saving.', '该字段包含非字符串项，请在保存前修复 JSON 数组。', lang)}</div>
+        <div className="text-ui-sm text-warning-100">
+          {tx(
+            'This field contains non-string items. Repair the JSON array before saving.',
+            '该字段包含非字符串项，请在保存前修复 JSON 数组。',
+            lang,
+          )}
+        </div>
         <JsonStructuredEditor value={value} type="array" onChange={next => onChange(next as string[])} />
       </div>
     )
@@ -552,7 +585,15 @@ function emptyJsonValue(type: JsonValueType): unknown {
   }
 }
 
-export function JsonStructuredEditor({ value, type, onChange }: { value: unknown; type: 'object' | 'array'; onChange: (value: unknown) => void }) {
+export function JsonStructuredEditor({
+  value,
+  type,
+  onChange,
+}: {
+  value: unknown
+  type: 'object' | 'array'
+  onChange: (value: unknown) => void
+}) {
   const lang = useLang()
   const reportDraftError = useContext(JsonDraftErrorContext)
   const draftID = useRef<string | undefined>(undefined)
@@ -622,7 +663,15 @@ export function JsonStructuredEditor({ value, type, onChange }: { value: unknown
   )
 }
 
-function JsonValueEditor({ value, onChange, placeholder }: { value: unknown; onChange: (value: unknown) => void; placeholder?: string }) {
+function JsonValueEditor({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: unknown
+  onChange: (value: unknown) => void
+  placeholder?: string
+}) {
   const type = jsonValueType(value)
   switch (type) {
     case 'number':
@@ -671,14 +720,20 @@ export function KeyValueField({
         return (
           <div key={key} className="space-y-2 border-b border-border-200/40 pb-3 last:border-b-0 last:pb-0">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="min-w-0 flex-1 truncate font-mono text-ui-caption font-medium text-text-100">
-                {key}
-              </div>
+              <div className="min-w-0 flex-1 truncate font-mono text-ui-caption font-medium text-text-100">{key}</div>
               <div className="w-full sm:w-40">
-                <Select value={type} options={typeOptions} onChange={next => onChange({ ...record, [key]: emptyJsonValue(next as JsonValueType) })} />
+                <Select
+                  value={type}
+                  options={typeOptions}
+                  onChange={next => onChange({ ...record, [key]: emptyJsonValue(next as JsonValueType) })}
+                />
               </div>
             </div>
-            <JsonValueEditor value={item} onChange={next => onChange({ ...record, [key]: next })} placeholder={valuePlaceholder} />
+            <JsonValueEditor
+              value={item}
+              onChange={next => onChange({ ...record, [key]: next })}
+              placeholder={valuePlaceholder}
+            />
           </div>
         )
       })}
@@ -706,7 +761,11 @@ export function KeyValueField({
         </div>
       </div>
       <div data-setting-desc className="text-ui-sm leading-relaxed text-text-400">
-        {tx('Existing object keys cannot be reliably deleted through the official merge API; change values instead, or reset before saving newly added keys.', '官方 merge API 不能可靠删除已保存的 object key；请改值，刚新增但不想保存的键可以在保存前 Reset。', lang)}
+        {tx(
+          'Existing object keys cannot be reliably deleted through the official merge API; change values instead, or reset before saving newly added keys.',
+          '官方 merge API 不能可靠删除已保存的 object key；请改值，刚新增但不想保存的键可以在保存前 Reset。',
+          lang,
+        )}
       </div>
     </div>
   )
@@ -730,7 +789,13 @@ export function StringMapField({
   if (isRecord(value) && Object.values(value).some(item => typeof item !== 'string')) {
     return (
       <div className="space-y-2">
-        <div className="text-ui-sm text-warning-100">{tx('This map contains non-string values. Repair the JSON object before saving.', '该 map 包含非字符串值，请在保存前修复 JSON 对象。', lang)}</div>
+        <div className="text-ui-sm text-warning-100">
+          {tx(
+            'This map contains non-string values. Repair the JSON object before saving.',
+            '该 map 包含非字符串值，请在保存前修复 JSON 对象。',
+            lang,
+          )}
+        </div>
         <JsonStructuredEditor value={value} type="object" onChange={next => onChange(next as Record<string, string>)} />
       </div>
     )
@@ -754,11 +819,20 @@ export function StringMapField({
       </div>
       {Object.entries(record).map(([key, item]) => (
         <div key={key} className="grid min-w-0 grid-cols-[minmax(0,1fr)_12px_minmax(0,1fr)_32px] items-center gap-2">
-          <div title={key} className={`${fieldClass} flex min-w-0 items-center truncate font-mono text-text-200`}>
-            {key}
-          </div>
-          <span aria-hidden="true" className="text-center font-mono text-ui-caption text-text-400">=</span>
-          <TextField value={item} onChange={next => onChange({ ...record, [key]: next })} placeholder={valuePlaceholder ?? tx('value', '值', lang)} mono />
+          <NativeTooltip>
+            <div title={key} className={`${fieldClass} flex min-w-0 items-center truncate font-mono text-text-200`}>
+              {key}
+            </div>
+          </NativeTooltip>
+          <span aria-hidden="true" className="text-center font-mono text-ui-caption text-text-400">
+            =
+          </span>
+          <TextField
+            value={item}
+            onChange={next => onChange({ ...record, [key]: next })}
+            placeholder={valuePlaceholder ?? tx('value', '值', lang)}
+            mono
+          />
           <span aria-hidden="true" />
         </div>
       ))}
@@ -777,7 +851,9 @@ export function StringMapField({
           placeholder={keyPlaceholder ?? tx('new key', '新键名', lang)}
           className={`${fieldClass} min-w-0 flex-1 font-mono`}
         />
-        <span aria-hidden="true" className="text-center font-mono text-ui-caption text-text-400">=</span>
+        <span aria-hidden="true" className="text-center font-mono text-ui-caption text-text-400">
+          =
+        </span>
         <input
           value={newValue}
           onChange={event => {
@@ -790,19 +866,25 @@ export function StringMapField({
           placeholder={valuePlaceholder ?? tx('value', '值', lang)}
           className={`${fieldClass} min-w-0 flex-1 font-mono`}
         />
-        <button
-          type="button"
-          aria-label={tx('Add key-value pair', '添加键值对', lang)}
-          title={tx('Add key-value pair', '添加键值对', lang)}
-          disabled={!targetKey || hasOwn(record, targetKey)}
-          onClick={addEntry}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border-200 text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
-        >
-          <PlusIcon size={13} />
-        </button>
+        <NativeTooltip>
+          <button
+            type="button"
+            aria-label={tx('Add key-value pair', '添加键值对', lang)}
+            title={tx('Add key-value pair', '添加键值对', lang)}
+            disabled={!targetKey || hasOwn(record, targetKey)}
+            onClick={addEntry}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border-200 text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
+          >
+            <PlusIcon size={13} />
+          </button>
+        </NativeTooltip>
       </div>
       <div data-setting-desc className="text-ui-sm leading-relaxed text-text-400">
-        {tx('This map only accepts string values. Existing keys cannot be reliably deleted through the official merge API.', '这个 map 只接受字符串值。官方 merge API 不能可靠删除已保存的 key。', lang)}
+        {tx(
+          'This map only accepts string values. Existing keys cannot be reliably deleted through the official merge API.',
+          '这个 map 只接受字符串值。官方 merge API 不能可靠删除已保存的 key。',
+          lang,
+        )}
       </div>
     </div>
   )

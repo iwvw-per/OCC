@@ -8,6 +8,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import {
   CheckIcon,
   CircleIcon,
@@ -99,7 +100,9 @@ export const WorkStatusSessionSection = memo(function WorkStatusSessionSection({
             label={t('workStatus.context.label')}
             value={
               <>
-                <WorkStatusValue>{percent === null ? '\u2014' : `${Math.min(percent, 999).toFixed(1)}%`}</WorkStatusValue>
+                <WorkStatusValue>
+                  {percent === null ? '\u2014' : `${Math.min(percent, 999).toFixed(1)}%`}
+                </WorkStatusValue>
                 {cost !== null ? <WorkStatusValue tone="muted">{formatCost(cost)}</WorkStatusValue> : null}
               </>
             }
@@ -107,7 +110,10 @@ export const WorkStatusSessionSection = memo(function WorkStatusSessionSection({
           <WorkStatusMeter percent={percent ?? 0} color={meterColor} />
         </>
       ) : (
-        <WorkStatusRow label={t('workStatus.context.label')} value={<WorkStatusValue tone="muted">—</WorkStatusValue>} />
+        <WorkStatusRow
+          label={t('workStatus.context.label')}
+          value={<WorkStatusValue tone="muted">—</WorkStatusValue>}
+        />
       )}
     </WorkStatusSection>
   )
@@ -130,21 +136,11 @@ export const WorkStatusProjectSection = memo(function WorkStatusProjectSection({
   if (!projectLabel && !branch && !showLoading) return null
 
   return (
-    <WorkStatusSection
-      title={t('workStatus.section.project')}
-      icon={<FolderIcon size={14} />}
-      summary={projectLabel}
-    >
+    <WorkStatusSection title={t('workStatus.section.project')} icon={<FolderIcon size={14} />} summary={projectLabel}>
       {branch || showLoading ? (
         <WorkStatusRow
           icon={<GitBranchIcon size={14} />}
-          label={
-            branch ? (
-              <span className="font-mono">{branch}</span>
-            ) : (
-              <Spinner size="xs" tone="muted" />
-            )
-          }
+          label={branch ? <span className="font-mono">{branch}</span> : <Spinner size="xs" tone="muted" />}
         />
       ) : null}
     </WorkStatusSection>
@@ -242,9 +238,7 @@ export const WorkStatusSubagentsSection = memo(function WorkStatusSubagentsSecti
    * 弹窗里的子代理跟随最新状态刷新，而不是保留打开那一刻的快照 ——
    * 打开时还在跑的子代理会结束，状态要跟着变。
    */
-  const activeDetail = detailChild
-    ? children.find(child => child.id === detailChild.id) ?? detailChild
-    : null
+  const activeDetail = detailChild ? (children.find(child => child.id === detailChild.id) ?? detailChild) : null
 
   const renderRow = (child: ChildSessionInfo) => (
     <WorkStatusRow
@@ -252,9 +246,11 @@ export const WorkStatusSubagentsSection = memo(function WorkStatusSubagentsSecti
       onClick={() => setDetailChild(child)}
       ariaLabel={t('workStatus.subagent.openDetail', { title: child.title })}
       label={
-        <span className="min-w-0 truncate text-left" title={child.title}>
-          {child.title}
-        </span>
+        <NativeTooltip>
+          <span className="min-w-0 truncate text-left" title={child.title}>
+            {child.title}
+          </span>
+        </NativeTooltip>
       }
       value={
         child.status === 'running' ? (
@@ -378,7 +374,7 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
    * 弹窗里的任务跟随 jobs 的最新状态刷新，而不是保留打开那一刻的快照 ——
    * 运行中的任务在弹窗开着时会结束，状态与输出都要跟着变。
    */
-  const activeDetail = detailJob ? jobs.find(job => job.id === detailJob.id) ?? detailJob : null
+  const activeDetail = detailJob ? (jobs.find(job => job.id === detailJob.id) ?? detailJob) : null
 
   const closeDetail = useCallback(() => setDetailJob(null), [])
 
@@ -397,9 +393,11 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
       onClick={() => handleRowClick(job)}
       ariaLabel={t('workStatus.backgroundJob.openDetail', { title: job.title })}
       label={
-        <span className="min-w-0 truncate text-left" title={job.title}>
-          {job.title}
-        </span>
+        <NativeTooltip>
+          <span className="min-w-0 truncate text-left" title={job.title}>
+            {job.title}
+          </span>
+        </NativeTooltip>
       }
       value={
         job.status === 'running' ? (
@@ -434,7 +432,12 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
           settled.length > 0 ? (
             <WorkStatusRowAction
               tone="default"
-              onClick={() => backgroundJobStore.clearSettled(sessionId ?? '', settled.map(job => job.id))}
+              onClick={() =>
+                backgroundJobStore.clearSettled(
+                  sessionId ?? '',
+                  settled.map(job => job.id),
+                )
+              }
               ariaLabel={t('workStatus.backgroundJob.clearSettled')}
             >
               {t('workStatus.backgroundJob.clearSettledShort')}
@@ -485,9 +488,7 @@ function TodoStatusIcon({ status }: { status: string }) {
   return <ClockIcon size={13} className="text-text-500" />
 }
 
-export const WorkStatusTasksSection = memo(function WorkStatusTasksSection({
-  sessionId,
-}: WorkStatusSectionContext) {
+export const WorkStatusTasksSection = memo(function WorkStatusTasksSection({ sessionId }: WorkStatusSectionContext) {
   const { t } = useTranslation('chat')
   const todos = useTodos(sessionId)
 
@@ -529,7 +530,9 @@ export const WorkStatusTasksSection = memo(function WorkStatusTasksSection({
       icon={<LayersIcon size={14} />}
       id="tasks"
       summary={`${doneCount}/${visibleTodos.length}`}
-      collapsedContent={activeTodo ? <WorkStatusRows>{renderRow(activeTodo, 'collapsed-active')}</WorkStatusRows> : null}
+      collapsedContent={
+        activeTodo ? <WorkStatusRows>{renderRow(activeTodo, 'collapsed-active')}</WorkStatusRows> : null
+      }
     >
       <WorkStatusRows>
         {visibleTodos.map((todo, index) => renderRow(todo, `${todo.status}-${index}-${todo.content}`))}
@@ -740,9 +743,11 @@ export const WorkStatusPluginsSection = memo(function WorkStatusPluginsSection({
               key={plugin.id}
               muted={failed}
               label={
-                <span className="min-w-0 truncate" title={pluginDetailTitle(plugin)}>
-                  {plugin.id}
-                </span>
+                <NativeTooltip>
+                  <span className="min-w-0 truncate" title={pluginDetailTitle(plugin)}>
+                    {plugin.id}
+                  </span>
+                </NativeTooltip>
               }
               value={
                 failed ? (

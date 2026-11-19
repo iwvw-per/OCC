@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Dialog } from '../../../components/ui'
+import { Dialog, NativeTooltip } from '../../../components/ui'
 import { CodeBlock } from '../../../components/CodeBlock'
 import { ChevronDownIcon, ChevronUpIcon, CpuIcon, DollarSignIcon } from '../../../components/Icons'
 import { useCurrentSessionId, useMessages } from '../../../store'
@@ -30,9 +30,11 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-1">
       <div className="text-ui-sm font-medium text-text-400">{label}</div>
-      <div className="text-ui-base text-text-200 font-mono truncate" title={value}>
-        {value}
-      </div>
+      <NativeTooltip>
+        <div className="text-ui-base text-text-200 font-mono truncate" title={value}>
+          {value}
+        </div>
+      </NativeTooltip>
     </div>
   )
 }
@@ -110,7 +112,10 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
           />
           <Stat label={t('contextDetails.contextLimit')} value={formatTokens(contextLimit)} />
           <Stat label={t('contextDetails.autoCompactAt')} value={formatTokens(autoCompactCeiling(contextLimit))} />
-          <Stat label={t('contextDetails.totalTokens')} value={stats.contextUsed ? formatTokens(stats.contextUsed) : '—'} />
+          <Stat
+            label={t('contextDetails.totalTokens')}
+            value={stats.contextUsed ? formatTokens(stats.contextUsed) : '—'}
+          />
           <Stat
             label={t('contextDetails.usage')}
             value={
@@ -167,9 +172,11 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
                   className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left bg-bg-100 hover:bg-bg-200 transition-colors"
                 >
                   <div className="min-w-0">
-                    <div className="text-ui-caption text-text-200 font-mono truncate" title={headerLabel}>
-                      {headerLabel}
-                    </div>
+                    <NativeTooltip>
+                      <div className="text-ui-caption text-text-200 font-mono truncate" title={headerLabel}>
+                        {headerLabel}
+                      </div>
+                    </NativeTooltip>
                     <div className="flex items-center gap-2 mt-0.5 text-ui-xs text-text-500 font-mono">
                       <span className="tabular-nums">{time}</span>
                       {assistantTokens !== null && (

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { CopyIcon, CheckIcon } from '../Icons'
 import { clsx } from 'clsx'
 import { clipboardErrorHandler, copyTextToClipboard } from '../../utils'
+import { NativeTooltip } from './Tooltip'
 
 interface CopyButtonProps {
   text: string
@@ -48,22 +49,24 @@ export function CopyButton({ text, className, position = 'absolute', groupName }
   const hoverClass = groupName ? `group-hover/${groupName}:opacity-100` : 'group-hover:opacity-100'
 
   return (
-    <button
-      onClick={handleCopy}
-      className={clsx(
-        'inline-flex items-center justify-center',
-        'h-7 w-7 p-1.5 rounded-md',
-        'transition-colors duration-150',
-        // State styles
-        copied ? 'text-success-100' : 'text-text-400 hover:text-text-200',
-        // Position variant
-        position === 'absolute' && `absolute top-2 right-2 z-10 opacity-0 ${hoverClass}`,
-        className,
-      )}
-      title={copied ? t('copied') : t('copy')}
-      aria-label={copied ? t('copied') : t('copyToClipboard')}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </button>
+    <NativeTooltip>
+      <button
+        onClick={handleCopy}
+        className={clsx(
+          'inline-flex items-center justify-center',
+          'h-7 w-7 p-1.5 rounded-md',
+          'transition-colors duration-150',
+          // State styles
+          copied ? 'text-success-100' : 'text-text-400 hover:text-text-200',
+          // Position variant
+          position === 'absolute' && `absolute top-2 right-2 z-10 opacity-0 ${hoverClass}`,
+          className,
+        )}
+        title={copied ? t('copied') : t('copy')}
+        aria-label={copied ? t('copied') : t('copyToClipboard')}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </button>
+    </NativeTooltip>
   )
 }

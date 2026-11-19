@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { CloseIcon, SearchIcon } from '../../components/Icons'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
 import { filterSettingsSearchItems, type SearchMenuItem } from './settingsSearchCatalog'
 
@@ -11,7 +12,13 @@ interface SettingsSearchProps<T extends SearchMenuItem> {
   onSelect: (item: T) => boolean | void
 }
 
-export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, clearLabel, noResultsLabel, onSelect }: SettingsSearchProps<T>) {
+export function SettingsSearch<T extends SearchMenuItem>({
+  items,
+  placeholder,
+  clearLabel,
+  noResultsLabel,
+  onSelect,
+}: SettingsSearchProps<T>) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const [hasFocus, setHasFocus] = useState(false)
@@ -90,10 +97,7 @@ export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, c
         inputRef.current?.focus()
       }}
     >
-      <SearchIcon
-        size={14}
-        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400"
-      />
+      <SearchIcon size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400" />
       <input
         ref={inputRef}
         type="text"
@@ -176,14 +180,14 @@ export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, c
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-ui-caption text-text-100">{item.label}</span>
                   {item.description && (
-                    <span className="mt-0.5 block truncate font-mono text-ui-sm text-text-400">
-                      {item.description}
-                    </span>
+                    <span className="mt-0.5 block truncate font-mono text-ui-sm text-text-400">{item.description}</span>
                   )}
                 </span>
-                <span className="max-w-[48%] shrink-0 truncate text-ui-sm text-text-400" title={item.tabLabel}>
-                  {item.tabLabel}
-                </span>
+                <NativeTooltip>
+                  <span className="max-w-[48%] shrink-0 truncate text-ui-sm text-text-400" title={item.tabLabel}>
+                    {item.tabLabel}
+                  </span>
+                </NativeTooltip>
               </button>
             ))
           )}

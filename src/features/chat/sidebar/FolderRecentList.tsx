@@ -13,7 +13,7 @@ import {
   CheckIcon,
   ExternalLinkIcon,
 } from '../../../components/Icons'
-import { ExpandableSection, Spinner } from '../../../components/ui'
+import { ExpandableSection, Spinner, NativeTooltip } from '../../../components/ui'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { useDelayedRender, useSessions, useVcsInfo } from '../../../hooks'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
@@ -94,11 +94,7 @@ function ProjectNameTitle({
       className={`min-w-0 flex-1 whitespace-nowrap text-ui-caption font-semibold optical-center transition-[padding] duration-150 ${
         overflows ? 'name-fade-right overflow-hidden' : 'truncate'
       } ${className}`}
-      style={
-        reserveRightPx > 0
-          ? ({ '--project-actions-w': `${reserveRightPx}px` } as React.CSSProperties)
-          : undefined
-      }
+      style={reserveRightPx > 0 ? ({ '--project-actions-w': `${reserveRightPx}px` } as React.CSSProperties) : undefined}
     >
       {text}
     </span>
@@ -219,33 +215,32 @@ export function FolderRecentList({
     [onExpandedProjectIdsChange],
   )
 
-  const {
-    dragState,
-    handlePointerDown,
-    handleTouchStart,
-    handleTouchMove,
-    handleTouchEnd,
-    registerRef,
-  } = useReorderableList({
-    ids: projects.map(project => project.id),
-    // 项目列表始终按最后对话时间自动排序，不再支持拖拽重排
-    canDrag: () => false,
-    onCommit: (draggedId, targetId) => {
-      const draggedProject = projectById.get(draggedId)
-      const targetProject = projectById.get(targetId)
-      if (!draggedProject?.canReorder || !targetProject?.canReorder) return
-      onReorderProject(draggedProject.id, targetProject.id)
-    },
-    onDragActivated: handleDragActivated,
-    onDragFinished: handleDragFinished,
-  })
+  const { dragState, handlePointerDown, handleTouchStart, handleTouchMove, handleTouchEnd, registerRef } =
+    useReorderableList({
+      ids: projects.map(project => project.id),
+      // 项目列表始终按最后对话时间自动排序，不再支持拖拽重排
+      canDrag: () => false,
+      onCommit: (draggedId, targetId) => {
+        const draggedProject = projectById.get(draggedId)
+        const targetProject = projectById.get(targetId)
+        if (!draggedProject?.canReorder || !targetProject?.canReorder) return
+        onReorderProject(draggedProject.id, targetProject.id)
+      },
+      onDragActivated: handleDragActivated,
+      onDragFinished: handleDragFinished,
+    })
   const draggedId = dragState?.draggedId ?? null
   const isDragging = dragState !== null
   const displayOrder = dragState?.currentOrder ?? projects.map(project => project.id)
 
   const handleSelectDirectory = useCallback(
     (directory: string, sectionKind: FolderRecentProject['sectionKind'] = 'project') => {
-      onSelectProject({ id: directory, worktree: directory, name: getDirectoryName(directory) || directory, sectionKind })
+      onSelectProject({
+        id: directory,
+        worktree: directory,
+        name: getDirectoryName(directory) || directory,
+        sectionKind,
+      })
     },
     [onSelectProject],
   )
@@ -307,9 +302,7 @@ export function FolderRecentList({
 
   return (
     <>
-      <div
-        className={`custom-scrollbar select-none ${embedded ? '' : 'h-full overflow-y-auto px-1.5 py-1'}`}
-      >
+      <div className={`custom-scrollbar select-none ${embedded ? '' : 'h-full overflow-y-auto px-1.5 py-1'}`}>
         {projects.length === 0 && pinnedSessions.length === 0 && unavailablePinnedEntries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-text-400 opacity-70">
             <p className="text-ui-caption font-medium text-text-300">{t('sidebar.noProjectFoldersYet')}</p>
@@ -345,20 +338,14 @@ export function FolderRecentList({
               const nextId = index < displayOrder.length - 1 ? displayOrder[index + 1] : null
               const nextProjectChecked = !!nextId && (selectedProjectIds?.has(nextId) ?? false)
               // 折叠时：和相邻文件夹拼接；展开时：和首条 session 的拼接在 section 内部处理
-              const prevExpanded =
-                !!prevId && !isDragging && expandedProjectIds.includes(prevId)
+              const prevExpanded = !!prevId && !isDragging && expandedProjectIds.includes(prevId)
               const projectCheckedPrev =
                 isEditMode &&
                 isProjectChecked &&
                 !!prevId &&
                 !prevExpanded &&
                 (selectedProjectIds?.has(prevId) ?? false)
-              const projectCheckedNext =
-                isEditMode &&
-                isProjectChecked &&
-                !!nextId &&
-                !isExpanded &&
-                nextProjectChecked
+              const projectCheckedNext = isEditMode && isProjectChecked && !!nextId && !isExpanded && nextProjectChecked
               return (
                 <FolderRecentSection
                   key={project.id}
@@ -480,65 +467,64 @@ function PinnedFolderSection({
   return (
     <div className="relative transition-all duration-150 group/folder mb-1.5 border-b border-border-200/40 pb-1.5">
       <div className={cn('relative flex w-full items-center rounded-md select-none', interactive.row)}>
-        <button
-          onClick={() => setIsExpanded(value => !value)}
-          className="flex flex-1 min-w-0 items-center gap-2 pl-2 pr-2 py-1.5 text-left cursor-default select-none"
-          title={t('sessions.pinned')}
-        >
-          <span className="size-5 shrink-0 flex items-center justify-center">
-            <PinIcon size={15} className="text-accent-main-100" />
-          </span>
-          <span className="min-w-0 flex-1 truncate text-ui-caption font-medium text-text-300">
-            {t('sessions.pinned')}
-          </span>
-        </button>
+        <NativeTooltip>
+          <button
+            onClick={() => setIsExpanded(value => !value)}
+            className="flex flex-1 min-w-0 items-center gap-2 pl-2 pr-2 py-1.5 text-left cursor-default select-none"
+            title={t('sessions.pinned')}
+          >
+            <span className="size-5 shrink-0 flex items-center justify-center">
+              <PinIcon size={15} className="text-accent-main-100" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-ui-caption font-medium text-text-300">
+              {t('sessions.pinned')}
+            </span>
+          </button>
+        </NativeTooltip>
       </div>
 
       <ExpandableSection show={isExpanded}>
         <div onTouchStart={e => e.stopPropagation()} className="flex flex-col gap-0.5 pt-1">
           {sessions.map((session, index) => {
             const isChecked = selectedSessionIds?.has(session.id) ?? false
-            const prevChecked =
-              isEditMode && index > 0 && (selectedSessionIds?.has(sessions[index - 1].id) ?? false)
+            const prevChecked = isEditMode && index > 0 && (selectedSessionIds?.has(sessions[index - 1].id) ?? false)
             const nextChecked =
-              isEditMode &&
-              index < sessions.length - 1 &&
-              (selectedSessionIds?.has(sessions[index + 1].id) ?? false)
+              isEditMode && index < sessions.length - 1 && (selectedSessionIds?.has(sessions[index + 1].id) ?? false)
             return (
-            <div key={session.id}>
-              <SessionListItem
-                session={session}
-                isSelected={!!selectedSessionId && session.id === splitSessionKey(selectedSessionId).sessionId}
-                onSelect={() => onSelectSession(session)}
-                onRename={newTitle => onRenameSession(session, newTitle)}
-                onDelete={() => onRequestDeleteSession({ session, removeLocal: () => {} })}
-                onChanged={onSessionChanged}
-                preferTouchUi={preferTouchUi}
-                density="minimal"
-                showStats={showSessionDiffStats}
-                showDirectory={false}
-                isEditMode={isEditMode}
-                isChecked={isChecked}
-                checkedPrev={prevChecked}
-                checkedNext={nextChecked}
-                onToggleCheck={
-                  onToggleSessionSelection ? options => onToggleSessionSelection(session.id, options) : undefined
-                }
-              />
-              {onSelectChildSession &&
-                (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
-                  <SessionChildrenSlot
-                    parentSession={session}
-                    selectedSessionId={selectedSessionId}
-                    fetchAll={expandedChildSessionIds?.has(session.id)}
-                    children={inlineChildSessions?.get(session.id)}
-                    onSelect={onSelectChildSession}
-                    isEditMode={isEditMode}
-                    selectedSessionIds={selectedSessionIds}
-                    onToggleSessionSelection={onToggleSessionSelection}
-                  />
-                )}
-            </div>
+              <div key={session.id}>
+                <SessionListItem
+                  session={session}
+                  isSelected={!!selectedSessionId && session.id === splitSessionKey(selectedSessionId).sessionId}
+                  onSelect={() => onSelectSession(session)}
+                  onRename={newTitle => onRenameSession(session, newTitle)}
+                  onDelete={() => onRequestDeleteSession({ session, removeLocal: () => {} })}
+                  onChanged={onSessionChanged}
+                  preferTouchUi={preferTouchUi}
+                  density="minimal"
+                  showStats={showSessionDiffStats}
+                  showDirectory={false}
+                  isEditMode={isEditMode}
+                  isChecked={isChecked}
+                  checkedPrev={prevChecked}
+                  checkedNext={nextChecked}
+                  onToggleCheck={
+                    onToggleSessionSelection ? options => onToggleSessionSelection(session.id, options) : undefined
+                  }
+                />
+                {onSelectChildSession &&
+                  (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
+                    <SessionChildrenSlot
+                      parentSession={session}
+                      selectedSessionId={selectedSessionId}
+                      fetchAll={expandedChildSessionIds?.has(session.id)}
+                      children={inlineChildSessions?.get(session.id)}
+                      onSelect={onSelectChildSession}
+                      isEditMode={isEditMode}
+                      selectedSessionIds={selectedSessionIds}
+                      onToggleSessionSelection={onToggleSessionSelection}
+                    />
+                  )}
+              </div>
             )
           })}
           {unavailableEntries.map(entry => (
@@ -558,26 +544,28 @@ function UnavailablePinnedSessionItem({ entry }: { entry: PinnedSessionEntry }) 
     <div className="group relative flex items-center gap-2 px-2 py-1.5 select-none text-text-500">
       <span className="relative shrink-0 flex items-center justify-center size-5" />
       <div className="flex min-w-0 flex-1 items-center gap-1.5 pr-0 group-hover:pr-8 transition-[padding] duration-200">
-        <span className="min-w-0 flex-1 truncate text-ui-caption text-text-500 optical-center" title={title}>
-          {title}
-        </span>
-        <span className="shrink-0 text-ui-xs text-text-500 group-hover:hidden">
-          {t('sessions.unavailable')}
-        </span>
+        <NativeTooltip>
+          <span className="min-w-0 flex-1 truncate text-ui-caption text-text-500 optical-center" title={title}>
+            {title}
+          </span>
+        </NativeTooltip>
+        <span className="shrink-0 text-ui-xs text-text-500 group-hover:hidden">{t('sessions.unavailable')}</span>
       </div>
-      <button
-        type="button"
-        onClick={() => pinnedSessionsStore.unpin(entry.sessionId)}
-        className={cn(
-          'absolute right-2 z-10 p-1 rounded text-accent-main-100 hover:text-accent-main-200',
-          'opacity-0 group-hover:opacity-100 transition-opacity',
-          interactive.subtle,
-        )}
-        title={t('sessions.unpin')}
-        aria-label={t('sessions.unpin')}
-      >
-        <PinIcon className="w-3 h-3" />
-      </button>
+      <NativeTooltip>
+        <button
+          type="button"
+          onClick={() => pinnedSessionsStore.unpin(entry.sessionId)}
+          className={cn(
+            'absolute right-2 z-10 p-1 rounded text-accent-main-100 hover:text-accent-main-200',
+            'opacity-0 group-hover:opacity-100 transition-opacity',
+            interactive.subtle,
+          )}
+          title={t('sessions.unpin')}
+          aria-label={t('sessions.unpin')}
+        >
+          <PinIcon className="w-3 h-3" />
+        </button>
+      </NativeTooltip>
     </div>
   )
 }
@@ -784,9 +772,7 @@ function FolderRecentSection({
       onClose={() => setContextMenu(null)}
       directory={project.worktree}
       onNewSession={
-        onNewSessionInDirectory && project.worktree
-          ? () => onNewSessionInDirectory(project.worktree)
-          : undefined
+        onNewSessionInDirectory && project.worktree ? () => onNewSessionInDirectory(project.worktree) : undefined
       }
       onOpenDirectory={canOpenDirectory ? () => void handleOpenDirectory() : undefined}
       onRemove={
@@ -817,8 +803,7 @@ function FolderRecentSection({
     refresh,
     patchLocalSession,
     removeLocalSession,
-  } =
-  useSessions({
+  } = useSessions({
     // 有 workspace（git worktree）时聚合所有目录的会话，不区分分支层级；
     // 否则退回单目录。
     directories: hasWorkspaceTree ? workspaceDirectories : undefined,
@@ -944,10 +929,7 @@ function FolderRecentSection({
   const folderCheckedNext = projectCheckedNext || firstVisibleSessionChecked
 
   // 就地筛选：匹配项目名或已加载会话的标题/目录；无匹配的项目整体隐藏
-  const searchTerms = useMemo(
-    () => search.trim().toLowerCase().split(/\s+/).filter(Boolean),
-    [search],
-  )
+  const searchTerms = useMemo(() => search.trim().toLowerCase().split(/\s+/).filter(Boolean), [search])
   const filteredSessions = useMemo(() => {
     if (searchTerms.length === 0) return visibleSessions
     return visibleSessions.filter(session =>
@@ -1001,166 +983,188 @@ function FolderRecentSection({
               }
             : {})}
         >
-          <button
-            type="button"
-            onMouseDown={e => {
-              if (!isEditMode) return
-              e.preventDefault()
-              window.getSelection()?.removeAllRanges()
-            }}
-            onClick={e => {
-              // 长按已弹出菜单：吞掉抬手补发的这次 click，避免菜单打开的同时展开/收起
-              if (suppressClickRef.current) {
-                suppressClickRef.current = false
+          <NativeTooltip>
+            <button
+              type="button"
+              onMouseDown={e => {
+                if (!isEditMode) return
                 e.preventDefault()
-                return
-              }
-              if (isEditMode) {
-                // 管理模式：点文件夹 = 选中；Shift 点可范围选
-                onToggleProjectCheck?.({ shiftKey: e.shiftKey })
-                return
-              }
-              onSelectProject()
-              onToggle()
-            }}
-            className={cn(
-              // 触摸端加大上下内边距，行高从约 32px 提到约 44px，满足手指触控热区；
-              // 桌面保持 py-1.5 的紧凑排布。
-              'flex flex-1 min-w-0 items-center gap-1 pl-2 pr-2 text-left cursor-default select-none rounded-md',
-              preferTouchUi ? 'py-3' : 'py-1.5',
-              // 点击/展开反馈走 transition-colors，与 interactive 词汇表一致；
-              // 再叠一个 150ms 的箭头旋转（见下方 ChevronDownIcon），
-              // 让"点了一下"有明确反馈而不是瞬变。
-              'transition-colors duration-150 active:bg-bg-200/60 active:duration-75',
-            )}
-            title={project.worktree}
-          >
-            {/* hover 时图标淡出、展开/收起箭头淡入（两者叠放做交叉淡入淡出）。
+                window.getSelection()?.removeAllRanges()
+              }}
+              onClick={e => {
+                // 长按已弹出菜单：吞掉抬手补发的这次 click，避免菜单打开的同时展开/收起
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false
+                  e.preventDefault()
+                  return
+                }
+                if (isEditMode) {
+                  // 管理模式：点文件夹 = 选中；Shift 点可范围选
+                  onToggleProjectCheck?.({ shiftKey: e.shiftKey })
+                  return
+                }
+                onSelectProject()
+                onToggle()
+              }}
+              className={cn(
+                // 触摸端加大上下内边距，行高从约 32px 提到约 44px，满足手指触控热区；
+                // 桌面保持 py-1.5 的紧凑排布。
+                'flex flex-1 min-w-0 items-center gap-1 pl-2 pr-2 text-left cursor-default select-none rounded-md',
+                preferTouchUi ? 'py-3' : 'py-1.5',
+                // 点击/展开反馈走 transition-colors，与 interactive 词汇表一致；
+                // 再叠一个 150ms 的箭头旋转（见下方 ChevronDownIcon），
+                // 让"点了一下"有明确反馈而不是瞬变。
+                'transition-colors duration-150 active:bg-bg-200/60 active:duration-75',
+              )}
+              title={project.worktree}
+            >
+              {/* hover 时图标淡出、展开/收起箭头淡入（两者叠放做交叉淡入淡出）。
                 箭头常态不可见但仍占位，避免 hover 瞬间撑开会引起文字位移。
                 图标类型（地球/分支/文件夹）不丢失，鼠标移开即恢复。 */}
-            <span className="relative size-5 shrink-0 flex items-center justify-center">
-              <FolderDisplayIcon
-                size={17}
-                className={`transition-opacity duration-150 group-hover/folder:opacity-0 ${
-                  isProjectActive ? 'text-accent-main-100' : 'text-text-400'
-                }`}
-                // 激活项目：主色描边 + 主色填充（fill 跟随 currentColor），
-                // 与列内其他线性图标区分开；非激活保持原来的灰线框。
-                {...(isProjectActive ? { fill: 'currentColor', fillOpacity: 0.22 } : {})}
+              <span className="relative size-5 shrink-0 flex items-center justify-center">
+                <FolderDisplayIcon
+                  size={17}
+                  className={`transition-opacity duration-150 group-hover/folder:opacity-0 ${
+                    isProjectActive ? 'text-accent-main-100' : 'text-text-400'
+                  }`}
+                  // 激活项目：主色描边 + 主色填充（fill 跟随 currentColor），
+                  // 与列内其他线性图标区分开；非激活保持原来的灰线框。
+                  {...(isProjectActive ? { fill: 'currentColor', fillOpacity: 0.22 } : {})}
+                />
+                <ChevronDownIcon
+                  size={13}
+                  className={`absolute text-text-300 opacity-0 transition-[opacity,transform] duration-150 group-hover/folder:opacity-100 ${
+                    isExpanded ? '' : '-rotate-90'
+                  }`}
+                />
+              </span>
+              <ProjectNameTitle
+                text={projectName}
+                // 颜色承担层级：项目名用最强文字色，比下属会话（text-300）明显更亮。
+                // 字重上 medium 与 semibold 都解析到 600（字体只有 400/600 两档），
+                // 无法再靠加粗区分，所以层级只能由颜色表达。
+                className="text-text-100"
+                /**
+                 * hover 时为右侧操作按钮让位。
+                 *
+                 * 那三个按钮（新建会话 / 打开目录 / 移除）是**绝对定位**叠在行尾的，
+                 * 而项目名是 flex-1 占满整行 —— 名字一长就必然被按钮压住（实测
+                 * `rtx4060-laptop-tensor-uni…` 与按钮重叠）。
+                 *
+                 * 这里在 hover 时给标题加右内边距：按钮数量决定宽度，
+                 * 文字随之收缩并正常截断，视觉上不跳动（按钮本来就只在 hover 出现）。
+                 */
+                reserveRightPx={projectActionsWidth}
               />
-              <ChevronDownIcon
-                size={13}
-                className={`absolute text-text-300 opacity-0 transition-[opacity,transform] duration-150 group-hover/folder:opacity-100 ${
-                  isExpanded ? '' : '-rotate-90'
-                }`}
-              />
-            </span>
-            <ProjectNameTitle
-              text={projectName}
-              // 颜色承担层级：项目名用最强文字色，比下属会话（text-300）明显更亮。
-              // 字重上 medium 与 semibold 都解析到 600（字体只有 400/600 两档），
-              // 无法再靠加粗区分，所以层级只能由颜色表达。
-              className="text-text-100"
-              /**
-               * hover 时为右侧操作按钮让位。
-               *
-               * 那三个按钮（新建会话 / 打开目录 / 移除）是**绝对定位**叠在行尾的，
-               * 而项目名是 flex-1 占满整行 —— 名字一长就必然被按钮压住（实测
-               * `rtx4060-laptop-tensor-uni…` 与按钮重叠）。
-               *
-               * 这里在 hover 时给标题加右内边距：按钮数量决定宽度，
-               * 文字随之收缩并正常截断，视觉上不跳动（按钮本来就只在 hover 出现）。
-               */
-              reserveRightPx={projectActionsWidth}
-            />
-          </button>
+            </button>
+          </NativeTooltip>
           {/* 项目行 hover 的 + 按钮：在该项目目录下新建会话（全局/无目录项目不显示）；hover 才显示，与移除按钮一致。
               hover 揭示按钮不参与 flex 布局动画：固定 24px 占位、绝对定位到行尾右侧，只做 opacity 淡入。
               这样展开时不会挤压 title / 推动右侧状态点与时间，避免"划过一行时文字轻微位移"。 */}
           {!isEditMode && onNewSessionInDirectory && project.worktree && (
-            <button
-              type="button"
-              onPointerDown={e => e.stopPropagation()}
-              onClick={e => {
-                e.stopPropagation()
-                onNewSessionInDirectory(project.worktree)
-              }}
-              className={cn(
-                'absolute right-[34px] z-10 flex items-center justify-center size-6 rounded-full overflow-hidden text-accent-main-100 hover:text-accent-main-200',
-                'opacity-0 transition-opacity duration-150 group-hover/folder:opacity-100 pointer-events-none group-hover/folder:pointer-events-auto',
-                interactive.accent,
-              )}
-              title={t('sidebar.newTaskInDirectory', { defaultValue: 'New conversation here' })}
-              aria-label={t('sidebar.newTaskInDirectory', { defaultValue: 'New conversation here' })}
-            >
-              <PlusIcon size={13} />
-            </button>
+            <NativeTooltip>
+              <button
+                type="button"
+                onPointerDown={e => e.stopPropagation()}
+                onClick={e => {
+                  e.stopPropagation()
+                  onNewSessionInDirectory(project.worktree)
+                }}
+                className={cn(
+                  'absolute right-[34px] z-10 flex items-center justify-center size-6 rounded-full overflow-hidden text-accent-main-100 hover:text-accent-main-200',
+                  'opacity-0 transition-opacity duration-150 group-hover/folder:opacity-100 pointer-events-none group-hover/folder:pointer-events-auto',
+                  interactive.accent,
+                )}
+                title={t('sidebar.newTaskInDirectory', { defaultValue: 'New conversation here' })}
+                aria-label={t('sidebar.newTaskInDirectory', { defaultValue: 'New conversation here' })}
+              >
+                <PlusIcon size={13} />
+              </button>
+            </NativeTooltip>
           )}
           {/* 打开项目目录：仅桌面端显示；hover 才显示，与 + / 移除按钮同一套几何 */}
           {!isEditMode && canOpenDirectory && (
-            <button
-              type="button"
-              onPointerDown={e => e.stopPropagation()}
-              onClick={e => {
-                e.stopPropagation()
-                void handleOpenDirectory()
-              }}
-              className={cn(
-                'absolute right-[62px] z-10 flex items-center justify-center size-6 rounded-full overflow-hidden text-text-400 hover:text-text-100',
-                'opacity-0 transition-opacity duration-150 group-hover/folder:opacity-100 pointer-events-none group-hover/folder:pointer-events-auto',
-                interactive.subtle,
-              )}
-              title={t('header.openProjectDirectory')}
-              aria-label={t('header.openProjectDirectory')}
-            >
-              <ExternalLinkIcon size={13} />
-            </button>
+            <NativeTooltip>
+              <button
+                type="button"
+                onPointerDown={e => e.stopPropagation()}
+                onClick={e => {
+                  e.stopPropagation()
+                  void handleOpenDirectory()
+                }}
+                className={cn(
+                  'absolute right-[62px] z-10 flex items-center justify-center size-6 rounded-full overflow-hidden text-text-400 hover:text-text-100',
+                  'opacity-0 transition-opacity duration-150 group-hover/folder:opacity-100 pointer-events-none group-hover/folder:pointer-events-auto',
+                  interactive.subtle,
+                )}
+                title={t('header.openProjectDirectory')}
+                aria-label={t('header.openProjectDirectory')}
+              >
+                <ExternalLinkIcon size={13} />
+              </button>
+            </NativeTooltip>
           )}
           {/* 移除项目：hover 显示；二次点击防误触（已保存=移除，服务器发现=隐藏；全局项不显示）。
               与 + 按钮同一套几何：固定占位 + opacity 淡入，不改变布局。 */}
           {!isEditMode && onRemoveProject && project.worktree && (
-            <button
-              type="button"
-              onPointerDown={e => e.stopPropagation()}
-              onClick={e => {
-                e.stopPropagation()
-                handleRemoveClick()
-              }}
-              onMouseLeave={disarmRemove}
-              className={cn(
-                'absolute right-1.5 z-10 flex items-center justify-center size-6 rounded-full overflow-hidden',
-                removeArmed
-                  ? 'bg-danger-100/15 text-danger-100 opacity-100 pointer-events-auto'
-                  : 'text-text-400 opacity-0 transition-opacity duration-150 group-hover/folder:opacity-100 pointer-events-none group-hover/folder:pointer-events-auto hover:text-danger-100',
-                !removeArmed && interactive.danger,
-              )}
-              title={removeArmed ? t('sidebar.removeProjectConfirmClick', { defaultValue: '再次点击确认移除' }) : t('sidebar.removeProject')}
-              aria-label={removeArmed ? t('sidebar.removeProjectConfirmClick', { defaultValue: '再次点击确认移除' }) : t('sidebar.removeProject')}
-            >
-              {removeArmed ? <CheckIcon size={12} /> : <TrashIcon size={12} />}
-            </button>
+            <NativeTooltip>
+              <button
+                type="button"
+                onPointerDown={e => e.stopPropagation()}
+                onClick={e => {
+                  e.stopPropagation()
+                  handleRemoveClick()
+                }}
+                onMouseLeave={disarmRemove}
+                className={cn(
+                  'absolute right-1.5 z-10 flex items-center justify-center size-6 rounded-full overflow-hidden',
+                  removeArmed
+                    ? 'bg-danger-100/15 text-danger-100 opacity-100 pointer-events-auto'
+                    : 'text-text-400 opacity-0 transition-opacity duration-150 group-hover/folder:opacity-100 pointer-events-none group-hover/folder:pointer-events-auto hover:text-danger-100',
+                  !removeArmed && interactive.danger,
+                )}
+                title={
+                  removeArmed
+                    ? t('sidebar.removeProjectConfirmClick', { defaultValue: '再次点击确认移除' })
+                    : t('sidebar.removeProject')
+                }
+                aria-label={
+                  removeArmed
+                    ? t('sidebar.removeProjectConfirmClick', { defaultValue: '再次点击确认移除' })
+                    : t('sidebar.removeProject')
+                }
+              >
+                {removeArmed ? <CheckIcon size={12} /> : <TrashIcon size={12} />}
+              </button>
+            </NativeTooltip>
           )}
           {/* 管理模式下保留展开/收起，否则选不了内部会话 */}
           {isEditMode && (
-            <button
-              type="button"
-              onPointerDown={e => e.stopPropagation()}
-              onClick={e => {
-                e.stopPropagation()
-                onToggle()
-              }}
-              className={cn(
-                'shrink-0 flex items-center justify-center w-6 h-6 mr-1 rounded-md text-text-500 hover:text-text-200',
-                interactive.subtle,
-              )}
-              title={isExpanded ? t('common:collapse', { defaultValue: 'Collapse' }) : t('common:expand', { defaultValue: 'Expand' })}
-              aria-expanded={isExpanded}
-            >
-              <ChevronDownIcon
-                size={12}
-                className={`transition-transform duration-150 ${isExpanded ? '' : '-rotate-90'}`}
-              />
-            </button>
+            <NativeTooltip>
+              <button
+                type="button"
+                onPointerDown={e => e.stopPropagation()}
+                onClick={e => {
+                  e.stopPropagation()
+                  onToggle()
+                }}
+                className={cn(
+                  'shrink-0 flex items-center justify-center w-6 h-6 mr-1 rounded-md text-text-500 hover:text-text-200',
+                  interactive.subtle,
+                )}
+                title={
+                  isExpanded
+                    ? t('common:collapse', { defaultValue: 'Collapse' })
+                    : t('common:expand', { defaultValue: 'Expand' })
+                }
+                aria-expanded={isExpanded}
+              >
+                <ChevronDownIcon
+                  size={12}
+                  className={`transition-transform duration-150 ${isExpanded ? '' : '-rotate-90'}`}
+                />
+              </button>
+            </NativeTooltip>
           )}
           {/* 状态指示：紧挨时间，hover 时隐藏给操作按钮让位。
               状态分档与项目内会话行（minimal SessionListItem）保持一致：
@@ -1169,25 +1173,29 @@ function FolderRecentSection({
               - unread：主色未读点
               旋转图标比点更大，容器用 w-3.5 并在右侧留 0.5 间距，避免贴住时间。 */}
           {folderStatus && (
-            <span
-              className="relative shrink-0 flex items-center justify-center w-4 h-4 group-hover/folder:hidden"
-              title={folderStatus.count ? `${folderStatus.label} (${folderStatus.count})` : folderStatus.label}
-            >
-              {folderStatus.kind === 'working' ? (
-                <Spinner size="xs" tone="accent" variant="grid-orbit" />
-              ) : (
-                <span className={`absolute w-1.5 h-1.5 rounded-full ${folderStatus.dot}`} />
-              )}
-            </span>
+            <NativeTooltip>
+              <span
+                className="relative shrink-0 flex items-center justify-center w-4 h-4 group-hover/folder:hidden"
+                title={folderStatus.count ? `${folderStatus.label} (${folderStatus.count})` : folderStatus.label}
+              >
+                {folderStatus.kind === 'working' ? (
+                  <Spinner size="xs" tone="accent" variant="grid-orbit" />
+                ) : (
+                  <span className={`absolute w-1.5 h-1.5 rounded-full ${folderStatus.dot}`} />
+                )}
+              </span>
+            </NativeTooltip>
           )}
           {/* 最后使用时间放行尾；hover 时隐藏，给 + / 移除按钮让位 */}
           {lastUsedAt ? (
-            <span
-              className="shrink-0 pl-1 pr-1.5 text-ui-xs text-text-500 group-hover/folder:hidden"
-              title={new Date(lastUsedAt).toLocaleString()}
-            >
-              {formatRelativeDay(lastUsedAt)}
-            </span>
+            <NativeTooltip>
+              <span
+                className="shrink-0 pl-1 pr-1.5 text-ui-xs text-text-500 group-hover/folder:hidden"
+                title={new Date(lastUsedAt).toLocaleString()}
+              >
+                {formatRelativeDay(lastUsedAt)}
+              </span>
+            </NativeTooltip>
           ) : null}
         </div>
         {contextMenuNode}
@@ -1204,9 +1212,7 @@ function FolderRecentSection({
                 <div className="flex items-center gap-2 px-2 py-1" aria-busy="true">
                   <span className="size-5 shrink-0" aria-hidden="true" />
                   <Spinner size="xs" tone="accent" variant="pixel" />
-                  <span className="reasoning-shimmer-text text-ui-sm">
-                    {t('sidebar.loadingChats')}
-                  </span>
+                  <span className="reasoning-shimmer-text text-ui-sm">{t('sidebar.loadingChats')}</span>
                 </div>
               ) : error && filteredSessions.length === 0 ? (
                 <div className="flex items-center gap-2 px-2 py-1" role="alert">
@@ -1245,44 +1251,46 @@ function FolderRecentSection({
                         ? (selectedSessionIds?.has(filteredSessions[index + 1].id) ?? false)
                         : nextProjectChecked)
                     return (
-                    <div key={session.id}>
-                      <SessionListItem
-                        session={session}
-                        activeSessionKey={serverId ? `${serverId}::${session.id}` : undefined}
-                        isSelected={!!selectedSessionId && session.id === splitSessionKey(selectedSessionId).sessionId}
-                        onSelect={() => onSelectSession(session)}
-                        onRename={newTitle => handleRename(session.id, newTitle)}
-                        onDelete={() => handleDelete(session.id)}
-                        onArchive={() => handleArchive(session.id)}
-                        preferTouchUi={preferTouchUi}
-                        density="minimal"
-                        showStats={showSessionDiffStats}
-                        showDirectory={false}
-                        isEditMode={isEditMode}
-                        isChecked={isChecked}
-                        checkedPrev={prevChecked}
-                        checkedNext={nextChecked}
-                        onToggleCheck={
-                          onToggleSessionSelection
-                            ? options => onToggleSessionSelection(session.id, options)
-                            : undefined
-                        }
-                      />
-                      {onSelectChildSession &&
-                        (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
-                          <SessionChildrenSlot
-                            parentSession={session}
-                            serverId={serverId}
-                            selectedSessionId={selectedSessionId}
-                            fetchAll={expandedChildSessionIds?.has(session.id)}
-                            children={inlineChildSessions?.get(session.id)}
-                            onSelect={onSelectChildSession}
-                            isEditMode={isEditMode}
-                            selectedSessionIds={selectedSessionIds}
-                            onToggleSessionSelection={onToggleSessionSelection}
-                          />
-                        )}
-                    </div>
+                      <div key={session.id}>
+                        <SessionListItem
+                          session={session}
+                          activeSessionKey={serverId ? `${serverId}::${session.id}` : undefined}
+                          isSelected={
+                            !!selectedSessionId && session.id === splitSessionKey(selectedSessionId).sessionId
+                          }
+                          onSelect={() => onSelectSession(session)}
+                          onRename={newTitle => handleRename(session.id, newTitle)}
+                          onDelete={() => handleDelete(session.id)}
+                          onArchive={() => handleArchive(session.id)}
+                          preferTouchUi={preferTouchUi}
+                          density="minimal"
+                          showStats={showSessionDiffStats}
+                          showDirectory={false}
+                          isEditMode={isEditMode}
+                          isChecked={isChecked}
+                          checkedPrev={prevChecked}
+                          checkedNext={nextChecked}
+                          onToggleCheck={
+                            onToggleSessionSelection
+                              ? options => onToggleSessionSelection(session.id, options)
+                              : undefined
+                          }
+                        />
+                        {onSelectChildSession &&
+                          (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
+                            <SessionChildrenSlot
+                              parentSession={session}
+                              serverId={serverId}
+                              selectedSessionId={selectedSessionId}
+                              fetchAll={expandedChildSessionIds?.has(session.id)}
+                              children={inlineChildSessions?.get(session.id)}
+                              onSelect={onSelectChildSession}
+                              isEditMode={isEditMode}
+                              selectedSessionIds={selectedSessionIds}
+                              onToggleSessionSelection={onToggleSessionSelection}
+                            />
+                          )}
+                      </div>
                     )
                   })}
 
@@ -1307,34 +1315,30 @@ function FolderRecentSection({
                           {isLoadingMore ? (
                             <Spinner size="xs" tone="accent" variant="pixel" />
                           ) : (
-                            <ChevronDownIcon
-                              size={12}
-                              className="text-accent-main-100 transition-colors"
-                            />
+                            <ChevronDownIcon size={12} className="text-accent-main-100 transition-colors" />
                           )}
                         </button>
                       )}
 
                       {visibleSessions.length > DIRECTORY_PAGE_SIZE && (
-                        <button
-                          onClick={() => void collapse()}
-                          disabled={isLoadingMore}
-                          aria-busy={isLoadingMore}
-                          aria-label={t('sidebar.showFewerChats')}
-                          title={t('sidebar.showFewerChats')}
-                          className={cn(
-                            'group inline-flex items-center gap-1.5 rounded-md py-1.5 pr-2 text-ui-sm font-medium text-accent-main-100',
-                            hasMore ? 'flex-1 justify-center pl-2' : 'flex-1 justify-start pl-[30px]',
-                            interactive.subtle,
-                            'disabled:cursor-default disabled:opacity-70',
-                          )}
-                        >
-                          <span>{t('sidebar.showFewerChats')}</span>
-                          <ChevronDownIcon
-                            size={12}
-                            className="rotate-180 text-accent-main-100 transition-colors"
-                          />
-                        </button>
+                        <NativeTooltip>
+                          <button
+                            onClick={() => void collapse()}
+                            disabled={isLoadingMore}
+                            aria-busy={isLoadingMore}
+                            aria-label={t('sidebar.showFewerChats')}
+                            title={t('sidebar.showFewerChats')}
+                            className={cn(
+                              'group inline-flex items-center gap-1.5 rounded-md py-1.5 pr-2 text-ui-sm font-medium text-accent-main-100',
+                              hasMore ? 'flex-1 justify-center pl-2' : 'flex-1 justify-start pl-[30px]',
+                              interactive.subtle,
+                              'disabled:cursor-default disabled:opacity-70',
+                            )}
+                          >
+                            <span>{t('sidebar.showFewerChats')}</span>
+                            <ChevronDownIcon size={12} className="rotate-180 text-accent-main-100 transition-colors" />
+                          </button>
+                        </NativeTooltip>
                       )}
                     </div>
                   )}
@@ -1347,4 +1351,3 @@ function FolderRecentSection({
     </div>
   )
 }
-

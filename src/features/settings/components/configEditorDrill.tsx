@@ -4,6 +4,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '../../../components/Icons'
 import { DrillContext, DrillDepthContext, type DrillEntry, type DrillState } from './configEditorDrillState'
 import { DraftNavigationContext } from './configEditorJsonDraft'
 import { tx, useLang } from './configEditorUtils'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 
 export function Drill({
   rootTitle,
@@ -32,7 +33,7 @@ export function Drill({
     setPrevTargetKey(targetKey)
     setStack(targetStack ?? [])
   }
-  const liveStack = rootChanged || targetChanged ? targetStack ?? [] : stack
+  const liveStack = rootChanged || targetChanged ? (targetStack ?? []) : stack
 
   const api: DrillState = {
     stack: liveStack,
@@ -80,23 +81,23 @@ export function Drill({
                   const isLast = index === trail.length - 1
                   return (
                     <span key={`${frame.id}:${index}`} className="flex h-7 min-w-0 shrink-0 items-center gap-1">
-                      {index > 0 && (
-                        <ChevronRightIcon size={14} className="shrink-0 text-text-400" />
-                      )}
-                      <button
-                        type="button"
-                        disabled={isLast}
-                        onClick={() => api.back(index)}
-                        aria-current={isLast ? 'page' : undefined}
-                        title={frame.title}
-                        className={`inline-flex h-7 min-w-0 max-w-[180px] items-center truncate text-ui-caption leading-none transition-colors ${
-                          isLast
-                            ? 'cursor-default text-text-100'
-                            : 'text-text-300 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1'
-                        }`}
-                      >
-                        {frame.title}
-                      </button>
+                      {index > 0 && <ChevronRightIcon size={14} className="shrink-0 text-text-400" />}
+                      <NativeTooltip>
+                        <button
+                          type="button"
+                          disabled={isLast}
+                          onClick={() => api.back(index)}
+                          aria-current={isLast ? 'page' : undefined}
+                          title={frame.title}
+                          className={`inline-flex h-7 min-w-0 max-w-[180px] items-center truncate text-ui-caption leading-none transition-colors ${
+                            isLast
+                              ? 'cursor-default text-text-100'
+                              : 'text-text-300 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1'
+                          }`}
+                        >
+                          {frame.title}
+                        </button>
+                      </NativeTooltip>
                     </span>
                   )
                 })}
@@ -144,10 +145,16 @@ export function DrillRow({
           <span className="min-w-0 break-all text-ui-caption font-medium text-text-100">{label}</span>
           {badge && <span className="text-ui-xs font-medium uppercase tracking-wide text-warning-100">{badge}</span>}
         </div>
-        {desc && <div data-setting-desc className="mt-0.5 text-ui-sm leading-relaxed text-text-300">{desc}</div>}
+        {desc && (
+          <div data-setting-desc className="mt-0.5 text-ui-sm leading-relaxed text-text-300">
+            {desc}
+          </div>
+        )}
       </div>
       {preview ? (
-        <span className="min-w-0 max-w-full truncate text-ui-sm text-text-400 sm:max-w-[200px] sm:text-right">{preview}</span>
+        <span className="min-w-0 max-w-full truncate text-ui-sm text-text-400 sm:max-w-[200px] sm:text-right">
+          {preview}
+        </span>
       ) : (
         <span className="hidden sm:block" />
       )}

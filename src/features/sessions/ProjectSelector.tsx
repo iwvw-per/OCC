@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FolderIcon, GlobeIcon, ChevronDownIcon, PlusIcon, TrashIcon } from '../../components/Icons'
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import type { ApiProject } from '../../api'
 
 // ============================================
@@ -103,25 +104,27 @@ export function ProjectSelector({
   return (
     <div ref={containerRef} className="relative">
       {/* Trigger Button */}
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        disabled={isLoading}
-        aria-expanded={isOpen}
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-200 transition-colors group text-left"
-        title={getPath(currentProject)}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="text-ui-base font-semibold text-text-100 truncate">{getDisplayName(currentProject)}</div>
-          <div className="text-ui-xs text-text-400/70 truncate font-mono">{getPath(currentProject)}</div>
-        </div>
-        <ChevronDownIcon
-          className={`w-3 h-3 text-text-400 transition-all duration-200 shrink-0 ${
-            isOpen ? 'rotate-180' : 'opacity-0 group-hover:opacity-100'
-          }`}
-        />
-      </button>
+      <NativeTooltip>
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          disabled={isLoading}
+          aria-expanded={isOpen}
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-200 transition-colors group text-left"
+          title={getPath(currentProject)}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="text-ui-base font-semibold text-text-100 truncate">{getDisplayName(currentProject)}</div>
+            <div className="text-ui-xs text-text-400/70 truncate font-mono">{getPath(currentProject)}</div>
+          </div>
+          <ChevronDownIcon
+            className={`w-3 h-3 text-text-400 transition-all duration-200 shrink-0 ${
+              isOpen ? 'rotate-180' : 'opacity-0 group-hover:opacity-100'
+            }`}
+          />
+        </button>
+      </NativeTooltip>
 
       {/* Dropdown */}
       <div
@@ -141,7 +144,9 @@ export function ProjectSelector({
             </div>
 
             {otherProjects.length === 0 ? (
-              <div className="px-3 py-4 text-center text-ui-caption text-text-400/60">{t('sessions.noOtherProjects')}</div>
+              <div className="px-3 py-4 text-center text-ui-caption text-text-400/60">
+                {t('sessions.noOtherProjects')}
+              </div>
             ) : (
               /* 条目之间留 2px：ProjectItem 是 rounded-lg + hover 底色，
                  紧贴时相邻圆角会拼成一条凹槽。不用容器 gap，避免撑开分组标题。 */
@@ -225,43 +230,47 @@ function ProjectItem({ project, displayName, path, onSelect, onRemove }: Project
       className="group w-full flex items-center gap-2.5 px-2 py-2 rounded-lg cursor-pointer select-none transition-colors hover:bg-bg-200 active:bg-bg-300"
       onClick={onSelect}
     >
-      <button
-        type="button"
-        onClick={e => {
-          e.stopPropagation()
-          onSelect()
-        }}
-        className="min-w-0 flex flex-1 items-center gap-2.5 text-left bg-transparent border-none p-0"
-        title={path}
-      >
-        <div
-          className={`
-          w-7 h-7 rounded-lg flex items-center justify-center shrink-0
-          ${isGlobal ? 'bg-accent-main-100/15 text-accent-main-100' : 'bg-bg-200 text-text-400'}
-        `}
-        >
-          {isGlobal ? <GlobeIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
-        </div>
-
-        <div className="flex-1 min-w-0 text-left">
-          <div className="text-ui-base text-text-200 truncate">{displayName}</div>
-          <div className="text-ui-xs text-text-400/60 truncate font-mono">{path}</div>
-        </div>
-      </button>
-
-      {onRemove && (
+      <NativeTooltip>
         <button
           type="button"
           onClick={e => {
             e.stopPropagation()
-            onRemove()
+            onSelect()
           }}
-          aria-label={t('common:remove')}
-          className="p-1 rounded text-text-400 hover:text-danger-100 hover:bg-danger-100/10 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 md:focus-visible:opacity-100 transition-colors"
-          title={t('common:remove')}
+          className="min-w-0 flex flex-1 items-center gap-2.5 text-left bg-transparent border-none p-0"
+          title={path}
         >
-          <TrashIcon className="w-3 h-3" />
+          <div
+            className={`
+          w-7 h-7 rounded-lg flex items-center justify-center shrink-0
+          ${isGlobal ? 'bg-accent-main-100/15 text-accent-main-100' : 'bg-bg-200 text-text-400'}
+        `}
+          >
+            {isGlobal ? <GlobeIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
+          </div>
+
+          <div className="flex-1 min-w-0 text-left">
+            <div className="text-ui-base text-text-200 truncate">{displayName}</div>
+            <div className="text-ui-xs text-text-400/60 truncate font-mono">{path}</div>
+          </div>
         </button>
+      </NativeTooltip>
+
+      {onRemove && (
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation()
+              onRemove()
+            }}
+            aria-label={t('common:remove')}
+            className="p-1 rounded text-text-400 hover:text-danger-100 hover:bg-danger-100/10 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 md:focus-visible:opacity-100 transition-colors"
+            title={t('common:remove')}
+          >
+            <TrashIcon className="w-3 h-3" />
+          </button>
+        </NativeTooltip>
       )}
     </div>
   )

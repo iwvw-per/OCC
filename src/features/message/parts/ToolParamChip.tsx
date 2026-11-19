@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { getMaterialIconUrl } from '../../../utils/materialIcons'
 import { cn } from '../../../utils/cn'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 
 /** 看起来像文件路径（含分隔符或扩展名）时展示文件图标 */
 function looksLikePath(text: string): boolean {
@@ -37,21 +38,23 @@ export const ToolParamChip = memo(function ToolParamChip({
   className,
 }: ToolParamChipProps) {
   return (
-    <span
-      className={cn(
-        'inline-flex h-5 min-w-0 items-center gap-1 rounded-sm px-1.5',
-        'font-mono text-ui-xs leading-none',
-        // shimmer 的 text-fill-color 会继承，这里显式恢复为自身文字色
-        '[-webkit-text-fill-color:currentColor]',
-        'transition-colors duration-150',
-        error ? 'bg-danger-100/10 text-danger-100' : 'bg-bg-200/70 text-text-400',
-        className,
-      )}
-      title={titleText ?? text}
-    >
-      {looksLikePath(text) && <FileGlyph path={text} />}
-      <span className="min-w-0 truncate">{text}</span>
-    </span>
+    <NativeTooltip>
+      <span
+        className={cn(
+          'inline-flex h-5 min-w-0 items-center gap-1 rounded-sm px-1.5',
+          'font-mono text-ui-xs leading-none',
+          // shimmer 的 text-fill-color 会继承，这里显式恢复为自身文字色
+          '[-webkit-text-fill-color:currentColor]',
+          'transition-colors duration-150',
+          error ? 'bg-danger-100/10 text-danger-100' : 'bg-bg-200/70 text-text-400',
+          className,
+        )}
+        title={titleText ?? text}
+      >
+        {looksLikePath(text) && <FileGlyph path={text} />}
+        <span className="min-w-0 truncate">{text}</span>
+      </span>
+    </NativeTooltip>
   )
 })
 

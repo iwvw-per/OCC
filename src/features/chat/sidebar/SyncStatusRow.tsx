@@ -13,6 +13,7 @@
 
 import { useSyncExternalStore } from 'react'
 import { AlertCircleIcon } from '../../../components/Icons'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { PixelGrid, Spinner } from '../../../components/ui/Spinner'
 import { getSyncState, subscribeSyncState, type SyncState } from '../../../api/preferencesSyncEngine'
 import { cn } from '../../../utils/cn'
@@ -58,17 +59,19 @@ export function SyncStatusIcon() {
 
   const view = syncStatusView(state)
   return (
-    <span
-      className={cn(
-        'flex size-5 items-center justify-center rounded-full',
-        view.kind === 'syncing' ? 'text-accent-main-100' : undefined,
-      )}
-      title={view.title}
-      aria-label={view.label}
-      role="status"
-    >
-      <SyncStatusIconGlyph kind={view.kind} />
-    </span>
+    <NativeTooltip>
+      <span
+        className={cn(
+          'flex size-5 items-center justify-center rounded-full',
+          view.kind === 'syncing' ? 'text-accent-main-100' : undefined,
+        )}
+        title={view.title}
+        aria-label={view.label}
+        role="status"
+      >
+        <SyncStatusIconGlyph kind={view.kind} />
+      </span>
+    </NativeTooltip>
   )
 }
 

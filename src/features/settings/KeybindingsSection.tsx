@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { useKeybindingStore } from '../../hooks/useKeybindings'
 import { keyEventToString, formatKeybinding, parseKeybinding } from '../../store/keybindingStore'
 import { UndoIcon, SearchIcon } from '../../components/Icons'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import type { KeybindingConfig, KeybindingAction } from '../../store/keybindingStore'
 import { SettingsSection } from './components/SettingsUI'
 import { cn } from '../../utils/cn'
@@ -154,19 +155,21 @@ function KeybindingRow({ config, onEdit, onReset, isKeyUsed, t }: KeybindingRowP
 
       {/* Reset */}
       {isModified && !isEditing && (
-        <button
-          type="button"
-          onClick={() => onReset(config.action)}
-          className={cn(
-            'p-1 mr-1 rounded text-text-400 hover:text-text-100',
-            interactive.subtle,
-            interactive.focusRingCompact,
-            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity',
-          )}
-          title={t('keybindings.resetToDefault')}
-        >
-          <UndoIcon size={12} />
-        </button>
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={() => onReset(config.action)}
+            className={cn(
+              'p-1 mr-1 rounded text-text-400 hover:text-text-100',
+              interactive.subtle,
+              interactive.focusRingCompact,
+              'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity',
+            )}
+            title={t('keybindings.resetToDefault')}
+          >
+            <UndoIcon size={12} />
+          </button>
+        </NativeTooltip>
       )}
 
       {/* Key */}
@@ -344,7 +347,6 @@ export function KeybindingsSection() {
           ))
         )}
       </div>
-
     </SettingsSection>
   )
 }

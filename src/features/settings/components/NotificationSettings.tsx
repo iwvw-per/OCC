@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/Button'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import {
   BellIcon,
   VolumeIcon,
@@ -271,16 +272,18 @@ function EventSoundCard({
       className="relative rounded-lg border border-border-200/50 p-3 hover:border-border-300/60 transition-colors"
     >
       {/* 试听按钮 — 绝对定位右上角 */}
-      <button
-        type="button"
-        onClick={handlePreview}
-        disabled={eventConfig.soundId === 'none'}
-        className="absolute right-2 top-2 inline-flex items-center justify-center w-7 h-7 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200 transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-400"
-        title={t('notifications.preview')}
-        aria-label={t('notifications.preview')}
-      >
-        <PlayIcon size={13} />
-      </button>
+      <NativeTooltip>
+        <button
+          type="button"
+          onClick={handlePreview}
+          disabled={eventConfig.soundId === 'none'}
+          className="absolute right-2 top-2 inline-flex items-center justify-center w-7 h-7 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200 transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-400"
+          title={t('notifications.preview')}
+          aria-label={t('notifications.preview')}
+        >
+          <PlayIcon size={13} />
+        </button>
+      </NativeTooltip>
 
       {/* Header — 图标+标题+描述 */}
       <div className="flex items-start gap-2.5 min-w-0 mb-2.5 pr-9">
@@ -345,20 +348,16 @@ function EventSoundCard({
       {/* Custom audio + actions — 行内 ghost 按钮 */}
       {hasCustom && eventConfig.customFileName && (
         <div className="flex flex-wrap items-center gap-1 mb-1.5">
-          <span
-            className="min-w-0 flex-1 text-ui-sm text-text-400 truncate"
-            title={eventConfig.customFileName}
-          >
-            {eventConfig.customFileName}
-          </span>
+          <NativeTooltip>
+            <span className="min-w-0 flex-1 text-ui-sm text-text-400 truncate" title={eventConfig.customFileName}>
+              {eventConfig.customFileName}
+            </span>
+          </NativeTooltip>
           <button
             type="button"
             onClick={handleExportCustom}
             disabled={audioBusy !== null}
-            className={cn(
-              'text-ui-sm text-accent-main-100 px-1.5 py-0.5 rounded-md',
-              interactive.accent,
-            )}
+            className={cn('text-ui-sm text-accent-main-100 px-1.5 py-0.5 rounded-md', interactive.accent)}
           >
             {t('notifications.exportAudio')}
           </button>
@@ -375,19 +374,25 @@ function EventSoundCard({
 
       {/* Upload row */}
       <div className="flex flex-wrap items-center gap-2 mt-1">
-        <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileUpload} disabled={audioBusy !== null} className="hidden" />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="audio/*"
+          onChange={handleFileUpload}
+          disabled={audioBusy !== null}
+          className="hidden"
+        />
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={audioBusy !== null}
-          className={cn(
-            'text-ui-sm text-accent-main-100 px-2 py-1 rounded-md disabled:opacity-50',
-            interactive.accent,
-          )}
+          className={cn('text-ui-sm text-accent-main-100 px-2 py-1 rounded-md disabled:opacity-50', interactive.accent)}
         >
           {hasCustom ? t('notifications.replaceAudio') : t('notifications.uploadAudio')}
         </button>
-        <span className="w-full text-ui-sm text-text-500 sm:ml-auto sm:w-auto">{t('notifications.supportedFormats')}</span>
+        <span className="w-full text-ui-sm text-text-500 sm:ml-auto sm:w-auto">
+          {t('notifications.supportedFormats')}
+        </span>
       </div>
 
       {/* Upload Error */}
@@ -434,7 +439,10 @@ export function NotificationSettings() {
 
   return (
     <div>
-      <SettingsSection title={t('notifications.systemNotifications')} description={t('notifications.systemNotificationsDesc')}>
+      <SettingsSection
+        title={t('notifications.systemNotifications')}
+        description={t('notifications.systemNotificationsDesc')}
+      >
         {notificationsSupported ? (
           <>
             <SettingRow
@@ -450,17 +458,13 @@ export function NotificationSettings() {
               <Toggle
                 enabled={notificationsEnabled && notificationPermission !== 'denied'}
                 disabled={notificationPermission === 'denied'}
-                onChange={() =>
-                  notificationPermission !== 'denied' && setNotificationsEnabled(!notificationsEnabled)
-                }
+                onChange={() => notificationPermission !== 'denied' && setNotificationsEnabled(!notificationsEnabled)}
               />
             </SettingRow>
 
             <SettingRow
               label={t('notifications.testNotification')}
-              description={
-                notificationsEnabled ? t('notifications.sendSampleDesc') : t('notifications.enableToTest')
-              }
+              description={notificationsEnabled ? t('notifications.sendSampleDesc') : t('notifications.enableToTest')}
             >
               <Button
                 size="sm"
@@ -498,9 +502,7 @@ export function NotificationSettings() {
             )}
           </>
         ) : (
-          <div className="px-4 py-3 text-ui-sm text-text-300 leading-relaxed">
-            {t('notifications.notAvailable')}
-          </div>
+          <div className="px-4 py-3 text-ui-sm text-text-300 leading-relaxed">{t('notifications.notAvailable')}</div>
         )}
       </SettingsSection>
 
@@ -516,10 +518,7 @@ export function NotificationSettings() {
       </SettingsSection>
 
       {liveUpdateSupported() && (
-        <SettingsSection
-          title={t('notifications.liveUpdate')}
-          description={t('notifications.liveUpdateDesc')}
-        >
+        <SettingsSection title={t('notifications.liveUpdate')} description={t('notifications.liveUpdateDesc')}>
           <SettingRow
             label={t('notifications.liveUpdateLabel')}
             description={t('notifications.liveUpdateLabelDesc')}
@@ -543,10 +542,7 @@ export function NotificationSettings() {
               icon={soundSettings.enabled ? <VolumeIcon size={14} /> : <VolumeOffIcon size={14} />}
               onClick={() => soundStore.setEnabled(!soundSettings.enabled)}
             >
-              <Toggle
-                enabled={soundSettings.enabled}
-                onChange={() => soundStore.setEnabled(!soundSettings.enabled)}
-              />
+              <Toggle enabled={soundSettings.enabled} onChange={() => soundStore.setEnabled(!soundSettings.enabled)} />
             </SettingRow>
 
             <SettingRow

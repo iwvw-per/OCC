@@ -1,11 +1,12 @@
 {
   "name": "opencodeui",
-  "version": "2.0.69",
+  "version": "2.1.0",
   "description": "A third-party web frontend for OpenCode",
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:desktop": "tauri dev -c \"{\\\"identifier\\\":\\\"com.opencodeui.occ.dev\\\"}\"",
     "typecheck": "tsc -b",
     "type-check": "npm run typecheck",
     "build": "tsc -b && vite build",

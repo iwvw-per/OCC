@@ -99,12 +99,13 @@ describe('SyncStatusIcon', () => {
     expect(glyph?.className).not.toContain('text-success-100')
   })
 
-  it('exposes the status via title and aria-label for accessibility', () => {
+  it('exposes the status via aria-label and a self-drawn tooltip', () => {
     seedLoggedInAndEnabled()
     render(<SyncStatusIcon />)
     const node = screen.getByRole('status')
-    expect(node.getAttribute('title')).toBeTruthy()
     expect(node.getAttribute('aria-label')).toBeTruthy()
+    // 原生 title 已由自绘提示(HintTooltip)取代,不再挂在 DOM 上。
+    expect(node.getAttribute('title')).toBeNull()
   })
 
   it('accepts a SyncState shape from the engine', () => {

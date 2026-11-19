@@ -20,6 +20,7 @@ import { DESKTOP_FULLSCREEN_LAYER_Z_INDEX, DESKTOP_TITLEBAR_HEIGHT } from '../co
 import { usesCustomDesktopTitlebar } from '../utils/tauri'
 import { CloseIcon } from './Icons'
 import { ModalShell } from './ui/ModalShell'
+import { NativeTooltip } from './ui/Tooltip'
 import type { ViewMode } from './DiffViewer'
 
 // ============================================
@@ -71,7 +72,10 @@ export const FullscreenViewer = memo(function FullscreenViewer({
     >
       <div className="w-full h-full flex flex-col bg-bg-100">
         {showHeader && (
-          <div data-testid="fullscreen-viewer-header" className="flex items-center h-11 px-4 border-b border-border-100/40 shrink-0 gap-3">
+          <div
+            data-testid="fullscreen-viewer-header"
+            className="flex items-center h-11 px-4 border-b border-border-100/40 shrink-0 gap-3"
+          >
             {/* Left: title area */}
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {title &&
@@ -89,21 +93,25 @@ export const FullscreenViewer = memo(function FullscreenViewer({
             <div className="flex items-center gap-2 shrink-0">
               {headerRight}
               {headerRight && <div className="w-px h-4 bg-border-200/30" />}
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label={t('closeEsc')}
-                className="p-1.5 text-text-400 hover:text-text-100 hover:bg-bg-200 rounded-lg transition-colors"
-                title={t('closeEsc')}
-              >
-                <CloseIcon size={16} />
-              </button>
+              <NativeTooltip>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label={t('closeEsc')}
+                  className="p-1.5 text-text-400 hover:text-text-100 hover:bg-bg-200 rounded-lg transition-colors"
+                  title={t('closeEsc')}
+                >
+                  <CloseIcon size={16} />
+                </button>
+              </NativeTooltip>
             </div>
           </div>
         )}
 
         {/* Content: 填满剩余空间 */}
-        <div className="flex-1 min-h-0">{deferContent ? isOpen && <DeferredFullscreenContent>{children}</DeferredFullscreenContent> : children}</div>
+        <div className="flex-1 min-h-0">
+          {deferContent ? isOpen && <DeferredFullscreenContent>{children}</DeferredFullscreenContent> : children}
+        </div>
       </div>
     </ModalShell>
   )
@@ -141,7 +149,9 @@ export function ViewModeSwitch({ viewMode, onChange }: { viewMode: ViewMode; onC
         type="button"
         aria-pressed={viewMode === 'split'}
         className={`px-2.5 py-1 rounded-md transition-all ${
-          viewMode === 'split' ? 'bg-bg-100 text-text-100 shadow-sm border border-border-200' : 'text-text-400 hover:bg-bg-200 border border-transparent'
+          viewMode === 'split'
+            ? 'bg-bg-100 text-text-100 shadow-sm border border-border-200'
+            : 'text-text-400 hover:bg-bg-200 border border-transparent'
         }`}
         onClick={() => onChange('split')}
       >
@@ -151,7 +161,9 @@ export function ViewModeSwitch({ viewMode, onChange }: { viewMode: ViewMode; onC
         type="button"
         aria-pressed={viewMode === 'unified'}
         className={`px-2.5 py-1 rounded-md transition-all ${
-          viewMode === 'unified' ? 'bg-bg-100 text-text-100 shadow-sm border border-border-200' : 'text-text-400 hover:bg-bg-200 border border-transparent'
+          viewMode === 'unified'
+            ? 'bg-bg-100 text-text-100 shadow-sm border border-border-200'
+            : 'text-text-400 hover:bg-bg-200 border border-transparent'
         }`}
         onClick={() => onChange('unified')}
       >

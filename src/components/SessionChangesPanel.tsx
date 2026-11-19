@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { RetryIcon, ChevronRightIcon, MaximizeIcon, ClockIcon, GitBranchIcon, GitDiffIcon, LayersIcon } from './Icons'
 import { getMaterialIconUrl } from '../utils/materialIcons'
 import { DiffViewer, useDiffViewerData, type ViewMode } from './DiffViewer'
-import { Button, IconButton, Tabs, TabsList, TabsTrigger } from './ui'
+import { Button, IconButton, Tabs, TabsList, TabsTrigger, NativeTooltip } from './ui'
 import { ViewModeSwitch } from './FullscreenViewer'
 import { getCurrentProject, initGitProject } from '../api/client'
 import { getLastTurnDiff, getSessionDiff } from '../api/session'
@@ -696,11 +696,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const showPreview = !loading && selectedDiff !== null && !(error && diffs.length === 0)
 
   if (projectLoading && !project) {
-    return (
-      <div className="p-4 text-center text-text-400 text-ui-caption">
-        {t('sessionChanges.loadingChanges')}
-      </div>
-    )
+    return <div className="p-4 text-center text-text-400 text-ui-caption">{t('sessionChanges.loadingChanges')}</div>
   }
 
   if (!project && error) {
@@ -740,15 +736,11 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
         <div className="flex-1 overflow-auto panel-scrollbar-y">
           {nonGitLoading && nonGitFiles.length === 0 ? (
-            <div className="p-4 text-center text-text-400 text-ui-caption">
-              {t('sessionChanges.loadingChanges')}
-            </div>
+            <div className="p-4 text-center text-text-400 text-ui-caption">{t('sessionChanges.loadingChanges')}</div>
           ) : nonGitError && nonGitFiles.length === 0 ? (
             <div className="p-4 text-center text-danger-100 text-ui-caption">{nonGitError}</div>
           ) : nonGitFiles.length === 0 ? (
-            <div className="p-4 text-center text-text-400 text-ui-caption">
-              {t('sessionChanges.emptyDirectory')}
-            </div>
+            <div className="p-4 text-center text-text-400 text-ui-caption">{t('sessionChanges.emptyDirectory')}</div>
           ) : (
             <div className="py-0.5">
               {nonGitFiles.map(node => (
@@ -811,45 +803,49 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       >
         {/* Header */}
         <div className="relative flex h-10 items-center gap-2 px-3 shrink-0 overflow-hidden">
-          <div
-            className="min-w-0 flex flex-1 overflow-hidden"
-            title={`+${totalStats.additions} -${totalStats.deletions} ${fullFileCountLabel}`}
-            style={statFadeMaskStyle}
-          >
-            <div className="inline-flex h-6 min-w-max items-center gap-1.5 whitespace-nowrap text-ui-xs tabular-nums">
-              <span className="text-success-100">+{totalStats.additions}</span>
-              <span className="text-danger-100">-{totalStats.deletions}</span>
-              <span className="text-text-400">{compactFileCountLabel}</span>
+          <NativeTooltip>
+            <div
+              className="min-w-0 flex flex-1 overflow-hidden"
+              title={`+${totalStats.additions} -${totalStats.deletions} ${fullFileCountLabel}`}
+              style={statFadeMaskStyle}
+            >
+              <div className="inline-flex h-6 min-w-max items-center gap-1.5 whitespace-nowrap text-ui-xs tabular-nums">
+                <span className="text-success-100">+{totalStats.additions}</span>
+                <span className="text-danger-100">-{totalStats.deletions}</span>
+                <span className="text-text-400">{compactFileCountLabel}</span>
+              </div>
             </div>
-          </div>
+          </NativeTooltip>
 
           <div className="flex shrink-0 items-center gap-1">
-            <button
-              ref={changeMenuTriggerRef}
-              type="button"
-              onClick={() => {
-                changeMenuOpenFocusRef.current = 'selected'
-                setChangeMenuOpen(open => !open)
-              }}
-              onKeyDown={event => {
-                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                  event.preventDefault()
-                  changeMenuOpenFocusRef.current = event.key === 'ArrowUp' ? 'last' : 'first'
-                  setChangeMenuOpen(true)
-                }
-              }}
-              aria-label={`${t('sessionChanges.mode')}: ${activeChangeModeMeta.label}`}
-              aria-haspopup="menu"
-              aria-expanded={changeMenuOpen}
-              aria-controls={changeMenuOpen ? changeMenuId : undefined}
-              title={activeChangeModeMeta.label}
-              className={`
+            <NativeTooltip>
+              <button
+                ref={changeMenuTriggerRef}
+                type="button"
+                onClick={() => {
+                  changeMenuOpenFocusRef.current = 'selected'
+                  setChangeMenuOpen(open => !open)
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    changeMenuOpenFocusRef.current = event.key === 'ArrowUp' ? 'last' : 'first'
+                    setChangeMenuOpen(true)
+                  }
+                }}
+                aria-label={`${t('sessionChanges.mode')}: ${activeChangeModeMeta.label}`}
+                aria-haspopup="menu"
+                aria-expanded={changeMenuOpen}
+                aria-controls={changeMenuOpen ? changeMenuId : undefined}
+                title={activeChangeModeMeta.label}
+                className={`
                 inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors
                 ${changeMenuOpen ? interactive.toggleActiveNeutral : 'text-text-400 hover:text-text-100 hover:bg-bg-200 border border-transparent'}
               `}
-            >
-              <span className="shrink-0">{activeChangeModeMeta.icon}</span>
-            </button>
+              >
+                <span className="shrink-0">{activeChangeModeMeta.icon}</span>
+              </button>
+            </NativeTooltip>
 
             <DropdownMenu
               triggerRef={changeMenuTriggerRef}
@@ -914,18 +910,10 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
             {/* List Mode Toggle */}
             <Tabs variant="slider" value={listMode} onValueChange={value => setListMode(value as 'flat' | 'tree')}>
               <TabsList activeIndex={listMode === 'flat' ? 0 : 1} itemCount={2} className="shrink-0">
-                <TabsTrigger
-                  value="flat"
-                  title={t('sessionChanges.flatList')}
-                  className="px-2 py-0.5 text-ui-xs"
-                >
+                <TabsTrigger value="flat" title={t('sessionChanges.flatList')} className="px-2 py-0.5 text-ui-xs">
                   {t('sessionChanges.list')}
                 </TabsTrigger>
-                <TabsTrigger
-                  value="tree"
-                  title={t('sessionChanges.treeView')}
-                  className="px-2 py-0.5 text-ui-xs"
-                >
+                <TabsTrigger value="tree" title={t('sessionChanges.treeView')} className="px-2 py-0.5 text-ui-xs">
                   {t('sessionChanges.tree')}
                 </TabsTrigger>
               </TabsList>
@@ -960,9 +948,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         {/* File List */}
         <div className="flex-1 overflow-auto panel-scrollbar-y">
           {loading ? (
-            <div className="p-4 text-center text-text-400 text-ui-caption">
-              {t('sessionChanges.loadingChanges')}
-            </div>
+            <div className="p-4 text-center text-text-400 text-ui-caption">{t('sessionChanges.loadingChanges')}</div>
           ) : error && diffs.length === 0 ? (
             <div className="p-4 text-center text-danger-100 text-ui-caption">{error}</div>
           ) : diffs.length === 0 ? (

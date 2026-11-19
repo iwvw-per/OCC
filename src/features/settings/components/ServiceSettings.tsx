@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/Button'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { cn } from '../../../utils/cn'
 import { interactive } from '../../../utils/interaction'
 import { TrashIcon, WifiIcon, WifiOffIcon, SpinnerIcon, StopIcon } from '../../../components/Icons'
@@ -118,9 +119,9 @@ export function ServiceSettings() {
     serviceStore.setStarting(true)
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      const detected = await invoke<string | null>('detect_opencode_binary', { envVars: serviceStore.envVarsRecord }).catch(
-        () => null,
-      )
+      const detected = await invoke<string | null>('detect_opencode_binary', {
+        envVars: serviceStore.envVarsRecord,
+      }).catch(() => null)
       if (operation !== serviceOperationRef.current) return
       serviceStore.setDetectedBinaryPath(detected)
       const result = await invoke<StartOpencodeServiceResult>('start_opencode_service', {
@@ -186,7 +187,9 @@ export function ServiceSettings() {
   if (!isTauriDesktop) {
     return (
       <SettingsSection plain title={t('service.localService')} description={t('service.desktopOnlyDesc')}>
-        <div data-setting-desc className="text-ui-sm text-text-300 leading-relaxed">{t('service.webModeDesc')}</div>
+        <div data-setting-desc className="text-ui-sm text-text-300 leading-relaxed">
+          {t('service.webModeDesc')}
+        </div>
       </SettingsSection>
     )
   }
@@ -259,7 +262,12 @@ export function ServiceSettings() {
       >
         <div className="flex items-center gap-1.5">
           {!serviceStarting && !serviceRunning && (
-            <Button size="sm" variant="ghost" onClick={handleStartService} disabled={checkingService || stoppingService}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleStartService}
+              disabled={checkingService || stoppingService}
+            >
               {t('common:start')}
             </Button>
           )}
@@ -269,7 +277,12 @@ export function ServiceSettings() {
               {t('common:stop')}
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={handleCheckService} disabled={serviceStarting || checkingService || stoppingService}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleCheckService}
+            disabled={serviceStarting || checkingService || stoppingService}
+          >
             {t('common:refresh')}
           </Button>
         </div>
@@ -322,18 +335,20 @@ export function ServiceSettings() {
                   placeholder={t('service.valuePlaceholder')}
                   className={`${settingsFieldClass} min-w-0 font-mono text-ui-sm sm:flex-1`}
                 />
-                <button
-                  type="button"
-                  className="shrink-0 w-8 h-8 flex items-center justify-center text-text-400 hover:text-danger-100
+                <NativeTooltip>
+                  <button
+                    type="button"
+                    className="shrink-0 w-8 h-8 flex items-center justify-center text-text-400 hover:text-danger-100
                     hover:bg-danger-100/10 rounded-lg transition-colors"
-                  onClick={() => {
-                    const updated = envVars.filter((_, i) => i !== idx)
-                    serviceStore.setEnvVars(updated)
-                  }}
-                  title={t('common:remove')}
-                >
-                  <TrashIcon size={12} />
-                </button>
+                    onClick={() => {
+                      const updated = envVars.filter((_, i) => i !== idx)
+                      serviceStore.setEnvVars(updated)
+                    }}
+                    title={t('common:remove')}
+                  >
+                    <TrashIcon size={12} />
+                  </button>
+                </NativeTooltip>
               </div>
             ))}
           </div>

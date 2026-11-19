@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { QuestionIcon, CheckIcon, ReturnIcon, ChevronDownIcon, TimerIcon } from '../../components/Icons'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import type { ApiQuestionRequest, ApiQuestionInfo, QuestionAnswer } from '../../api'
 import { usePresence } from '../../hooks'
 import { useChatViewport } from './chatViewport'
@@ -214,9 +215,7 @@ export function QuestionDialog({
                 <div className="flex items-center justify-center text-text-100 w-5 h-5">
                   <QuestionIcon />
                 </div>
-                <h3 className="text-ui-base leading-none font-medium text-text-100">
-                  {t('questionDialog.title')}
-                </h3>
+                <h3 className="text-ui-base leading-none font-medium text-text-100">{t('questionDialog.title')}</h3>
                 {queueLength > 1 && (
                   <span className="text-ui-caption text-text-400 bg-bg-200 px-1.5 py-0.5 rounded">
                     {t('questionDialog.moreCount', { count: queueLength - 1 })}
@@ -229,15 +228,17 @@ export function QuestionDialog({
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => onCollapsedChange?.(true)}
-                className="p-1 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200 transition-colors"
-                title={t('questionDialog.minimize')}
-                aria-label={t('questionDialog.minimize')}
-              >
-                <ChevronDownIcon size={16} />
-              </button>
+              <NativeTooltip>
+                <button
+                  type="button"
+                  onClick={() => onCollapsedChange?.(true)}
+                  className="p-1 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200 transition-colors"
+                  title={t('questionDialog.minimize')}
+                  aria-label={t('questionDialog.minimize')}
+                >
+                  <ChevronDownIcon size={16} />
+                </button>
+              </NativeTooltip>
             </div>
 
             <div className="border-t border-border-300/30" />
@@ -364,9 +365,7 @@ function QuestionItem({
 
               <div className="flex-1 min-w-0">
                 <span className="text-ui-base text-text-100">{option.label}</span>
-                {option.description && (
-                  <p className="text-ui-caption text-text-400 mt-0.5">{option.description}</p>
-                )}
+                {option.description && <p className="text-ui-caption text-text-400 mt-0.5">{option.description}</p>}
               </div>
             </button>
           )

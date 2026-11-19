@@ -333,6 +333,7 @@ function InputBoxComponent({
   // Mobile Input Dock: 滚动收起/展开（逻辑在 useMobileCollapse hook 中）
   // ============================================
   const hasContent = text.trim().length > 0 || attachments.length > 0
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const { isCollapsed, expandedHeightRef, handleExpandInput, handleFocus, handleBlur, handleContainerPointerDown } =
     useMobileCollapse({
       enabled: interaction.enableCollapsedInputDock,
@@ -345,6 +346,7 @@ function InputBoxComponent({
       registerInputBox,
       collapsedPermission,
       collapsedQuestion,
+      suppressCollapse: modelMenuOpen,
     })
 
   // 处理 revert 恢复
@@ -1784,7 +1786,7 @@ function InputBoxComponent({
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                className={`glass rounded-2xl relative overflow-hidden focus-within:outline-none shadow-lg ${
+                className={`bg-bg-100 rounded-2xl relative overflow-hidden focus-within:outline-none shadow-lg ${
                   isCollapsed ? 'pointer-events-auto' : ''
                 } ${
                   isDragging || isInternalFileDragging
@@ -1910,6 +1912,7 @@ function InputBoxComponent({
                         selectedModelKey={selectedModelKey}
                         onModelChange={onModelChange}
                         modelsLoading={modelsLoading}
+                        onModelMenuOpenChange={setModelMenuOpen}
                         inputContainerRef={inputContainerRef}
                         modelSelectorRef={modelSelectorRef}
                       />

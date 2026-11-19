@@ -394,6 +394,16 @@ body,
   --color-oncolor-100: hsl(var(--oncolor-100));
 
   /* ============================================
+   * Tooltip colors — 提示气泡专用面
+   * ============================================
+   * 提示气泡用实色面(不走 .glass 毛玻璃),叠在任意内容上都清晰;
+   * tag 用于气泡内的快捷键徽标底色。随主题/明暗自动派生。 */
+  --color-tooltip: hsl(var(--bg-000));
+  --color-tooltip-foreground: hsl(var(--text-100));
+  --color-tooltip-tag: hsl(var(--bg-200));
+  --color-tooltip-tag-foreground: hsl(var(--text-300));
+
+  /* ============================================
    * Border Radius - 统一圆角规范
    * ============================================
    * 取值与 Tailwind 默认刻度一致。此前整套刻度被上移一档
@@ -1681,7 +1691,7 @@ html[data-chat-width-dragging] .glass-alt {
  * Morphing FAB — 收起态「回到底部」、展开态「发送 / 停止」三合一
  *
  * 与输入框共用 --chat-morph-dur / --chat-morph-ease：收起态是药丸右侧的圆按钮，
- * 展开时滑到输入框右下角并缩成圆角方块，图标在 ↓ / 发送 / 停止 之间交叉淡入。
+ * 展开时滑到输入框右下角并缩成圆形，图标在 ↓ / 发送 / 停止 之间交叉淡入。
  * 定位锚点（chat-fab-anchor）宽度跟随输入框，所以 FAB 始终贴着输入框右缘。
  * ============================================ */
 .chat-fab-anchor {
@@ -1742,13 +1752,13 @@ html[data-chat-width-dragging] .glass-alt {
   cursor: default;
 }
 
-/* 展开态：滑到输入框右下角，圆角方块。 */
+/* 展开态：滑到输入框右下角，圆形。 */
 .chat-fab[data-collapsed='false'] {
   right: 18px;
   bottom: 14px;
   width: var(--chat-fab-expanded-size);
   height: var(--chat-fab-expanded-size);
-  border-radius: 6px;
+  border-radius: calc(var(--chat-fab-expanded-size) / 2);
 }
 
 /* 停止态换个同色系深一档的底，与发送区分。 */

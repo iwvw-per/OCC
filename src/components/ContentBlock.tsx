@@ -7,6 +7,7 @@
  * - Loading 状态 -> Skeleton
  */
 
+import { NativeTooltip } from './ui/Tooltip'
 import {
   lazy,
   memo,
@@ -38,9 +39,7 @@ import { useUiDisclosureState } from '../utils/uiDisclosureState'
 // CodePreview 依赖 CodeMirror（@codemirror/* + @lezer/* 约 950KB 源码）。
 // ContentBlock 处在首屏消息流的必经路径上，静态导入会把整条 CodeMirror 链路
 // 打进主 chunk，因此这里改为按需加载：只有真正渲染代码内容时才拉取。
-const CodePreview = lazy(() =>
-  import('./CodePreview').then(module => ({ default: module.CodePreview })),
-)
+const CodePreview = lazy(() => import('./CodePreview').then(module => ({ default: module.CodePreview })))
 
 /** 惰性加载代码视图期间的占位，避免布局塌缩与闪烁。 */
 function CodePreviewFallback() {
@@ -379,16 +378,18 @@ export const ContentBlock = memo(function ContentBlock({
 
           {/* Fullscreen button - 支持 diff 和代码 */}
           {(isDiff || content?.trim()) && !collapsed && (
-            <button
-              className="p-0.5 text-text-400 hover:text-text-200 rounded transition-colors"
-              onClick={e => {
-                e.stopPropagation()
-                openFullscreen()
-              }}
-              title={t('contentBlock.fullscreen')}
-            >
-              <MaximizeIcon size={13} />
-            </button>
+            <NativeTooltip>
+              <button
+                className="p-0.5 text-text-400 hover:text-text-200 rounded transition-colors"
+                onClick={e => {
+                  e.stopPropagation()
+                  openFullscreen()
+                }}
+                title={t('contentBlock.fullscreen')}
+              >
+                <MaximizeIcon size={13} />
+              </button>
+            </NativeTooltip>
           )}
 
           {/* Exit code */}
@@ -408,9 +409,7 @@ export const ContentBlock = memo(function ContentBlock({
       <div
         data-content-block-body
         onTransitionEnd={handleBodyTransitionEnd}
-        className={`grid ${panelClassName} ${
-          layoutOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-        }`}
+        className={`grid ${panelClassName} ${layoutOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
       >
         <div ref={wrapperRef} className="overflow-hidden min-h-0">
           {shouldRenderContent && hasContent && (

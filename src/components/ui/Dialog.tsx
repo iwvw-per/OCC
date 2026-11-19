@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useId } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { CloseIcon } from '../Icons'
+import { NativeTooltip } from './Tooltip'
 import { useDelayedRender } from '../../hooks/useDelayedRender'
 import { useBackClose } from '../../hooks/useBackClose'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -70,7 +71,10 @@ export function Dialog({
   }, [])
 
   const getTopOpenDialog = useCallback(
-    () => Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"][data-dialog-open="true"]')).at(-1),
+    () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"][data-dialog-open="true"]'),
+      ).at(-1),
     [],
   )
 
@@ -368,15 +372,17 @@ export function Dialog({
                     {title}
                   </div>
                   {showCloseButton && (
-                    <button
-                      type="button"
-                      onClick={requestClose}
-                      aria-label={t('common:close')}
-                      className="hidden md:block p-2 text-text-400 hover:text-text-200 hover:bg-bg-100 rounded-md transition-colors"
-                      title={t('common:close')}
-                    >
-                      <CloseIcon size={18} />
-                    </button>
+                    <NativeTooltip>
+                      <button
+                        type="button"
+                        onClick={requestClose}
+                        aria-label={t('common:close')}
+                        className="hidden md:block p-2 text-text-400 hover:text-text-200 hover:bg-bg-100 rounded-md transition-colors"
+                        title={t('common:close')}
+                      >
+                        <CloseIcon size={18} />
+                      </button>
+                    </NativeTooltip>
                   )}
                 </div>
               )}

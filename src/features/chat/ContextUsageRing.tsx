@@ -10,6 +10,7 @@
 
 import { useTranslation } from 'react-i18next'
 import { CircularProgress } from '../../components/CircularProgress'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import { formatCost, formatTokens, useSessionStats } from '../../hooks'
 import { autoCompactCeiling, compactRatio } from '../../utils/contextWindow'
 import { cn } from '../../utils/cn'
@@ -56,48 +57,50 @@ export function ContextUsageRing({ contextLimit, onOpenDetails, className }: Con
     : `${t('sidebar.contextUsage')}: ${stats.contextUsed === null ? '—' : formatTokens(stats.contextUsed)} · ${t('sidebar.contextLimitUnknown')} · ${formatCost(stats.totalCost)}`
 
   return (
-    <button
-      type="button"
-      onClick={onOpenDetails}
-      title={title}
-      aria-label={t('sidebar.contextUsage')}
-      className={cn(
-        'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-text-300 hover:text-text-100',
-        interactive.subtle,
-        className,
-      )}
-    >
-      {known ? (
-        <CircularProgress
-          progress={percent / 100}
-          size={18}
-          strokeWidth={2.5}
-          trackClassName="text-text-100/10"
-          progressClassName={progressColor}
-        />
-      ) : (
-        /**
-         * 未知窗口：只画轨道 + 一个居中的短横，明确表示「不知道」。
-         *
-         * 此前这里进度恒为 0、也不加任何标记，视觉上与「占用 0%」完全一样 ——
-         * 用户看到的就是「圆圈在，但怎么都不涨」。原因是模型列表还没到手、
-         * 或该模型没声明 limit，`contextPercent` 为 null（不是 0）。加一条
-         * 虚线状的短横后，两种状态可以一眼区分。
-         */
-        <>
+    <NativeTooltip>
+      <button
+        type="button"
+        onClick={onOpenDetails}
+        title={title}
+        aria-label={t('sidebar.contextUsage')}
+        className={cn(
+          'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-text-300 hover:text-text-100',
+          interactive.subtle,
+          className,
+        )}
+      >
+        {known ? (
           <CircularProgress
-            progress={0}
+            progress={percent / 100}
             size={18}
             strokeWidth={2.5}
             trackClassName="text-text-100/10"
-            progressClassName="text-transparent"
+            progressClassName={progressColor}
           />
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute h-[2px] w-[6px] rounded-full bg-text-500/70"
-          />
-        </>
-      )}
-    </button>
+        ) : (
+          /**
+           * 未知窗口：只画轨道 + 一个居中的短横，明确表示「不知道」。
+           *
+           * 此前这里进度恒为 0、也不加任何标记，视觉上与「占用 0%」完全一样 ——
+           * 用户看到的就是「圆圈在，但怎么都不涨」。原因是模型列表还没到手、
+           * 或该模型没声明 limit，`contextPercent` 为 null（不是 0）。加一条
+           * 虚线状的短横后，两种状态可以一眼区分。
+           */
+          <>
+            <CircularProgress
+              progress={0}
+              size={18}
+              strokeWidth={2.5}
+              trackClassName="text-text-100/10"
+              progressClassName="text-transparent"
+            />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute h-[2px] w-[6px] rounded-full bg-text-500/70"
+            />
+          </>
+        )}
+      </button>
+    </NativeTooltip>
   )
 }

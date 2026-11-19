@@ -9,6 +9,7 @@ import { useServerStore } from '../../../hooks/useServerStore'
 import { useHostSlideState } from './hostSwitchDirection'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { IconButton } from '../../../components/ui/IconButton'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { SidebarFooter } from './SidebarFooter'
 import {
   SidebarIcon,
@@ -383,7 +384,15 @@ export function SidePanel({
     if (needSwitchSession) {
       onNewSession()
     }
-  }, [selectedSessionIds, selectedSessionId, sessionLookup, currentDirectory, refresh, onNewSession, clearSessionSelection])
+  }, [
+    selectedSessionIds,
+    selectedSessionId,
+    sessionLookup,
+    currentDirectory,
+    refresh,
+    onNewSession,
+    clearSessionSelection,
+  ])
 
   // ---- 批量移除项目 ----
   const handleBatchRemoveProjects = useCallback(() => {
@@ -402,7 +411,14 @@ export function SidePanel({
     }
     clearProjectSelection()
     setBatchRemoveProjectConfirm(false)
-  }, [folderProjects, savedDirectoryPaths, selectedProjectIds, removeDirectory, clearProjectSelection, hideProjectDirectory])
+  }, [
+    folderProjects,
+    savedDirectoryPaths,
+    selectedProjectIds,
+    removeDirectory,
+    clearProjectSelection,
+    hideProjectDirectory,
+  ])
 
   // 单个项目移除：二次点击防误触（按钮层），这里直接执行。
   //
@@ -507,9 +523,7 @@ export function SidePanel({
             {/* 用 hash 路由跳 home：`href="/"` 会触发整页导航，丢掉当前 hash，
                 未落盘的本地状态（如刚添加的项目）会因此看起来「消失」。 */}
             <a href="#/" className="flex items-center whitespace-nowrap h-full">
-              <span className="text-ui-base font-semibold text-text-100 tracking-tight">
-                {t('header.openCode')}
-              </span>
+              <span className="text-ui-base font-semibold text-text-100 tracking-tight">{t('header.openCode')}</span>
             </a>
           </div>
         </div>
@@ -518,66 +532,70 @@ export function SidePanel({
       {/* ===== Navigation - 图标位置固定；间距与 Header 面板按钮对齐 ===== */}
       <div className={`flex flex-col gap-1 mx-2 ${hideHeader ? 'mt-2' : 'mt-1'}`}>
         {/* New Chat - 图标始终在 padding-left: 6px 位置，收起时刚好居中 */}
-        <button
-          type="button"
-          onClick={() => onNewSession()}
-          aria-label={t('sidebar.newChat')}
-          className={cn(
-            'h-8 flex items-center rounded-lg text-text-300 group overflow-hidden',
-            interactive.row,
-            'transition-all duration-300',
-          )}
-          style={{
-            width: showLabels ? '100%' : 32,
-            paddingLeft: 6,
-            paddingRight: 6,
-          }}
-          title={t('sidebar.newChat')}
-        >
-          <span className="size-5 flex items-center justify-center shrink-0">
-            <NewChatIcon size={16} />
-          </span>
-          <span
-            className="ml-2 text-ui-base whitespace-nowrap transition-opacity duration-300"
-            style={{ opacity: showLabels ? 1 : 0 }}
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={() => onNewSession()}
+            aria-label={t('sidebar.newChat')}
+            className={cn(
+              'h-8 flex items-center rounded-lg text-text-300 group overflow-hidden',
+              interactive.row,
+              'transition-all duration-300',
+            )}
+            style={{
+              width: showLabels ? '100%' : 32,
+              paddingLeft: 6,
+              paddingRight: 6,
+            }}
+            title={t('sidebar.newChat')}
           >
-            {t('sidebar.newChat')}
-          </span>
-          <span
-            className="ml-auto text-ui-xs text-text-500 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
-            style={{ opacity: showLabels ? undefined : 0 }}
-          >
-            {newChatShortcut}
-          </span>
-        </button>
+            <span className="size-5 flex items-center justify-center shrink-0">
+              <NewChatIcon size={16} />
+            </span>
+            <span
+              className="ml-2 text-ui-base whitespace-nowrap transition-opacity duration-300"
+              style={{ opacity: showLabels ? 1 : 0 }}
+            >
+              {t('sidebar.newChat')}
+            </span>
+            <span
+              className="ml-auto text-ui-xs text-text-500 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
+              style={{ opacity: showLabels ? undefined : 0 }}
+            >
+              {newChatShortcut}
+            </span>
+          </button>
+        </NativeTooltip>
 
         {/* 新建项目 - 收起时仅图标 */}
-        <button
-          type="button"
-          onClick={onAddProject}
-          aria-label={t('sidebar.newProject')}
-          className={cn(
-            'h-8 flex items-center rounded-lg text-text-300 group overflow-hidden',
-            interactive.row,
-            'transition-all duration-300',
-          )}
-          style={{
-            width: showLabels ? '100%' : 32,
-            paddingLeft: 6,
-            paddingRight: 6,
-          }}
-          title={t('sidebar.newProject')}
-        >
-          <span className="size-5 flex items-center justify-center shrink-0">
-            <PlusIcon size={16} />
-          </span>
-          <span
-            className="ml-2 text-ui-base whitespace-nowrap transition-opacity duration-300"
-            style={{ opacity: showLabels ? 1 : 0 }}
+        <NativeTooltip>
+          <button
+            type="button"
+            onClick={onAddProject}
+            aria-label={t('sidebar.newProject')}
+            className={cn(
+              'h-8 flex items-center rounded-lg text-text-300 group overflow-hidden',
+              interactive.row,
+              'transition-all duration-300',
+            )}
+            style={{
+              width: showLabels ? '100%' : 32,
+              paddingLeft: 6,
+              paddingRight: 6,
+            }}
+            title={t('sidebar.newProject')}
           >
-            {t('sidebar.newProject')}
-          </span>
-        </button>
+            <span className="size-5 flex items-center justify-center shrink-0">
+              <PlusIcon size={16} />
+            </span>
+            <span
+              className="ml-2 text-ui-base whitespace-nowrap transition-opacity duration-300"
+              style={{ opacity: showLabels ? 1 : 0 }}
+            >
+              {t('sidebar.newProject')}
+            </span>
+          </button>
+        </NativeTooltip>
 
         {/* Search — 与上方导航同列 gap-0.5；收起时图标，展开时输入框 */}
         {showLabels ? (
@@ -618,25 +636,27 @@ export function SidePanel({
             )}
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => {
-              pendingFocusSearchRef.current = true
-              onToggleSidebar()
-            }}
-            aria-label={t('sidebar.searchChats')}
-            className={cn(
-              'h-8 mb-1.5 flex items-center rounded-lg text-text-300 hover:text-text-100 overflow-hidden',
-              interactive.row,
-              'transition-all duration-300',
-            )}
-            style={{ width: 32, paddingLeft: 6, paddingRight: 6 }}
-            title={t('sidebar.searchChats')}
-          >
-            <span className="size-5 flex items-center justify-center shrink-0">
-              <SearchIcon size={16} />
-            </span>
-          </button>
+          <NativeTooltip>
+            <button
+              type="button"
+              onClick={() => {
+                pendingFocusSearchRef.current = true
+                onToggleSidebar()
+              }}
+              aria-label={t('sidebar.searchChats')}
+              className={cn(
+                'h-8 mb-1.5 flex items-center rounded-lg text-text-300 hover:text-text-100 overflow-hidden',
+                interactive.row,
+                'transition-all duration-300',
+              )}
+              style={{ width: 32, paddingLeft: 6, paddingRight: 6 }}
+              title={t('sidebar.searchChats')}
+            >
+              <span className="size-5 flex items-center justify-center shrink-0">
+                <SearchIcon size={16} />
+              </span>
+            </button>
+          </NativeTooltip>
         )}
       </div>
 
@@ -675,56 +695,64 @@ export function SidePanel({
                 </span>
                 <div className="ml-auto flex items-center gap-2 md:gap-1.5">
                   {selectedSessionIds.size > 0 && (
-                    <button
-                      type="button"
-                      data-icon-button
-                      onClick={() => setBatchDeleteSessionConfirm(true)}
-                      className={cn('p-1.5 rounded-md text-text-500 hover:text-danger-100', interactive.danger)}
-                      title={t('sidebar.deleteSessionsWithCount', { count: selectedSessionIds.size })}
-                      aria-label={t('sidebar.deleteSessionsWithCount', { count: selectedSessionIds.size })}
-                    >
-                      <TrashIcon size={14} />
-                    </button>
+                    <NativeTooltip>
+                      <button
+                        type="button"
+                        data-icon-button
+                        onClick={() => setBatchDeleteSessionConfirm(true)}
+                        className={cn('p-1.5 rounded-md text-text-500 hover:text-danger-100', interactive.danger)}
+                        title={t('sidebar.deleteSessionsWithCount', { count: selectedSessionIds.size })}
+                        aria-label={t('sidebar.deleteSessionsWithCount', { count: selectedSessionIds.size })}
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </NativeTooltip>
                   )}
                   {selectedProjectIds.size > 0 && (
+                    <NativeTooltip>
+                      <button
+                        type="button"
+                        data-icon-button
+                        onClick={() => setBatchRemoveProjectConfirm(true)}
+                        className={cn(
+                          'p-1.5 rounded-md text-text-500 hover:text-warning-100',
+                          interactive.warning,
+                          interactive.focusRingCompact,
+                        )}
+                        title={t('sidebar.removeProjectsWithCount', { count: selectedProjectIds.size })}
+                        aria-label={t('sidebar.removeProjectsWithCount', { count: selectedProjectIds.size })}
+                      >
+                        <FolderMinusIcon size={14} />
+                      </button>
+                    </NativeTooltip>
+                  )}
+                  <NativeTooltip>
                     <button
                       type="button"
                       data-icon-button
-                      onClick={() => setBatchRemoveProjectConfirm(true)}
-                      className={cn(
-                        'p-1.5 rounded-md text-text-500 hover:text-warning-100',
-                        interactive.warning,
-                        interactive.focusRingCompact,
-                      )}
-                      title={t('sidebar.removeProjectsWithCount', { count: selectedProjectIds.size })}
-                      aria-label={t('sidebar.removeProjectsWithCount', { count: selectedProjectIds.size })}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={exitEditMode}
+                      aria-label={t('sidebar.doneManaging')}
+                      aria-pressed
+                      className={cn('p-1.5 rounded-md text-text-500 hover:text-text-100', interactive.subtle)}
+                      title={t('sidebar.doneManaging')}
                     >
-                      <FolderMinusIcon size={14} />
+                      <CheckIcon size={14} />
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    data-icon-button
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={exitEditMode}
-                    aria-label={t('sidebar.doneManaging')}
-                    aria-pressed
-                    className={cn('p-1.5 rounded-md text-text-500 hover:text-text-100', interactive.subtle)}
-                    title={t('sidebar.doneManaging')}
-                  >
-                    <CheckIcon size={14} />
-                  </button>
+                  </NativeTooltip>
                 </div>
               </>
             ) : (
               <>
                 {/* 最左：当前主机名（只读标识）；右侧按钮组仍靠右 */}
-                <span
-                  className="min-w-0 flex-1 truncate pl-[6px] text-ui-caption font-medium text-text-400"
-                  title={activeServer?.name}
-                >
-                  {activeServer?.name}
-                </span>
+                <NativeTooltip>
+                  <span
+                    className="min-w-0 flex-1 truncate pl-[6px] text-ui-caption font-medium text-text-400"
+                    title={activeServer?.name}
+                  >
+                    {activeServer?.name}
+                  </span>
+                </NativeTooltip>
                 {/* 收起优先：默认先收起全部；全部收起后点击才展开全部。
                     判定与作用必须用同一批项目：此前判定只看非派生项目，展开却
                     用 folderProjects（含派生项目），于是「全部收起」后仍有一个
@@ -809,9 +837,7 @@ export function SidePanel({
           <>
             {t('sidebar.batchDeleteSessionsConfirm', { count: selectedSessionIds.size })}
             {selectedSessionId && selectedSessionIds.has(selectedSessionId) && (
-              <div className="mt-2 text-ui-caption text-warning-100">
-                {t('sidebar.batchDeleteIncludesCurrent')}
-              </div>
+              <div className="mt-2 text-ui-caption text-warning-100">{t('sidebar.batchDeleteIncludesCurrent')}</div>
             )}
           </>
         }

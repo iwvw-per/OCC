@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Popover, PopoverAnchor, PopoverContent } from '../../../components/ui/Popover'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { getMaterialIconUrl } from '../../../utils/materialIcons'
 import { cn } from '../../../utils/cn'
 import { layoutStore } from '../../../store/layoutStore'
@@ -213,8 +214,16 @@ export const DiffChips = memo(function DiffChips({ files, className }: DiffChips
               ? 'border-border-300 bg-bg-200 text-text-100'
               : 'border-border-200/50 bg-bg-100 text-text-300 hover:bg-bg-200',
           )}
-          title={preferTouchUi ? t('diffChips.tapToPreview', { path: file.path }) : t('diffChips.openInPanel', { path: file.path })}
-          aria-label={preferTouchUi ? t('diffChips.tapToPreview', { path: file.path }) : t('diffChips.openInPanel', { path: file.path })}
+          title={
+            preferTouchUi
+              ? t('diffChips.tapToPreview', { path: file.path })
+              : t('diffChips.openInPanel', { path: file.path })
+          }
+          aria-label={
+            preferTouchUi
+              ? t('diffChips.tapToPreview', { path: file.path })
+              : t('diffChips.openInPanel', { path: file.path })
+          }
         >
           <FileGlyph path={file.path} />
           <span className="min-w-0 truncate">{basename(file.path)}</span>
@@ -232,9 +241,7 @@ export const DiffChips = memo(function DiffChips({ files, className }: DiffChips
       ))}
 
       {overflow > 0 && (
-        <span className="font-mono text-ui-xs text-text-500">
-          {t('diffChips.more', { count: overflow })}
-        </span>
+        <span className="font-mono text-ui-xs text-text-500">{t('diffChips.more', { count: overflow })}</span>
       )}
 
       <Popover open={!!activeFile} onOpenChange={next => !next && setActivePath(null)}>
@@ -271,9 +278,11 @@ function DiffPanel({ file }: { file: ChangedFile }) {
   return (
     <>
       <div className="flex items-center gap-2 border-b border-border-200/50 px-2.5 py-1.5 font-mono">
-        <span className="min-w-0 flex-1 truncate text-text-300" title={file.path}>
-          {file.path}
-        </span>
+        <NativeTooltip>
+          <span className="min-w-0 flex-1 truncate text-text-300" title={file.path}>
+            {file.path}
+          </span>
+        </NativeTooltip>
         <span className="shrink-0 tabular-nums">
           {file.additions > 0 && <span className="text-success-100">+{file.additions}</span>}
           {file.deletions > 0 && (

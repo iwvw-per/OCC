@@ -1,4 +1,5 @@
 import { CheckIcon } from '../Icons'
+import { NativeTooltip } from './Tooltip'
 import { cn } from '../../utils/cn'
 import { interactive } from '../../utils/interaction'
 
@@ -39,7 +40,9 @@ export function MenuItem({
         'transition-colors duration-150',
         // 禁用态优先于交互态：用 disabled: 前缀而非三元，避免顺序依赖
         interactive.disabled,
-        disabled ? 'text-text-500' : cn('cursor-pointer hover:bg-bg-200 active:bg-bg-300', interactive.focusRingCompact),
+        disabled
+          ? 'text-text-500'
+          : cn('cursor-pointer hover:bg-bg-200 active:bg-bg-300', interactive.focusRingCompact),
         selected && !disabled && 'text-text-100',
       )}
     >
@@ -51,9 +54,11 @@ export function MenuItem({
           {label}
         </div>
         {description && (
-          <div className="text-ui-sm text-text-500 mt-0.5 line-clamp-2" title={description}>
-            {description}
-          </div>
+          <NativeTooltip>
+            <div className="text-ui-sm text-text-500 mt-0.5 line-clamp-2" title={description}>
+              {description}
+            </div>
+          </NativeTooltip>
         )}
       </div>
       {selected && !disabled && (

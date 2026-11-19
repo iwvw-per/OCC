@@ -8,6 +8,7 @@ import { useUpdateStore, hasUpdateAvailable } from '../store/updateStore'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Header } from '../features/chat/Header'
 import { DesktopNavControls } from './DesktopNavControls'
+import { NativeTooltip } from './ui/Tooltip'
 
 /* 右上角窗口控制按钮专属样式：贴右边缘，无圆角，近似正方形（与其余统一样式区分） */
 export const DESKTOP_TITLEBAR_BUTTON =
@@ -64,33 +65,39 @@ const WindowsControls = memo(function WindowsControls() {
 
   return (
     <div className="flex h-full shrink-0 items-stretch">
-      <button
-        type="button"
-        onClick={handleMinimize}
-        className={DESKTOP_TITLEBAR_BUTTON}
-        title={t('desktopTitlebar.minimize')}
-        aria-label={t('desktopTitlebar.minimize')}
-      >
-        <MinusIcon size={14} />
-      </button>
-      <button
-        type="button"
-        onClick={handleToggleMaximize}
-        className={DESKTOP_TITLEBAR_BUTTON}
-        title={maximized ? t('desktopTitlebar.restore') : t('desktopTitlebar.maximize')}
-        aria-label={maximized ? t('desktopTitlebar.restore') : t('desktopTitlebar.maximize')}
-      >
-        {maximized ? <CopyIcon size={12} /> : <SquareIcon size={12} />}
-      </button>
-      <button
-        type="button"
-        onClick={handleClose}
-        className={`${DESKTOP_TITLEBAR_BUTTON} hover:bg-danger-100 hover:text-white`}
-        title={t('desktopTitlebar.close')}
-        aria-label={t('desktopTitlebar.close')}
-      >
-        <CloseIcon size={14} />
-      </button>
+      <NativeTooltip>
+        <button
+          type="button"
+          onClick={handleMinimize}
+          className={DESKTOP_TITLEBAR_BUTTON}
+          title={t('desktopTitlebar.minimize')}
+          aria-label={t('desktopTitlebar.minimize')}
+        >
+          <MinusIcon size={14} />
+        </button>
+      </NativeTooltip>
+      <NativeTooltip>
+        <button
+          type="button"
+          onClick={handleToggleMaximize}
+          className={DESKTOP_TITLEBAR_BUTTON}
+          title={maximized ? t('desktopTitlebar.restore') : t('desktopTitlebar.maximize')}
+          aria-label={maximized ? t('desktopTitlebar.restore') : t('desktopTitlebar.maximize')}
+        >
+          {maximized ? <CopyIcon size={12} /> : <SquareIcon size={12} />}
+        </button>
+      </NativeTooltip>
+      <NativeTooltip>
+        <button
+          type="button"
+          onClick={handleClose}
+          className={`${DESKTOP_TITLEBAR_BUTTON} hover:bg-danger-100 hover:text-white`}
+          title={t('desktopTitlebar.close')}
+          aria-label={t('desktopTitlebar.close')}
+        >
+          <CloseIcon size={14} />
+        </button>
+      </NativeTooltip>
     </div>
   )
 })

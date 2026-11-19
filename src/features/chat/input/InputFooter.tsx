@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { RefObject } from 'react'
 import { CheckIcon, ClockIcon, CircleIcon, CloseIcon, FastForwardIcon } from '../../../components/Icons'
 import { CircularProgress } from '../../../components/CircularProgress'
+import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { useTodos, useTodoStats, useCurrentTask, todoStore } from '../../../store'
 import { getSessionTodos } from '../../../api/session'
 import { subscribeToServerEvents } from '../../../api/events'
@@ -254,28 +255,30 @@ export const InputFooter = memo(function InputFooter({
     >
       {/* Full Auto 三态切换: off -> session -> global -> off */}
       {showAutoApprove && (
-        <button
-          onClick={() => autoApproveStore.cyclePaneFullAutoMode(paneId)}
-          className="shrink-0 flex items-center justify-center hover:text-text-100 transition-colors"
-          title={
-            fullAutoMode === 'off'
-              ? t('inputFooter.autoApproveOff')
-              : fullAutoMode === 'session'
-                ? t('inputFooter.autoApproveSession')
-                : t('inputFooter.autoApproveGlobal')
-          }
-        >
-          <FastForwardIcon
-            size={11}
-            className={`transition-colors ${
-              fullAutoMode === 'global'
-                ? 'text-danger-100 drop-shadow-[0_0_4px_var(--color-danger-100)]'
+        <NativeTooltip>
+          <button
+            onClick={() => autoApproveStore.cyclePaneFullAutoMode(paneId)}
+            className="shrink-0 flex items-center justify-center hover:text-text-100 transition-colors"
+            title={
+              fullAutoMode === 'off'
+                ? t('inputFooter.autoApproveOff')
                 : fullAutoMode === 'session'
-                  ? 'text-warning-100 drop-shadow-[0_0_4px_var(--color-warning-100)]'
-                  : ''
-            }`}
-          />
-        </button>
+                  ? t('inputFooter.autoApproveSession')
+                  : t('inputFooter.autoApproveGlobal')
+            }
+          >
+            <FastForwardIcon
+              size={11}
+              className={`transition-colors ${
+                fullAutoMode === 'global'
+                  ? 'text-danger-100 drop-shadow-[0_0_4px_var(--color-danger-100)]'
+                  : fullAutoMode === 'session'
+                    ? 'text-warning-100 drop-shadow-[0_0_4px_var(--color-warning-100)]'
+                    : ''
+              }`}
+            />
+          </button>
+        </NativeTooltip>
       )}
 
       {showAutoApprove && showSessionStats && <span className="text-text-400/70 shrink-0">·</span>}
@@ -293,24 +296,26 @@ export const InputFooter = memo(function InputFooter({
       {showTaskProgress && hasTodos && (
         <>
           {(showAutoApprove || showSessionStats) && <span className="text-text-400/70 shrink-0">·</span>}
-          <button
-            onClick={togglePanel}
-            className={`flex items-center gap-1.5 min-w-0 border border-transparent px-1 rounded-md hover:bg-bg-200 hover:border-border-200 transition-colors ${
-              panelOpen ? 'text-text-100' : ''
-            }`}
-            title={showTaskLabel ? undefined : taskLabel}
-          >
-            <MiniProgress size={11} progress={progress} done={isAllDone} />
-            <span className="tabular-nums shrink-0">
-              {stats.completed}/{stats.total}
-            </span>
-            {showTaskLabel && (
-              <>
-                <span className="text-text-400/60 shrink-0">·</span>
-                <span className="truncate text-left">{taskLabel}</span>
-              </>
-            )}
-          </button>
+          <NativeTooltip>
+            <button
+              onClick={togglePanel}
+              className={`flex items-center gap-1.5 min-w-0 border border-transparent px-1 rounded-md hover:bg-bg-200 hover:border-border-200 transition-colors ${
+                panelOpen ? 'text-text-100' : ''
+              }`}
+              title={showTaskLabel ? undefined : taskLabel}
+            >
+              <MiniProgress size={11} progress={progress} done={isAllDone} />
+              <span className="tabular-nums shrink-0">
+                {stats.completed}/{stats.total}
+              </span>
+              {showTaskLabel && (
+                <>
+                  <span className="text-text-400/60 shrink-0">·</span>
+                  <span className="truncate text-left">{taskLabel}</span>
+                </>
+              )}
+            </button>
+          </NativeTooltip>
         </>
       )}
 

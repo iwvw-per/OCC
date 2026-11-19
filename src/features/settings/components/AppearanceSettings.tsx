@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
-import { Button, Select, SelectContent, SelectItem, SelectTrigger, Textarea } from '../../../components/ui'
+import {
+  Button,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  Textarea,
+  NativeTooltip,
+} from '../../../components/ui'
 import { SunIcon, MoonIcon, SystemIcon, CheckIcon, GlobeIcon, UndoIcon } from '../../../components/Icons'
 import { settingsFieldClass, Toggle, SegmentedControl, SettingRow, SettingField, SettingsSection } from './SettingsUI'
 import { CodeBlockThemeSettings } from './CodeBlockThemeSettings'
@@ -137,9 +145,7 @@ function FontScaleSlider({
   const displayPx = baseSize + value
   return (
     <div className="flex items-center gap-3 w-full">
-      <span className="text-text-400 text-ui-xs select-none shrink-0">
-        A
-      </span>
+      <span className="text-text-400 text-ui-xs select-none shrink-0">A</span>
       <input
         type="range"
         min={FONT_SCALE_MIN}
@@ -149,12 +155,8 @@ function FontScaleSlider({
         onChange={e => onChange(Number(e.target.value))}
         className={sliderCls}
       />
-      <span className="text-text-400 text-ui-base select-none shrink-0">
-        A
-      </span>
-      <span className="text-ui-caption text-text-300 w-12 text-right tabular-nums shrink-0">
-        {displayPx}px
-      </span>
+      <span className="text-text-400 text-ui-base select-none shrink-0">A</span>
+      <span className="text-ui-caption text-text-300 w-12 text-right tabular-nums shrink-0">{displayPx}px</span>
     </div>
   )
 }
@@ -491,9 +493,7 @@ function SavedSnippetItem({
         <div className="min-w-0 flex-1">
           <div className="flex min-h-7 items-center gap-2 flex-wrap">
             <span
-              className={`text-ui-caption font-medium truncate ${
-                isActive ? 'text-accent-main-100' : 'text-text-100'
-              }`}
+              className={`text-ui-caption font-medium truncate ${isActive ? 'text-accent-main-100' : 'text-text-100'}`}
             >
               {snippet.name}
             </span>
@@ -773,15 +773,17 @@ export function AppearanceSettings() {
           description={t('appearance.uiFontScaleDesc')}
           actions={
             uiFontScale !== 0 ? (
-              <button
-                type="button"
-                onClick={() => setUIFontScale(0)}
-                title={t('appearance.fontScaleReset')}
-                aria-label={t('appearance.fontScaleReset')}
-                className={cn('p-1 rounded-md text-text-400 hover:text-text-200', interactive.subtle)}
-              >
-                <UndoIcon size={12} />
-              </button>
+              <NativeTooltip>
+                <button
+                  type="button"
+                  onClick={() => setUIFontScale(0)}
+                  title={t('appearance.fontScaleReset')}
+                  aria-label={t('appearance.fontScaleReset')}
+                  className={cn('p-1 rounded-md text-text-400 hover:text-text-200', interactive.subtle)}
+                >
+                  <UndoIcon size={12} />
+                </button>
+              </NativeTooltip>
             ) : undefined
           }
         >
@@ -793,15 +795,17 @@ export function AppearanceSettings() {
           description={t('appearance.codeFontScaleDesc')}
           actions={
             codeFontScale !== 0 ? (
-              <button
-                type="button"
-                onClick={() => setCodeFontScale(0)}
-                title={t('appearance.fontScaleReset')}
-                aria-label={t('appearance.fontScaleReset')}
-                className={cn('p-1 rounded-md text-text-400 hover:text-text-200', interactive.subtle)}
-              >
-                <UndoIcon size={12} />
-              </button>
+              <NativeTooltip>
+                <button
+                  type="button"
+                  onClick={() => setCodeFontScale(0)}
+                  title={t('appearance.fontScaleReset')}
+                  aria-label={t('appearance.fontScaleReset')}
+                  className={cn('p-1 rounded-md text-text-400 hover:text-text-200', interactive.subtle)}
+                >
+                  <UndoIcon size={12} />
+                </button>
+              </NativeTooltip>
             ) : undefined
           }
         >

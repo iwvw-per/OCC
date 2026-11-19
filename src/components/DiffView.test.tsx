@@ -33,7 +33,7 @@ describe('DiffView', () => {
     expect(screen.getByText('+1')).toBeInTheDocument()
     expect(screen.getByText('-1')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTitle('Fullscreen'))
+    fireEvent.click(screen.getByLabelText('Fullscreen'))
     expect(screen.getByTestId('fullscreen-viewer')).toBeInTheDocument()
   })
 })

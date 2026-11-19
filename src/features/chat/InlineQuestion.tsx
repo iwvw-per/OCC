@@ -8,6 +8,7 @@ import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckIcon, QuestionIcon, TimerIcon } from '../../components/Icons'
 import { ApprovalCard } from '../../components/ui/ApprovalCard'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 import type { ApiQuestionRequest, ApiQuestionInfo, QuestionAnswer } from '../../api'
 import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { useQuestionAutoSelect } from '../../hooks/useQuestionAutoSelect'
@@ -240,9 +241,7 @@ export const InlineQuestion = memo(function InlineQuestion({
             </span>
           )}
           {isPaged && (
-            <span
-              className={`${autoSelectRemaining === null ? 'ml-auto' : ''} tabular-nums text-ui-xs text-text-500`}
-            >
+            <span className={`${autoSelectRemaining === null ? 'ml-auto' : ''} tabular-nums text-ui-xs text-text-500`}>
               {t('chat:questionDialog.answeredCount', { done: answeredCount, total: totalQuestions })}
             </span>
           )}
@@ -322,9 +321,7 @@ function InlineQuestionItem({
     <div className="space-y-2">
       {/* 问题文字 */}
       <div>
-        {question.header && (
-          <div className="text-ui-sm text-text-400 font-medium mb-0.5">{question.header}</div>
-        )}
+        {question.header && <div className="text-ui-sm text-text-400 font-medium mb-0.5">{question.header}</div>}
         <div className="text-ui-base text-text-100">{question.question}</div>
       </div>
 
@@ -333,27 +330,31 @@ function InlineQuestionItem({
         {question.options.map((option, idx) => {
           const isSelected = selected.has(option.label)
           return (
-            <button
-              key={idx}
-              onClick={() => (isMultiple ? onToggleOption(option.label) : onSelectOption(option.label))}
-              title={option.description}
-              className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-ui-caption leading-5 rounded-md transition-colors border ${
-                isSelected ? 'bg-bg-200 text-text-100 border-border-200' : 'text-text-300 hover:bg-bg-200 border-transparent'
-              }`}
-            >
-              {isMultiple && (
-                <span className="inline-flex h-5 w-3.5 shrink-0 items-center justify-center">
-                  <span
-                    className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors ${
-                      isSelected ? 'border-text-100 bg-text-100 text-bg-000' : 'border-border-300'
-                    }`}
-                  >
-                    {isSelected && <CheckIcon size={10} className="shrink-0" />}
+            <NativeTooltip>
+              <button
+                key={idx}
+                onClick={() => (isMultiple ? onToggleOption(option.label) : onSelectOption(option.label))}
+                title={option.description}
+                className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-ui-caption leading-5 rounded-md transition-colors border ${
+                  isSelected
+                    ? 'bg-bg-200 text-text-100 border-border-200'
+                    : 'text-text-300 hover:bg-bg-200 border-transparent'
+                }`}
+              >
+                {isMultiple && (
+                  <span className="inline-flex h-5 w-3.5 shrink-0 items-center justify-center">
+                    <span
+                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors ${
+                        isSelected ? 'border-text-100 bg-text-100 text-bg-000' : 'border-border-300'
+                      }`}
+                    >
+                      {isSelected && <CheckIcon size={10} className="shrink-0" />}
+                    </span>
                   </span>
-                </span>
-              )}
-              <span className="min-w-0 whitespace-normal break-words text-left">{option.label}</span>
-            </button>
+                )}
+                <span className="min-w-0 whitespace-normal break-words text-left">{option.label}</span>
+              </button>
+            </NativeTooltip>
           )
         })}
       </div>

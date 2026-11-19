@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { getCommands, type Command } from '../../api/command'
 import { apiErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
+import { NativeTooltip } from '../../components/ui/Tooltip'
 
 // ============================================
 // Types
@@ -93,7 +94,9 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
       }
       if (shadowEl === undefined) {
         shadowEl =
-          parent.closest<HTMLElement>('[data-chat-pane-root]')?.querySelector<HTMLElement>('[data-chat-header-shadow]') ?? null
+          parent
+            .closest<HTMLElement>('[data-chat-pane-root]')
+            ?.querySelector<HTMLElement>('[data-chat-header-shadow]') ?? null
       }
       const parentRect = parent.getBoundingClientRect()
       // 阴影底边 = 菜单顶部不可越过的线（header + 渐变阴影）。
@@ -261,33 +264,37 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
         )}
 
         {filteredCommands.map((cmd, index) => (
-          <button
-            key={cmd.name}
-            title={cmd.description}
-            className={`w-full px-2.5 py-2 md:py-1.5 flex items-center gap-3 text-left rounded-lg transition-colors ${
-              index === activeIndex ? 'bg-bg-200 text-text-100' : 'text-text-200 hover:bg-bg-200'
-            }`}
-            onClick={() => onSelect(cmd)}
-            onPointerEnter={() => setSelectedIndex(index)}
-          >
-            <span
-              className={`font-mono text-ui-base flex-shrink-0 leading-5 whitespace-nowrap ${
-                index === activeIndex ? 'text-accent-main-100' : 'text-text-300'
+          <NativeTooltip>
+            <button
+              key={cmd.name}
+              title={cmd.description}
+              className={`w-full px-2.5 py-2 md:py-1.5 flex items-center gap-3 text-left rounded-lg transition-colors ${
+                index === activeIndex ? 'bg-bg-200 text-text-100' : 'text-text-200 hover:bg-bg-200'
               }`}
-              /**
-               * 统一列宽（不是 minWidth）：所有描述从同一列开始，视觉整齐。
-               * 宽度由「本次过滤结果里最长的命令名」算出，因此 /open-code-review
-               * 这种长名不会再被截成 `/open-code-revie...`。
-               */
-              style={{ width: commandColumnWidth }}
+              onClick={() => onSelect(cmd)}
+              onPointerEnter={() => setSelectedIndex(index)}
             >
-              /{cmd.name}
-            </span>
-            <div className="flex-1 min-w-0">
-              {cmd.description && <div className="text-ui-caption text-text-400 truncate">{cmd.description}</div>}
-            </div>
-            {cmd.keybind && <span className="text-ui-caption text-text-500 font-mono flex-shrink-0">{cmd.keybind}</span>}
-          </button>
+              <span
+                className={`font-mono text-ui-base flex-shrink-0 leading-5 whitespace-nowrap ${
+                  index === activeIndex ? 'text-accent-main-100' : 'text-text-300'
+                }`}
+                /**
+                 * 统一列宽（不是 minWidth）：所有描述从同一列开始，视觉整齐。
+                 * 宽度由「本次过滤结果里最长的命令名」算出，因此 /open-code-review
+                 * 这种长名不会再被截成 `/open-code-revie...`。
+                 */
+                style={{ width: commandColumnWidth }}
+              >
+                /{cmd.name}
+              </span>
+              <div className="flex-1 min-w-0">
+                {cmd.description && <div className="text-ui-caption text-text-400 truncate">{cmd.description}</div>}
+              </div>
+              {cmd.keybind && (
+                <span className="text-ui-caption text-text-500 font-mono flex-shrink-0">{cmd.keybind}</span>
+              )}
+            </button>
+          </NativeTooltip>
         ))}
       </div>
 
