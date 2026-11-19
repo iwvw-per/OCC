@@ -208,9 +208,9 @@ export const McpPanel = memo(function McpPanel({ isResizing: _isResizing, onClos
     <div className="flex flex-col h-full min-h-0 bg-bg-100">
       {/* Header */}
       <div className="relative flex h-10 items-center justify-between px-3">
-        <div className="flex h-6 min-w-0 items-center gap-1.5 text-text-100 text-[length:var(--fs-xs)] font-medium">
+        <div className="flex h-6 min-w-0 items-center gap-1.5 text-text-100 text-ui-sm font-medium">
           <span>{t('mcpPanel.title')}</span>
-          {!loading && <span className="inline-flex h-4 items-center text-[length:var(--fs-xs)] leading-none text-text-400">({servers.length})</span>}
+          {!loading && <span className="inline-flex h-4 items-center text-ui-sm leading-none text-text-400">({servers.length})</span>}
         </div>
         <div className="flex items-center gap-1">
           <IconButton
@@ -264,7 +264,7 @@ export const McpPanel = memo(function McpPanel({ isResizing: _isResizing, onClos
             ))}
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full text-text-400 text-[length:var(--fs-base)] gap-2">
+          <div className="flex flex-col items-center justify-center h-full text-text-400 text-ui-base gap-2">
             <AlertCircleIcon size={20} className="text-danger-100" />
             <span>{error}</span>
             <Button variant="secondary" size="sm" onClick={handleRefresh}>
@@ -272,7 +272,7 @@ export const McpPanel = memo(function McpPanel({ isResizing: _isResizing, onClos
             </Button>
           </div>
         ) : servers.length === 0 && !showAddForm ? (
-          <div className="flex flex-col items-center justify-center h-full text-text-400 text-[length:var(--fs-base)] gap-2 px-4 text-center">
+          <div className="flex flex-col items-center justify-center h-full text-text-400 text-ui-base gap-2 px-4 text-center">
             <PlugIcon size={24} className="opacity-30" />
             <span>{t('mcpPanel.noServers')}</span>
             <Button variant="secondary" size="sm" onClick={() => setShowAddForm(true)}>
@@ -282,7 +282,7 @@ export const McpPanel = memo(function McpPanel({ isResizing: _isResizing, onClos
         ) : (
           <div className="flex flex-col gap-0.5 p-1">
             {resourceError && (
-              <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-md bg-warning-bg/50 px-2 py-1.5 text-[length:var(--fs-sm)] text-warning-100">
+              <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-md bg-warning-bg/50 px-2 py-1.5 text-ui-caption text-warning-100">
                 <AlertCircleIcon size={13} />
                 <span>{resourceError}</span>
               </div>
@@ -377,7 +377,7 @@ const AddServerForm = memo(function AddServerForm({ onSubmit, onCancel, isLoadin
   return (
     <form onSubmit={handleSubmit} className="m-3 rounded-lg border border-border-200/60 bg-bg-100/50 p-3">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[length:var(--fs-base)] font-medium text-text-100">{t('mcpPanel.addMcpServer')}</span>
+        <span className="text-ui-base font-medium text-text-100">{t('mcpPanel.addMcpServer')}</span>
         <IconButton size="sm" onClick={onCancel} aria-label={t('common:close')} title={t('common:close')}>
           <CloseIcon size={14} />
         </IconButton>
@@ -403,7 +403,7 @@ const AddServerForm = memo(function AddServerForm({ onSubmit, onCancel, isLoadin
 
       {/* Name Input */}
       <div className="mb-2 flex flex-col gap-1">
-        <label className="text-[length:var(--fs-xs)] text-text-400">{t('mcpPanel.serverName')}</label>
+        <label className="text-ui-sm text-text-400">{t('mcpPanel.serverName')}</label>
         <Input
           type="text"
           value={name}
@@ -415,7 +415,7 @@ const AddServerForm = memo(function AddServerForm({ onSubmit, onCancel, isLoadin
       {/* Local: Command Input */}
       {serverType === 'local' && (
         <div className="mb-2 flex flex-col gap-1">
-          <label className="text-[length:var(--fs-xs)] text-text-400">{t('mcpPanel.command')}</label>
+          <label className="text-ui-sm text-text-400">{t('mcpPanel.command')}</label>
           <Input
             type="text"
             value={command}
@@ -428,7 +428,7 @@ const AddServerForm = memo(function AddServerForm({ onSubmit, onCancel, isLoadin
       {/* Remote: URL Input */}
       {serverType === 'remote' && (
         <div className="mb-2 flex flex-col gap-1">
-          <label className="text-[length:var(--fs-xs)] text-text-400">{t('mcpPanel.url')}</label>
+          <label className="text-ui-sm text-text-400">{t('mcpPanel.url')}</label>
           <Input
             type="text"
             value={url}
@@ -440,7 +440,7 @@ const AddServerForm = memo(function AddServerForm({ onSubmit, onCancel, isLoadin
 
       {/* Error */}
       {error && (
-        <div className="mb-2 flex items-start gap-1.5 rounded-md bg-danger-bg px-2 py-1.5 text-[length:var(--fs-sm)] text-danger-100">
+        <div className="mb-2 flex items-start gap-1.5 rounded-md bg-danger-bg px-2 py-1.5 text-ui-caption text-danger-100">
           <AlertCircleIcon size={13} className="mt-0.5 shrink-0" />
           <span className="min-w-0 break-words">{error}</span>
         </div>
@@ -589,19 +589,19 @@ const ServerItem = memo(function ServerItem({ server, isLoading, onConnect, onDi
         {/* Server name + status chip */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="min-w-0 truncate text-[length:var(--fs-base)] text-text-100">{name}</span>
+            <span className="min-w-0 truncate text-ui-base text-text-100">{name}</span>
             <Chip tone={statusInfo.tone} size="xs" className="gap-0.5">
               {StatusIcon && <StatusIcon size={9} />}
               {statusInfo.label}
             </Chip>
             {server.resources.length > 0 && (
-              <span className="shrink-0 text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+              <span className="shrink-0 text-ui-xs tabular-nums text-text-500">
                 {t('mcpPanel.resourceCount', { count: server.resources.length })}
               </span>
             )}
           </div>
           {errorMessage && !expanded && (
-            <div className="mt-0.5 truncate text-[length:var(--fs-sm)] text-danger-100" title={errorMessage}>
+            <div className="mt-0.5 truncate text-ui-caption text-danger-100" title={errorMessage}>
               {errorMessage}
             </div>
           )}
@@ -613,34 +613,34 @@ const ServerItem = memo(function ServerItem({ server, isLoading, onConnect, onDi
 
       {/* Expanded Error Details */}
       {expanded && errorMessage && (
-        <div className="mb-1 rounded-md bg-danger-bg px-2 py-2 text-[length:var(--fs-sm)] text-text-200 break-words font-mono">
+        <div className="mb-1 rounded-md bg-danger-bg px-2 py-2 text-ui-caption text-text-200 break-words font-mono">
           {errorMessage}
         </div>
       )}
 
       {expanded && server.resources.length > 0 && (
         <div className="mb-1 overflow-hidden rounded-md border border-border-100/40 bg-bg-200/25">
-          <div className="flex items-center gap-1.5 border-b border-border-100/30 px-2 py-1 text-[length:var(--fs-xs)] font-medium text-text-300">
+          <div className="flex items-center gap-1.5 border-b border-border-100/30 px-2 py-1 text-ui-sm font-medium text-text-300">
             <FileIcon size={12} />
             <span>{t('mcpPanel.resources')}</span>
           </div>
           <div className="divide-y divide-border-100/25">
             {server.resources.map(resource => (
               <div key={resource.uri} className="px-2 py-1.5">
-                <div className="flex items-center gap-1.5 text-[length:var(--fs-sm)] text-text-100">
+                <div className="flex items-center gap-1.5 text-ui-caption text-text-100">
                   <span className="truncate">{resource.name}</span>
                   {resource.mimeType && (
-                    <span className="shrink-0 rounded bg-bg-300/60 px-1.5 py-0.5 text-[length:var(--fs-xxs)] text-text-400">
+                    <span className="shrink-0 rounded bg-bg-300/60 px-1.5 py-0.5 text-ui-xs text-text-400">
                       {resource.mimeType}
                     </span>
                   )}
                 </div>
                 {resource.description && (
-                  <div className="mt-0.5 line-clamp-2 text-[length:var(--fs-xs)] text-text-400">
+                  <div className="mt-0.5 line-clamp-2 text-ui-sm text-text-400">
                     {resource.description}
                   </div>
                 )}
-                <div className="mt-0.5 truncate font-mono text-[length:var(--fs-xxs)] text-text-500">{resource.uri}</div>
+                <div className="mt-0.5 truncate font-mono text-ui-xs text-text-500">{resource.uri}</div>
               </div>
             ))}
           </div>

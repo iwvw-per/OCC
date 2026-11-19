@@ -87,11 +87,11 @@ function Toast({ item, onDismiss, onClick }: { item: ToastItem; onDismiss: () =>
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <div className="text-[length:var(--fs-sm)] font-medium text-text-100 truncate leading-tight">
+        <div className="text-ui-caption font-medium text-text-100 truncate leading-tight">
           {notification.title}
         </div>
         {notification.body && (
-          <div className="text-[length:var(--fs-xs)] text-text-300 truncate mt-0.5 leading-tight">
+          <div className="text-ui-sm text-text-300 truncate mt-0.5 leading-tight">
             {notification.body}
           </div>
         )}
@@ -137,10 +137,10 @@ function UpdateToast({ onOpenAbout }: { onOpenAbout: () => void }) {
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="text-[length:var(--fs-sm)] font-medium text-text-100 truncate leading-tight">
+        <div className="text-ui-caption font-medium text-text-100 truncate leading-tight">
           {t('about.toastTitle', { version: latestVersion })}
         </div>
-        <div className="text-[length:var(--fs-xs)] text-text-300 truncate mt-0.5 leading-tight">
+        <div className="text-ui-sm text-text-300 truncate mt-0.5 leading-tight">
           {t('about.toastBody')}
         </div>
       </div>
@@ -205,7 +205,7 @@ export function ToastContainer({ onOpenAbout }: { onOpenAbout: () => void }) {
       {toasts.length >= 2 && (
         <div className="flex justify-end pointer-events-auto">
           <button
-            className="text-[length:var(--fs-xs)] text-text-300 px-2 py-1 rounded-md hover:bg-bg-200 active:bg-bg-300 transition-colors duration-150"
+            className="text-ui-sm text-text-300 px-2 py-1 rounded-md hover:bg-bg-200 active:bg-bg-300 transition-colors duration-150"
             onClick={() => notificationStore.dismissAllToasts()}
           >
             {t('toast.clearAll')}

@@ -214,16 +214,16 @@ export function QuestionDialog({
                 <div className="flex items-center justify-center text-text-100 w-5 h-5">
                   <QuestionIcon />
                 </div>
-                <h3 className="text-[length:var(--fs-base)] leading-none font-medium text-text-100">
+                <h3 className="text-ui-base leading-none font-medium text-text-100">
                   {t('questionDialog.title')}
                 </h3>
                 {queueLength > 1 && (
-                  <span className="text-[length:var(--fs-sm)] text-text-400 bg-bg-200 px-1.5 py-0.5 rounded">
+                  <span className="text-ui-caption text-text-400 bg-bg-200 px-1.5 py-0.5 rounded">
                     {t('questionDialog.moreCount', { count: queueLength - 1 })}
                   </span>
                 )}
                 {autoSelectRemaining !== null && (
-                  <span className="inline-flex items-center gap-1 tabular-nums text-[length:var(--fs-sm)] text-text-400">
+                  <span className="inline-flex items-center gap-1 tabular-nums text-ui-caption text-text-400">
                     <TimerIcon size={13} className="shrink-0" />
                     {t('questionDialog.autoSelectIn', { seconds: autoSelectRemaining })}
                   </span>
@@ -265,7 +265,7 @@ export function QuestionDialog({
               <button
                 onClick={handleSubmit}
                 disabled={!canSubmit || isReplying}
-                className="w-full flex items-center justify-between px-3.5 py-2 rounded-lg bg-text-100 text-bg-000 hover:bg-text-200 transition-colors font-medium text-[length:var(--fs-base)] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-between px-3.5 py-2 rounded-lg bg-text-100 text-bg-000 hover:bg-text-200 transition-colors font-medium text-ui-base disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span>{isReplying ? t('common:sending') : t('common:submit')}</span>
                 {!isReplying && <ReturnIcon />}
@@ -274,10 +274,10 @@ export function QuestionDialog({
               <button
                 onClick={onReject}
                 disabled={isReplying}
-                className="w-full flex items-center justify-between px-3.5 py-2 rounded-lg text-text-300 hover:bg-bg-200 transition-colors text-[length:var(--fs-base)] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-between px-3.5 py-2 rounded-lg text-text-300 hover:bg-bg-200 transition-colors text-ui-base disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span>{t('common:skip')}</span>
-                <span className="text-[length:var(--fs-sm)] text-text-500">{t('common:esc')}</span>
+                <span className="text-ui-caption text-text-500">{t('common:esc')}</span>
               </button>
             </div>
           </div>
@@ -343,8 +343,8 @@ function QuestionItem({
     <div className="space-y-2.5">
       {/* Question text */}
       <div>
-        <p className="text-[length:var(--fs-sm)] text-text-400 mb-0.5">{question.header}</p>
-        <p className="text-[length:var(--fs-base)] text-text-100">{question.question}</p>
+        <p className="text-ui-caption text-text-400 mb-0.5">{question.header}</p>
+        <p className="text-ui-base text-text-100">{question.question}</p>
       </div>
 
       {/* Options */}
@@ -363,9 +363,9 @@ function QuestionItem({
               <Indicator type={isMultiple ? 'checkbox' : 'radio'} checked={isSelected} />
 
               <div className="flex-1 min-w-0">
-                <span className="text-[length:var(--fs-base)] text-text-100">{option.label}</span>
+                <span className="text-ui-base text-text-100">{option.label}</span>
                 {option.description && (
-                  <p className="text-[length:var(--fs-sm)] text-text-400 mt-0.5">{option.description}</p>
+                  <p className="text-ui-caption text-text-400 mt-0.5">{option.description}</p>
                 )}
               </div>
             </button>
@@ -400,7 +400,7 @@ function QuestionItem({
               }}
               placeholder={t('questionDialog.typeYourAnswer')}
               rows={1}
-              className="flex-1 bg-transparent text-[length:var(--fs-base)] text-text-100 placeholder:text-text-500 focus:outline-none resize-none min-h-[20px]"
+              className="flex-1 bg-transparent text-ui-base text-text-100 placeholder:text-text-500 focus:outline-none resize-none min-h-[20px]"
             />
           </div>
         )}

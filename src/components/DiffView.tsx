@@ -92,7 +92,7 @@ export const DiffView = memo(function DiffView({
             id: `diff-view:${generatedFullscreenId}`,
             title: fileName,
             titleExtra: (
-              <div className="flex items-center gap-1.5 text-[length:var(--fs-xs)] tabular-nums shrink-0">
+              <div className="flex items-center gap-1.5 text-ui-sm tabular-nums shrink-0">
                 {stats.additions > 0 && <span className="text-success-100">+{stats.additions}</span>}
                 {stats.deletions > 0 && <span className="text-danger-100">-{stats.deletions}</span>}
               </div>
@@ -135,7 +135,7 @@ export const DiffView = memo(function DiffView({
   // Fallback for unified diff string only
   if (!hasContent && diff) {
     return (
-      <div className="border border-border-200/50 rounded-md bg-bg-100 overflow-auto p-2 text-[length:var(--fs-sm)] font-mono whitespace-pre text-text-200">
+      <div className="border border-border-200/50 rounded-md bg-bg-100 overflow-auto p-2 text-ui-caption font-mono whitespace-pre text-text-200">
         {diff}
       </div>
     )

@@ -87,7 +87,7 @@ export const TaskBody = memo(function TaskBody({
           用户消息展示，外面再重复一遍既冗余又占地方。只有拿不到子会话
           （旧数据 / 尚未创建）时才在外层兜底显示，避免信息丢失。 */}
       {prompt && !targetSessionId && (
-        <div className="text-[length:var(--fs-xs)] text-text-500 leading-relaxed whitespace-nowrap overflow-hidden text-ellipsis">
+        <div className="text-ui-sm text-text-500 leading-relaxed whitespace-nowrap overflow-hidden text-ellipsis">
           {prompt}
         </div>
       )}
@@ -218,7 +218,7 @@ export const TaskHeader = memo(function TaskHeader({
       label={
         <span className="flex items-center gap-2">
           <TaskAgentBadge agentType={agentType} tone={agentBadgeTone} sessionId={sessionId} />
-          <span className="min-w-0 truncate text-[length:var(--fs-sm)]">{description}</span>
+          <span className="min-w-0 truncate text-ui-caption">{description}</span>
         </span>
       }
       meta={
@@ -375,7 +375,7 @@ const SubSessionView = memo(function SubSessionView({ sessionId, serverId }: Sub
   }
 
   if (visibleMessages.length === 0) {
-    return <div className="text-[length:var(--fs-sm)] text-text-500 italic py-2">{t('task.waitingForResponse')}</div>
+    return <div className="text-ui-caption text-text-500 italic py-2">{t('task.waitingForResponse')}</div>
   }
 
   return (
@@ -419,7 +419,7 @@ const MessageItem = memo(function MessageItem({ message, isLast }: MessageItemPr
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] px-2.5 py-1.5 rounded-md bg-bg-300 text-text-100 text-[length:var(--fs-xs)] whitespace-pre-wrap break-words">
+        <div className="max-w-[85%] px-2.5 py-1.5 rounded-md bg-bg-300 text-text-100 text-ui-sm whitespace-pre-wrap break-words">
           {textContent}
         </div>
       </div>
@@ -431,7 +431,7 @@ const MessageItem = memo(function MessageItem({ message, isLast }: MessageItemPr
     <div className="space-y-1.5">
       {/* Text content */}
       {textContent && (
-        <div className="text-[length:var(--fs-xs)] text-text-200 leading-relaxed whitespace-pre-wrap">
+        <div className="text-ui-sm text-text-200 leading-relaxed whitespace-pre-wrap">
           {textContent.length > 500 && !isLast ? textContent.slice(0, 500) + '...' : textContent}
         </div>
       )}

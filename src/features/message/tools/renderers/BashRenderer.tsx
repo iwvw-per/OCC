@@ -261,7 +261,7 @@ function TerminalSurface({
 
         {isDone && exitCode !== undefined && (
           <div
-            className={`mt-0.5 text-[length:var(--fs-xxs)] font-medium ${
+            className={`mt-0.5 text-ui-xs font-medium ${
               exitCode === 0 ? 'text-accent-secondary-100' : 'text-warning-100'
             }`}
           >

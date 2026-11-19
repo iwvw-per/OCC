@@ -697,14 +697,14 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
   if (projectLoading && !project) {
     return (
-      <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">
+      <div className="p-4 text-center text-text-400 text-ui-caption">
         {t('sessionChanges.loadingChanges')}
       </div>
     )
   }
 
   if (!project && error) {
-    return <div className="p-4 text-center text-danger-100 text-[length:var(--fs-sm)]">{error}</div>
+    return <div className="p-4 text-center text-danger-100 text-ui-caption">{error}</div>
   }
 
   if (!project?.vcs) {
@@ -713,7 +713,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       <div className="flex flex-col h-full">
         <div className="relative flex h-10 items-center gap-2 px-3 shrink-0">
           <div className="min-w-0 flex flex-1 overflow-hidden">
-            <div className="inline-flex h-6 min-w-max items-center gap-1.5 whitespace-nowrap text-[length:var(--fs-xxs)] text-text-400">
+            <div className="inline-flex h-6 min-w-max items-center gap-1.5 whitespace-nowrap text-ui-xs text-text-400">
               {t('sessionChanges.filesScope')}
             </div>
           </div>
@@ -740,13 +740,13 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
         <div className="flex-1 overflow-auto panel-scrollbar-y">
           {nonGitLoading && nonGitFiles.length === 0 ? (
-            <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">
+            <div className="p-4 text-center text-text-400 text-ui-caption">
               {t('sessionChanges.loadingChanges')}
             </div>
           ) : nonGitError && nonGitFiles.length === 0 ? (
-            <div className="p-4 text-center text-danger-100 text-[length:var(--fs-sm)]">{nonGitError}</div>
+            <div className="p-4 text-center text-danger-100 text-ui-caption">{nonGitError}</div>
           ) : nonGitFiles.length === 0 ? (
-            <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">
+            <div className="p-4 text-center text-text-400 text-ui-caption">
               {t('sessionChanges.emptyDirectory')}
             </div>
           ) : (
@@ -816,7 +816,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
             title={`+${totalStats.additions} -${totalStats.deletions} ${fullFileCountLabel}`}
             style={statFadeMaskStyle}
           >
-            <div className="inline-flex h-6 min-w-max items-center gap-1.5 whitespace-nowrap text-[length:var(--fs-xxs)] tabular-nums">
+            <div className="inline-flex h-6 min-w-max items-center gap-1.5 whitespace-nowrap text-ui-xs tabular-nums">
               <span className="text-success-100">+{totalStats.additions}</span>
               <span className="text-danger-100">-{totalStats.deletions}</span>
               <span className="text-text-400">{compactFileCountLabel}</span>
@@ -900,7 +900,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
                         changeMenuTriggerRef.current?.focus()
                       }}
                       className={`
-                        group flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] transition-colors
+                        group flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-ui-caption transition-colors
                         ${isSelected ? 'bg-bg-200/70 text-text-100' : 'text-text-200 hover:bg-bg-200'}
                       `}
                     >
@@ -917,14 +917,14 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
                 <TabsTrigger
                   value="flat"
                   title={t('sessionChanges.flatList')}
-                  className="px-2 py-0.5 text-[length:var(--fs-xxs)]"
+                  className="px-2 py-0.5 text-ui-xs"
                 >
                   {t('sessionChanges.list')}
                 </TabsTrigger>
                 <TabsTrigger
                   value="tree"
                   title={t('sessionChanges.treeView')}
-                  className="px-2 py-0.5 text-[length:var(--fs-xxs)]"
+                  className="px-2 py-0.5 text-ui-xs"
                 >
                   {t('sessionChanges.tree')}
                 </TabsTrigger>
@@ -934,10 +934,10 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
             {/* View Mode Toggle */}
             <Tabs variant="slider" value={viewMode} onValueChange={value => setViewMode(value as 'unified' | 'split')}>
               <TabsList activeIndex={viewMode === 'unified' ? 0 : 1} itemCount={2} className="shrink-0">
-                <TabsTrigger value="unified" className="px-2 py-0.5 text-[length:var(--fs-xxs)]">
+                <TabsTrigger value="unified" className="px-2 py-0.5 text-ui-xs">
                   {t('sessionChanges.unified')}
                 </TabsTrigger>
-                <TabsTrigger value="split" className="px-2 py-0.5 text-[length:var(--fs-xxs)]">
+                <TabsTrigger value="split" className="px-2 py-0.5 text-ui-xs">
                   {t('sessionChanges.split')}
                 </TabsTrigger>
               </TabsList>
@@ -960,13 +960,13 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         {/* File List */}
         <div className="flex-1 overflow-auto panel-scrollbar-y">
           {loading ? (
-            <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">
+            <div className="p-4 text-center text-text-400 text-ui-caption">
               {t('sessionChanges.loadingChanges')}
             </div>
           ) : error && diffs.length === 0 ? (
-            <div className="p-4 text-center text-danger-100 text-[length:var(--fs-sm)]">{error}</div>
+            <div className="p-4 text-center text-danger-100 text-ui-caption">{error}</div>
           ) : diffs.length === 0 ? (
-            <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">{emptyText}</div>
+            <div className="p-4 text-center text-text-400 text-ui-caption">{emptyText}</div>
           ) : (
             <div className="py-0.5">
               {listMode === 'tree'
@@ -994,7 +994,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
                         onContextMenu={event => handleFileContextMenu(event, diff.file)}
                         className={`
                        w-full min-w-0 flex items-center gap-2 px-3 py-1 text-left
-                       hover:bg-bg-200 transition-colors text-[length:var(--fs-sm)]
+                       hover:bg-bg-200 transition-colors text-ui-caption
                        text-text-300
                      `}
                       >
@@ -1013,7 +1013,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
                         <span className={`flex-1 min-w-0 font-mono truncate ${FILE_STATUS_COLOR[fileStatus]}`}>
                           {diff.file}
                         </span>
-                        <div className="flex items-center gap-2 text-[length:var(--fs-xxs)] font-mono shrink-0">
+                        <div className="flex items-center gap-2 text-ui-xs font-mono shrink-0">
                           {diff.additions > 0 && <span className="text-success-100">+{diff.additions}</span>}
                           {diff.deletions > 0 && <span className="text-danger-100">-{diff.deletions}</span>}
                         </div>
@@ -1035,7 +1035,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
             <button
               type="button"
               onClick={handleOpenInFiles}
-              className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200 rounded-md transition-colors"
+              className="w-full px-2.5 py-1.5 text-left text-ui-caption text-text-200 hover:bg-bg-200 rounded-md transition-colors"
             >
               {t('sessionChanges.openInFiles')}
             </button>
@@ -1120,7 +1120,7 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
       id: `session-change:${diff.file}`,
       title: fileName,
       titleExtra: (
-        <div className="flex items-center gap-1.5 text-[length:var(--fs-xs)] tabular-nums shrink-0">
+        <div className="flex items-center gap-1.5 text-ui-sm tabular-nums shrink-0">
           {diff.additions > 0 && <span className="text-success-100">+{diff.additions}</span>}
           {diff.deletions > 0 && <span className="text-danger-100">-{diff.deletions}</span>}
         </div>
@@ -1152,11 +1152,11 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
           iconPath: previewDiff.file,
           label: (
             <>
-              <span className="block whitespace-nowrap text-[length:var(--fs-xs)] font-mono">{currentFileName}</span>
-              <span className="shrink-0 text-[length:var(--fs-xxs)] font-mono text-success-100/90">
+              <span className="block whitespace-nowrap text-ui-sm font-mono">{currentFileName}</span>
+              <span className="shrink-0 text-ui-xs font-mono text-success-100/90">
                 {previewDiff.additions > 0 ? `+${previewDiff.additions}` : ''}
               </span>
-              <span className="shrink-0 text-[length:var(--fs-xxs)] font-mono text-danger-100/90">
+              <span className="shrink-0 text-ui-xs font-mono text-danger-100/90">
                 {previewDiff.deletions > 0 ? `-${previewDiff.deletions}` : ''}
               </span>
             </>
@@ -1367,7 +1367,7 @@ const ChangesTreeItem = memo(function ChangesTreeItem({
         <button
           type="button"
           onClick={() => onToggleDir(node.path)}
-          className="w-full min-w-0 flex items-center gap-1.5 py-1 hover:bg-bg-200 transition-colors text-[length:var(--fs-sm)] text-text-300"
+          className="w-full min-w-0 flex items-center gap-1.5 py-1 hover:bg-bg-200 transition-colors text-ui-caption text-text-300"
           style={{ paddingLeft }}
         >
           <ChevronRightIcon size={12} className={`shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
@@ -1384,7 +1384,7 @@ const ChangesTreeItem = memo(function ChangesTreeItem({
             }}
           />
           <span className={`flex-1 min-w-0 truncate text-left ${node.status ? statusColor : ''}`}>{node.name}</span>
-          <div className="flex items-center gap-1.5 text-[length:var(--fs-xxs)] font-mono pr-3 shrink-0">
+          <div className="flex items-center gap-1.5 text-ui-xs font-mono pr-3 shrink-0">
             {node.additions > 0 && <span className="text-success-100">+{node.additions}</span>}
             {node.deletions > 0 && <span className="text-danger-100">-{node.deletions}</span>}
           </div>
@@ -1415,7 +1415,7 @@ const ChangesTreeItem = memo(function ChangesTreeItem({
         onContextMenuFile(event, node.diff.file)
       }}
       className={`
-         w-full min-w-0 flex items-center gap-1.5 py-1 transition-colors text-[length:var(--fs-sm)]
+         w-full min-w-0 flex items-center gap-1.5 py-1 transition-colors text-ui-caption
          hover:bg-bg-200
          text-text-300
        `}
@@ -1438,7 +1438,7 @@ const ChangesTreeItem = memo(function ChangesTreeItem({
       >
         {node.name}
       </span>
-      <div className="flex items-center gap-1.5 text-[length:var(--fs-xxs)] font-mono pr-3 shrink-0">
+      <div className="flex items-center gap-1.5 text-ui-xs font-mono pr-3 shrink-0">
         {node.additions > 0 && <span className="text-success-100">+{node.additions}</span>}
         {node.deletions > 0 && <span className="text-danger-100">-{node.deletions}</span>}
       </div>
@@ -1485,7 +1485,7 @@ const NonGitTreeNode = memo(function NonGitTreeNode({
         <button
           type="button"
           onClick={() => onToggleDir(node.path)}
-          className="w-full min-w-0 flex items-center gap-1.5 py-1 hover:bg-bg-200 transition-colors text-[length:var(--fs-sm)] text-text-300"
+          className="w-full min-w-0 flex items-center gap-1.5 py-1 hover:bg-bg-200 transition-colors text-ui-caption text-text-300"
           style={{ paddingLeft }}
         >
           <ChevronRightIcon size={12} className={`shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
@@ -1523,7 +1523,7 @@ const NonGitTreeNode = memo(function NonGitTreeNode({
     <button
       type="button"
       onClick={() => onOpenFile(node)}
-      className="w-full min-w-0 flex items-center gap-1.5 py-1 hover:bg-bg-200 transition-colors text-[length:var(--fs-sm)] text-text-300"
+      className="w-full min-w-0 flex items-center gap-1.5 py-1 hover:bg-bg-200 transition-colors text-ui-caption text-text-300"
       style={{ paddingLeft: paddingLeft + 16 }}
     >
       <img

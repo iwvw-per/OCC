@@ -22,7 +22,7 @@ export const SelectTrigger = forwardRef<
     ref={ref}
     className={cn(
       'inline-flex h-8 min-w-0 items-center justify-between gap-2 rounded-md border border-border-200 bg-transparent px-2.5',
-      'text-[length:var(--fs-sm)] text-text-100 transition-colors',
+      'text-ui-caption text-text-100 transition-colors',
       'hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 focus-visible:outline-none',
       'disabled:opacity-40 disabled:cursor-not-allowed',
       '[&>span]:truncate',
@@ -74,7 +74,7 @@ export const SelectLabel = forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.Label
     ref={ref}
-    className={cn('px-2 py-1 text-[length:var(--fs-xxs)] uppercase tracking-wider text-text-500', className)}
+    className={cn('px-2 py-1 text-ui-xs uppercase tracking-wider text-text-500', className)}
     {...props}
   />
 ))
@@ -88,7 +88,7 @@ export const SelectItem = forwardRef<
     ref={ref}
     className={cn(
       'relative flex w-full cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 pr-7',
-      'text-[length:var(--fs-sm)] text-text-200 outline-none transition-colors',
+      'text-ui-caption text-text-200 outline-none transition-colors',
       // highlighted 是「鼠标/键盘高亮项」，语义为 hover，取统一悬停底色；
       // 选中态由 data-[state=checked] 的文字色 + CheckIcon 表达，不靠底色深浅区分。
       'data-[highlighted]:bg-bg-200 data-[highlighted]:text-text-100',

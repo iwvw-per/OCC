@@ -442,28 +442,65 @@ body,
   --menu-width: 360px;
 
   /* ============================================
-   * Fonts — 自托管组合字体（西文 + 中文各一套，靠字符回退自动分工）
+   * Fonts — 与 ZCode 设计系统对齐
    *
-   * 逐字符匹配：拉丁字母命中前面的 Manrope，中文 Manrope 无字形 →
-   * 落到 HarmonyOS Sans SC，无需 JS 或按语言切换。
-   *
-   * 字体包在 public/fonts/sora/，由 index.html 引入 sora.css。
-   * 中文用 cn-font-split 按 unicode-range 切成 164 个子集按需下载；
-   * Sora / Manrope 是 400-700 可变字体。
+   * UI 正文走系统 UI 字体栈(与 Tailwind v4 preflight 的 font-sans 一致);
+   * 等宽字体沿用 ZCode 的 --font-mono:保留各平台西文等宽字体,
+   * 并在通用 monospace 前显式加入各平台 CJK 无衬线字体
+   * (Windows 的 Consolas 不含中文字形,否则中文会落到宋体)。
    *
    * --font-ui-sans: 用户可覆盖的 UI 字体变量
-   * --font-sans:    Tailwind font-sans class 使用的变量，指向 --font-ui-sans
-   * --font-mono:    代码/等宽字体，Tailwind font-mono class 使用
+   * --font-sans:    Tailwind font-sans class 使用的变量,指向 --font-ui-sans
+   * --font-mono:    代码/等宽字体,Tailwind font-mono class 使用
    * ============================================ */
   --font-ui-sans:
-    'Manrope', 'HarmonyOS Sans SC', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif,
-    'Apple Color Emoji', 'Segoe UI Emoji';
+    ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
   --font-sans: var(--font-ui-sans);
-  --font-ui-serif: 'Georgia', 'Noto Serif', serif;
   --font-mono:
-    'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo,
-    Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono',
-    'Noto Sans CJK SC', ui-monospace, monospace;
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', 'Microsoft YaHei UI',
+    'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', monospace;
+
+  /* ============================================
+   * UI 字号体系 — 与 ZCode 对齐
+   *
+   * 所有界面字号必须使用 text-ui-* 工具类,统一由 --ui-font-size 派生
+   * (默认 14px,Appearance 设置里的 UI 字号滑块只改这一个变量)。
+   * 禁止使用 Tailwind 内建 text-sm / text-xs,也禁止 text-[13px] 这类任意值。
+   *
+   * 例外:代码、Diff、终端继续使用 --fs-code / --fs-terminal 独立字号设置;
+   * 移动端 Web 输入框防 iOS 聚焦缩放使用固定 16px 的 text-mobile-input-safe。
+   * ============================================ */
+  --text-ui-settings-title: calc(var(--ui-font-size) + 10px);
+  --text-ui-settings-title--line-height: calc(4 / 3);
+  --text-ui-settings-title-lg: calc(var(--ui-font-size) + 16px);
+  --text-ui-settings-title-lg--line-height: 1.2;
+  --text-ui-xl: calc(var(--ui-font-size) + 4px);
+  --text-ui-lg: calc(var(--ui-font-size) + 2px);
+  --text-ui-base: var(--ui-font-size);
+  --text-ui-caption: calc(var(--ui-font-size) - 1px);
+  --text-ui-sm: calc(var(--ui-font-size) - 2px);
+  --text-ui-xs: calc(var(--ui-font-size) - 4px);
+  /* iOS Safari 会缩放小于 16px 的聚焦输入;该平台下限不能跟随界面字号降低。 */
+  --text-mobile-input-safe: 16px;
+}
+
+/*
+ * 中日韩汉字共用码位,字形由字体决定:--font-mono 为中文在 monospace 前写死了 SC 字体,
+ * 日文/韩文界面会因此显示中文字形。<html lang> 跟随界面语言写入,
+ * 这里按 lang 把对应语言的字体排到 SC 前面;无衬线正文走 system-ui,浏览器会按 lang 自动选日/韩字形。
+ */
+:root:lang(ja) {
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', 'Hiragino Sans',
+    'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo', 'Noto Sans CJK JP', 'Noto Sans JP', 'Microsoft YaHei UI',
+    'PingFang SC', monospace;
+}
+
+:root:lang(ko) {
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', 'Apple SD Gothic Neo',
+    'Malgun Gothic', 'Noto Sans CJK KR', 'Noto Sans KR', 'Microsoft YaHei UI', 'PingFang SC', monospace;
 }
 
 :root[data-mode='dark'] {
@@ -510,14 +547,12 @@ body,
  */
 :root {
   --font-ui-sans:
-    'Manrope', 'HarmonyOS Sans SC', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif,
-    'Apple Color Emoji', 'Segoe UI Emoji';
+    ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
   --font-sans: var(--font-ui-sans);
-  --font-ui-serif: 'Georgia', 'Noto Serif', serif;
   --font-mono:
-    'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo,
-    Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono',
-    'Noto Sans CJK SC', ui-monospace, monospace;
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', 'Microsoft YaHei UI',
+    'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', monospace;
 
   /* Background - 灰调晨雾 */
   --bg-000: 150 10% 99%;
@@ -581,37 +616,21 @@ body,
   --oncolor-100: 0 0% 100%;
 
   /* ============================================
-   * Typography Scale — 字号系统
+   * UI 字号 — 与 ZCode 对齐
    * ============================================
-   * 所有 UI 字号都通过这些变量控制。
-   * themeStore 的 fontScale 设置会覆盖这些值。
+   * 界面字号统一由 --ui-font-size 派生,组件里只用 text-ui-* 工具类。
+   * themeStore 的 UI 字号设置只覆盖 --ui-font-size 这一个变量。
    *
-   * 使用方式：在 Tailwind class 中写 text-[length:var(--fs-xxs)] 等。
-   * 代码区行高必须用绝对值 (px)，保证虚拟滚动和行号对齐。
-   *
-   * 参考：opencode 官方 UI 只用 4 档（13/14/16/20），
-   *       代码区 13px + 24px 行高。
+   * 代码 / Diff / 终端保留独立字号与行高设置:行高必须是绝对值 (px),
+   * 保证虚拟滚动和行号对齐。
    */
-  --fs-xxs: 11px;
-  --fs-xs: 12px;
-  --fs-sm: 13px;
-  --fs-md: 13px;
-  --fs-base: 14px;
-  --fs-lg: 16px;
+  --ui-font-size: 14px;
 
   /* 代码 / Diff / 终端专用 */
   --fs-code: 13px;
   --fs-code-line-height: 24px;
   --fs-terminal: 13px;
   --fs-terminal-line-height: 1.4;
-
-  /* 固定字号 — 不受 fontScale 滑块影响，但统一管理 */
-  --fs-btn-sm: 12px;
-  --fs-btn-md: 14px;
-  --fs-btn-lg: 16px;
-  --fs-heading-3: 16px;
-  --fs-heading-2: 18px;
-  --fs-heading-1: 20px;
 }
 
 /* Base styles */
@@ -623,58 +642,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ============================================
- * 组合字体的标题与字重补丁
- *
- * 标题换 Sora（正文用 Manrope），形成西文上的层级差异。
- * 中文仍落到 HarmonyOS Sans SC。
- * ============================================ */
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  font-family: 'Sora', 'HarmonyOS Sans SC', ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: -0.01em;
-}
-
-/* HarmonyOS Sans SC 只自托管了 400 / 600 两档。
-   全站有 170 处 font-medium(500)，没有对应字重时浏览器会合成加粗
-   （算法描边），小字号中文下容易发虚、笔画粘连。这里把 500 归到
-   真实存在的 600，由字体本身表达强调，视觉更干净。
-   代价：medium 与 semibold 同级，层级差异靠颜色/字号承担。
-
-   覆盖 @theme 里的 --font-weight-medium 而非 .font-medium 类：
-   Tailwind 生成的是 .font-medium{font-weight:var(--font-weight-medium)}，
-   改变量即可全局生效，不必和 @layer utilities 拼特异性。 */
-@theme {
-  --font-weight-medium: 600;
-  /* HarmonyOS Sans SC 也无 700，font-bold 会合成加粗。
-     归到真实存在的 600；全站只有 4 处（列表分组标题、markdown 标题等），
-     视觉上本就与 semibold 同级。 */
-  --font-weight-bold: 600;
-}
-
-/* ============================================
- * 字体下行笔画防裁切
- *
- * 自托管字体的下探墨迹（拉丁 g/j/p/q/y 及中文标点）比系统 UI 字体更深。
- * 配合 truncate / line-clamp / overflow-hidden 或固定高度容器时，
- * leading-none / leading-tight 的行盒过矮会切掉底部笔画。
- *
- * 这里给紧密行高设 1.35 下限（≥ 各字体实际墨迹下探），一次性消除裁切。
- * 规则不带 layer，优先级高于 @layer utilities 里的 Tailwind 类，全局生效。
- *
- * 实测影响：全站 27 处紧密行高，其中 6 处同时有固定高度容器。
- * 最紧的是 h-4(16px) + fs-xs(12px) → 行盒 16.2px，仅超出 0.2px，可忽略；
- * 其余（h-7 28px / h-8 32px）都远大于行盒高度。
- * ============================================ */
-.leading-none,
-.leading-tight,
-.leading-\[1\.2\] {
-  line-height: 1.35;
-}
 
 /* ============================================
  * Markdown Math Theme Integration
@@ -706,14 +673,14 @@ h6 {
   margin-bottom: 1rem;
 }
 
-.markdown-content.text-\[length\:var\(--fs-sm\)\]
+.markdown-content.text-ui-caption
   .markdown-stream-block:not(:first-child)
   > :first-child
   > :first-child {
   margin-top: 0.5rem;
 }
 
-.markdown-content.text-\[length\:var\(--fs-sm\)\] .markdown-stream-block:not(:last-child) > :last-child > :last-child {
+.markdown-content.text-ui-caption .markdown-stream-block:not(:last-child) > :last-child > :last-child {
   margin-bottom: 0.5rem;
 }
 
@@ -731,7 +698,7 @@ h6 {
   min-width: max-content;
   border-collapse: collapse;
   color: hsl(var(--text-200));
-  font-size: var(--fs-sm);
+  font-size: var(--text-ui-base);
   line-height: 1.5;
 }
 
@@ -1068,7 +1035,7 @@ h6 {
 
   /*
    * iOS 缩放已由 viewport meta (maximum-scale=1, user-scalable=no) 阻止，
-   * 不再需要强制 16px，让 textarea 继承 --fs-base 与信息流字号一致。
+   * 不再需要强制 16px，让 textarea 继承 --text-ui-base 与信息流字号一致。
    */
 }
 
@@ -1471,8 +1438,8 @@ h6 {
  * Mention tag styles
  * ============================================ */
 .mention-tag {
-  /* 600 而非 500：HarmonyOS Sans SC 无 500 字重，500 会触发合成加粗 */
-  font-weight: 600;
+  /* 系统 UI 字体有真实 500 字重,与 ZCode 的 font-medium 约定一致 */
+  font-weight: 500;
 }
 
 /* ============================================
@@ -2083,8 +2050,8 @@ html[data-chat-width-dragging] .glass-alt {
 /* ============================================================
    图标 + 单行文本的光学垂直居中
    ============================================================
-   字体（Manrope / HarmonyOS Sans SC）的 ascent 明显大于 descent，行盒中心
-   因此比字形墨迹中心略低。flex 的 items-center 按行盒居中，排出的
+   多数 UI 字体的 ascent 明显大于 descent,行盒中心因此比字形墨迹中心略低。
+   flex 的 items-center 按行盒居中,排出的
    「图标 + 单行文本」看起来文字偏上约 0.5~0.8px。
    text-box: trim-both 把行盒裁到字形上下缘，墨迹真正落到行盒中心，与图标同心。
 
@@ -2097,38 +2064,62 @@ html[data-chat-width-dragging] .glass-alt {
 }
 
 /* ============================================================
-   可读性补丁 —— 追加到文件末尾
+   思维强度滑动条(移植 ZCode composer-thought-slider,收窄了高度)
+   ============================================================
+   可见轨道 / 填充 / 档位圆点 / 滑块全部自绘,原生 range 只负责命中与键盘;
+   因此必须把原生轨道与滑块设为透明,并让它们的尺寸和可视滑块一致,
+   否则首尾档位与拖动坐标会对不齐。 */
+.thought-slider-range::-webkit-slider-runnable-track {
+  height: 24px;
+  background: transparent;
+}
+
+.thought-slider-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 5px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.thought-slider-range::-moz-range-track {
+  height: 24px;
+  background: transparent;
+}
+
+.thought-slider-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.thought-slider-range::-moz-range-progress {
+  background: transparent;
+}
+
+/* 拖拽也是离散档位切换,保留与点击一致的短过渡,避免跳变。 */
+.thought-slider-thumb,
+.thought-slider-fill {
+  transition:
+    left 120ms ease-out,
+    width 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thought-slider-thumb,
+  .thought-slider-fill {
+    transition: none;
+  }
+}
+
+/* ============================================================
+   主题亮度补丁 —— 追加到文件末尾
    ============================================================ */
-
-/* 1) 全局字重 / 行高 / 渲染 */
-:root:root {
-  /* 400 而非 500：HarmonyOS Sans SC 只自托管 400/600 两档，
-     500 会走浏览器合成加粗（算法描边），小字号中文下笔画发虚。
-     原值 500 是针对 Inter / PingFang 调的（它们的 400 在 12-14px 偏细），
-     换成自托管字体后不再需要。 */
-  font-weight: 400;
-  line-height: 1.6; /* 中英混排要比 1.4 松一些 */
-  letter-spacing: 0.01em; /* 给中文一点呼吸感 */
-  font-optical-sizing: auto;
-
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-}
-
-/* 等宽字体处理连字 */
-:root:root code,
-:root:root pre,
-:root:root kbd,
-:root:root samp,
-:root:root textarea,
-:root:root [class*='font-mono'] {
-  /* 同样用 400：等宽字体（Fira Code / Consolas）只有 400 是真字重，
-     500 会合成加粗，在代码块里会把字形糊掉。 */
-  font-weight: 400;
-  letter-spacing: 0;
-  font-variant-ligatures: contextual; /* 讨厌连字就改成 none */
-}
 
 /* 2) 浅色：弱文字整体压深一档 */
 /* 说明：themeStore 会注入同特异性 (:root:root) 的主题变量（opencode-theme-vars），

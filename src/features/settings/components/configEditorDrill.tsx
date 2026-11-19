@@ -63,7 +63,7 @@ export function Drill({
               <button
                 type="button"
                 onClick={() => api.back(liveStack.length - 1)}
-                className="inline-flex h-7 shrink-0 items-center gap-0.5 text-[length:var(--fs-sm)] leading-none text-text-300 transition-colors hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1"
+                className="inline-flex h-7 shrink-0 items-center gap-0.5 text-ui-caption leading-none text-text-300 transition-colors hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1"
               >
                 <ChevronLeftIcon size={14} className="shrink-0" />
                 <span className="leading-none">{tx('Back', '返回', lang)}</span>
@@ -89,7 +89,7 @@ export function Drill({
                         onClick={() => api.back(index)}
                         aria-current={isLast ? 'page' : undefined}
                         title={frame.title}
-                        className={`inline-flex h-7 min-w-0 max-w-[180px] items-center truncate text-[length:var(--fs-sm)] leading-none transition-colors ${
+                        className={`inline-flex h-7 min-w-0 max-w-[180px] items-center truncate text-ui-caption leading-none transition-colors ${
                           isLast
                             ? 'cursor-default text-text-100'
                             : 'text-text-300 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1'
@@ -141,13 +141,13 @@ export function DrillRow({
     >
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 break-all text-[length:var(--fs-sm)] font-medium text-text-100">{label}</span>
-          {badge && <span className="text-[10px] font-medium uppercase tracking-wide text-warning-100">{badge}</span>}
+          <span className="min-w-0 break-all text-ui-caption font-medium text-text-100">{label}</span>
+          {badge && <span className="text-ui-xs font-medium uppercase tracking-wide text-warning-100">{badge}</span>}
         </div>
-        {desc && <div data-setting-desc className="mt-0.5 text-[length:var(--fs-xs)] leading-relaxed text-text-300">{desc}</div>}
+        {desc && <div data-setting-desc className="mt-0.5 text-ui-sm leading-relaxed text-text-300">{desc}</div>}
       </div>
       {preview ? (
-        <span className="min-w-0 max-w-full truncate text-[length:var(--fs-xs)] text-text-400 sm:max-w-[200px] sm:text-right">{preview}</span>
+        <span className="min-w-0 max-w-full truncate text-ui-sm text-text-400 sm:max-w-[200px] sm:text-right">{preview}</span>
       ) : (
         <span className="hidden sm:block" />
       )}

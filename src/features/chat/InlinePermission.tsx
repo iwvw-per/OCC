@@ -78,7 +78,7 @@ export const InlinePermission = memo(function InlinePermission({
   const showContent = !contentHidden && (isFileEdit ? !!diffData : !!patternsText)
 
   const actions = resolved ? (
-    <div className="flex items-center gap-2 text-[length:var(--fs-sm)] text-text-400">
+    <div className="flex items-center gap-2 text-ui-caption text-text-400">
       <Spinner size="sm" tone="accent" />
       <span>{t('permissionDialog.applying', { defaultValue: 'Applying…' })}</span>
     </div>
@@ -88,7 +88,7 @@ export const InlinePermission = memo(function InlinePermission({
         onClick={() => onReply(request.id, 'once')}
         disabled={isReplying}
         data-haptic="strong"
-        className="px-2.5 h-7 rounded-md text-[length:var(--fs-sm)] font-medium bg-text-100 text-bg-000 hover:bg-text-200 transition-colors disabled:opacity-50"
+        className="px-2.5 h-7 rounded-md text-ui-caption font-medium bg-text-100 text-bg-000 hover:bg-text-200 transition-colors disabled:opacity-50"
       >
         {t('permissionDialog.allowOnce')}
       </button>
@@ -96,7 +96,7 @@ export const InlinePermission = memo(function InlinePermission({
         onClick={handleAlways}
         disabled={isReplying}
         data-haptic="strong"
-        className="px-2.5 h-7 rounded-md text-[length:var(--fs-sm)] text-text-300 hover:bg-bg-200 transition-colors disabled:opacity-50"
+        className="px-2.5 h-7 rounded-md text-ui-caption text-text-300 hover:bg-bg-200 transition-colors disabled:opacity-50"
       >
         {t('permissionDialog.alwaysAllow')}
       </button>
@@ -104,7 +104,7 @@ export const InlinePermission = memo(function InlinePermission({
         onClick={() => onReply(request.id, 'reject')}
         disabled={isReplying}
         data-haptic="strong"
-        className="px-2.5 h-7 rounded-md text-[length:var(--fs-sm)] text-text-400 hover:bg-danger-100/10 transition-colors disabled:opacity-50"
+        className="px-2.5 h-7 rounded-md text-ui-caption text-text-400 hover:bg-danger-100/10 transition-colors disabled:opacity-50"
       >
         {t('common:reject')}
       </button>

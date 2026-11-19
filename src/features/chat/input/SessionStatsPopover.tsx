@@ -114,18 +114,18 @@ export function SessionStatsPopover({ stats, tokensPerSec, displayFields }: Sess
               {bottomItems.map((item, index) => (
                 <span key={item.key} className="flex items-center gap-1 shrink-0">
                   {index > 0 && <span className="text-text-400/50">·</span>}
-                  <span className="text-text-400 text-[length:var(--fs-xxs)]">{item.label}</span>
+                  <span className="text-text-400 text-ui-xs">{item.label}</span>
                   <span className="text-text-200 font-medium">{item.value}</span>
                 </span>
               ))}
             </span>
           ) : (
-            <span className="text-[length:var(--fs-xxs)] text-text-400">{t('sessionStats.title')}</span>
+            <span className="text-ui-xs text-text-400">{t('sessionStats.title')}</span>
           )}
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" side="top" sideOffset={8} className="w-72 p-0">
-        <div className="flex items-center gap-2 border-b border-border-200/50 px-4 py-2.5 text-[length:var(--fs-sm)] font-medium text-text-200">
+        <div className="flex items-center gap-2 border-b border-border-200/50 px-4 py-2.5 text-ui-caption font-medium text-text-200">
           <StatsIcon size={13} className="shrink-0 text-text-400" />
           <span>{t('sessionStats.title')}</span>
         </div>
@@ -133,13 +133,13 @@ export function SessionStatsPopover({ stats, tokensPerSec, displayFields }: Sess
         <dl className="flex flex-col gap-2.5 px-4 py-3.5">
           {detailRows.map(row => (
             <div key={row.label} className="flex items-center justify-between gap-4">
-              <dt className="text-[length:var(--fs-sm)] text-text-400">{row.label}</dt>
-              <dd className="text-[length:var(--fs-sm)] tabular-nums text-text-200">{row.value}</dd>
+              <dt className="text-ui-caption text-text-400">{row.label}</dt>
+              <dd className="text-ui-caption tabular-nums text-text-200">{row.value}</dd>
             </div>
           ))}
         </dl>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border-200/50 px-4 py-2.5 text-[length:var(--fs-xxs)] text-text-500">
+        <div className="flex items-center justify-between gap-3 border-t border-border-200/50 px-4 py-2.5 text-ui-xs text-text-500">
           <span className="flex items-center gap-1.5">
             <GaugeIcon size={11} className="shrink-0" />
             <span className="tabular-nums">{t('sessionStats.counts', { turns: stats.turns, steps: stats.steps })}</span>

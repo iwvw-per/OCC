@@ -47,7 +47,7 @@ export function PermissionEditor({ value, onChange, lang }: { value: unknown; on
   return (
     <div className="space-y-6">
       <div className="flex min-w-0 items-center justify-between gap-4">
-        <span className="min-w-0 flex-1 text-[length:var(--fs-md)] font-medium text-text-100">
+        <span className="min-w-0 flex-1 text-ui-base font-medium text-text-100">
           {tx('Apply one action to everything', '对所有工具应用同一动作', lang)}
         </span>
         <div className="w-36 shrink-0">
@@ -69,8 +69,8 @@ export function PermissionEditor({ value, onChange, lang }: { value: unknown; on
               <div key={tool}>
                 <div className="flex min-w-0 items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[length:var(--fs-md)] font-medium text-text-100">{tool}</div>
-                    <div data-setting-desc className="mt-0.5 text-[length:var(--fs-sm)] leading-relaxed text-text-300">{tx(en, zh, lang)}</div>
+                    <div className="truncate text-ui-base font-medium text-text-100">{tool}</div>
+                    <div data-setting-desc className="mt-0.5 text-ui-caption leading-relaxed text-text-300">{tx(en, zh, lang)}</div>
                   </div>
                   <div className="w-36 shrink-0">
                     <Select
@@ -118,8 +118,8 @@ export function PermissionEditor({ value, onChange, lang }: { value: unknown; on
                 <div key={tool}>
                   <div className="flex min-w-0 items-center justify-between gap-4">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[length:var(--fs-md)] font-medium text-text-100">{tool}</div>
-                      <div data-setting-desc className="mt-0.5 text-[length:var(--fs-sm)] leading-relaxed text-text-300">
+                      <div className="truncate text-ui-base font-medium text-text-100">{tool}</div>
+                      <div data-setting-desc className="mt-0.5 text-ui-caption leading-relaxed text-text-300">
                         {tx('Custom tool permission key.', '自定义工具权限 key。', lang)}
                       </div>
                     </div>
@@ -167,7 +167,7 @@ export function PermissionEditor({ value, onChange, lang }: { value: unknown; on
               setNewTool('')
             }}
             className={cn(
-              'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-[length:var(--fs-sm)] font-medium text-accent-main-100',
+              'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-ui-caption font-medium text-accent-main-100',
               interactive.accent,
               interactive.focusRingCompact,
               'disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none',
@@ -214,7 +214,7 @@ function PatternRules({ value, onChange, lang }: { value: JsonRecord; onChange: 
           <PlusIcon size={14} />
         </button>
       </div>
-      <div data-setting-desc className="text-[length:var(--fs-xs)] leading-relaxed text-text-500">
+      <div data-setting-desc className="text-ui-sm leading-relaxed text-text-500">
         {tx('Existing pattern keys cannot be reliably deleted or renamed through the official merge API. Change the action instead.', '官方 merge API 不能可靠删除或重命名已保存的 pattern key。请修改动作。', lang)}
       </div>
     </div>
@@ -224,7 +224,7 @@ function PatternRules({ value, onChange, lang }: { value: JsonRecord; onChange: 
 export function PermissionsSection({ config, setConfig, lang }: SectionProps) {
   return (
     <SectionShell id="permissions" lang={lang}>
-      <p data-setting-desc className="mb-3 text-[length:var(--fs-xs)] leading-relaxed text-text-300">
+      <p data-setting-desc className="mb-3 text-ui-sm leading-relaxed text-text-300">
         {tx(
           'ask = prompt every time, allow = run without asking, deny = block. Pattern rules let you match specific commands or paths (e.g. "git push *").',
           'ask = 每次询问，allow = 直接放行，deny = 拒绝。pattern 规则可匹配具体命令或路径（如 "git push *"）。',
@@ -246,7 +246,7 @@ export function ToolToggleMap({ value, onChange }: { value: unknown; onChange: (
         <div className="flex flex-col gap-3">
           {Object.entries(record).map(([tool, enabled]) => (
             <div key={tool} className="flex min-w-0 items-center justify-between gap-4">
-              <span className="min-w-0 flex-1 truncate text-[length:var(--fs-md)] font-medium text-text-100">{tool}</span>
+              <span className="min-w-0 flex-1 truncate text-ui-base font-medium text-text-100">{tool}</span>
               <Toggle ariaLabel={tx(`Toggle ${tool}`, `切换 ${tool}`, lang)} enabled={Boolean(enabled)} onChange={() => onChange({ ...record, [tool]: !enabled })} />
             </div>
           ))}
@@ -263,7 +263,7 @@ export function ToolToggleMap({ value, onChange }: { value: unknown; onChange: (
             setNewKey('')
           }}
           className={cn(
-            'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-[length:var(--fs-sm)] font-medium text-accent-main-100',
+            'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-ui-caption font-medium text-accent-main-100',
             interactive.accent,
             interactive.focusRingCompact,
             'disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none',
@@ -272,7 +272,7 @@ export function ToolToggleMap({ value, onChange }: { value: unknown; onChange: (
           <PlusIcon size={14} />
         </button>
       </div>
-      <div data-setting-desc className="text-[length:var(--fs-xs)] leading-relaxed text-text-300">
+      <div data-setting-desc className="text-ui-sm leading-relaxed text-text-300">
         {tx('Existing tool keys cannot be reliably deleted through the official merge API. Toggle them instead.', '官方 merge API 不能可靠删除已保存的 tool key。请改为切换启用状态。', lang)}
       </div>
     </div>

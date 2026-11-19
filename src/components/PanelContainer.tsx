@@ -567,7 +567,7 @@ const PanelTabButton = memo(function PanelTabButton({
       onContextMenu={onContextMenu}
       onDoubleClick={canRename ? onDoubleClick : undefined}
       className={`
-        group flex items-center gap-1.5 px-2 py-1 rounded-md text-[length:var(--fs-sm)] shrink-0
+        group flex items-center gap-1.5 px-2 py-1 rounded-md text-ui-caption shrink-0
         border border-transparent cursor-pointer select-none
         transition-all duration-150 ease-out
         ${
@@ -605,7 +605,7 @@ const PanelTabButton = memo(function PanelTabButton({
               onEditCancel()
             }
           }}
-          className="truncate max-w-[140px] bg-transparent border-none outline-none text-[length:var(--fs-sm)] text-text-100"
+          className="truncate max-w-[140px] bg-transparent border-none outline-none text-ui-caption text-text-100"
         />
       ) : (
         <span className="truncate max-w-[100px]">{label}</span>

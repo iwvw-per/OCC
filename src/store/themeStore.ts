@@ -1120,12 +1120,11 @@ class ThemeStore {
 
   /**
    * 字号偏移覆盖。
-   * 两个维度均为 0 时不注入覆盖，直接用 index.css :root 里的默认值。
-   * 非零时通过 :root:root 高优先级覆盖 --fs-* 变量。
+   * 两个维度均为 0 时不注入覆盖,直接用 index.css 里的默认值。
+   * 非零时通过 :root:root 高优先级覆盖字号变量。
    *
-   * 基准值（偏移 0）：
-   *   UI:   xxs=11  xs=12  sm=13  md=13  base=14  lg=16
-   *         heading-3=16  heading-2=18  heading-1=20
+   * 基准值(偏移 0):
+   *   UI:   --ui-font-size=14(text-ui-* 全部由它派生)
    *   Code: code=13  code-line-height=24  terminal=13  terminal-line-height=1.4
    */
   private applyFontScale() {
@@ -1146,17 +1145,7 @@ class ThemeStore {
     const vars: string[] = []
 
     if (ui !== 0) {
-      vars.push(
-        `--fs-xxs: ${11 + ui}px`,
-        `--fs-xs: ${12 + ui}px`,
-        `--fs-sm: ${13 + ui}px`,
-        `--fs-md: ${13 + ui}px`,
-        `--fs-base: ${14 + ui}px`,
-        `--fs-lg: ${16 + ui}px`,
-        `--fs-heading-3: ${16 + ui}px`,
-        `--fs-heading-2: ${18 + ui}px`,
-        `--fs-heading-1: ${20 + ui}px`,
-      )
+      vars.push(`--ui-font-size: ${14 + ui}px`)
     }
 
     if (code !== 0) {

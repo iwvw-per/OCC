@@ -13,9 +13,9 @@ export type DisclosureRowSize = 'sm' | 'md' | 'lg'
  * - lg: h-9（36px）— 时间线工具行
  */
 const sizeStyles: Record<DisclosureRowSize, string> = {
-  sm: 'py-1 gap-1.5 text-[length:var(--fs-sm)]',
-  md: 'h-8 gap-2 text-[length:var(--fs-sm)]',
-  lg: 'h-9 gap-2.5 text-[length:var(--fs-md)]',
+  sm: 'py-1 gap-1.5 text-ui-caption',
+  md: 'h-8 gap-2 text-ui-caption',
+  lg: 'h-9 gap-2.5 text-ui-base',
 }
 
 const labelToneStyles = {

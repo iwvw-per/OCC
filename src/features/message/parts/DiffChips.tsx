@@ -207,7 +207,7 @@ export const DiffChips = memo(function DiffChips({ files, className }: DiffChips
           onBlur={preferTouchUi ? undefined : scheduleClose}
           className={cn(
             'inline-flex h-6 max-w-[14rem] items-center gap-1.5 rounded-sm border px-1.5',
-            'font-mono text-[length:var(--fs-xxs)]',
+            'font-mono text-ui-xs',
             'transition-colors duration-150',
             activePath === file.path
               ? 'border-border-300 bg-bg-200 text-text-100'
@@ -232,7 +232,7 @@ export const DiffChips = memo(function DiffChips({ files, className }: DiffChips
       ))}
 
       {overflow > 0 && (
-        <span className="font-mono text-[length:var(--fs-xxs)] text-text-500">
+        <span className="font-mono text-ui-xs text-text-500">
           {t('diffChips.more', { count: overflow })}
         </span>
       )}
@@ -244,7 +244,7 @@ export const DiffChips = memo(function DiffChips({ files, className }: DiffChips
           ref={setContentRef}
           align="start"
           sideOffset={6}
-          className="w-[min(34rem,80vw)] p-0 text-[length:var(--fs-xxs)]"
+          className="w-[min(34rem,80vw)] p-0 text-ui-xs"
           onOpenAutoFocus={event => event.preventDefault()}
           // 触摸端点 chip 时，Radix 会把这次 pointerdown 当作「点浮层外部」而关闭。
           // 那是我们自己在处理的手势，阻止它，关闭/切换全由点击逻辑决定；

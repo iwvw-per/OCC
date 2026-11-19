@@ -51,10 +51,10 @@ export const RetryStatusInline = memo(function RetryStatusInline({ status }: { s
           onClick={() => setExpanded(prev => !prev)}
         >
           <RetryIcon className="w-4 h-4 text-warning-100 flex-shrink-0" />
-          <span className="text-[length:var(--fs-base)] text-warning-100 flex-1 min-w-0 truncate">
+          <span className="text-ui-base text-warning-100 flex-1 min-w-0 truncate">
             {t('retryStatus.retrying', { attempt: status.attempt })}
             {nextLabel && (
-              <span className="text-[length:var(--fs-sm)] text-text-400 ml-2 tabular-nums">
+              <span className="text-ui-caption text-text-400 ml-2 tabular-nums">
                 {t('retryStatus.nextIn', { label: nextLabel })}
               </span>
             )}
@@ -64,10 +64,10 @@ export const RetryStatusInline = memo(function RetryStatusInline({ status }: { s
       ) : (
         <div className="flex items-center gap-2 min-w-0">
           <RetryIcon className="w-4 h-4 text-warning-100 flex-shrink-0" />
-          <span className="text-[length:var(--fs-base)] text-warning-100 flex-1 min-w-0 truncate">
+          <span className="text-ui-base text-warning-100 flex-1 min-w-0 truncate">
             {t('retryStatus.retrying', { attempt: status.attempt })}
             {nextLabel && (
-              <span className="text-[length:var(--fs-sm)] text-text-400 ml-2 tabular-nums">
+              <span className="text-ui-caption text-text-400 ml-2 tabular-nums">
                 {t('retryStatus.nextIn', { label: nextLabel })}
               </span>
             )}
@@ -85,7 +85,7 @@ export const RetryStatusInline = memo(function RetryStatusInline({ status }: { s
         >
           {shouldRenderBody && (
             <div className="mt-2 pt-2 border-t border-warning-100/20">
-              <p className="text-[length:var(--fs-sm)] text-text-300 font-mono whitespace-pre-wrap break-words overflow-x-hidden">
+              <p className="text-ui-caption text-text-300 font-mono whitespace-pre-wrap break-words overflow-x-hidden">
                 {status.message}
               </p>
             </div>

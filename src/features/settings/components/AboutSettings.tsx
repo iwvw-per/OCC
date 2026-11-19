@@ -208,26 +208,26 @@ export function AboutSettings() {
       <SettingsSection plain title={t('about.versionCardTitle')} description={t('about.versionCardDesc')}>
         <div className="divide-y divide-border-200/35">
           <div className="flex items-center justify-between gap-4 py-2.5">
-            <div className="text-[length:var(--fs-sm)] text-text-300">{t('about.currentVersion')}</div>
-            <div className="shrink-0 text-[length:var(--fs-sm)] font-semibold text-text-100 tabular-nums">
+            <div className="text-ui-caption text-text-300">{t('about.currentVersion')}</div>
+            <div className="shrink-0 text-ui-caption font-semibold text-text-100 tabular-nums">
               v{updateState.currentVersion}
             </div>
           </div>
           <div className="flex items-center justify-between gap-4 py-2.5">
-            <div className="text-[length:var(--fs-sm)] text-text-300">{t('about.updateChannel')}</div>
-            <div className="shrink-0 text-[length:var(--fs-sm)] font-semibold text-text-100">
+            <div className="text-ui-caption text-text-300">{t('about.updateChannel')}</div>
+            <div className="shrink-0 text-ui-caption font-semibold text-text-100">
               {updateState.currentChannel === 'canary' ? t('about.channelCanary') : t('about.channelStable')}
             </div>
           </div>
           <div className="flex items-center justify-between gap-4 py-2.5">
-            <div className="text-[length:var(--fs-sm)] text-text-300">{t('about.latestVersion')}</div>
-            <div className="shrink-0 text-[length:var(--fs-sm)] font-semibold text-text-100 tabular-nums">
+            <div className="text-ui-caption text-text-300">{t('about.latestVersion')}</div>
+            <div className="shrink-0 text-ui-caption font-semibold text-text-100 tabular-nums">
               {latestVersion}
             </div>
           </div>
         </div>
 
-        <div className="min-w-0 text-[length:var(--fs-sm)] text-text-300 leading-relaxed">
+        <div className="min-w-0 text-ui-caption text-text-300 leading-relaxed">
           <div className="break-words font-medium text-text-100">{statusText}</div>
           {releaseDate && <div className="mt-1 text-text-400">{t('about.publishedAt', { date: releaseDate })}</div>}
         </div>
@@ -299,7 +299,7 @@ export function AboutSettings() {
           onChange={handleImportBackup}
           className="hidden"
         />
-        <div className="rounded-lg bg-warning-bg/40 border border-warning-100/20 px-3.5 py-3 text-[length:var(--fs-sm)] text-text-300 leading-relaxed">
+        <div className="rounded-lg bg-warning-bg/40 border border-warning-100/20 px-3.5 py-3 text-ui-caption text-text-300 leading-relaxed">
           {t('about.backupWarning')}
         </div>
 
@@ -315,7 +315,7 @@ export function AboutSettings() {
         </div>
 
         {backupError && (
-          <div className="min-w-0 break-all rounded-lg bg-danger-100/10 border border-danger-100/20 px-3.5 py-2.5 text-[length:var(--fs-sm)] text-danger-100 leading-relaxed">
+          <div className="min-w-0 break-all rounded-lg bg-danger-100/10 border border-danger-100/20 px-3.5 py-2.5 text-ui-caption text-danger-100 leading-relaxed">
             {backupError}
           </div>
         )}

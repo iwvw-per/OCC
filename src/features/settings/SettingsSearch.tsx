@@ -125,7 +125,7 @@ export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, c
           }
         }}
         placeholder={placeholder}
-        className="h-8 w-full rounded-md border border-border-200 bg-transparent pl-8 pr-8 text-[length:var(--fs-sm)] text-text-100 outline-none placeholder:text-text-400 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30"
+        className="h-8 w-full rounded-md border border-border-200 bg-transparent pl-8 pr-8 text-ui-caption text-text-100 outline-none placeholder:text-text-400 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30"
       />
       {query && (
         <button
@@ -150,7 +150,7 @@ export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, c
           className="absolute left-0 top-[calc(100%+6px)] max-h-72 min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-md border border-border-200 bg-bg-000/95 flex flex-col gap-0.5 p-1 shadow-xl backdrop-blur-xl custom-scrollbar"
         >
           {results.length === 0 ? (
-            <div className="px-2.5 py-3 text-[length:var(--fs-xs)] text-text-400" role="status">
+            <div className="px-2.5 py-3 text-ui-sm text-text-400" role="status">
               {noResultsLabel}
             </div>
           ) : (
@@ -174,14 +174,14 @@ export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, c
                 }`}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[length:var(--fs-sm)] text-text-100">{item.label}</span>
+                  <span className="block truncate text-ui-caption text-text-100">{item.label}</span>
                   {item.description && (
-                    <span className="mt-0.5 block truncate font-mono text-[length:var(--fs-xs)] text-text-400">
+                    <span className="mt-0.5 block truncate font-mono text-ui-sm text-text-400">
                       {item.description}
                     </span>
                   )}
                 </span>
-                <span className="max-w-[48%] shrink-0 truncate text-[length:var(--fs-xs)] text-text-400" title={item.tabLabel}>
+                <span className="max-w-[48%] shrink-0 truncate text-ui-sm text-text-400" title={item.tabLabel}>
                   {item.tabLabel}
                 </span>
               </button>

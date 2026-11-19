@@ -61,7 +61,7 @@ export const WorkStatusSectionsDialog = memo(function WorkStatusSectionsDialog({
 
   return (
     <Dialog isOpen={isOpen} onClose={onClose} title={t('chat:workStatus.sections.dialogTitle')} width={420}>
-      <p className="mb-3 text-[length:var(--fs-sm)] text-text-400">
+      <p className="mb-3 text-ui-caption text-text-400">
         {t('chat:workStatus.sections.dialogDescription')}
       </p>
 
@@ -116,7 +116,7 @@ export const WorkStatusSectionsDialog = memo(function WorkStatusSectionsDialog({
                 aria-label={label}
               />
 
-              <span className="min-w-0 flex-1 truncate text-[length:var(--fs-base)] text-text-200">{label}</span>
+              <span className="min-w-0 flex-1 truncate text-ui-base text-text-200">{label}</span>
             </li>
           )
         })}
@@ -125,7 +125,7 @@ export const WorkStatusSectionsDialog = memo(function WorkStatusSectionsDialog({
       {!allVisible ? (
         <div className="mt-3 flex items-center justify-between border-t border-border-200/50 pt-3">
           {noneVisible ? (
-            <span className="text-[length:var(--fs-xs)] text-danger-100">
+            <span className="text-ui-sm text-danger-100">
               {t('chat:workStatus.sections.noneWarning')}
             </span>
           ) : (

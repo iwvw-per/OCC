@@ -14,21 +14,6 @@
     />
     <meta name="robots" content="index, follow" />
 
-    <!-- Fonts: 自托管组合字体（西文 Manrope/Sora + 中文 HarmonyOS Sans SC）
-         中文用 cn-font-split 按 unicode-range 切成 164 个子集，按需下载，
-         单包 10-70KB。这里 preload 两个拉丁可变字体：体积小且首屏必用，
-         提前拉取可避免文本先以回退字体渲染再切换（FOUT）。
-         中文字体不做 preload：164 个子集无法预知命中哪个，交给 unicode-range 按需取。 -->
-    <link
-      rel="preload"
-      href="/fonts/sora/files/Manrope-latin.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link rel="preload" href="/fonts/sora/files/Sora-latin.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="stylesheet" href="/fonts/sora/sora.css" />
-
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#262524" />

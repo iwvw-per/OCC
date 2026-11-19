@@ -78,7 +78,7 @@ export const MessageErrorView = memo(function MessageErrorView({ error, stateKey
         onClick={() => hasDetails && withScrollLock(() => setExpanded(!expanded))}
       >
         <AlertCircleIcon className={`w-4 h-4 ${colorClass} flex-shrink-0`} />
-        <span className={`text-[length:var(--fs-base)] ${colorClass} flex-1 min-w-0 truncate`}>{title}</span>
+        <span className={`text-ui-base ${colorClass} flex-1 min-w-0 truncate`}>{title}</span>
         {hasDetails && <ChevronDownIcon className={chevronClass(expanded)} />}
       </div>
 
@@ -91,13 +91,13 @@ export const MessageErrorView = memo(function MessageErrorView({ error, stateKey
       >
         {shouldRenderBody && (
           <div className={`mt-2 pt-2 space-y-1.5 border-t ${borderClass}`}>
-            <p className="text-[length:var(--fs-sm)] text-text-300 break-words">{description}</p>
+            <p className="text-ui-caption text-text-300 break-words">{description}</p>
             {formattedDetails && <CodeBlock code={formattedDetails} language={detailsLang} maxHeight={240} />}
             {rawDiagnostics && (
               <div>
                 <button
                   type="button"
-                  className="flex items-center gap-1 text-[length:var(--fs-sm)] text-text-400 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1 cursor-pointer"
+                  className="flex items-center gap-1 text-ui-caption text-text-400 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1 cursor-pointer"
                   onClick={() => withScrollLock(() => setShowRawDiagnostics(!showRawDiagnostics))}
                 >
                   <ChevronDownIcon className={chevronClass(showRawDiagnostics)} />

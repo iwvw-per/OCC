@@ -83,7 +83,7 @@ export function SessionSortMenu() {
         maxWidth="min(240px, calc(100vw - 24px))"
       >
         <div ref={menuRef} role="menu" aria-label={t('sidebar.sortSessions', { defaultValue: '排序' })} className="p-1">
-          <div className="px-2 pt-1 pb-1.5 text-[length:var(--fs-xxs)] font-semibold uppercase tracking-wider text-text-400/60 select-none">
+          <div className="px-2 pt-1 pb-1.5 text-ui-xs font-semibold uppercase tracking-wider text-text-400/60 select-none">
             {t('sidebar.sortBy', { defaultValue: '排序方式' })}
           </div>
           {/* 条目之间留 2px：item 是 rounded-lg + hover 底色，紧贴时相邻圆角会拼成一条凹槽。
@@ -101,7 +101,7 @@ export function SessionSortMenu() {
                 }`}
               >
                 <span className="w-4 h-4 flex items-center justify-center shrink-0 text-text-400">{icon}</span>
-                <span className="flex-1 min-w-0 truncate text-[length:var(--fs-sm)]">{label}</span>
+                <span className="flex-1 min-w-0 truncate text-ui-caption">{label}</span>
                 {sidebarProjectSortField === field && (
                   <span className="w-4 flex items-center justify-center shrink-0 text-accent-main-100">
                     <CheckIcon size={14} />
@@ -113,7 +113,7 @@ export function SessionSortMenu() {
 
           <div className="mx-1 my-1 h-px bg-border-200/50" />
 
-          <div className="px-2 pt-1 pb-1.5 text-[length:var(--fs-xxs)] font-semibold uppercase tracking-wider text-text-400/60 select-none">
+          <div className="px-2 pt-1 pb-1.5 text-ui-xs font-semibold uppercase tracking-wider text-text-400/60 select-none">
             {t('sidebar.sortDirection', { defaultValue: '方向' })}
           </div>
           <button
@@ -128,7 +128,7 @@ export function SessionSortMenu() {
             <span className="w-4 h-4 flex items-center justify-center shrink-0 text-text-400">
               <SortDescIcon size={14} />
             </span>
-            <span className="flex-1 min-w-0 truncate text-[length:var(--fs-sm)]">
+            <span className="flex-1 min-w-0 truncate text-ui-caption">
               {t('sidebar.sortDesc', { defaultValue: '倒序（新 → 旧）' })}
             </span>
             {sidebarProjectSortDesc && (
@@ -149,7 +149,7 @@ export function SessionSortMenu() {
             <span className="w-4 h-4 flex items-center justify-center shrink-0 text-text-400">
               <SortIcon size={14} />
             </span>
-            <span className="flex-1 min-w-0 truncate text-[length:var(--fs-sm)]">
+            <span className="flex-1 min-w-0 truncate text-ui-caption">
               {t('sidebar.sortAsc', { defaultValue: '正序（旧 → 新）' })}
             </span>
             {!sidebarProjectSortDesc && (

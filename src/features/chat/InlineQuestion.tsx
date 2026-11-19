@@ -175,7 +175,7 @@ export const InlineQuestion = memo(function InlineQuestion({
           <span className="font-medium text-text-300">{t('chat:questionDialog.title')}</span>
           {isPaged && (
             <span className="ml-auto flex items-center gap-1.5">
-              <span className="tabular-nums text-[length:var(--fs-xxs)] text-text-500">
+              <span className="tabular-nums text-ui-xs text-text-500">
                 {t('chat:questionDialog.pageOf', { current: safePage + 1, total: totalQuestions })}
               </span>
               <span className="flex items-center gap-1">
@@ -202,7 +202,7 @@ export const InlineQuestion = memo(function InlineQuestion({
             <button
               onClick={goPrev}
               disabled={safePage === 0 || isReplying}
-              className="px-2.5 h-7 rounded-md text-[length:var(--fs-sm)] text-text-400 hover:bg-bg-200 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+              className="px-2.5 h-7 rounded-md text-ui-caption text-text-400 hover:bg-bg-200 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
             >
               {t('common:previous')}
             </button>
@@ -211,7 +211,7 @@ export const InlineQuestion = memo(function InlineQuestion({
             <button
               onClick={goNext}
               disabled={isReplying}
-              className="px-2.5 h-7 rounded-md text-[length:var(--fs-sm)] font-medium bg-text-100 text-bg-000 hover:bg-text-200 transition-colors disabled:opacity-50"
+              className="px-2.5 h-7 rounded-md text-ui-caption font-medium bg-text-100 text-bg-000 hover:bg-text-200 transition-colors disabled:opacity-50"
             >
               {t('common:next')}
             </button>
@@ -220,7 +220,7 @@ export const InlineQuestion = memo(function InlineQuestion({
               onClick={handleSubmit}
               disabled={!canSubmit || isReplying}
               data-haptic="medium"
-              className="px-2.5 h-7 rounded-md text-[length:var(--fs-sm)] font-medium bg-text-100 text-bg-000 hover:bg-text-200 transition-colors disabled:opacity-50"
+              className="px-2.5 h-7 rounded-md text-ui-caption font-medium bg-text-100 text-bg-000 hover:bg-text-200 transition-colors disabled:opacity-50"
             >
               {t('common:submit')}
             </button>
@@ -229,19 +229,19 @@ export const InlineQuestion = memo(function InlineQuestion({
             onClick={() => onReject(request.id)}
             disabled={isReplying}
             data-haptic="strong"
-            className="px-2.5 h-7 rounded-md text-[length:var(--fs-sm)] text-text-400 hover:bg-bg-200 transition-colors disabled:opacity-50"
+            className="px-2.5 h-7 rounded-md text-ui-caption text-text-400 hover:bg-bg-200 transition-colors disabled:opacity-50"
           >
             {t('common:skip')}
           </button>
           {autoSelectRemaining !== null && (
-            <span className="ml-auto inline-flex items-center gap-1 tabular-nums text-[length:var(--fs-xxs)] text-text-500">
+            <span className="ml-auto inline-flex items-center gap-1 tabular-nums text-ui-xs text-text-500">
               <TimerIcon size={12} className="shrink-0" />
               {t('chat:questionDialog.autoSelectIn', { seconds: autoSelectRemaining })}
             </span>
           )}
           {isPaged && (
             <span
-              className={`${autoSelectRemaining === null ? 'ml-auto' : ''} tabular-nums text-[length:var(--fs-xxs)] text-text-500`}
+              className={`${autoSelectRemaining === null ? 'ml-auto' : ''} tabular-nums text-ui-xs text-text-500`}
             >
               {t('chat:questionDialog.answeredCount', { done: answeredCount, total: totalQuestions })}
             </span>
@@ -323,9 +323,9 @@ function InlineQuestionItem({
       {/* 问题文字 */}
       <div>
         {question.header && (
-          <div className="text-[length:var(--fs-xs)] text-text-400 font-medium mb-0.5">{question.header}</div>
+          <div className="text-ui-sm text-text-400 font-medium mb-0.5">{question.header}</div>
         )}
-        <div className="text-[length:var(--fs-md)] text-text-100">{question.question}</div>
+        <div className="text-ui-base text-text-100">{question.question}</div>
       </div>
 
       {/* 选项 — 紧凑按钮组；勾选框用首行高度容器对齐，不随换行拉伸 */}
@@ -337,7 +337,7 @@ function InlineQuestionItem({
               key={idx}
               onClick={() => (isMultiple ? onToggleOption(option.label) : onSelectOption(option.label))}
               title={option.description}
-              className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-[length:var(--fs-sm)] leading-5 rounded-md transition-colors border ${
+              className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-ui-caption leading-5 rounded-md transition-colors border ${
                 isSelected ? 'bg-bg-200 text-text-100 border-border-200' : 'text-text-300 hover:bg-bg-200 border-transparent'
               }`}
             >
@@ -398,7 +398,7 @@ function InlineQuestionItem({
             }}
             placeholder={t('questionDialog.typeYourAnswer')}
             rows={1}
-            className="min-h-5 flex-1 resize-none bg-transparent py-0 text-[length:var(--fs-sm)] leading-5 text-text-100 placeholder:text-text-500 focus:outline-none"
+            className="min-h-5 flex-1 resize-none bg-transparent py-0 text-ui-caption leading-5 text-text-100 placeholder:text-text-500 focus:outline-none"
           />
         </div>
       )}

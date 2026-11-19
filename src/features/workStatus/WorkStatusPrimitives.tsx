@@ -17,7 +17,7 @@ import { workStatusStore } from '../../store/workStatusStore'
 const SECTION_CLASS =
   'flex flex-col [&:not(:first-child)]:mt-2.5 [&:not(:first-child)]:border-t [&:not(:first-child)]:border-border-200/40 [&:not(:first-child)]:pt-2.5'
 
-const HEADING_CLASS = 'text-[length:var(--fs-xs)] font-semibold text-text-100'
+const HEADING_CLASS = 'text-ui-sm font-semibold text-text-100'
 
 export function WorkStatusSection({
   title,
@@ -39,7 +39,7 @@ export function WorkStatusSection({
         )}
         <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>{title}</h3>
         {summary !== undefined && summary !== null ? (
-          <span className="min-w-0 max-w-[60%] truncate text-right text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+          <span className="min-w-0 max-w-[60%] truncate text-right text-ui-xs tabular-nums text-text-500">
             {summary}
           </span>
         ) : null}
@@ -89,7 +89,7 @@ export function WorkStatusCollapsibleSection({
   const onToggle = () => workStatusStore.setSectionExpanded(id, !expanded)
   const summaryNode =
     summary !== undefined && summary !== null ? (
-      <span className="min-w-0 max-w-[60%] truncate text-right text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+      <span className="min-w-0 max-w-[60%] truncate text-right text-ui-xs tabular-nums text-text-500">
         {summary}
       </span>
     ) : null
@@ -171,11 +171,11 @@ export function WorkStatusRow({ icon, leading, label, value, muted, onClick, ari
   const body = (
     <>
       {leading ?? (icon != null && <span className="inline-flex size-3.5 shrink-0 items-center justify-center text-text-500">{icon}</span>)}
-      <span className={cn('min-w-0 flex-1 truncate text-[length:var(--fs-xs)]', muted && 'text-text-400')}>
+      <span className={cn('min-w-0 flex-1 truncate text-ui-sm', muted && 'text-text-400')}>
         {label}
       </span>
       {value !== undefined && value !== null ? (
-        <span className="flex shrink-0 items-center gap-1.5 text-[length:var(--fs-xs)] tabular-nums">{value}</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-ui-sm tabular-nums">{value}</span>
       ) : null}
     </>
   )
@@ -244,7 +244,7 @@ export function WorkStatusRowAction({
         onClick()
       }}
       className={cn(
-        'shrink-0 rounded-full px-1.5 py-px text-[length:var(--fs-xxs)] font-medium leading-4 transition-opacity',
+        'shrink-0 rounded-full px-1.5 py-px text-ui-xs font-medium leading-4 transition-opacity',
         'hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50',
         toneClass,
       )}

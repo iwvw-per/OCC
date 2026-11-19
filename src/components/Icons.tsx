@@ -55,6 +55,8 @@ import {
   CircleAlert,
   RefreshCcw,
   Cpu,
+  Package,
+  Server,
   DollarSign,
   Lightbulb,
   Users,
@@ -179,6 +181,8 @@ export const RetryIcon = wrap(RefreshCcw)
 export const ZoomInIcon = wrap(ZoomIn)
 export const ZoomOutIcon = wrap(ZoomOut)
 export const CpuIcon = wrap(Cpu)
+export const PackageIcon = wrap(Package)
+export const ServerIcon = wrap(Server)
 export const DollarSignIcon = wrap(DollarSign)
 export const LightbulbIcon = wrap(Lightbulb)
 export const UsersIcon = wrap(Users)

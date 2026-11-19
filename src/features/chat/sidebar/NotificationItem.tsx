@@ -143,7 +143,7 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
         >
           <div className="flex min-w-0 items-center gap-1.5">
             <p
-              className="min-w-0 flex-1 truncate text-[length:var(--fs-md)] font-medium text-text-200"
+              className="min-w-0 flex-1 truncate text-ui-base font-medium text-text-200"
               title={displayTitle}
             >
               {displayTitle}
@@ -152,7 +152,7 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-main-100 group-hover:hidden group-focus-within:hidden" />
             )}
           </div>
-          <div className="mt-1 flex h-4 min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[length:var(--fs-xxs)] text-text-400">
+          <div className="mt-1 flex h-4 min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-ui-xs text-text-400">
             <span className={`relative shrink-0 flex h-3 w-3 items-center justify-center ${config.color}`}>
               <Icon size={10} />
             </span>

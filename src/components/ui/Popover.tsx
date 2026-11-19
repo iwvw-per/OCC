@@ -24,7 +24,7 @@ export const PopoverContent = forwardRef<
       sideOffset={sideOffset}
       className={cn(
         'z-[200] rounded-xl border border-border-200/60 glass p-3 shadow-lg outline-none',
-        'text-[length:var(--fs-sm)] text-text-200',
+        'text-ui-caption text-text-200',
         // 开合动画由 index.css 的 .overlay-surface 驱动（与 Select/DropdownMenu 统一）。
         'overlay-surface',
         className,

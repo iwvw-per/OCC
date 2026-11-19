@@ -203,7 +203,7 @@ export const CodeBlock = memo(function CodeBlock({
     [requireTapToRevealCopy],
   )
 
-  const fontSize = isReasoning ? 'text-[length:var(--fs-sm)]' : 'text-[length:var(--fs-md)]'
+  const fontSize = isReasoning ? 'text-ui-caption' : 'text-ui-base'
   const lineHeight = isReasoning ? 'leading-5' : 'leading-6'
   const textColor = isReasoning ? 'text-text-300' : 'text-text-200'
 
@@ -254,7 +254,7 @@ export const CodeBlock = memo(function CodeBlock({
     >
       {showLabel ? (
         <div className="flex min-h-10 items-start justify-between pl-3.5 pr-0 pt-2 pb-0">
-          <div className="flex h-8 min-w-0 items-center text-[length:var(--fs-xs)] font-medium leading-none tracking-wide text-text-500 select-none">
+          <div className="flex h-8 min-w-0 items-center text-ui-sm font-medium leading-none tracking-wide text-text-500 select-none">
             <span className="truncate">{language}</span>
           </div>
           <div className="inline-flex h-8 shrink-0 items-center gap-0.5 pr-2 opacity-0 group-hover/code:opacity-100 group-focus-within/code:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">

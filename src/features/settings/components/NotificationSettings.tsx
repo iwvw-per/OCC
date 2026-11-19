@@ -136,7 +136,7 @@ function VolumeSlider({ value, onChange }: { value: number; onChange: (v: number
           [&::-moz-range-track]:h-1.5"
       />
       <VolumeIcon size={13} className="text-text-400 shrink-0" />
-      <span className="text-[length:var(--fs-sm)] text-text-300 w-8 text-right tabular-nums">{value}</span>
+      <span className="text-ui-caption text-text-300 w-8 text-right tabular-nums">{value}</span>
     </div>
   )
 }
@@ -286,10 +286,10 @@ function EventSoundCard({
       <div className="flex items-start gap-2.5 min-w-0 mb-2.5 pr-9">
         <span className={`${color} shrink-0 mt-[3px]`}>{icon}</span>
         <div className="min-w-0">
-          <div className="text-[length:var(--fs-md)] font-medium text-text-100 leading-snug">
+          <div className="text-ui-base font-medium text-text-100 leading-snug">
             {t(labelKey as `notifications.${string}`)}
           </div>
-          <div data-setting-desc className="text-[length:var(--fs-xs)] text-text-300 mt-0.5">
+          <div data-setting-desc className="text-ui-sm text-text-300 mt-0.5">
             {t(descKey as `notifications.${string}`)}
           </div>
         </div>
@@ -300,7 +300,7 @@ function EventSoundCard({
         <button
           type="button"
           onClick={() => handleSoundChange('none')}
-          className={`px-2.5 py-1 rounded-md text-[length:var(--fs-sm)] font-medium transition-colors
+          className={`px-2.5 py-1 rounded-md text-ui-caption font-medium transition-colors
             ${
               eventConfig.soundId === 'none'
                 ? 'bg-accent-main-100/15 text-accent-main-100'
@@ -315,7 +315,7 @@ function EventSoundCard({
             key={sid}
             type="button"
             onClick={() => handleSoundChange(sid)}
-            className={`px-2.5 py-1 rounded-md text-[length:var(--fs-sm)] font-medium transition-colors
+            className={`px-2.5 py-1 rounded-md text-ui-caption font-medium transition-colors
               ${
                 eventConfig.soundId === sid
                   ? 'bg-accent-main-100/15 text-accent-main-100'
@@ -330,7 +330,7 @@ function EventSoundCard({
           <button
             type="button"
             onClick={() => handleSoundChange('custom')}
-            className={`px-2.5 py-1 rounded-md text-[length:var(--fs-sm)] font-medium transition-colors
+            className={`px-2.5 py-1 rounded-md text-ui-caption font-medium transition-colors
               ${
                 eventConfig.soundId === 'custom'
                   ? 'bg-accent-main-100/15 text-accent-main-100'
@@ -346,7 +346,7 @@ function EventSoundCard({
       {hasCustom && eventConfig.customFileName && (
         <div className="flex flex-wrap items-center gap-1 mb-1.5">
           <span
-            className="min-w-0 flex-1 text-[length:var(--fs-xs)] text-text-400 truncate"
+            className="min-w-0 flex-1 text-ui-sm text-text-400 truncate"
             title={eventConfig.customFileName}
           >
             {eventConfig.customFileName}
@@ -356,7 +356,7 @@ function EventSoundCard({
             onClick={handleExportCustom}
             disabled={audioBusy !== null}
             className={cn(
-              'text-[length:var(--fs-xs)] text-accent-main-100 px-1.5 py-0.5 rounded-md',
+              'text-ui-sm text-accent-main-100 px-1.5 py-0.5 rounded-md',
               interactive.accent,
             )}
           >
@@ -366,7 +366,7 @@ function EventSoundCard({
             type="button"
             onClick={handleRemoveCustom}
             disabled={audioBusy !== null}
-            className="text-[length:var(--fs-xs)] text-text-400 px-1.5 py-0.5 rounded-md hover:bg-danger-100/10 transition-colors"
+            className="text-ui-sm text-text-400 px-1.5 py-0.5 rounded-md hover:bg-danger-100/10 transition-colors"
           >
             {t('notifications.removeCustom')}
           </button>
@@ -381,18 +381,18 @@ function EventSoundCard({
           onClick={() => fileInputRef.current?.click()}
           disabled={audioBusy !== null}
           className={cn(
-            'text-[length:var(--fs-xs)] text-accent-main-100 px-2 py-1 rounded-md disabled:opacity-50',
+            'text-ui-sm text-accent-main-100 px-2 py-1 rounded-md disabled:opacity-50',
             interactive.accent,
           )}
         >
           {hasCustom ? t('notifications.replaceAudio') : t('notifications.uploadAudio')}
         </button>
-        <span className="w-full text-[length:var(--fs-xs)] text-text-500 sm:ml-auto sm:w-auto">{t('notifications.supportedFormats')}</span>
+        <span className="w-full text-ui-sm text-text-500 sm:ml-auto sm:w-auto">{t('notifications.supportedFormats')}</span>
       </div>
 
       {/* Upload Error */}
       {uploadError && (
-        <div aria-live="polite" className="mt-1.5 text-[length:var(--fs-xs)] text-danger-100 flex items-center gap-1.5">
+        <div aria-live="polite" className="mt-1.5 text-ui-sm text-danger-100 flex items-center gap-1.5">
           <AlertCircleIcon size={11} />
           {uploadError}
         </div>
@@ -475,10 +475,10 @@ export function NotificationSettings() {
             {notificationsEnabled && notificationPermission !== 'denied' && (
               <SettingsCardRow>
                 <div className="mb-2.5">
-                  <div className="text-[length:var(--fs-sm)] font-medium text-text-100">
+                  <div className="text-ui-caption font-medium text-text-100">
                     {t('notifications.notificationTypes')}
                   </div>
-                  <div data-setting-desc className="mt-0.5 text-[length:var(--fs-xs)] text-text-400 leading-relaxed">
+                  <div data-setting-desc className="mt-0.5 text-ui-sm text-text-400 leading-relaxed">
                     {t('notifications.notificationTypesDesc')}
                   </div>
                 </div>
@@ -498,7 +498,7 @@ export function NotificationSettings() {
             )}
           </>
         ) : (
-          <div className="px-4 py-3 text-[length:var(--fs-xs)] text-text-300 leading-relaxed">
+          <div className="px-4 py-3 text-ui-sm text-text-300 leading-relaxed">
             {t('notifications.notAvailable')}
           </div>
         )}
@@ -582,7 +582,7 @@ export function NotificationSettings() {
             )}
           </>
         ) : (
-          <div className="px-4 py-3 text-[length:var(--fs-xs)] text-text-300 leading-relaxed">
+          <div className="px-4 py-3 text-ui-sm text-text-300 leading-relaxed">
             {t('notifications.soundNotSupported')}
           </div>
         )}
@@ -625,7 +625,7 @@ export function NotificationSettings() {
             )}
           </>
         ) : (
-          <div className="px-4 py-3 text-[length:var(--fs-xs)] text-text-300 leading-relaxed">
+          <div className="px-4 py-3 text-ui-sm text-text-300 leading-relaxed">
             {t('notifications.hapticNotSupported')}
           </div>
         )}

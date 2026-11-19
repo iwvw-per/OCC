@@ -74,7 +74,7 @@ export function MentionTag({ type, value, displayName, onClick, className = '', 
   return (
     <span
       className={`
-        inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[length:var(--fs-sm)] font-medium
+        inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-ui-caption font-medium
         border cursor-pointer select-none transition-[filter,opacity]
         hover:brightness-95 active:brightness-90
         ${colors.bg} ${colors.text} ${colors.darkText} ${colors.border}

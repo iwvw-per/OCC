@@ -22,10 +22,10 @@ export const FolderProjectDropOverlay = memo(function FolderProjectDropOverlay({
           <FolderIcon size={24} />
         </div>
         <div className="px-4 text-center">
-          <div className="text-[length:var(--fs-base)] font-medium text-accent-main-100">
+          <div className="text-ui-base font-medium text-accent-main-100">
             {t('chatArea.dropFolderToAddProject')}
           </div>
-          <div className="mt-1 text-[length:var(--fs-sm)] text-text-300">
+          <div className="mt-1 text-ui-caption text-text-300">
             {t('chatArea.dropFolderToAddProjectHint')}
           </div>
         </div>

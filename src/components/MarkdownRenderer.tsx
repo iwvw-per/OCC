@@ -738,7 +738,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
   if (error) {
     return (
       <div className="my-4 first:mt-0 last:mb-0 rounded-md border border-danger-100/30 bg-danger-bg/40 p-3">
-        <p className="mb-2 text-[length:var(--fs-sm)] font-medium text-danger-100">{t('markdown.renderFailed')}</p>
+        <p className="mb-2 text-ui-caption font-medium text-danger-100">{t('markdown.renderFailed')}</p>
         <CodeBlock code={code} language="mermaid" />
       </div>
     )
@@ -782,7 +782,7 @@ const MarkdownTable = memo(function MarkdownTable({
   if (isReasoning) {
     return (
       <div className="overflow-x-auto my-2 first:mt-0 last:mb-0 w-full">
-        <table className="min-w-full border-collapse text-[length:var(--fs-sm)]">
+        <table className="min-w-full border-collapse text-ui-caption">
           {children}
         </table>
       </div>
@@ -792,7 +792,7 @@ const MarkdownTable = memo(function MarkdownTable({
   return (
     <div className="group/table relative my-5 first:mt-0 last:mb-0 rounded-md border border-border-200/35 w-full">
       <div className="overflow-x-auto">
-        <table className="w-full text-[length:var(--fs-md)] border-collapse">
+        <table className="w-full text-ui-base border-collapse">
           {children}
         </table>
       </div>
@@ -813,8 +813,8 @@ function MarkdownTableCell({
     return (
       <th
         className={isReasoning
-          ? 'px-3 py-1.5 text-left text-[length:var(--fs-sm)] font-medium whitespace-nowrap border-b border-border-200/32'
-          : 'relative px-3 py-2.5 text-left text-[length:var(--fs-md)] font-semibold whitespace-nowrap border-b border-border-200/38'
+          ? 'px-3 py-1.5 text-left text-ui-caption font-medium whitespace-nowrap border-b border-border-200/32'
+          : 'relative px-3 py-2.5 text-left text-ui-base font-semibold whitespace-nowrap border-b border-border-200/38'
         }
       >
         {children}
@@ -824,8 +824,8 @@ function MarkdownTableCell({
   return (
     <td
       className={isReasoning
-        ? 'px-3 py-1.5 text-[length:var(--fs-sm)] text-text-300 w-max border-b border-border-200/18'
-        : 'px-3 py-2 text-[length:var(--fs-md)] text-text-300 leading-[1.55] w-max border-b border-border-200/14'
+        ? 'px-3 py-1.5 text-ui-caption text-text-300 w-max border-b border-border-200/18'
+        : 'px-3 py-2 text-ui-base text-text-300 leading-[1.55] w-max border-b border-border-200/14'
       }
     >
       {children}
@@ -918,13 +918,13 @@ function renderInlineTokensToReact(tokens: unknown[], _isReasoning: boolean): Re
     if (item.type === 'del') {
       return <del key={index} className={_isReasoning ? 'text-text-500 line-through decoration-text-500/50' : 'text-text-400 line-through decoration-text-400/50'}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</del>
     }
-    if (item.type === 'codespan') return <code key={index} className={_isReasoning ? 'font-mono text-accent-main-100 text-[0.9em] align-baseline break-words' : 'text-accent-main-100 text-[0.9em] font-mono align-baseline break-words'}>{String(item.text ?? '')}</code>
+    if (item.type === 'codespan') return <code key={index} className={_isReasoning ? 'font-mono text-accent-main-100 text-ui-sm align-baseline break-words' : 'text-accent-main-100 text-ui-sm font-mono align-baseline break-words'}>{String(item.text ?? '')}</code>
     if (item.type === 'link') {
       const href = typeof item.href === 'string' ? item.href : undefined
       if (isUnsafeHrefInline(href)) return <span key={index}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)} [blocked]</span>
       const localPath = decodeLocalFileHrefInline(href) ?? getWindowsAbsolutePathInline(href)
       const className = _isReasoning
-        ? 'text-[length:var(--fs-sm)] font-medium text-accent-main-200/80 hover:text-accent-main-200 underline underline-offset-2 transition-colors'
+        ? 'text-ui-caption font-medium text-accent-main-200/80 hover:text-accent-main-200 underline underline-offset-2 transition-colors'
         : 'font-medium text-accent-main-100 hover:text-accent-main-200 underline underline-offset-2 transition-colors'
       if (localPath) {
         return (
@@ -1776,7 +1776,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   return (
     <div
-      className={`markdown-content ${isReasoning ? 'text-[length:var(--fs-sm)] leading-5 text-text-500' : 'text-[length:var(--fs-base)] leading-relaxed text-text-100'} break-words min-w-0 overflow-hidden ${className}`}
+      className={`markdown-content ${isReasoning ? 'text-ui-caption leading-5 text-text-500' : 'text-ui-base leading-relaxed text-text-100'} break-words min-w-0 overflow-hidden ${className}`}
     >
       {streamBlocks.map(block => (
         <MarkdownStreamBlock

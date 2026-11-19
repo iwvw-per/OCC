@@ -89,10 +89,10 @@ function PresetCard({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-[length:var(--fs-md)] font-medium text-text-100">{name}</span>
+          <span className="text-ui-base font-medium text-text-100">{name}</span>
           {isActive && <CheckIcon size={12} className="text-accent-main-100 shrink-0" />}
         </div>
-        <div className="text-[length:var(--fs-xs)] text-text-400 mt-0.5">{description}</div>
+        <div className="text-ui-sm text-text-400 mt-0.5">{description}</div>
       </div>
     </button>
   )
@@ -137,7 +137,7 @@ function FontScaleSlider({
   const displayPx = baseSize + value
   return (
     <div className="flex items-center gap-3 w-full">
-      <span className="text-text-400 text-[length:var(--fs-xs)] select-none shrink-0" style={{ fontSize: 11 }}>
+      <span className="text-text-400 text-ui-xs select-none shrink-0">
         A
       </span>
       <input
@@ -149,10 +149,10 @@ function FontScaleSlider({
         onChange={e => onChange(Number(e.target.value))}
         className={sliderCls}
       />
-      <span className="text-text-400 select-none shrink-0" style={{ fontSize: 16 }}>
+      <span className="text-text-400 text-ui-base select-none shrink-0">
         A
       </span>
-      <span className="text-[length:var(--fs-sm)] text-text-300 w-12 text-right tabular-nums shrink-0">
+      <span className="text-ui-caption text-text-300 w-12 text-right tabular-nums shrink-0">
         {displayPx}px
       </span>
     </div>
@@ -402,11 +402,11 @@ function CustomCSSEditor({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <div data-setting-desc className="text-[length:var(--fs-xs)] text-text-400 min-w-0">
+        <div data-setting-desc className="text-ui-sm text-text-400 min-w-0">
           <Trans
             i18nKey="settings:appearance.customCssSpecificityHelp"
             components={{
-              1: <code className="text-[length:var(--fs-xxs)] px-1 py-0.5 bg-bg-200 rounded font-mono" />,
+              1: <code className="text-ui-xs px-1 py-0.5 bg-bg-200 rounded font-mono" />,
             }}
           />
         </div>
@@ -491,7 +491,7 @@ function SavedSnippetItem({
         <div className="min-w-0 flex-1">
           <div className="flex min-h-7 items-center gap-2 flex-wrap">
             <span
-              className={`text-[length:var(--fs-sm)] font-medium truncate ${
+              className={`text-ui-caption font-medium truncate ${
                 isActive ? 'text-accent-main-100' : 'text-text-100'
               }`}
             >
@@ -499,12 +499,12 @@ function SavedSnippetItem({
             </span>
             {isActive && !isDirty && <CheckIcon size={12} className="text-accent-main-100 shrink-0" />}
             {isDirty && (
-              <span className="px-1.5 py-0.5 rounded bg-warning-bg text-warning-200 text-[length:var(--fs-xxs)]">
+              <span className="px-1.5 py-0.5 rounded bg-warning-bg text-warning-200 text-ui-xs">
                 {t('appearance.modifiedOverride')}
               </span>
             )}
           </div>
-          <div className="text-[length:var(--fs-xs)] text-text-400 mt-1 whitespace-pre-wrap break-all max-h-10 overflow-hidden">
+          <div className="text-ui-sm text-text-400 mt-1 whitespace-pre-wrap break-all max-h-10 overflow-hidden">
             {snippet.css.slice(0, 160) || '/* empty */'}
           </div>
         </div>
@@ -556,7 +556,7 @@ function LanguagePicker({
   return (
     <SettingRow label={t('appearance.language')} description={t('appearance.languageDesc')}>
       <Select value={current} onValueChange={onSelect}>
-        <SelectTrigger aria-label={t('appearance.language')} className="h-7 gap-1.5 text-[length:var(--fs-sm)]">
+        <SelectTrigger aria-label={t('appearance.language')} className="h-7 gap-1.5 text-ui-caption">
           <span className="flex min-w-0 items-center gap-1.5">
             <GlobeIcon size={13} className="shrink-0 text-text-400" />
             <span className="truncate font-medium">{displayLabel}</span>
@@ -739,7 +739,7 @@ export function AppearanceSettings() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-border-200/50 px-3 py-3 text-[length:var(--fs-sm)] text-text-400">
+              <div className="rounded-lg border border-dashed border-border-200/50 px-3 py-3 text-ui-caption text-text-400">
                 {t('appearance.noSavedOverrides')}
               </div>
             )}

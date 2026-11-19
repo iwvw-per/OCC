@@ -154,7 +154,7 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
 
   if (isLoading && sorted.length === 0) {
     return (
-      <div className="flex items-center justify-center gap-2 py-10 text-[length:var(--fs-sm)] text-text-400">
+      <div className="flex items-center justify-center gap-2 py-10 text-ui-caption text-text-400">
         <Spinner size="sm" tone="muted" variant="ring" />
         {t('common:loading')}
       </div>
@@ -163,7 +163,7 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
 
   if (error && sorted.length === 0) {
     return (
-      <div className="py-10 text-center text-[length:var(--fs-sm)] text-text-400">
+      <div className="py-10 text-center text-ui-caption text-text-400">
         {t('chat:archived.loadFailed', { defaultValue: 'Failed to load archived chats' })}
       </div>
     )
@@ -173,7 +173,7 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
     return (
       <div className="py-10 flex flex-col items-center gap-2 text-text-400">
         <ArchiveIcon size={24} className="opacity-50" />
-        <span className="text-[length:var(--fs-sm)]">
+        <span className="text-ui-caption">
           {t('chat:archived.empty', { defaultValue: 'No archived chats' })}
         </span>
       </div>
@@ -191,11 +191,11 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
         <button
           type="button"
           onClick={() => toggleAll()}
-          className="text-[length:var(--fs-xxs)] text-text-400 hover:text-text-200 transition-colors"
+          className="text-ui-xs text-text-400 hover:text-text-200 transition-colors"
         >
           {t('chat:archived.selectAll', { defaultValue: 'Select all' })}
         </button>
-        <span className="flex-1 text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+        <span className="flex-1 text-ui-xs tabular-nums text-text-500">
           {outgoing.length > 0
             ? t('chat:archived.selectedCount', { count: outgoing.length, defaultValue: '{{count}} selected' })
             : t('chat:archived.totalCount', { count: sorted.length, defaultValue: '{{count}} archived' })}
@@ -227,7 +227,7 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
       </div>
 
       {bulkFailed && (
-        <div className="mb-2 rounded-md bg-danger-100/10 px-3 py-2 text-[length:var(--fs-xxs)] text-danger-100">
+        <div className="mb-2 rounded-md bg-danger-100/10 px-3 py-2 text-ui-xs text-danger-100">
           {t('chat:archived.deleteFailed', { defaultValue: 'Some chats failed to delete. Please retry.' })}
         </div>
       )}
@@ -282,10 +282,10 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
                       )}
                     />
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] font-semibold text-text-100">
+                  <span className="min-w-0 flex-1 truncate text-ui-caption font-semibold text-text-100">
                     {group.name}
                   </span>
-                  <span className="shrink-0 text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+                  <span className="shrink-0 text-ui-xs tabular-nums text-text-500">
                     {group.sessions.length}
                   </span>
                 </button>
@@ -316,10 +316,10 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
                           aria-label={session.title || t('commands:sessions.untitledChat', { defaultValue: 'Untitled' })}
                         />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[length:var(--fs-sm)] text-text-200">
+                          <div className="truncate text-ui-caption text-text-200">
                             {session.title || t('commands:sessions.untitledChat', { defaultValue: 'Untitled' })}
                           </div>
-                          <div className="mt-0.5 text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+                          <div className="mt-0.5 text-ui-xs tabular-nums text-text-500">
                             {formatLocaleDateTime(session.time?.archived)}
                           </div>
                         </div>
@@ -346,7 +346,7 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
                               disabled={isBusy}
                               onClick={() => void handleRestore(session.id)}
                               className={cn(
-                                'flex h-7 items-center gap-1 rounded-md px-2 text-[length:var(--fs-xxs)]',
+                                'flex h-7 items-center gap-1 rounded-md px-2 text-ui-xs',
                                 'bg-bg-200 text-text-300 transition-colors duration-150',
                                 'hover:bg-bg-300 active:bg-bg-300',
                                 isBusy && 'opacity-50',
@@ -361,7 +361,7 @@ function ArchivedSessionsBody({ serverId }: { serverId?: string }) {
                               disabled={isBusy}
                               onClick={() => setConfirmId(session.id)}
                               className={cn(
-                                'flex h-7 items-center gap-1 rounded-md px-2 text-[length:var(--fs-xxs)]',
+                                'flex h-7 items-center gap-1 rounded-md px-2 text-ui-xs',
                                 'bg-danger-100/10 text-danger-100 transition-colors duration-150',
                                 'hover:bg-danger-100/20 active:bg-danger-100/30',
                                 isBusy && 'opacity-50',

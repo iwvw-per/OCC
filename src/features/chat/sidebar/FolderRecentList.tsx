@@ -91,7 +91,7 @@ function ProjectNameTitle({
        * 改用纯 CSS 变量 + 一条全局规则控制，见下方 `<style>` 说明。
        */
       data-project-title
-      className={`min-w-0 flex-1 whitespace-nowrap text-[length:var(--fs-sm)] font-semibold optical-center transition-[padding] duration-150 ${
+      className={`min-w-0 flex-1 whitespace-nowrap text-ui-caption font-semibold optical-center transition-[padding] duration-150 ${
         overflows ? 'name-fade-right overflow-hidden' : 'truncate'
       } ${className}`}
       style={
@@ -312,8 +312,8 @@ export function FolderRecentList({
       >
         {projects.length === 0 && pinnedSessions.length === 0 && unavailablePinnedEntries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-text-400 opacity-70">
-            <p className="text-[length:var(--fs-sm)] font-medium text-text-300">{t('sidebar.noProjectFoldersYet')}</p>
-            <p className="mt-1 text-[length:var(--fs-xs)] text-text-400/70">{t('sidebar.addProjectDesc')}</p>
+            <p className="text-ui-caption font-medium text-text-300">{t('sidebar.noProjectFoldersYet')}</p>
+            <p className="mt-1 text-ui-sm text-text-400/70">{t('sidebar.addProjectDesc')}</p>
           </div>
         ) : (
           <div onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
@@ -488,7 +488,7 @@ function PinnedFolderSection({
           <span className="size-5 shrink-0 flex items-center justify-center">
             <PinIcon size={15} className="text-accent-main-100" />
           </span>
-          <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] font-medium text-text-300">
+          <span className="min-w-0 flex-1 truncate text-ui-caption font-medium text-text-300">
             {t('sessions.pinned')}
           </span>
         </button>
@@ -558,10 +558,10 @@ function UnavailablePinnedSessionItem({ entry }: { entry: PinnedSessionEntry }) 
     <div className="group relative flex items-center gap-2 px-2 py-1.5 select-none text-text-500">
       <span className="relative shrink-0 flex items-center justify-center size-5" />
       <div className="flex min-w-0 flex-1 items-center gap-1.5 pr-0 group-hover:pr-8 transition-[padding] duration-200">
-        <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] text-text-500 optical-center" title={title}>
+        <span className="min-w-0 flex-1 truncate text-ui-caption text-text-500 optical-center" title={title}>
           {title}
         </span>
-        <span className="shrink-0 text-[length:var(--fs-xxs)] text-text-500 group-hover:hidden">
+        <span className="shrink-0 text-ui-xs text-text-500 group-hover:hidden">
           {t('sessions.unavailable')}
         </span>
       </div>
@@ -1183,7 +1183,7 @@ function FolderRecentSection({
           {/* 最后使用时间放行尾；hover 时隐藏，给 + / 移除按钮让位 */}
           {lastUsedAt ? (
             <span
-              className="shrink-0 pl-1 pr-1.5 text-[length:var(--fs-xxs)] text-text-500 group-hover/folder:hidden"
+              className="shrink-0 pl-1 pr-1.5 text-ui-xs text-text-500 group-hover/folder:hidden"
               title={new Date(lastUsedAt).toLocaleString()}
             >
               {formatRelativeDay(lastUsedAt)}
@@ -1204,26 +1204,26 @@ function FolderRecentSection({
                 <div className="flex items-center gap-2 px-2 py-1" aria-busy="true">
                   <span className="size-5 shrink-0" aria-hidden="true" />
                   <Spinner size="xs" tone="accent" variant="pixel" />
-                  <span className="reasoning-shimmer-text text-[length:var(--fs-xs)]">
+                  <span className="reasoning-shimmer-text text-ui-sm">
                     {t('sidebar.loadingChats')}
                   </span>
                 </div>
               ) : error && filteredSessions.length === 0 ? (
                 <div className="flex items-center gap-2 px-2 py-1" role="alert">
                   <span className="size-5 shrink-0" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate text-[length:var(--fs-xs)] text-danger-100">
+                  <span className="min-w-0 flex-1 truncate text-ui-sm text-danger-100">
                     {t('sidebar.loadingChatsFailed')}
                   </span>
                   <button
                     type="button"
                     onClick={() => void refresh()}
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[length:var(--fs-xs)] text-text-300 hover:bg-bg-200"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-ui-sm text-text-300 hover:bg-bg-200"
                   >
                     {t('common:retry', { defaultValue: 'Retry' })}
                   </button>
                 </div>
               ) : filteredSessions.length === 0 ? (
-                <div className="px-2 py-1 text-[length:var(--fs-xs)] text-text-400/50">
+                <div className="px-2 py-1 text-ui-sm text-text-400/50">
                   {searchTerms.length > 0
                     ? t('sidebar.searchNoMatches', { defaultValue: 'No matching chats' })
                     : t('sidebar.noChatsInFolder')}
@@ -1295,7 +1295,7 @@ function FolderRecentSection({
                           aria-busy={isLoadingMore}
                           aria-label={isLoadingMore ? t('common:loadingMore') : t('sidebar.showMoreChats')}
                           className={cn(
-                            'group inline-flex items-center gap-1.5 rounded-md py-1.5 pr-2 text-[length:var(--fs-xs)] font-medium text-accent-main-100',
+                            'group inline-flex items-center gap-1.5 rounded-md py-1.5 pr-2 text-ui-sm font-medium text-accent-main-100',
                             visibleSessions.length > DIRECTORY_PAGE_SIZE
                               ? 'flex-1 justify-center pl-2'
                               : 'flex-1 justify-start pl-[30px]',
@@ -1323,7 +1323,7 @@ function FolderRecentSection({
                           aria-label={t('sidebar.showFewerChats')}
                           title={t('sidebar.showFewerChats')}
                           className={cn(
-                            'group inline-flex items-center gap-1.5 rounded-md py-1.5 pr-2 text-[length:var(--fs-xs)] font-medium text-accent-main-100',
+                            'group inline-flex items-center gap-1.5 rounded-md py-1.5 pr-2 text-ui-sm font-medium text-accent-main-100',
                             hasMore ? 'flex-1 justify-center pl-2' : 'flex-1 justify-start pl-[30px]',
                             interactive.subtle,
                             'disabled:cursor-default disabled:opacity-70',

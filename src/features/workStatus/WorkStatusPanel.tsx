@@ -255,7 +255,7 @@ export const WorkStatusPanel = memo(function WorkStatusPanel({
 
       {contentMounted && allSectionsHidden ? (
         <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
-          <span className="text-[length:var(--fs-sm)] text-text-500">{t('chat:workStatus.sections.allHidden')}</span>
+          <span className="text-ui-caption text-text-500">{t('chat:workStatus.sections.allHidden')}</span>
           <Button
             variant="ghost"
             size="sm"

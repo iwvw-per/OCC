@@ -187,7 +187,7 @@ export const ContentBlock = memo(function ContentBlock({
   const fullscreenTitleExtra = useMemo(
     () =>
       diffStats && (
-        <div className="flex items-center gap-1.5 text-[length:var(--fs-xs)] tabular-nums shrink-0">
+        <div className="flex items-center gap-1.5 text-ui-sm tabular-nums shrink-0">
           {diffStats.additions > 0 && <span className="text-success-100">+{diffStats.additions}</span>}
           {diffStats.deletions > 0 && <span className="text-danger-100">-{diffStats.deletions}</span>}
         </div>
@@ -324,7 +324,7 @@ export const ContentBlock = memo(function ContentBlock({
   const headerClass = isError ? 'bg-danger-100/8 hover:bg-danger-100/12' : 'bg-bg-200/40 hover:bg-bg-200/60'
 
   return (
-    <div className={`rounded-md overflow-hidden text-[length:var(--fs-sm)] ${containerClass}`}>
+    <div className={`rounded-md overflow-hidden text-ui-caption ${containerClass}`}>
       {/* Header */}
       <div
         className={`flex items-center gap-2 px-3 h-8 select-none transition-colors ${
@@ -368,7 +368,7 @@ export const ContentBlock = memo(function ContentBlock({
         <div className="flex items-center gap-2.5 font-mono shrink-0">
           {/* Diff stats */}
           {diffStats && (
-            <div className="flex items-center gap-1.5 tabular-nums font-medium text-[length:var(--fs-xxs)]">
+            <div className="flex items-center gap-1.5 tabular-nums font-medium text-ui-xs">
               {diffStats.additions > 0 && <span className="text-success-100">+{diffStats.additions}</span>}
               {diffStats.deletions > 0 && <span className="text-danger-100">-{diffStats.deletions}</span>}
               {diffStats.additions === 0 && diffStats.deletions === 0 && (
@@ -394,7 +394,7 @@ export const ContentBlock = memo(function ContentBlock({
           {/* Exit code */}
           {stats?.exit !== undefined && (
             <span
-              className={`tabular-nums text-[length:var(--fs-xxs)] font-medium ${
+              className={`tabular-nums text-ui-xs font-medium ${
                 stats.exit === 0 ? 'text-accent-secondary-100' : 'text-warning-100'
               }`}
             >

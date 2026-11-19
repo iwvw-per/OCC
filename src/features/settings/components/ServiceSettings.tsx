@@ -186,7 +186,7 @@ export function ServiceSettings() {
   if (!isTauriDesktop) {
     return (
       <SettingsSection plain title={t('service.localService')} description={t('service.desktopOnlyDesc')}>
-        <div data-setting-desc className="text-[length:var(--fs-xs)] text-text-300 leading-relaxed">{t('service.webModeDesc')}</div>
+        <div data-setting-desc className="text-ui-sm text-text-300 leading-relaxed">{t('service.webModeDesc')}</div>
       </SettingsSection>
     )
   }
@@ -200,7 +200,7 @@ export function ServiceSettings() {
           <button
             type="button"
             className={cn(
-              'h-7 px-2 rounded-md text-[length:var(--fs-xs)] font-medium text-accent-main-100',
+              'h-7 px-2 rounded-md text-ui-sm font-medium text-accent-main-100',
               interactive.accent,
               interactive.focusRingCompact,
               'disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none',
@@ -219,7 +219,7 @@ export function ServiceSettings() {
           placeholder={t('service.binaryPathPlaceholder')}
           className={`${settingsFieldClass} font-mono`}
         />
-        <div className="text-[length:var(--fs-xs)] text-text-500 mt-1.5 font-mono break-all">
+        <div className="text-ui-sm text-text-500 mt-1.5 font-mono break-all">
           {localBinaryPath.trim()
             ? t('service.usingManualBinary')
             : detectedBinaryPath
@@ -282,7 +282,7 @@ export function ServiceSettings() {
           <button
             type="button"
             className={cn(
-              'h-7 px-2 rounded-md text-[length:var(--fs-xs)] font-medium text-accent-main-100',
+              'h-7 px-2 rounded-md text-ui-sm font-medium text-accent-main-100',
               interactive.accent,
               interactive.focusRingCompact,
             )}
@@ -308,9 +308,9 @@ export function ServiceSettings() {
                     serviceStore.setEnvVars(updated)
                   }}
                   placeholder={t('service.keyPlaceholder')}
-                  className={`${settingsFieldClass} min-w-0 font-mono text-[length:var(--fs-xs)] sm:w-[120px] sm:shrink-0`}
+                  className={`${settingsFieldClass} min-w-0 font-mono text-ui-sm sm:w-[120px] sm:shrink-0`}
                 />
-                <span className="text-text-500 text-[length:var(--fs-xs)] shrink-0">=</span>
+                <span className="text-text-500 text-ui-sm shrink-0">=</span>
                 <input
                   type="text"
                   value={env.value}
@@ -320,7 +320,7 @@ export function ServiceSettings() {
                     serviceStore.setEnvVars(updated)
                   }}
                   placeholder={t('service.valuePlaceholder')}
-                  className={`${settingsFieldClass} min-w-0 font-mono text-[length:var(--fs-xs)] sm:flex-1`}
+                  className={`${settingsFieldClass} min-w-0 font-mono text-ui-sm sm:flex-1`}
                 />
                 <button
                   type="button"
@@ -341,7 +341,7 @@ export function ServiceSettings() {
       </SettingField>
 
       {serviceError && (
-        <div className="text-[length:var(--fs-sm)] text-danger-100 bg-danger-100/10 border border-danger-100/20 rounded-lg px-3 py-2.5 leading-relaxed break-all">
+        <div className="text-ui-caption text-danger-100 bg-danger-100/10 border border-danger-100/20 rounded-lg px-3 py-2.5 leading-relaxed break-all">
           {serviceError}
         </div>
       )}

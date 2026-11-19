@@ -7,10 +7,10 @@ import { cn } from '../../../utils/cn'
 const SettingLabelContext = createContext<string | undefined>(undefined)
 
 export const settingsFieldClass =
-  'min-w-0 w-full h-8 px-2.5 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30'
+  'min-w-0 w-full h-8 px-2.5 text-ui-caption rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30'
 
 export const settingsFieldAreaClass =
-  'min-w-0 w-full px-2.5 py-2 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 resize-y leading-relaxed custom-scrollbar'
+  'min-w-0 w-full px-2.5 py-2 text-ui-caption rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 resize-y leading-relaxed custom-scrollbar'
 
 // ============================================
 // Shared Settings UI Primitives
@@ -176,9 +176,9 @@ export function SettingRow({
         <div className="flex items-start gap-3 min-w-0 flex-1">
           {icon && <span className="mt-0.5 text-text-400 shrink-0">{icon}</span>}
           <div className="min-w-0">
-            <div className="text-[length:var(--fs-md)] font-medium text-text-100 leading-snug">{label}</div>
+            <div className="text-ui-base font-medium text-text-100 leading-snug">{label}</div>
             {description && (
-              <div data-setting-desc className="text-[length:var(--fs-xs)] text-text-300 leading-relaxed mt-0.5">
+              <div data-setting-desc className="text-ui-sm text-text-300 leading-relaxed mt-0.5">
                 {description}
               </div>
             )}
@@ -219,9 +219,9 @@ export function SettingField({
     >
       <div className="flex items-start justify-between gap-3 min-h-[20px]">
         <div className="min-w-0">
-          <div className="text-[length:var(--fs-md)] font-medium text-text-100 leading-snug">{label}</div>
+          <div className="text-ui-base font-medium text-text-100 leading-snug">{label}</div>
           {description && (
-            <div data-setting-desc className="text-[length:var(--fs-xs)] text-text-300 leading-relaxed mt-0.5">
+            <div data-setting-desc className="text-ui-sm text-text-300 leading-relaxed mt-0.5">
               {description}
             </div>
           )}
@@ -286,11 +286,11 @@ export function SettingsSection({
       <div className="mb-3">
         {/* 标题与 actions 同一行垂直居中，描述单独在下一行，避免按钮和标题错位 */}
         <div className="flex items-center justify-between gap-3 min-h-[28px]">
-          <h2 className="min-w-0 text-[length:var(--fs-md)] font-semibold text-text-100 leading-snug">{title}</h2>
+          <h2 className="min-w-0 text-ui-base font-semibold text-text-100 leading-snug">{title}</h2>
           {actions && <div className="shrink-0 flex items-center gap-1.5">{actions}</div>}
         </div>
         {description && (
-          <p data-setting-desc className="text-[length:var(--fs-xs)] text-text-300 mt-1 leading-relaxed max-w-[52ch]">
+          <p data-setting-desc className="text-ui-sm text-text-300 mt-1 leading-relaxed max-w-[52ch]">
             {description}
           </p>
         )}
@@ -325,9 +325,9 @@ export function SettingsSubgroup({
     <div data-setting-label={title} className={className || ''}>
       {title && (
         <div className="mb-2.5 px-0.5">
-          <div className="text-[length:var(--fs-sm)] font-medium text-text-100">{title}</div>
+          <div className="text-ui-caption font-medium text-text-100">{title}</div>
           {description && (
-            <div data-setting-desc className="text-[length:var(--fs-xs)] text-text-400 mt-0.5 leading-relaxed">
+            <div data-setting-desc className="text-ui-sm text-text-400 mt-0.5 leading-relaxed">
               {description}
             </div>
           )}

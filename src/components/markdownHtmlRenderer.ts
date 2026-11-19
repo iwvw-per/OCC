@@ -280,14 +280,14 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
   renderer.heading = function ({ tokens, depth }) {
     const text = this.parser.parseInline(tokens)
     const className = isReasoning
-      ? 'text-[length:var(--fs-sm)] font-semibold text-text-300 mt-2 mb-1 first:mt-0 last:mb-0'
+      ? 'text-ui-caption font-semibold text-text-300 mt-2 mb-1 first:mt-0 last:mb-0'
       : depth === 1
-        ? 'text-[length:var(--fs-heading-1)] font-bold text-text-100 mt-8 mb-4 first:mt-0 last:mb-0 tracking-tight'
+        ? 'text-ui-xl font-bold text-text-100 mt-8 mb-4 first:mt-0 last:mb-0 tracking-tight'
         : depth === 2
-          ? 'text-[length:var(--fs-heading-2)] font-bold text-text-100 mt-6 mb-3 first:mt-0 last:mb-0 tracking-tight pb-1.5 border-b border-border-100/40'
+          ? 'text-ui-lg font-bold text-text-100 mt-6 mb-3 first:mt-0 last:mb-0 tracking-tight pb-1.5 border-b border-border-100/40'
           : depth === 3
-            ? 'text-[length:var(--fs-heading-3)] font-semibold text-text-100 mt-5 mb-2 first:mt-0 last:mb-0 tracking-tight'
-            : 'text-[length:var(--fs-base)] font-semibold text-text-100 mt-4 mb-2 first:mt-0 last:mb-0 tracking-tight'
+            ? 'text-ui-base font-semibold text-text-100 mt-5 mb-2 first:mt-0 last:mb-0 tracking-tight'
+            : 'text-ui-base font-semibold text-text-100 mt-4 mb-2 first:mt-0 last:mb-0 tracking-tight'
     const tag = Math.min(Math.max(depth, 1), 4)
     return `<h${tag} class="${className}">${text}</h${tag}>`
   }
@@ -295,7 +295,7 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
   renderer.paragraph = function ({ tokens }) {
     const text = this.parser.parseInline(tokens)
     const className = isReasoning
-      ? 'text-[length:var(--fs-sm)] mb-2 last:mb-0 leading-5 text-text-400'
+      ? 'text-ui-caption mb-2 last:mb-0 leading-5 text-text-400'
       : 'mb-4 last:mb-0 leading-7 text-text-200'
     return `<p class="${className}">${text}</p>`
   }
@@ -308,8 +308,8 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
 
   renderer.codespan = ({ text }) => {
     const className = isReasoning
-      ? 'font-mono text-accent-main-100 text-[0.9em] align-baseline break-words'
-      : 'text-accent-main-100 text-[0.9em] font-mono align-baseline break-words'
+      ? 'font-mono text-accent-main-100 text-ui-sm align-baseline break-words'
+      : 'text-accent-main-100 text-ui-sm font-mono align-baseline break-words'
     return `<code class="${className}">${escapeHtml(text)}</code>`
   }
 
@@ -326,7 +326,7 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
   // 删除线只来自 ~~...~~（tokenizer 已限制单 ~ 不产生 del）
   renderer.del = function ({ tokens }) {
     const className = isReasoning
-      ? 'text-[length:var(--fs-sm)] text-text-500 line-through decoration-text-500/50'
+      ? 'text-ui-caption text-text-500 line-through decoration-text-500/50'
       : 'text-text-400 line-through decoration-text-400/50'
     return `<del class="${className}">${this.parser.parseInline(tokens)}</del>`
   }
@@ -337,7 +337,7 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
     const localPath = decodeLocalFileHref(href) ?? getWindowsAbsolutePath(href)
     const normalizedHref = localPath ? encodeLocalFileHref(localPath) : href
     const className = isReasoning
-      ? 'text-[length:var(--fs-sm)] font-medium text-accent-main-200/80 hover:text-accent-main-200 underline underline-offset-2 transition-colors'
+      ? 'text-ui-caption font-medium text-accent-main-200/80 hover:text-accent-main-200 underline underline-offset-2 transition-colors'
       : 'font-medium text-accent-main-100 hover:text-accent-main-200 underline underline-offset-2 transition-colors'
     const attrs = [
       `href="${escapeAttribute(normalizedHref)}"`,
@@ -380,8 +380,8 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
     const tag = ordered ? 'ol' : 'ul'
     const className = isReasoning
       ? ordered
-        ? 'text-[length:var(--fs-sm)] list-decimal list-outside mb-2 last:mb-0 space-y-0.5 marker:text-text-500/60'
-        : 'text-[length:var(--fs-sm)] list-disc list-outside ml-4 mb-2 last:mb-0 space-y-0.5 marker:text-text-500/60'
+        ? 'text-ui-caption list-decimal list-outside mb-2 last:mb-0 space-y-0.5 marker:text-text-500/60'
+        : 'text-ui-caption list-disc list-outside ml-4 mb-2 last:mb-0 space-y-0.5 marker:text-text-500/60'
       : ordered
         ? 'list-decimal list-outside mb-4 last:mb-0 space-y-1 marker:text-text-400/80'
         : 'list-disc list-outside ml-5 mb-4 last:mb-0 space-y-1 marker:text-text-400/80'
@@ -392,7 +392,7 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
 
   renderer.listitem = function ({ tokens, task, checked }) {
     const className = isReasoning
-      ? 'text-[length:var(--fs-sm)] text-text-400 pl-1 leading-5'
+      ? 'text-ui-caption text-text-400 pl-1 leading-5'
       : 'text-text-200 pl-1 leading-7'
     const checkbox = task ? `<input type="checkbox" ${checked ? 'checked' : ''} disabled class="mr-2 align-middle">` : ''
     const content = tokens ? this.parser.parse(tokens) : ''
@@ -420,7 +420,7 @@ function renderFootnoteDefinitionsHtml(src: string, isReasoning: boolean): strin
     const [, label, content] = match
     const id = getFootnoteId(label)
     const body = marked.parseInline(content, { renderer }) as string
-    const className = isReasoning ? 'text-[length:var(--fs-sm)] text-text-400 leading-5' : 'text-text-300 leading-6'
+    const className = isReasoning ? 'text-ui-caption text-text-400 leading-5' : 'text-text-300 leading-6'
     items.push(`<li id="fn-${escapeAttribute(id)}" class="${className}"><span class="font-medium text-text-400">${escapeHtml(label)}.</span> ${body} <a href="#fnref-${escapeAttribute(id)}" class="font-medium text-accent-main-100 underline underline-offset-2">back</a></li>`)
   }
 

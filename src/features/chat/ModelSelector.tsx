@@ -1,26 +1,32 @@
 /**
  * ModelSelector - 统一模型选择器
  *
- * 单一组件同时服务 PC 端（Header）和移动端（InputToolbar）。
+ * 单一组件同时服务 PC 端(Header)和移动端(InputToolbar)。
  * 通过 props 控制触发按钮样式、弹出方向等差异。
+ *
+ * 菜单结构(与 ZCode composer 对齐):
+ *   端点行(向右展开子菜单)/ 分隔线 / 当前端点的模型列表 / 分隔线 / 思维强度滑动条
+ *
+ * 搜索、置顶、上下文长度都已移除:菜单是「按端点切换的短列表」,
+ * 而不是需要检索的全局目录。
  */
 
 import { useState, useRef, useEffect, useMemo, useCallback, memo, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDownIcon, SearchIcon, ThinkingIcon, EyeIcon, PinIcon } from '../../components/Icons'
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  EyeIcon,
+  PackageIcon,
+  ServerIcon,
+  ThinkingIcon,
+} from '../../components/Icons'
 import { DropdownMenu } from '../../components/ui'
 import type { ModelInfo } from '../../api'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
-import { hapticTap } from '../../utils/haptics'
-import {
-  getModelKey,
-  groupModelsByProvider,
-  getRecentModels,
-  recordModelUsage,
-  getPinnedModels,
-  isModelPinned,
-  toggleModelPin,
-} from '../../utils/modelUtils'
+import { getModelKey, groupModelsByProvider, recordModelUsage } from '../../utils/modelUtils'
 
 // ============================================
 // Public types
@@ -42,292 +48,10 @@ interface ModelSelectorProps {
   constrainToRef?: React.RefObject<HTMLElement | null>
   /** 触发按钮的展示风格 */
   trigger?: 'header' | 'toolbar'
-}
-
-// ============================================
-// Internal types
-// ============================================
-
-type FlatListItem =
-  | { type: 'header'; data: { name: string }; key: string }
-  | { type: 'item'; data: ModelInfo; key: string }
-
-// ============================================
-// Flat list hook（分组 + 置顶 + 最近）
-// ============================================
-
-function useFlatList(
-  models: ModelInfo[],
-  filteredModels: ModelInfo[],
-  searchQuery: string,
-  refreshTrigger: number,
-  t: (key: string) => string,
-) {
-  return useMemo(() => {
-    void refreshTrigger
-
-    const groups = groupModelsByProvider(filteredModels)
-    const recent = searchQuery ? [] : getRecentModels(models, 5)
-    const pinned = searchQuery ? [] : getPinnedModels(models)
-
-    const flat: FlatListItem[] = []
-    const addedKeys = new Set<string>()
-
-    if (pinned.length > 0) {
-      flat.push({ type: 'header', data: { name: t('modelSelector.pinned') }, key: 'header-pinned' })
-      pinned.forEach(m => {
-        const key = getModelKey(m)
-        flat.push({ type: 'item', data: m, key: `pinned-${key}` })
-        addedKeys.add(key)
-      })
-    }
-
-    if (recent.length > 0) {
-      const recentFiltered = recent.filter(m => !addedKeys.has(getModelKey(m)))
-      if (recentFiltered.length > 0) {
-        flat.push({ type: 'header', data: { name: t('modelSelector.recent') }, key: 'header-recent' })
-        recentFiltered.forEach(m => {
-          const key = getModelKey(m)
-          flat.push({ type: 'item', data: m, key: `recent-${key}` })
-          addedKeys.add(key)
-        })
-      }
-    }
-
-    groups.forEach(g => {
-      const groupModels = g.models.filter(m => !addedKeys.has(getModelKey(m)))
-      if (groupModels.length > 0) {
-        flat.push({ type: 'header', data: { name: g.providerName }, key: `header-${g.providerId}` })
-        groupModels.forEach(m => flat.push({ type: 'item', data: m, key: getModelKey(m) }))
-      }
-    })
-
-    return flat
-  }, [filteredModels, models, searchQuery, refreshTrigger, t])
-}
-
-// ============================================
-// ModelListPanel — 列表面板
-// ============================================
-
-interface ModelListPanelProps {
-  menuRef: React.RefObject<HTMLDivElement | null>
-  searchInputRef: React.RefObject<HTMLInputElement | null>
-  listRef: React.RefObject<HTMLDivElement | null>
-  searchQuery: string
-  setSearchQuery: (q: string) => void
-  setHighlightedIndex: React.Dispatch<React.SetStateAction<number>>
-  handleSearchKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void
-  handleItemKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>, interactiveIndex: number, model: ModelInfo) => void
-  flatList: FlatListItem[]
-  itemIndices: number[]
-  highlightedIndex: number
-  selectedModelKey: string | null
-  onItemClick: (model: ModelInfo) => void
-  onTogglePin: (e: React.MouseEvent<HTMLButtonElement>, model: ModelInfo) => void
-  onTouchStart?: (model: ModelInfo) => void
-  onTouchEnd?: () => void
-  handlePinKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>, interactiveIndex: number) => void
-  ignoreMouseRef: React.RefObject<boolean>
-  lastMousePosRef: React.RefObject<{ x: number; y: number }>
-  idPrefix: string
-  listboxId: string
-  maxListHeight: string
-  searchPlaceholder: string
-  noResultsText: string
-  noResultsHint: string
-  preferTouchUi: boolean
-  pinLabel: string
-  unpinLabel: string
-}
-
-const ModelListPanel = memo(function ModelListPanel({
-  menuRef,
-  searchInputRef,
-  listRef,
-  searchQuery,
-  setSearchQuery,
-  setHighlightedIndex,
-  handleSearchKeyDown,
-  handleItemKeyDown,
-  flatList,
-  itemIndices,
-  highlightedIndex,
-  selectedModelKey,
-  onItemClick,
-  onTogglePin,
-  onTouchStart,
-  onTouchEnd,
-  handlePinKeyDown,
-  ignoreMouseRef,
-  lastMousePosRef,
-  idPrefix,
-  listboxId,
-  maxListHeight,
-  searchPlaceholder,
-  noResultsText,
-  noResultsHint,
-  preferTouchUi,
-  pinLabel,
-  unpinLabel,
-}: ModelListPanelProps) {
-  return (
-    <div ref={menuRef} className="flex flex-col min-h-0">
-      {/* 搜索栏：与项目选择框统一——无底色、下方分隔线、--fs-sm */}
-      <div className="flex items-center gap-2 border-b border-border-200 px-2.5 py-1.5">
-        <SearchIcon aria-hidden="true" className="size-3.5 shrink-0 text-text-400" />
-        <input
-          ref={searchInputRef}
-          type="text"
-          name="model-search"
-          value={searchQuery}
-          onChange={e => {
-            setSearchQuery(e.target.value)
-            setHighlightedIndex(0)
-          }}
-          onKeyDown={handleSearchKeyDown}
-          placeholder={searchPlaceholder}
-          aria-label={searchPlaceholder}
-          autoComplete="off"
-          className="min-w-0 flex-1 bg-transparent border-none outline-none text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400"
-        />
-      </div>
-
-      {/* 列表 — 与项目选择框统一：p-1 内边距、行 rounded-lg */}
-      <div
-        ref={listRef}
-        id={listboxId}
-        role="list"
-        aria-label={searchPlaceholder}
-        className={`overflow-y-auto custom-scrollbar flex-1 min-h-0 p-1 ${maxListHeight}`}
-      >
-        {flatList.length === 0 ? (
-          <div className="px-4 py-10 text-center" role="status" aria-live="polite">
-            <div className="text-[length:var(--fs-sm)] text-text-400">{noResultsText}</div>
-            <div className="text-[length:var(--fs-xs)] text-text-500 mt-1">{noResultsHint}</div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-0.5">
-            {flatList.map((item, index) => {
-              if (item.type === 'header') {
-                return (
-                  <div
-                    key={item.key}
-                    aria-hidden="true"
-                    className="px-2.5 pt-2.5 pb-1 first:pt-0.5 text-[length:var(--fs-xxs)] font-semibold text-text-400/60 uppercase tracking-wider select-none"
-                  >
-                    {item.data.name}
-                  </div>
-                )
-              }
-
-              const model = item.data as ModelInfo
-              const itemKey = getModelKey(model)
-              const isSelected = selectedModelKey === itemKey
-              const isHL = itemIndices[highlightedIndex] === index
-              const interactiveIndex = itemIndices.indexOf(index)
-              const pinned = isModelPinned(model)
-
-              return (
-                <div
-                  key={item.key}
-                  className={`
-                    group flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100
-                    ${isSelected ? 'bg-accent-main-100/15 text-accent-main-100' : 'text-text-200'}
-                    ${isHL && !isSelected ? 'bg-bg-200 text-text-100' : ''}
-                  `}
-                  onMouseMove={e => {
-                    if (ignoreMouseRef.current) return
-                    if (e.clientX === lastMousePosRef.current.x && e.clientY === lastMousePosRef.current.y) return
-                    lastMousePosRef.current = { x: e.clientX, y: e.clientY }
-                    const hIndex = itemIndices.indexOf(index)
-                    if (hIndex !== -1 && hIndex !== highlightedIndex) setHighlightedIndex(hIndex)
-                  }}
-                >
-                  <button
-                    id={`${idPrefix}-${index}`}
-                    data-model-key={itemKey}
-                    data-focus-target="item"
-                    type="button"
-                    onClick={() => onItemClick(model)}
-                    onFocus={() => {
-                      if (interactiveIndex !== -1) setHighlightedIndex(interactiveIndex)
-                    }}
-                    onKeyDown={e => {
-                      if (interactiveIndex !== -1) handleItemKeyDown(e, interactiveIndex, model)
-                    }}
-                    onTouchStart={onTouchStart ? () => onTouchStart(model) : undefined}
-                    onTouchEnd={onTouchEnd}
-                    onTouchMove={onTouchEnd}
-                    title={`${model.name} · ${model.providerName}${model.contextLimit ? ` · ${formatContext(model.contextLimit)}` : ''}`}
-                    className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md bg-transparent border-none p-0 text-left text-[length:var(--fs-sm)] outline-none focus-visible:outline-none"
-                  >
-                    {/* Left: name + capability icons */}
-                    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-                      <span className={`truncate font-medium ${isSelected ? 'text-accent-main-100' : 'text-text-100'}`}>
-                        {model.name}
-                      </span>
-                      <div
-                        aria-hidden="true"
-                        className={`flex items-center gap-1 flex-shrink-0 transition-opacity ${isHL || isSelected ? 'opacity-60' : 'opacity-25'}`}
-                      >
-                        {model.supportsReasoning && <ThinkingIcon size={12} />}
-                        {model.supportsImages && <EyeIcon size={13} />}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-[length:var(--fs-sm)] tabular-nums flex-shrink-0">
-                      <span className="text-text-500 max-w-[100px] truncate text-right">{model.providerName}</span>
-                      {model.contextLimit > 0 && (
-                        <span className="text-text-500 min-w-[4ch] text-right hidden sm:inline">{formatContext(model.contextLimit)}</span>
-                      )}
-                    </div>
-                  </button>
-
-                  {!preferTouchUi && (
-                    <button
-                      type="button"
-                      data-model-key={itemKey}
-                      data-focus-target="pin"
-                      onClick={e => onTogglePin(e, model)}
-                      onFocus={() => {
-                        if (interactiveIndex !== -1) setHighlightedIndex(interactiveIndex)
-                      }}
-                      onKeyDown={e => {
-                        e.stopPropagation()
-                        if (interactiveIndex !== -1) handlePinKeyDown(e, interactiveIndex)
-                      }}
-                      aria-label={`${pinned ? unpinLabel : pinLabel}: ${model.name}`}
-                      className={`w-5 flex items-center justify-center flex-shrink-0 p-0.5 rounded outline-none transition-all duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-200 ${
-                        pinned
-                          ? 'text-accent-main-100 opacity-80 hover:opacity-100'
-                          : 'text-text-500 opacity-0 group-hover:opacity-40 group-focus-within:opacity-40 hover:!opacity-100 focus-visible:!opacity-100'
-                      }`}
-                    >
-                      <PinIcon size={12} />
-                    </button>
-                  )}
-
-                  {preferTouchUi && pinned && !isSelected && (
-                    <span className="w-5 flex items-center justify-center flex-shrink-0 text-accent-main-100/60">
-                      <PinIcon size={12} />
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-})
-
-function formatContext(limit: number): string {
-  if (!limit) return ''
-  const k = Math.round(limit / 1000)
-  if (k >= 1000) return `${(k / 1000).toFixed(0)}M`
-  return `${k}k`
+  /** 思维强度(模型变体)选项;存在时与模型选择合并到同一菜单 */
+  variants?: string[]
+  selectedVariant?: string
+  onVariantChange?: (variant: string | undefined) => void
 }
 
 // ============================================
@@ -345,59 +69,106 @@ export const ModelSelector = memo(
       position = 'bottom',
       constrainToRef,
       trigger = 'header',
+      variants = [],
+      selectedVariant,
+      onVariantChange,
     },
     ref,
   ) {
     const { t } = useTranslation('chat')
     const { preferTouchUi } = useInputCapabilities()
     const [isOpen, setIsOpen] = useState(false)
-    const [searchQuery, setSearchQuery] = useState('')
     const [highlightedIndex, setHighlightedIndex] = useState(0)
-    const [refreshTrigger, setRefreshTrigger] = useState(0)
+    /** 端点(provider)浏览态:null 表示跟随当前选中模型 */
+    const [browseProviderId, setBrowseProviderId] = useState<string | null>(null)
+    /** 端点子菜单是否展开 */
+    const [endpointsOpen, setEndpointsOpen] = useState(false)
 
     const containerRef = useRef<HTMLDivElement>(null)
     const triggerRef = useRef<HTMLButtonElement>(null)
-    const searchInputRef = useRef<HTMLInputElement>(null)
     const listRef = useRef<HTMLDivElement>(null)
     const menuRef = useRef<HTMLDivElement>(null)
-    const ignoreMouseRef = useRef(false)
-    const lastMousePosRef = useRef({ x: 0, y: 0 })
-    const openFocusTargetRef = useRef<'search' | 'list'>('search')
-    const openHighlightedIndexRef = useRef(0)
-    const pendingFocusRestoreRef = useRef<{ modelKey: string; target: 'item' | 'pin' } | null>(null)
+    const pendingFocusIndexRef = useRef(0)
 
     const idPrefix = trigger === 'header' ? 'ms-item' : 'ms-tb-item'
     const listboxId = `${idPrefix}-listbox`
 
     // ---- Derived data ----
 
-    const filteredModels = useMemo(() => {
-      if (!searchQuery.trim()) return models
-      const query = searchQuery.toLowerCase()
-      const normalize = (value: unknown) => (typeof value === 'string' ? value : '').toLowerCase()
-      return models.filter(
-        m =>
-          normalize(m.name).includes(query) ||
-          normalize(m.id).includes(query) ||
-          normalize(m.family).includes(query) ||
-          normalize(m.providerName).includes(query),
-      )
-    }, [models, searchQuery])
-
-    const flatList = useFlatList(models, filteredModels, searchQuery, refreshTrigger, t)
-
-    const itemIndices = useMemo(() => {
-      return flatList.map((item, index) => (item.type === 'item' ? index : -1)).filter(i => i !== -1)
-    }, [flatList])
-
     const selectedModel = useMemo(() => {
       if (!selectedModelKey) return null
       return models.find(m => getModelKey(m) === selectedModelKey) ?? null
     }, [models, selectedModelKey])
 
+    /** 全量端点分组,用于端点子菜单 */
+    const allProviderGroups = useMemo(() => groupModelsByProvider(models), [models])
+
+    /** 当前端点:优先用户显式选择的,其次当前模型所属端点,最后第一个端点 */
+    const activeProviderId = useMemo(() => {
+      if (browseProviderId && allProviderGroups.some(g => g.providerId === browseProviderId)) {
+        return browseProviderId
+      }
+      const selectedProviderId = selectedModel?.providerId
+      if (selectedProviderId && allProviderGroups.some(g => g.providerId === selectedProviderId)) {
+        return selectedProviderId
+      }
+      return allProviderGroups[0]?.providerId ?? ''
+    }, [allProviderGroups, browseProviderId, selectedModel?.providerId])
+
+    const activeProviderGroup = allProviderGroups.find(g => g.providerId === activeProviderId)
+
+    /** 当前端点下的模型列表 */
+    const visibleModels = useMemo(
+      () => models.filter(model => model.providerId === activeProviderId),
+      [activeProviderId, models],
+    )
+
+    // ---- 思维强度档位 ----
+
+    const thoughtLevels = useMemo(() => {
+      if (variants.length === 0) return []
+      return [
+        { value: undefined as string | undefined, label: t('inputToolbar.default') },
+        ...variants.map(variant => ({
+          value: variant as string | undefined,
+          label: variant.charAt(0).toUpperCase() + variant.slice(1),
+        })),
+      ]
+    }, [t, variants])
+
+    const thoughtIndex = Math.max(
+      0,
+      thoughtLevels.findIndex(level => level.value === selectedVariant),
+    )
+    // 第一档是「默认」(不指定思维强度),此时填充为空。
+    const thoughtFilled = thoughtIndex > 0
+    const thoughtProgress =
+      thoughtLevels.length > 1 ? (thoughtIndex / (thoughtLevels.length - 1)) * 100 : 0
+
+    // ---- Open / Close ----
+
+    const closeMenu = useCallback((options?: { focusTrigger?: boolean }) => {
+      setIsOpen(false)
+      setEndpointsOpen(false)
+      // 下次打开时回到当前模型所属端点,不保留上次临时浏览的端点。
+      setBrowseProviderId(null)
+      if (options?.focusTrigger !== false) {
+        triggerRef.current?.focus()
+      }
+    }, [])
+
+    const focusToolbarInput = useCallback(() => {
+      if (trigger !== 'toolbar') return
+      const container = constrainToRef?.current
+      const input = container?.querySelector<HTMLElement>(
+        'textarea, input:not([type="file"]):not([disabled]), [contenteditable="true"]',
+      )
+      input?.focus()
+    }, [constrainToRef, trigger])
+
     const focusRelativeToTrigger = useCallback((direction: 1 | -1) => {
-      const trigger = triggerRef.current
-      if (!trigger) return
+      const currentTrigger = triggerRef.current
+      if (!currentTrigger) return
 
       const focusables = Array.from(
         document.body.querySelectorAll<HTMLElement>(
@@ -408,71 +179,43 @@ export const ModelSelector = memo(
         const style = window.getComputedStyle(element)
         return style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0'
       })
-      const currentIndex = focusables.findIndex(item => item === trigger)
+      const currentIndex = focusables.findIndex(item => item === currentTrigger)
       if (currentIndex === -1) return
       focusables[currentIndex + direction]?.focus()
     }, [])
 
-    const isFocusableElement = useCallback((target: EventTarget | null) => {
-      const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null
-      if (!element) return false
-      const candidate = element.closest<HTMLElement>(
-        'button:not([disabled]), [href], input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      )
-      if (!candidate) return false
-
-      const style = window.getComputedStyle(candidate)
-      return style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0'
-    }, [])
-
-    const displayName =
-      trigger === 'header'
-        ? selectedModel?.name || t('modelSelector.selectModel')
-        : selectedModel?.name || (isLoading ? '...' : t('modelSelector.model'))
-
-    // ---- Open / Close ----
-
-    const openMenu = useCallback((focusTarget: 'search' | 'list' = 'search', preferredIndex?: number) => {
-      if (disabled || isLoading) return
-      let targetIndex = 0
-      if (typeof preferredIndex === 'number') {
-        targetIndex = Math.max(0, Math.min(preferredIndex, itemIndices.length - 1))
-      } else if (selectedModelKey) {
-        const index = flatList.findIndex(item => item.type === 'item' && getModelKey(item.data) === selectedModelKey)
-        if (index !== -1) {
-          const interactiveIndex = itemIndices.indexOf(index)
-          if (interactiveIndex !== -1) targetIndex = interactiveIndex
+    const openMenu = useCallback(
+      (preferredIndex?: number) => {
+        if (disabled || isLoading) return
+        let targetIndex = 0
+        if (typeof preferredIndex === 'number') {
+          targetIndex = Math.max(0, Math.min(preferredIndex, visibleModels.length - 1))
+        } else if (selectedModelKey) {
+          const index = visibleModels.findIndex(m => getModelKey(m) === selectedModelKey)
+          if (index !== -1) targetIndex = index
         }
-      }
-      openFocusTargetRef.current = focusTarget
-      openHighlightedIndexRef.current = targetIndex
-      setHighlightedIndex(targetIndex)
-      setIsOpen(true)
-      setSearchQuery('')
-      ignoreMouseRef.current = true
-      setTimeout(() => {
-        ignoreMouseRef.current = false
-      }, 300)
-    }, [disabled, isLoading, selectedModelKey, flatList, itemIndices])
+        pendingFocusIndexRef.current = targetIndex
+        setHighlightedIndex(targetIndex)
+        setIsOpen(true)
+      },
+      [disabled, isLoading, selectedModelKey, visibleModels],
+    )
 
-    const closeMenu = useCallback((options?: { focusTrigger?: boolean }) => {
-      setIsOpen(false)
-      setSearchQuery('')
-      if (options?.focusTrigger !== false) {
-        triggerRef.current?.focus()
-      }
-    }, [])
+    useImperativeHandle(ref, () => ({ openMenu: () => openMenu() }), [openMenu])
 
-    const focusToolbarInput = useCallback(() => {
-      if (trigger !== 'toolbar') return
-      const container = constrainToRef?.current
-      const input = container?.querySelector<HTMLElement>('textarea, input:not([type="file"]):not([disabled]), [contenteditable="true"]')
-      input?.focus()
-    }, [constrainToRef, trigger])
+    const focusItemAtIndex = useCallback(
+      (index: number) => {
+        if (visibleModels.length === 0) return
+        const clamped = Math.max(0, Math.min(index, visibleModels.length - 1))
+        setHighlightedIndex(clamped)
+        const target = document.getElementById(`${idPrefix}-${clamped}`) as HTMLElement | null
+        target?.focus()
+        target?.scrollIntoView({ block: 'nearest' })
+      },
+      [idPrefix, visibleModels.length],
+    )
 
-    useImperativeHandle(ref, () => ({ openMenu }), [openMenu])
-
-    // ---- Select / Pin ----
+    // ---- Select ----
 
     const handleSelect = useCallback(
       (model: ModelInfo) => {
@@ -485,96 +228,84 @@ export const ModelSelector = memo(
             focusToolbarInput()
           }, 0)
         }
-        setRefreshTrigger(c => c + 1)
       },
-      [onSelect, closeMenu, focusToolbarInput, trigger],
+      [closeMenu, focusToolbarInput, onSelect, trigger],
     )
 
-    const handleTogglePin = useCallback((e: React.MouseEvent<HTMLButtonElement>, model: ModelInfo) => {
-      e.stopPropagation()
-      if (e.detail === 0) {
-        pendingFocusRestoreRef.current = { modelKey: getModelKey(model), target: 'pin' }
-      } else {
-        pendingFocusRestoreRef.current = null
-        e.currentTarget.blur()
-      }
-      toggleModelPin(model)
-      setRefreshTrigger(c => c + 1)
+    /**
+     * 滑动条拖动时实时切换思维强度。
+     *
+     * 与「点选项」不同,这里不关闭菜单:拖动过程中每一帧都会回调,
+     * 关掉菜单就没法连续调档;关闭交给点击外部 / Escape。
+     */
+    const handleVariantSliderChange = useCallback(
+      (variant: string | undefined) => {
+        onVariantChange?.(variant)
+      },
+      [onVariantChange],
+    )
+
+    const handleSelectEndpoint = useCallback((providerId: string) => {
+      setBrowseProviderId(providerId)
+      setEndpointsOpen(false)
+      setHighlightedIndex(0)
     }, [])
 
-    // ---- Long press to pin (touch devices) ----
+    // ---- Keyboard navigation ----
 
-    const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const longPressFiredRef = useRef(false)
+    const handleItemKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+        e.stopPropagation()
 
-    const handleTouchStart = useCallback((model: ModelInfo) => {
-      longPressFiredRef.current = false
-      longPressTimerRef.current = setTimeout(() => {
-        longPressFiredRef.current = true
-        toggleModelPin(model)
-        setRefreshTrigger(c => c + 1)
-        hapticTap('strong')
-      }, 500)
-    }, [])
-
-    const handleTouchEnd = useCallback(() => {
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current)
-        longPressTimerRef.current = null
-      }
-    }, [])
-
-    const handleItemClick = useCallback(
-      (model: ModelInfo) => {
-        if (longPressFiredRef.current) {
-          longPressFiredRef.current = false
-          return
+        switch (e.key) {
+          case 'ArrowDown':
+            e.preventDefault()
+            focusItemAtIndex(index >= visibleModels.length - 1 ? 0 : index + 1)
+            break
+          case 'ArrowUp':
+            e.preventDefault()
+            focusItemAtIndex(index <= 0 ? visibleModels.length - 1 : index - 1)
+            break
+          case 'Home':
+            e.preventDefault()
+            focusItemAtIndex(0)
+            break
+          case 'End':
+            e.preventDefault()
+            focusItemAtIndex(visibleModels.length - 1)
+            break
+          case 'Escape':
+            e.preventDefault()
+            closeMenu()
+            break
+          case 'Tab':
+            e.preventDefault()
+            closeMenu({ focusTrigger: false })
+            window.setTimeout(() => {
+              focusRelativeToTrigger(e.shiftKey ? -1 : 1)
+            }, 0)
+            break
+          case 'Enter':
+          case ' ':
+            e.preventDefault()
+            handleSelect(visibleModels[index])
+            break
         }
-        handleSelect(model)
       },
-      [handleSelect],
+      [closeMenu, focusItemAtIndex, focusRelativeToTrigger, handleSelect, visibleModels],
     )
-
-    const focusItemAtInteractiveIndex = useCallback(
-      (interactiveIndex: number) => {
-        const globalIndex = itemIndices[interactiveIndex]
-        if (globalIndex == null) return
-        setHighlightedIndex(interactiveIndex)
-        const target = document.getElementById(`${idPrefix}-${globalIndex}`) as HTMLElement | null
-        target?.focus()
-        target?.scrollIntoView({ block: 'nearest' })
-      },
-      [itemIndices, idPrefix],
-    )
-
-    const focusPinButtonForModel = useCallback((modelKey: string, interactiveIndex: number) => {
-      setHighlightedIndex(interactiveIndex)
-      const selector = `button[data-focus-target="pin"][data-model-key="${modelKey}"]`
-      document.querySelector<HTMLElement>(selector)?.focus()
-    }, [])
 
     // ---- Side effects ----
 
     useEffect(() => {
       if (!isOpen) return
-      /**
-       * 触摸端不自动聚焦搜索框。
-       *
-       * 移动端聚焦输入框会立刻弹出软键盘，把弹层下半截（模型列表）整个遮住 ——
-       * 用户点开模型选择是为了**选**，不是为了打字，键盘先弹出来反而要多一步收起。
-       * 桌面端保持原来的「打开即可输入筛选」体验。
-       */
+      // 触摸端不自动聚焦列表项:避免用户点开菜单就被焦点环和软键盘打断。
       if (preferTouchUi) return
       const timerId = window.setTimeout(() => {
-        if (openFocusTargetRef.current === 'list') {
-          focusItemAtInteractiveIndex(openHighlightedIndexRef.current)
-        } else {
-          searchInputRef.current?.focus()
-        }
+        focusItemAtIndex(pendingFocusIndexRef.current)
       }, 50)
-
       return () => clearTimeout(timerId)
-    }, [isOpen, preferTouchUi, focusItemAtInteractiveIndex])
+    }, [isOpen, preferTouchUi, focusItemAtIndex])
 
     useEffect(() => {
       if (!isOpen) return
@@ -585,228 +316,73 @@ export const ModelSelector = memo(
           !containerRef.current.contains(target) &&
           !menuRef.current?.contains(target)
         ) {
-          closeMenu({ focusTrigger: !isFocusableElement(target) })
+          closeMenu()
         }
       }
       document.addEventListener('mousedown', handleClickOutside)
       return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [isOpen, closeMenu, isFocusableElement])
+    }, [closeMenu, isOpen])
 
     useEffect(() => {
       if (!isOpen) return
       const handleEsc = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          e.preventDefault()
-          e.stopPropagation()
-          closeMenu()
+        if (e.key !== 'Escape') return
+        e.preventDefault()
+        e.stopPropagation()
+        // 端点子菜单先收起,再按一次才关菜单。
+        if (endpointsOpen) {
+          setEndpointsOpen(false)
+          return
         }
+        closeMenu()
       }
       document.addEventListener('keydown', handleEsc, { capture: true })
       return () => document.removeEventListener('keydown', handleEsc, { capture: true })
-    }, [isOpen, closeMenu])
+    }, [closeMenu, endpointsOpen, isOpen])
 
     useEffect(() => {
       if (!isOpen) return
       requestAnimationFrame(() => {
-        const realIndex = itemIndices[highlightedIndex]
-        document.getElementById(`${idPrefix}-${realIndex}`)?.scrollIntoView({ block: 'nearest' })
+        document.getElementById(`${idPrefix}-${highlightedIndex}`)?.scrollIntoView({ block: 'nearest' })
       })
-    }, [isOpen, highlightedIndex, itemIndices, idPrefix])
-
-    useEffect(() => {
-      if (!isOpen || !pendingFocusRestoreRef.current) return
-
-      const { modelKey, target } = pendingFocusRestoreRef.current
-      const itemIndex = flatList.findIndex(item => item.type === 'item' && getModelKey(item.data) === modelKey)
-      if (itemIndex === -1) {
-        pendingFocusRestoreRef.current = null
-        return
-      }
-
-      const interactiveIndex = itemIndices.indexOf(itemIndex)
-      if (interactiveIndex !== -1) {
-        setHighlightedIndex(interactiveIndex)
-      }
-
-      const timerId = window.setTimeout(() => {
-        const selector = `button[data-focus-target="${target}"][data-model-key="${modelKey}"]`
-        const focusTarget = document.querySelector<HTMLElement>(selector)
-        focusTarget?.focus()
-        pendingFocusRestoreRef.current = null
-      }, 0)
-
-      return () => clearTimeout(timerId)
-    }, [isOpen, flatList, itemIndices])
-
-    // ---- Keyboard navigation ----
-
-    const handleSearchKeyDown = useCallback(
-      (e: React.KeyboardEvent<HTMLInputElement>) => {
-        e.stopPropagation()
-
-        if (itemIndices.length === 0) {
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            closeMenu()
-          } else if (e.key === 'Tab') {
-            e.preventDefault()
-            closeMenu({ focusTrigger: false })
-            window.setTimeout(() => {
-              focusRelativeToTrigger(e.shiftKey ? -1 : 1)
-            }, 0)
-          }
-          return
-        }
-
-        switch (e.key) {
-          case 'ArrowDown':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(highlightedIndex)
-            break
-          case 'ArrowUp':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(highlightedIndex)
-            break
-          case 'Enter': {
-            e.preventDefault()
-            const globalIndex = itemIndices[highlightedIndex]
-            const item = flatList[globalIndex]
-            if (item && item.type === 'item') handleSelect(item.data)
-            break
-          }
-          case 'Escape':
-            e.preventDefault()
-            closeMenu()
-            break
-          case 'Tab':
-            e.preventDefault()
-            closeMenu({ focusTrigger: false })
-            window.setTimeout(() => {
-              focusRelativeToTrigger(e.shiftKey ? -1 : 1)
-            }, 0)
-            break
-        }
-      },
-      [itemIndices, flatList, highlightedIndex, handleSelect, closeMenu, focusItemAtInteractiveIndex, focusRelativeToTrigger],
-    )
-
-    const handleItemKeyDown = useCallback(
-      (e: React.KeyboardEvent<HTMLButtonElement>, interactiveIndex: number, model: ModelInfo) => {
-        e.stopPropagation()
-
-        switch (e.key) {
-          case 'ArrowDown':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(interactiveIndex >= itemIndices.length - 1 ? 0 : interactiveIndex + 1)
-            break
-          case 'ArrowUp':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(interactiveIndex <= 0 ? itemIndices.length - 1 : interactiveIndex - 1)
-            break
-          case 'Home':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(0)
-            break
-          case 'End':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(itemIndices.length - 1)
-            break
-          case 'Escape':
-            e.preventDefault()
-            closeMenu()
-            break
-          case 'Tab':
-            e.preventDefault()
-            if (!preferTouchUi && !e.shiftKey) {
-              focusPinButtonForModel(getModelKey(model), interactiveIndex)
-              break
-            }
-            closeMenu({ focusTrigger: false })
-            window.setTimeout(() => {
-              focusRelativeToTrigger(e.shiftKey ? -1 : 1)
-            }, 0)
-            break
-          case 'Enter':
-          case ' ':
-            e.preventDefault()
-            handleSelect(model)
-            break
-        }
-      },
-      [
-        closeMenu,
-        focusItemAtInteractiveIndex,
-        focusPinButtonForModel,
-        handleSelect,
-        itemIndices.length,
-        focusRelativeToTrigger,
-        preferTouchUi,
-      ],
-    )
-
-    const handlePinKeyDown = useCallback(
-      (e: React.KeyboardEvent<HTMLButtonElement>, interactiveIndex: number) => {
-        switch (e.key) {
-          case 'ArrowDown':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(interactiveIndex >= itemIndices.length - 1 ? 0 : interactiveIndex + 1)
-            break
-          case 'ArrowUp':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(interactiveIndex <= 0 ? itemIndices.length - 1 : interactiveIndex - 1)
-            break
-          case 'Home':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(0)
-            break
-          case 'End':
-            e.preventDefault()
-            focusItemAtInteractiveIndex(itemIndices.length - 1)
-            break
-          case 'Escape':
-            e.preventDefault()
-            closeMenu()
-            break
-          case 'Tab':
-            e.preventDefault()
-            if (e.shiftKey) {
-              focusItemAtInteractiveIndex(interactiveIndex)
-              break
-            }
-            closeMenu({ focusTrigger: false })
-            window.setTimeout(() => {
-              focusRelativeToTrigger(e.shiftKey ? -1 : 1)
-            }, 0)
-            break
-        }
-      },
-      [closeMenu, focusItemAtInteractiveIndex, itemIndices.length, focusRelativeToTrigger],
-    )
+    }, [highlightedIndex, idPrefix, isOpen])
 
     // ---- Trigger button ----
 
+    const displayName =
+      trigger === 'header'
+        ? selectedModel?.name || t('modelSelector.selectModel')
+        : selectedModel?.name || (isLoading ? '...' : t('modelSelector.model'))
+
+    const thoughtLabel = thoughtLevels[thoughtIndex]?.label ?? t('inputToolbar.default')
+    const triggerTitle = variants.length > 0 ? `${displayName} · ${thoughtLabel}` : displayName
+
     const triggerButton =
-                trigger === 'header' ? (
+      trigger === 'header' ? (
         <button
           ref={triggerRef}
           onClick={() => (isOpen ? closeMenu() : openMenu())}
           onKeyDown={e => {
             if (e.key === 'ArrowDown') {
               e.preventDefault()
-              openMenu('list')
+              openMenu()
             } else if (e.key === 'ArrowUp') {
               e.preventDefault()
-              openMenu('list', itemIndices.length - 1)
+              openMenu(visibleModels.length - 1)
             }
           }}
           disabled={disabled || isLoading}
           aria-expanded={isOpen}
-          className="group flex items-center gap-2 px-2 py-1.5 text-text-200 rounded-lg hover:bg-bg-200 transition-colors duration-150 active:bg-bg-300 cursor-pointer text-[length:var(--fs-base)]"
-          title={displayName}
+          className="group flex h-7 items-center gap-1 rounded-lg pl-2 pr-1.5 text-ui-base text-text-200 transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer"
+          title={triggerTitle}
         >
-          <span className="font-medium truncate max-w-[240px]">{displayName}</span>
-          <div className={`opacity-50 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
-            <ChevronDownIcon size={16} />
+          <PackageIcon size={16} className="shrink-0 text-text-400" />
+          <span className="min-w-0 max-w-[240px] truncate font-medium">{displayName}</span>
+          {variants.length > 0 && (
+            <span className="shrink-0 truncate text-ui-base text-text-500">{thoughtLabel}</span>
+          )}
+          <div className={`text-text-400 shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
+            <ChevronDownIcon size={14} />
           </div>
         </button>
       ) : (
@@ -816,28 +392,178 @@ export const ModelSelector = memo(
           onKeyDown={e => {
             if (e.key === 'ArrowDown') {
               e.preventDefault()
-              openMenu('list')
+              openMenu()
             } else if (e.key === 'ArrowUp') {
               e.preventDefault()
-              openMenu('list', itemIndices.length - 1)
+              openMenu(visibleModels.length - 1)
             }
           }}
           disabled={disabled || isLoading}
           aria-expanded={isOpen}
-          className="flex items-center gap-1 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden w-full"
-          title={selectedModel?.name || t('modelSelector.selectModel')}
+          className="flex h-7 items-center gap-1 rounded-lg pl-2 pr-1.5 text-ui-base transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden w-full"
+          title={triggerTitle}
         >
-          <span className="text-[length:var(--fs-sm)] text-text-300 truncate">{displayName}</span>
+          <PackageIcon size={16} className="shrink-0 text-text-400" />
+          <span className="min-w-0 flex-1 truncate text-ui-base text-text-200">{displayName}</span>
+          {variants.length > 0 && (
+            <span className="shrink-0 truncate text-ui-base text-text-500">{thoughtLabel}</span>
+          )}
           <span className={`text-text-400 shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
-            <ChevronDownIcon />
+            <ChevronDownIcon size={14} />
           </span>
         </button>
       )
 
-    // ---- Dropdown config ----
+    // ---- Menu pieces ----
 
-    const dropdownMaxH = position === 'top' ? 'max-h-[min(360px,45vh)]' : 'max-h-[min(600px,70vh)]'
-    const listMaxH = position === 'top' ? 'max-h-[min(320px,40vh)]' : 'max-h-[min(500px,60vh)]'
+    const endpointLabel = t('modelSelector.endpoint')
+    const modelsLabel = t('modelSelector.model')
+
+    const endpointOptionButton = (group: { providerId: string; providerName: string; models: ModelInfo[] }) => {
+      const isActive = group.providerId === activeProviderId
+      return (
+        <button
+          key={group.providerId}
+          type="button"
+          role="option"
+          aria-selected={isActive}
+          onClick={() => handleSelectEndpoint(group.providerId)}
+          className={`flex min-h-7 items-center gap-2 rounded-md px-2 text-left text-ui-base transition-colors duration-100 hover:bg-bg-200 ${
+            isActive ? 'text-text-100' : 'text-text-200'
+          }`}
+        >
+          <ServerIcon size={16} className="shrink-0 text-text-400" />
+          <span className="min-w-0 flex-1 truncate">{group.providerName}</span>
+          <span className="shrink-0 text-ui-xs tabular-nums text-text-500">{group.models.length}</span>
+          {isActive && <CheckIcon size={16} className="shrink-0 text-text-400" />}
+        </button>
+      )
+    }
+
+    const endpointRow = (
+      <div className="relative">
+        <button
+          type="button"
+          data-focus-target="endpoint"
+          aria-haspopup="listbox"
+          aria-expanded={endpointsOpen}
+          onClick={() => setEndpointsOpen(open => !open)}
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-ui-base text-text-200 transition-colors duration-100 hover:bg-bg-200"
+        >
+          <ServerIcon size={16} className="shrink-0 text-text-400" />
+          <span className="shrink-0 text-text-500">{endpointLabel}</span>
+          <span className="ml-auto flex min-w-0 items-center gap-1">
+            <span className="min-w-0 truncate text-text-100">{activeProviderGroup?.providerName ?? '—'}</span>
+            <ChevronRightIcon
+              size={14}
+              className={`shrink-0 text-text-400 transition-transform duration-150 ${
+                endpointsOpen ? 'rotate-90' : ''
+              }`}
+            />
+          </span>
+        </button>
+      </div>
+    )
+
+    const modelList = (
+      <div
+        ref={listRef}
+        id={listboxId}
+        role="list"
+        aria-label={modelsLabel}
+        className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto custom-scrollbar p-1"
+      >
+        {visibleModels.length === 0 ? (
+          <div className="px-4 py-10 text-center" role="status" aria-live="polite">
+            <div className="text-ui-base text-text-400">{t('modelSelector.noModelsFound')}</div>
+          </div>
+        ) : (
+          visibleModels.map((model, index) => {
+            const itemKey = getModelKey(model)
+            const isSelected = selectedModelKey === itemKey
+            const isHL = highlightedIndex === index
+            return (
+              <button
+                key={itemKey}
+                id={`${idPrefix}-${index}`}
+                data-model-key={itemKey}
+                data-focus-target="item"
+                type="button"
+                onClick={() => handleSelect(model)}
+                onFocus={() => setHighlightedIndex(index)}
+                onMouseMove={() => setHighlightedIndex(index)}
+                onKeyDown={e => handleItemKeyDown(e, index)}
+                title={`${model.name} · ${model.providerName}`}
+                className={`flex min-h-7 items-center gap-2 rounded-md px-2 text-left text-ui-base transition-colors duration-100 hover:bg-bg-200 ${
+                  isSelected || isHL ? 'text-text-100' : 'text-text-200'
+                }`}
+              >
+                <span className="min-w-0 truncate">{model.name}</span>
+                <span className="flex shrink-0 items-center gap-1 text-text-400">
+                  {model.supportsReasoning && <ThinkingIcon size={13} />}
+                  {model.supportsImages && <EyeIcon size={13} />}
+                </span>
+                {isSelected && <CheckIcon size={16} className="ml-auto shrink-0 text-text-400" />}
+              </button>
+            )
+          })
+        )}
+      </div>
+    )
+
+    const thoughtSection =
+      variants.length > 0 ? (
+        <div className="px-2 pb-1.5 pt-1.5">
+          <div className="mb-1.5 flex items-center gap-2">
+            <span className="text-ui-sm text-text-500">{t('modelSelector.effort')}</span>
+            <span className="min-w-0 truncate text-ui-base text-text-100">
+              {thoughtLevels[thoughtIndex]?.label ?? '—'}
+            </span>
+          </div>
+          <div className={`thought-slider relative h-6 w-full ${thoughtLevels.length < 2 ? 'opacity-50' : ''}`}>
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+              <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-text-100/10" />
+              <div
+                className="thought-slider-fill absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-accent-main-100"
+                style={{
+                  width: thoughtFilled ? `calc(7px + (100% - 14px) * ${thoughtProgress / 100})` : 0,
+                }}
+              />
+              <div className="absolute inset-x-[7px] top-1/2 flex -translate-y-1/2 items-center justify-between">
+                {thoughtLevels.map((level, index) => (
+                  <span
+                    key={level.value ?? '__default'}
+                    className={`size-1 shrink-0 rounded-full transition-transform duration-150 ${
+                      thoughtFilled && index <= thoughtIndex ? 'bg-oncolor-100/60' : 'bg-text-500'
+                    }`}
+                  />
+                ))}
+              </div>
+              <div
+                className="thought-slider-thumb absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full border border-border-200/50 bg-oncolor-100 shadow-md"
+                style={{ left: `calc((100% - 14px) * ${thoughtProgress / 100})` }}
+              />
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, thoughtLevels.length - 1)}
+              step={1}
+              value={thoughtIndex}
+              disabled={thoughtLevels.length < 2}
+              aria-label={t('modelSelector.effort')}
+              aria-valuetext={thoughtLevels[thoughtIndex]?.label ?? ''}
+              onChange={event => {
+                handleVariantSliderChange(thoughtLevels[Number(event.target.value)]?.value)
+              }}
+              onPointerUp={event => {
+                handleVariantSliderChange(thoughtLevels[Number(event.currentTarget.value)]?.value)
+              }}
+              className="thought-slider-range absolute inset-0 m-0 h-6 w-full cursor-pointer appearance-none bg-transparent outline-none disabled:cursor-default"
+            />
+          </div>
+        </div>
+      ) : null
 
     // ---- Render ----
 
@@ -854,43 +580,56 @@ export const ModelSelector = memo(
           isOpen={isOpen}
           position={position}
           align="left"
-          width="460px"
-          minWidth="280px"
-          maxWidth="min(460px, calc(100vw - 24px))"
+          width="320px"
+          minWidth="260px"
+          maxWidth="min(320px, calc(100vw - 24px))"
           mobileFullWidth
           constrainToRef={constrainToRef}
-          className={`!p-0 overflow-hidden flex flex-col ${dropdownMaxH}`}
+          className="!p-0 flex flex-col"
         >
-          <ModelListPanel
-            menuRef={menuRef}
-            searchInputRef={searchInputRef}
-            listRef={listRef}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            setHighlightedIndex={setHighlightedIndex}
-            handleSearchKeyDown={handleSearchKeyDown}
-            handleItemKeyDown={handleItemKeyDown}
-            flatList={flatList}
-            itemIndices={itemIndices}
-            highlightedIndex={highlightedIndex}
-            selectedModelKey={selectedModelKey}
-            onItemClick={handleItemClick}
-            onTogglePin={handleTogglePin}
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
-            handlePinKeyDown={handlePinKeyDown}
-            ignoreMouseRef={ignoreMouseRef}
-            lastMousePosRef={lastMousePosRef}
-            idPrefix={idPrefix}
-            listboxId={listboxId}
-            maxListHeight={listMaxH}
-            searchPlaceholder={t('modelSelector.searchModels')}
-            noResultsText={t('modelSelector.noModelsFound')}
-            noResultsHint={t('modelSelector.tryDifferentKeyword')}
-            preferTouchUi={preferTouchUi}
-            pinLabel={t('modelSelector.pinToTop')}
-            unpinLabel={t('modelSelector.unpin')}
-          />
+          <div ref={menuRef} className="relative flex min-h-0 flex-col">
+            {preferTouchUi && endpointsOpen ? (
+              // 触摸端不做向右浮层(会超出屏宽),退回列表内下钻。
+              <div className="flex flex-col p-1">
+                <button
+                  type="button"
+                  onClick={() => setEndpointsOpen(false)}
+                  className="flex h-8 items-center gap-1.5 rounded-md px-2 text-ui-base text-text-200 hover:bg-bg-200"
+                >
+                  <ChevronLeftIcon size={14} className="text-text-400" />
+                  <span>{t('common:back')}</span>
+                </button>
+                <div className="mx-2 my-1 h-px bg-border-200/60" />
+                <div role="listbox" aria-label={endpointLabel} className="flex flex-col gap-0.5">
+                  {allProviderGroups.map(endpointOptionButton)}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="p-1 pb-0">{endpointRow}</div>
+                <div className="mx-2 my-1 h-px bg-border-200/60" />
+                {modelList}
+                {thoughtSection && (
+                  <>
+                    <div className="mx-2 h-px bg-border-200/60" />
+                    {thoughtSection}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* 桌面:端点列表向右展开,顶部与模型菜单对齐,左侧留出空隙;
+                样式(圆角/边框/背景/阴影/内边距)与模型菜单完全一致。 */}
+            {endpointsOpen && !preferTouchUi && (
+              <div
+                role="listbox"
+                aria-label={endpointLabel}
+                className="glass absolute -top-px left-full z-20 ml-2 flex w-52 flex-col gap-0.5 rounded-xl border border-border-200/60 p-1 shadow-lg"
+              >
+                {allProviderGroups.map(endpointOptionButton)}
+              </div>
+            )}
+          </div>
         </DropdownMenu>
       </div>
     )

@@ -283,7 +283,7 @@ function MobileExtraKeys({ onSend, stickyModifiers, onToggleSticky, onFocusTermi
   )
 
   const btnBase =
-    'flex h-8 min-w-0 w-full items-center justify-center overflow-hidden whitespace-nowrap rounded-md border px-0 text-[length:var(--fs-xxs)] leading-none font-mono font-semibold tracking-[-0.02em] text-text-200 transition-[background-color,color,border-color] duration-100 select-none touch-none'
+    'flex h-8 min-w-0 w-full items-center justify-center overflow-hidden whitespace-nowrap rounded-md border px-0 text-ui-xs leading-none font-mono font-semibold tracking-[-0.02em] text-text-200 transition-[background-color,color,border-color] duration-100 select-none touch-none'
   const btnNormal = `${btnBase} border-border-200/20 bg-bg-200/70 active:bg-bg-300/80`
   const btnActive = `${btnBase} border-accent-main-100/45 bg-accent-main-100/18 text-accent-main-100`
 

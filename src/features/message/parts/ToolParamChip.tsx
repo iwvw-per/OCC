@@ -40,7 +40,7 @@ export const ToolParamChip = memo(function ToolParamChip({
     <span
       className={cn(
         'inline-flex h-5 min-w-0 items-center gap-1 rounded-sm px-1.5',
-        'font-mono text-[length:var(--fs-xxs)] leading-none',
+        'font-mono text-ui-xs leading-none',
         // shimmer 的 text-fill-color 会继承，这里显式恢复为自身文字色
         '[-webkit-text-fill-color:currentColor]',
         'transition-colors duration-150',

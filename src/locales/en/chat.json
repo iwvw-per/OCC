@@ -166,7 +166,9 @@
     "vision": "Vision",
     "unpin": "Unpin",
     "pinToTop": "Pin to top",
-    "model": "Model"
+    "model": "Model",
+    "endpoint": "Endpoint",
+    "effort": "Thinking level"
   },
   "retryStatus": {
     "retrying": "Retrying (attempt {{attempt}})",

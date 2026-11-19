@@ -41,7 +41,7 @@ interface SubagentDialogProps {
 /** 一行「标签 + 值」，值与标签对齐，长值换行而不是溢出 */
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-3 text-[length:var(--fs-xs)]">
+    <div className="flex gap-3 text-ui-sm">
       <span className="w-16 shrink-0 text-text-500">{label}</span>
       <span className="min-w-0 flex-1 break-words text-text-200">{children}</span>
     </div>
@@ -196,7 +196,7 @@ export const SubagentDialog = memo(function SubagentDialog({
             </DetailRow>
             {child.agent ? (
               <DetailRow label={t('chat:workStatus.subagent.detailAgent')}>
-                <span className="font-mono text-[length:var(--fs-xxs)]">{child.agent}</span>
+                <span className="font-mono text-ui-xs">{child.agent}</span>
               </DetailRow>
             ) : null}
             {child.createdAt > 0 ? (
@@ -215,27 +215,27 @@ export const SubagentDialog = memo(function SubagentDialog({
               </DetailRow>
             ) : null}
             <DetailRow label={t('chat:workStatus.subagent.detailId')}>
-              <span className="font-mono text-[length:var(--fs-xxs)]">{child.id}</span>
+              <span className="font-mono text-ui-xs">{child.id}</span>
             </DetailRow>
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-[length:var(--fs-xs)] text-text-400">
+            <div className="flex items-center justify-center gap-2 py-8 text-ui-sm text-text-400">
               <Spinner size="xs" tone="current" variant="ring" />
               {t('common:loading')}
             </div>
           ) : failed ? (
-            <p className="py-4 text-[length:var(--fs-xs)] text-text-400">
+            <p className="py-4 text-ui-sm text-text-400">
               {t('chat:workStatus.subagent.detailLoadFailed')}
             </p>
           ) : (
             <>
               {prompt ? (
                 <div className="flex flex-col gap-1">
-                  <span className="text-[length:var(--fs-xxs)] text-text-500">
+                  <span className="text-ui-xs text-text-500">
                     {t('chat:workStatus.subagent.detailPrompt')}
                   </span>
-                  <div className="max-h-32 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md border border-border-200/50 bg-bg-200/40 px-3 py-2 text-[length:var(--fs-xs)] text-text-200">
+                  <div className="max-h-32 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md border border-border-200/50 bg-bg-200/40 px-3 py-2 text-ui-sm text-text-200">
                     {prompt}
                   </div>
                 </div>
@@ -243,15 +243,15 @@ export const SubagentDialog = memo(function SubagentDialog({
 
               {reply ? (
                 <div className="flex flex-col gap-1">
-                  <span className="text-[length:var(--fs-xxs)] text-text-500">
+                  <span className="text-ui-xs text-text-500">
                     {t('chat:workStatus.subagent.detailReply')}
                   </span>
-                  <div className="max-h-64 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md border border-border-200/50 bg-bg-100 px-3 py-2 text-[length:var(--fs-xs)] text-text-200">
+                  <div className="max-h-64 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md border border-border-200/50 bg-bg-100 px-3 py-2 text-ui-sm text-text-200">
                     {reply}
                   </div>
                 </div>
               ) : (
-                <p className="py-2 text-[length:var(--fs-xs)] text-text-400">
+                <p className="py-2 text-ui-sm text-text-400">
                   {t('chat:workStatus.subagent.detailNoReply')}
                 </p>
               )}

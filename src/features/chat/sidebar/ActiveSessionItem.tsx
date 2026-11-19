@@ -70,14 +70,14 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
       {/* Content */}
       <div className="flex-1 min-w-0 pr-1">
         <p
-          className={`text-[length:var(--fs-md)] truncate font-medium ${
+          className={`text-ui-base truncate font-medium ${
             isSelected ? 'text-text-100' : 'text-text-200'
           }`}
           title={displayTitle}
         >
           {displayTitle}
         </p>
-        <div className="mt-1 flex h-4 min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[length:var(--fs-xxs)] text-text-400">
+        <div className="mt-1 flex h-4 min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-ui-xs text-text-400">
           <span className="relative shrink-0 flex h-3 w-3 items-center justify-center">
             <span className={`absolute h-1.5 w-1.5 rounded-full ${statusConfig.dotColor}`} />
             {statusConfig.pulse && (

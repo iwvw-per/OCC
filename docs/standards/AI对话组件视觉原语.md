@@ -142,8 +142,8 @@ Chips / Task Rows / Approval Card / Loading State）。
 
 ### 图标 + 单行文本的光学居中
 
-字体（Manrope / HarmonyOS Sans SC）的 ascent 明显大于 descent，行盒中心比字形
-墨迹中心略低。flex 的 `items-center` 按行盒居中，因此「图标 + 单行文本」看起来
+多数 UI 字体的 ascent 明显大于 descent,行盒中心比字形墨迹中心略低。
+flex 的 `items-center` 按行盒居中,因此「图标 + 单行文本」看起来
 文字偏上约 0.5~0.8px。给该单行文本块加 `optical-center`（`index.css`，内部是
 `text-box: trim-both`）把行盒裁到字形上下缘，墨迹落到行盒中心，与图标同心。
 

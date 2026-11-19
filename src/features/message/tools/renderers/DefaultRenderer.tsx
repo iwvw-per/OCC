@@ -240,11 +240,11 @@ function DiagnosticsBlock({ diagnostics }: DiagnosticsBlockProps) {
   if (errors.length === 0 && warnings.length === 0) return null
 
   return (
-    <div className="rounded-md border border-border-200/40 bg-bg-100/80 overflow-hidden text-[length:var(--fs-sm)]">
+    <div className="rounded-md border border-border-200/40 bg-bg-100/80 overflow-hidden text-ui-caption">
       <div className="px-3 h-8 bg-bg-200/40 flex items-center gap-2">
         <AlertCircleIcon className="w-3.5 h-3.5 text-text-400" />
         <span className="font-medium text-text-300">{t('defaultRenderer.diagnostics')}</span>
-        <div className="flex items-center gap-2 ml-auto font-mono text-[length:var(--fs-xxs)]">
+        <div className="flex items-center gap-2 ml-auto font-mono text-ui-xs">
           {errors.length > 0 && (
             <span className="text-danger-100">{t('defaultRenderer.errorsCount', { count: errors.length })}</span>
           )}

@@ -570,7 +570,7 @@ const DiffViewerContent = memo(function DiffViewerContent({
   // 必须先于拆分视图缓存（useMemo/提前 return）路径判断。
   if (resolvedData.pending) {
     return (
-      <div className="h-full flex items-center justify-center text-text-400 text-[length:var(--fs-base)]">
+      <div className="h-full flex items-center justify-center text-text-400 text-ui-base">
         <Spinner size="sm" tone="accent" />
       </div>
     )
@@ -709,7 +709,7 @@ const WrappedSplitDiffView = memo(function WrappedSplitDiffView({
 
   if (pairedLines.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-text-400 text-[length:var(--fs-base)]">
+      <div className="h-full flex items-center justify-center text-text-400 text-ui-base">
         {t('diffViewer.noChanges')}
       </div>
     )
@@ -997,7 +997,7 @@ const SplitDiffView = memo(function SplitDiffView({
 
   if (pairedLines.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-text-400 text-[length:var(--fs-base)]">
+      <div className="h-full flex items-center justify-center text-text-400 text-ui-base">
         {t('diffViewer.noChanges')}
       </div>
     )
@@ -1354,7 +1354,7 @@ const UnifiedDiffView = memo(function UnifiedDiffView({
 
   if (lines.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-text-400 text-[length:var(--fs-base)]">
+      <div className="h-full flex items-center justify-center text-text-400 text-ui-base">
         {t('diffViewer.noChanges')}
       </div>
     )
@@ -1541,7 +1541,7 @@ const WrappedUnifiedDiffView = memo(function WrappedUnifiedDiffView({
 
   if (lines.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-text-400 text-[length:var(--fs-base)]">
+      <div className="h-full flex items-center justify-center text-text-400 text-ui-base">
         {t('diffViewer.noChanges')}
       </div>
     )

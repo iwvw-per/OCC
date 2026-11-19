@@ -19,8 +19,8 @@ interface ApprovalCardProps {
 export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(
   ({ header, children, footer, className }, ref) => (
     <div ref={ref} className={cn('rounded-md border border-border-200/40 bg-bg-100 overflow-hidden', className)}>
-      <div className="flex items-center gap-2 px-3 h-8 bg-bg-200/40 text-[length:var(--fs-sm)]">{header}</div>
-      {children != null && <div className="px-3 py-2.5 text-[length:var(--fs-sm)]">{children}</div>}
+      <div className="flex items-center gap-2 px-3 h-8 bg-bg-200/40 text-ui-caption">{header}</div>
+      {children != null && <div className="px-3 py-2.5 text-ui-caption">{children}</div>}
       {footer && <div className="flex items-center gap-2 px-3 py-2 border-t border-border-200/40">{footer}</div>}
     </div>
   ),

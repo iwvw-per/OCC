@@ -230,9 +230,9 @@ export function SidebarFooter({
           {/* Context Stats */}
           <div className="relative p-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[length:var(--fs-sm)] font-medium text-text-200">{t('sidebar.contextUsage')}</span>
+              <span className="text-ui-caption font-medium text-text-200">{t('sidebar.contextUsage')}</span>
               <div className="flex items-baseline gap-1.5">
-                <span className="text-[length:var(--fs-sm)] leading-none text-text-400 tabular-nums">
+                <span className="text-ui-caption leading-none text-text-400 tabular-nums">
                   {contextKnown ? `${Math.round(stats.contextPercent!)}%` : '--'}
                 </span>
                 <button
@@ -241,7 +241,7 @@ export function SidebarFooter({
                     closeMenu()
                     setContextDialogOpen(true)
                   }}
-                  className="shrink-0 text-[length:var(--fs-sm)] leading-none text-text-400 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1 transition-colors"
+                  className="shrink-0 text-ui-caption leading-none text-text-400 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1 transition-colors"
                 >
                   {t('sidebar.viewDetails')}
                 </button>
@@ -253,7 +253,7 @@ export function SidebarFooter({
                 style={{ transform: `scaleX(${contextKnown ? Math.min(100, stats.contextPercent!) / 100 : 0})` }}
               />
             </div>
-            <div className="flex justify-between text-[length:var(--fs-xxs)] text-text-400 tabular-nums">
+            <div className="flex justify-between text-ui-xs text-text-400 tabular-nums">
               <span>
                 {stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} /{' '}
                 {contextKnown ? formatTokens(stats.contextLimit) : t('sidebar.contextLimitUnknown')}
@@ -265,7 +265,7 @@ export function SidebarFooter({
 
           {/* Theme Selector */}
           <div className="relative p-2">
-            <div className="text-[length:var(--fs-xxs)] font-bold text-text-400 uppercase tracking-wider px-1 mb-1.5">
+            <div className="text-ui-xs font-bold text-text-400 uppercase tracking-wider px-1 mb-1.5">
               {t('sidebar.appearance')}
             </div>
             {/* 主题切换：复用设置里的 SegmentedControl（底层是共享 Tabs slider），
@@ -293,7 +293,7 @@ export function SidebarFooter({
                 closeMenu()
               }}
               disabled={chatContentWidth === null}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[length:var(--fs-sm)] text-text-300 hover:bg-bg-200 transition-colors text-left disabled:opacity-40 disabled:pointer-events-none"
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-ui-caption text-text-300 hover:bg-bg-200 transition-colors text-left disabled:opacity-40 disabled:pointer-events-none"
             >
               <MinimizeIcon size={14} />
               <span>{t('sidebar.resetWidth')}</span>
@@ -304,7 +304,7 @@ export function SidebarFooter({
                 closeMenu()
                 setShareDialogOpen(true)
               }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[length:var(--fs-sm)] text-text-300 hover:bg-bg-200 transition-colors text-left"
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-ui-caption text-text-300 hover:bg-bg-200 transition-colors text-left"
             >
               <ShareIcon size={14} />
               <span>{t('sidebar.shareChat')}</span>
@@ -315,7 +315,7 @@ export function SidebarFooter({
                 closeMenu()
                 setArchivedDialogOpen(true)
               }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[length:var(--fs-sm)] text-text-300 hover:bg-bg-200 transition-colors text-left"
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-ui-caption text-text-300 hover:bg-bg-200 transition-colors text-left"
             >
               <ArchiveIcon size={14} />
               <span>{t('sidebar.archivedChats')}</span>
@@ -326,7 +326,7 @@ export function SidebarFooter({
                 closeMenu()
                 onOpenSettings?.()
               }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[length:var(--fs-sm)] text-text-300 hover:bg-bg-200 transition-colors text-left"
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-ui-caption text-text-300 hover:bg-bg-200 transition-colors text-left"
             >
               <CogIcon size={14} />
               <span>{t('sidebar.settings')}</span>
@@ -334,7 +334,7 @@ export function SidebarFooter({
           </div>
 
           {/* Connection Status */}
-          <div className="relative flex items-center gap-2 px-3 py-2 text-[length:var(--fs-xxs)] text-text-300 cursor-default">
+          <div className="relative flex items-center gap-2 px-3 py-2 text-ui-xs text-text-300 cursor-default">
             <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-border-200/30" />
             <div className={`w-1.5 h-1.5 rounded-full ${statusColorClass}`} />
             <span className="capitalize">{activeHealth ? activeHealth.status : connectionState}</span>
@@ -373,12 +373,12 @@ export function SidebarFooter({
             className="ml-2 flex-1 flex items-center justify-between min-w-0 transition-opacity duration-300"
             style={{ opacity: showLabels ? 1 : 0 }}
           >
-            <span className="text-[length:var(--fs-sm)] tabular-nums text-text-300 truncate">
+            <span className="text-ui-caption tabular-nums text-text-300 truncate">
               {stats.contextUsed === null ? '\u2014' : formatTokens(stats.contextUsed)} /{' '}
               {contextKnown ? formatTokens(stats.contextLimit) : t('sidebar.contextLimitUnknown')}
             </span>
             <span
-              className={`text-[length:var(--fs-sm)] font-medium ml-2 ${
+              className={`text-ui-caption font-medium ml-2 ${
                 !contextKnown
                   ? 'text-text-400'
                   : stats.contextPercent! >= 90

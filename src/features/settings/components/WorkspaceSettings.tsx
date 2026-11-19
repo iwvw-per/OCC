@@ -39,7 +39,7 @@ export function WorkspaceSettings() {
           onClick={chatContentWidth === null ? undefined : resetChatContentWidth}
           disabled={chatContentWidth === null}
         >
-          <span className="text-[length:var(--fs-sm)] tabular-nums text-text-300">
+          <span className="text-ui-caption tabular-nums text-text-300">
             {chatContentWidth === null ? t('appearance.chatWidthAuto') : `${Math.round(chatContentWidth)}px`}
           </span>
         </SettingRow>

@@ -1524,7 +1524,7 @@ export const ChatArea = memo(
                 避免它一直悬在最新对话下方造成误解。 */}
             {shouldShowCompactionDivider(visibleMessages, compactedAt) && (
               <div className={`w-full mx-auto ${paddingClass}`} style={chatContentMaxWidthStyle}>
-                <div className="flex items-center gap-3 py-2 text-[length:var(--fs-xs)] text-text-400" data-compaction-divider>
+                <div className="flex items-center gap-3 py-2 text-ui-sm text-text-400" data-compaction-divider>
                   <span className="flex-1 h-px bg-border-200/70" />
                   <span className="shrink-0 leading-none">{t('message:system.contextCompacted')}</span>
                   <span className="flex-1 h-px bg-border-200/70" />
@@ -1570,7 +1570,7 @@ export const ChatArea = memo(
                         <button
                           type="button"
                           onClick={onReloadSession}
-                          className="rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-200 transition-colors hover:bg-bg-200"
+                          className="rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-ui-caption text-text-200 transition-colors hover:bg-bg-200"
                         >
                           {t('errors.reloadConversation')}
                         </button>
@@ -1579,7 +1579,7 @@ export const ChatArea = memo(
                         <button
                           type="button"
                           onClick={onOpenSettings}
-                          className="rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-200 transition-colors hover:bg-bg-200"
+                          className="rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-ui-caption text-text-200 transition-colors hover:bg-bg-200"
                         >
                           {t('connectionError.openServerSettings')}
                         </button>

@@ -83,11 +83,11 @@ export const AttachmentDetailModal = memo(function AttachmentDetailModal({
         <span className={`${colorClass} flex items-center shrink-0 [&>svg]:w-4 [&>svg]:h-4`}>
           <Icon />
         </span>
-        <span className="text-text-100 text-[length:var(--fs-md)] font-mono font-medium truncate min-w-0 flex-1">
+        <span className="text-text-100 text-ui-base font-mono font-medium truncate min-w-0 flex-1">
           {attachment.displayName}
         </span>
         {attachment.mime && (
-          <span className="text-[length:var(--fs-xs)] text-text-500 shrink-0 hidden sm:inline">{attachment.mime}</span>
+          <span className="text-ui-sm text-text-500 shrink-0 hidden sm:inline">{attachment.mime}</span>
         )}
       </div>
     )
@@ -113,7 +113,7 @@ export const AttachmentDetailModal = memo(function AttachmentDetailModal({
             <CodePreview code={attachment.content!} language={detectLanguage(attachment.displayName) || 'text'} />
           </Suspense>
         ) : (
-          <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-base)]">
+          <div className="flex items-center justify-center h-full text-text-400 text-ui-base">
             {t('attachment.noPreview')}
           </div>
         ),
@@ -418,7 +418,7 @@ function ZoomableImage({ url, alt }: { url: string; alt: string }) {
 
   if (imgError) {
     return (
-      <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-base)]">
+      <div className="flex items-center justify-center h-full text-text-400 text-ui-base">
         {t('attachment.failedToLoadImage')}
       </div>
     )
@@ -474,7 +474,7 @@ function ZoomableImage({ url, alt }: { url: string; alt: string }) {
             onClick={resetView}
             aria-label={t('attachment.zoomReset')}
             className={cn(
-              'px-2 py-1 rounded-md text-[length:var(--fs-sm)] font-mono text-text-400 transition-colors min-w-[52px] min-h-[44px] sm:min-h-0 flex items-center justify-center',
+              'px-2 py-1 rounded-md text-ui-caption font-mono text-text-400 transition-colors min-w-[52px] min-h-[44px] sm:min-h-0 flex items-center justify-center',
               interactive.subtle,
             )}
             title={t('attachment.zoomReset')}

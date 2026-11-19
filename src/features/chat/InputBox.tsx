@@ -1798,7 +1798,7 @@ function InputBoxComponent({
                 {/* Drop overlay */}
                 {(isDragging || isInternalFileDragging) && (
                   <div className="absolute inset-0 z-50 rounded-2xl bg-accent-main-100/5 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
-                    <span className="text-[length:var(--fs-base)] text-accent-main-100 font-medium">
+                    <span className="text-ui-base text-accent-main-100 font-medium">
                       {t('inputBox.dropFilesHere')}
                     </span>
                   </div>
@@ -1813,7 +1813,7 @@ function InputBoxComponent({
                   }`}
                 >
                   <ArrowUpIcon size={14} />
-                  <span className="text-[length:var(--fs-xs)] whitespace-nowrap">{t('inputActions.reply')}</span>
+                  <span className="text-ui-sm whitespace-nowrap">{t('inputActions.reply')}</span>
                 </div>
 
                 {/* 展开态内容层：收起时绝对定位 + 冻结展开宽度 + 居中，容器收缩时由

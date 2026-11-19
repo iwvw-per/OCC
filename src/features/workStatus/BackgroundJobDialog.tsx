@@ -34,7 +34,7 @@ interface BackgroundJobDialogProps {
 /** 一行「标签 + 值」，值与标签对齐，长值换行而不是溢出 */
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-3 text-[length:var(--fs-xs)]">
+    <div className="flex gap-3 text-ui-sm">
       <span className="w-16 shrink-0 text-text-500">{label}</span>
       <span className="min-w-0 flex-1 break-words text-text-200">{children}</span>
     </div>
@@ -187,36 +187,36 @@ export const BackgroundJobDialog = memo(function BackgroundJobDialog({
               </DetailRow>
             ) : null}
             <DetailRow label={t('chat:workStatus.backgroundJob.detailId')}>
-              <span className="font-mono text-[length:var(--fs-xxs)]">{job.id}</span>
+              <span className="font-mono text-ui-xs">{job.id}</span>
             </DetailRow>
           </div>
 
           <div className="flex flex-col gap-1">
-            <span className="text-[length:var(--fs-xs)] text-text-500">
+            <span className="text-ui-sm text-text-500">
               {t('chat:workStatus.backgroundJob.detailCommand')}
             </span>
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-[length:var(--fs-xxs)] text-text-200 custom-scrollbar">
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-ui-xs text-text-200 custom-scrollbar">
               {job.title}
             </pre>
           </div>
 
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
-              <span className="text-[length:var(--fs-xs)] text-text-500">
+              <span className="text-ui-sm text-text-500">
                 {t('chat:workStatus.backgroundJob.detailOutput')}
               </span>
               {loading ? <Spinner size="xs" tone="muted" /> : null}
             </div>
-            <pre className="max-h-[45vh] overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-[length:var(--fs-xxs)] text-text-200 custom-scrollbar">
+            <pre className="max-h-[45vh] overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-ui-xs text-text-200 custom-scrollbar">
               {hasOutput ? displayOutput : loading ? '' : t('chat:workStatus.backgroundJob.noOutput')}
             </pre>
             {error ? (
-              <span className="text-[length:var(--fs-xxs)] text-text-500">{error}</span>
+              <span className="text-ui-xs text-text-500">{error}</span>
             ) : null}
             {/* 只有「加载完成且确实没有输出」时才提示。
                 运行中的任务输出可能还没产生（或刚被读取），不该断言已被清理。 */}
             {!hasOutput && !loading && job.kind === 'shell' && job.status !== 'running' ? (
-              <span className="text-[length:var(--fs-xxs)] text-text-500">
+              <span className="text-ui-xs text-text-500">
                 {t('chat:workStatus.backgroundJob.outputExpired')}
               </span>
             ) : null}

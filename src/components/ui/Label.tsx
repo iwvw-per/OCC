@@ -12,7 +12,7 @@ export const Label = forwardRef<React.ElementRef<typeof LabelPrimitive.Root>, Re
     <LabelPrimitive.Root
       ref={ref}
       className={cn(
-        'flex flex-col gap-1 text-[length:var(--fs-xs)] text-text-300',
+        'flex flex-col gap-1 text-ui-sm text-text-300',
         'peer-disabled:opacity-40',
         className,
       )}

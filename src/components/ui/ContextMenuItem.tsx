@@ -24,7 +24,7 @@ export const ContextMenuItem = forwardRef<HTMLButtonElement, ContextMenuItemProp
       disabled={disabled}
       className={cn(
         'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left',
-        'text-[length:var(--fs-sm)] transition-colors duration-150',
+        'text-ui-caption transition-colors duration-150',
         tone === 'danger'
           ? 'text-danger-100 hover:bg-danger-100/10'
           : 'text-text-200 hover:bg-bg-200',
@@ -35,7 +35,7 @@ export const ContextMenuItem = forwardRef<HTMLButtonElement, ContextMenuItemProp
     >
       {icon && <span className="flex size-4 shrink-0 items-center justify-center text-text-400">{icon}</span>}
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {hint && <span className="shrink-0 text-[length:var(--fs-xxs)] text-text-500">{hint}</span>}
+      {hint && <span className="shrink-0 text-ui-xs text-text-500">{hint}</span>}
     </button>
   ),
 )

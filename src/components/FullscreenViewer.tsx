@@ -76,7 +76,7 @@ export const FullscreenViewer = memo(function FullscreenViewer({
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {title &&
                 (typeof title === 'string' ? (
-                  <span className="text-text-100 font-mono text-[length:var(--fs-md)] font-medium truncate min-w-0 flex-1">
+                  <span className="text-text-100 font-mono text-ui-base font-medium truncate min-w-0 flex-1">
                     {title}
                   </span>
                 ) : (
@@ -136,7 +136,7 @@ export function ViewModeSwitch({ viewMode, onChange }: { viewMode: ViewMode; onC
   const { t } = useTranslation('components')
 
   return (
-    <div className="flex items-center bg-bg-300/50 rounded-lg p-0.5 text-[length:var(--fs-xs)]">
+    <div className="flex items-center bg-bg-300/50 rounded-lg p-0.5 text-ui-sm">
       <button
         type="button"
         aria-pressed={viewMode === 'split'}

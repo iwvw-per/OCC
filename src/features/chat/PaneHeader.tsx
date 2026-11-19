@@ -189,12 +189,12 @@ export function PaneHeader({
               if (e.key === 'Enter') handleRename()
               if (e.key === 'Escape') setIsEditing(false)
             }}
-            className="px-1.5 py-0.5 text-[length:var(--fs-sm)] font-medium text-text-100 bg-transparent border-none outline-none w-[140px]"
+            className="px-1.5 py-0.5 text-ui-caption font-medium text-text-100 bg-transparent border-none outline-none w-[140px]"
           />
         ) : (
           <button
             onClick={handleStartEdit}
-            className="px-1.5 py-0.5 text-[length:var(--fs-sm)] font-medium text-text-200 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded transition-colors truncate max-w-[200px] cursor-text select-none"
+            className="px-1.5 py-0.5 text-ui-caption font-medium text-text-200 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded transition-colors truncate max-w-[200px] cursor-text select-none"
             title={t('header.clickToRename')}
           >
             {title}

@@ -50,7 +50,7 @@ function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd
       className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5
-                    text-[length:var(--fs-xs)] font-mono font-medium leading-none
+                    text-ui-sm font-mono font-medium leading-none
                     bg-bg-100 text-text-300 border border-border-200 rounded
                     shadow-[0_1px_0_0_var(--border-200)]"
     >
@@ -150,7 +150,7 @@ function KeybindingRow({ config, onEdit, onReset, isKeyUsed, t }: KeybindingRowP
       )}
     >
       {/* Label */}
-      <span className="min-w-0 flex-1 truncate pr-2 text-[length:var(--fs-md)] text-text-200">{config.label}</span>
+      <span className="min-w-0 flex-1 truncate pr-2 text-ui-base text-text-200">{config.label}</span>
 
       {/* Reset */}
       {isModified && !isEditing && (
@@ -177,7 +177,7 @@ function KeybindingRow({ config, onEdit, onReset, isKeyUsed, t }: KeybindingRowP
             tabIndex={0}
             className={`
               min-w-[120px] h-7 flex items-center justify-center px-3
-              text-[length:var(--fs-sm)] font-mono rounded border-2 outline-none
+              text-ui-caption font-mono rounded border-2 outline-none
               ${
                 error
                   ? 'border-danger-100/60 bg-danger-100/5 text-danger-100'
@@ -187,7 +187,7 @@ function KeybindingRow({ config, onEdit, onReset, isKeyUsed, t }: KeybindingRowP
           >
             {tempKey || <span className="text-text-400">...</span>}
           </div>
-          {error && <span className="text-[length:var(--fs-xs)] text-danger-100">{error}</span>}
+          {error && <span className="text-ui-sm text-danger-100">{error}</span>}
         </div>
       ) : (
         <button
@@ -291,7 +291,7 @@ export function KeybindingsSection() {
             type="button"
             onClick={resetAll}
             className={cn(
-              'h-7 px-2 rounded-md text-[length:var(--fs-xs)] font-medium text-text-400',
+              'h-7 px-2 rounded-md text-ui-sm font-medium text-text-400',
               interactive.danger,
               interactive.focusRingCompact,
             )}
@@ -313,17 +313,17 @@ export function KeybindingsSection() {
           autoCorrect="off"
           autoComplete="off"
           autoCapitalize="off"
-          className="w-full h-9 bg-bg-200/70 hover:bg-bg-200 border border-border-200/50 rounded-lg pl-9 pr-3 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400/70 focus:outline-none transition-colors"
+          className="w-full h-9 bg-bg-200/70 hover:bg-bg-200 border border-border-200/50 rounded-lg pl-9 pr-3 text-ui-caption text-text-100 placeholder:text-text-400/70 focus:outline-none transition-colors"
         />
       </div>
 
       <div className="-mx-1">
         {grouped.length === 0 ? (
-          <div className="py-8 text-center text-[length:var(--fs-base)] text-text-400">{t('common:noMatches')}</div>
+          <div className="py-8 text-center text-ui-base text-text-400">{t('common:noMatches')}</div>
         ) : (
           grouped.map(({ category, items }) => (
             <div key={category} className="mb-3">
-              <div className="px-3 py-1 text-[length:var(--fs-xs)] font-medium text-text-400 uppercase tracking-wider">
+              <div className="px-3 py-1 text-ui-sm font-medium text-text-400 uppercase tracking-wider">
                 {t(CATEGORY_LABELS[category])}
               </div>
               {/* 条目之间留 2px：KeybindingRow 是 rounded-md + hover 底色，

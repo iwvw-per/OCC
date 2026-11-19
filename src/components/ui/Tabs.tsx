@@ -27,7 +27,7 @@ const listBase: Record<TabsVariant, string> = {
  * 若与 md 同用 8px 会占高度 32%，明显偏圆；故降一档取 4px。
  * 内层相应取 2px，满足同心：内层 = 外层 − p-0.5 的 2px。
  *
- * lg 用于装图标的分段控件（如侧栏底部的主题切换）：字号 fs-sm、
+ * lg 用于装图标的分段控件（如侧栏底部的主题切换）：字号 text-ui-caption、
  * 内边距更大，整体约 34px 高，容器取 6px 更协调。
  */
 const listRadius: Record<TabsSize, string> = {
@@ -69,9 +69,9 @@ const triggerVariant: Record<TabsVariant, { base: string; active: string; inacti
 }
 
 const triggerSize: Record<TabsSize, string> = {
-  sm: 'px-2 py-1 text-[length:var(--fs-xxs)]',
-  md: 'px-2.5 py-1.5 text-[length:var(--fs-xs)]',
-  lg: 'px-2.5 py-1.5 text-[length:var(--fs-sm)]',
+  sm: 'px-2 py-1 text-ui-xs',
+  md: 'px-2.5 py-1.5 text-ui-sm',
+  lg: 'px-2.5 py-1.5 text-ui-caption',
 }
 
 interface TabsProps extends React.ComponentPropsWithoutRef<typeof TabsPrimitive.Root> {

@@ -181,7 +181,7 @@ export function SessionList({
                 placeholder={t('sessions.searchChats')}
                 aria-label={t('sessions.searchChats')}
                 autoComplete="off"
-                className="w-full bg-bg-200/40 hover:bg-bg-200 focus:bg-bg-000 border border-transparent focus:border-border-200 rounded-lg py-2 pl-9 pr-3 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400/70 focus:outline-none focus:shadow-sm transition-all duration-200"
+                className="w-full bg-bg-200/40 hover:bg-bg-200 focus:bg-bg-000 border border-transparent focus:border-border-200 rounded-lg py-2 pl-9 pr-3 text-ui-caption text-text-100 placeholder:text-text-400/70 focus:outline-none focus:shadow-sm transition-all duration-200"
               />
             </div>
             <IconButton
@@ -208,7 +208,7 @@ export function SessionList({
           </div>
         ) : sessions.length === 0 && !hasUnavailablePinned ? (
           <div className="flex flex-col items-center justify-center py-12 text-text-400 opacity-60">
-            <p className="text-[length:var(--fs-sm)]">
+            <p className="text-ui-caption">
               {search ? t('common:noMatchesFound') : t('sessions.noChatsYet')}
             </p>
           </div>
@@ -228,7 +228,7 @@ export function SessionList({
               if (groupSessions.length === 0) return null
               return (
                 <div key={group}>
-                  <h3 className="px-3 mb-1.5 mt-2 text-[length:var(--fs-xxs)] font-bold text-text-400/60 uppercase tracking-widest select-none">
+                  <h3 className="px-3 mb-1.5 mt-2 text-ui-xs font-bold text-text-400/60 uppercase tracking-widest select-none">
                     {t(`sessions.groups.${group}`)}
                   </h3>
                   <div className="space-y-0.5">
@@ -747,8 +747,8 @@ function SessionListItemComponent({
           aria-busy={isSaving}
           className={`w-full bg-bg-000 border border-accent-main-100/50 rounded px-2 text-text-100 focus:outline-none focus:ring-1 focus:ring-accent-main-100/30 disabled:opacity-60 ${
             isMinimal
-              ? 'py-0.5 text-[length:var(--fs-sm)] leading-normal'
-              : 'py-1.5 text-[length:var(--fs-base)] leading-relaxed'
+              ? 'py-0.5 text-ui-caption leading-normal'
+              : 'py-1.5 text-ui-base leading-relaxed'
           }`}
         />
       </div>
@@ -858,11 +858,11 @@ function SessionListItemComponent({
               : ''
           }`}
         >
-          <AutoScrollTitle text={session.title || t('sessions.untitledChat')} className="text-[length:var(--fs-xs)]" />
+          <AutoScrollTitle text={session.title || t('sessions.untitledChat')} className="text-ui-sm" />
 
           {((hasSummaryStats && session.summary) || session.time?.updated) && (
             <span
-              className={`shrink-0 flex items-center gap-1.5 text-[length:var(--fs-xxs)] text-text-500 transition-opacity duration-150 ${
+              className={`shrink-0 flex items-center gap-1.5 text-ui-xs text-text-500 transition-opacity duration-150 ${
                 !isEditMode && onArchive
                   ? isArchiving || actionsVisible
                     ? 'hidden'
@@ -964,7 +964,7 @@ function SessionListItemComponent({
           }`}
         >
           <p
-            className={`${isCompact ? 'text-[length:var(--fs-md)]' : 'text-[length:var(--fs-base)]'} truncate font-medium ${
+            className={`${isCompact ? 'text-ui-base' : 'text-ui-base'} truncate font-medium ${
               (isEditMode ? isChecked : isSelected)
                 ? 'text-text-100'
                 : 'text-text-200'
@@ -975,7 +975,7 @@ function SessionListItemComponent({
           </p>
 
           <div
-            className={`flex items-center ${isCompact ? 'mt-1' : 'mt-1.5'} h-4 text-[length:var(--fs-xxs)] text-text-400 gap-1 overflow-hidden`}
+            className={`flex items-center ${isCompact ? 'mt-1' : 'mt-1.5'} h-4 text-ui-xs text-text-400 gap-1 overflow-hidden`}
           >
             {activeStatus ? (
               <>
@@ -1116,12 +1116,12 @@ function UnavailablePinnedSessionItem({
     <div className={`group relative flex items-start ${padding} border border-transparent`}>
       <div className="flex-1 min-w-0 mr-1 group-hover:mr-8 transition-[margin] duration-200">
         <p
-          className={`${isCompact ? 'text-[length:var(--fs-md)]' : 'text-[length:var(--fs-base)]'} truncate font-medium text-text-500`}
+          className={`${isCompact ? 'text-ui-base' : 'text-ui-base'} truncate font-medium text-text-500`}
           title={title}
         >
           {title}
         </p>
-        <div className={`flex items-center ${isCompact ? 'mt-1' : 'mt-1.5'} h-4 text-[length:var(--fs-xxs)] text-text-500`}>
+        <div className={`flex items-center ${isCompact ? 'mt-1' : 'mt-1.5'} h-4 text-ui-xs text-text-500`}>
           <span>{t('sessions.unavailable')}</span>
         </div>
       </div>
@@ -1182,7 +1182,7 @@ function AutoScrollTitle({ text, className }: { text: string; className?: string
   return (
     <span
       ref={outerRef}
-      className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[length:var(--fs-sm)] optical-center ${
+      className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ui-caption optical-center ${
         overflow ? 'marquee-title name-fade-right' : 'truncate'
       } ${className ?? ''}`}
       title={text}

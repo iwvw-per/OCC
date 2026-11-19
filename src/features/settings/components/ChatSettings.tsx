@@ -115,7 +115,7 @@ export function ChatSettings() {
             />
           </div>
           {isAutoMode && (
-            <p data-setting-desc className="text-[length:var(--fs-xs)] text-text-400 mt-2">
+            <p data-setting-desc className="text-ui-sm text-text-400 mt-2">
               {t('chat.usingStyle', { style: effectiveStyle === 'windows' ? '\\' : '/' })}
               {detectedStyle &&
                 ` · ${t('chat.detectedStyle', {
@@ -215,7 +215,7 @@ export function ChatSettings() {
         {showInputStatusBar && inputStatusBarFields.sessionStats && (
           <div className="rounded-lg border border-border-200/50 bg-bg-200/25 p-3 space-y-2 mt-1">
             <div className="flex items-center justify-between gap-3 pb-1 border-b border-border-200/40">
-              <span className="text-[length:var(--fs-xs)] font-medium text-text-300">
+              <span className="text-ui-sm font-medium text-text-300">
                 {t('chat.sessionStatsDevice')}
               </span>
               <div className="w-48">
@@ -316,7 +316,7 @@ export function ChatSettings() {
         </SettingRow>
         {modelsLoading && (
           <SettingsCardRow>
-            <p className="text-[length:var(--fs-xs)] text-text-400">{t('models.loading')}</p>
+            <p className="text-ui-sm text-text-400">{t('models.loading')}</p>
           </SettingsCardRow>
         )}
       </SettingsSection>

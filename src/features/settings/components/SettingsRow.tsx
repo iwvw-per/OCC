@@ -31,9 +31,9 @@ export function SettingsRow({ title, description, children, stacked = false, cla
       )}
     >
       <div className="min-w-0 flex-1">
-        <div className="text-[length:var(--fs-sm)] font-medium text-text-100">{title}</div>
+        <div className="text-ui-caption font-medium text-text-100">{title}</div>
         {description && (
-          <div className="mt-0.5 text-[length:var(--fs-xs)] text-text-400 leading-relaxed">{description}</div>
+          <div className="mt-0.5 text-ui-sm text-text-400 leading-relaxed">{description}</div>
         )}
       </div>
       {children && (

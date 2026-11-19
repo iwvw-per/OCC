@@ -21,7 +21,7 @@ const WorktreePanel = lazy(() => import('./WorktreePanel').then(module => ({ def
 function PanelFallback() {
   const { t } = useTranslation(['components', 'common'])
   return (
-    <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+    <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
       {t('rightPanel.loadingPanel')}
     </div>
   )
@@ -96,7 +96,7 @@ export const RightPanel = memo(function RightPanel({
     (activeTab: PanelTab | null) => {
       if (!activeTab) {
         return (
-          <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+          <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
             {t('common:noContent')}
           </div>
         )
@@ -134,7 +134,7 @@ export const RightPanel = memo(function RightPanel({
               </Suspense>
             </div>
           ) : activeTab.type === 'changes' ? (
-            <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+            <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
               {t('rightPanel.noActiveSession')}
             </div>
           ) : null}

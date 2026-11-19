@@ -64,8 +64,8 @@ function ProvidersHome({ config, setConfig, lang, providerCatalog }: ProviderVie
                   onClick={() => openProvider(id)}
                   className="group grid w-full grid-cols-[minmax(0,1fr)_auto_14px] items-center gap-3 py-3 text-left"
                 >
-                  <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">{id}</span>
-                  <span className="shrink-0 truncate text-[length:var(--fs-xs)] text-text-400">
+                  <span className="min-w-0 truncate text-ui-caption font-medium text-text-100">{id}</span>
+                  <span className="shrink-0 truncate text-ui-sm text-text-400">
                     {modelCount > 0
                       ? tx(`${modelCount} model override(s)`, `${modelCount} 个模型覆盖`, lang)
                       : tx('provider config', '渠道配置', lang)}
@@ -96,13 +96,13 @@ function ProvidersHome({ config, setConfig, lang, providerCatalog }: ProviderVie
               addProvider(newProvider.trim())
               setNewProvider('')
             }}
-            className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-[length:var(--fs-sm)] font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
+            className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-ui-caption font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
           >
             <PlusIcon size={14} />
             {tx('Add', '添加', lang)}
           </button>
         </div>
-        <div data-setting-desc className="mt-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+        <div data-setting-desc className="mt-2 text-ui-sm leading-relaxed text-text-400">
           {tx(
             'Provider keys cannot be reliably deleted through the official merge API. Use enabled_providers/disabled_providers when you need to control availability.',
             '官方 merge API 不能可靠删除已保存的 provider key。需要控制可用性时请使用 enabled_providers/disabled_providers。',
@@ -130,7 +130,7 @@ function ProvidersHome({ config, setConfig, lang, providerCatalog }: ProviderVie
                 onClick={() => addProvider(id)}
                 className="flex w-full items-center justify-between gap-3 py-2.5 text-left"
               >
-                <span className="min-w-0 truncate text-[length:var(--fs-sm)] text-text-200">{id}</span>
+                <span className="min-w-0 truncate text-ui-caption text-text-200">{id}</span>
                 <PlusIcon size={14} className="shrink-0 text-text-300" />
               </button>
             ))}
@@ -197,8 +197,8 @@ function ProviderDetail({
         className="group grid w-full grid-cols-[minmax(0,1fr)_14px] items-center gap-3 py-3 text-left"
       >
         <div className="min-w-0">
-          <div className="text-[length:var(--fs-sm)] font-medium text-text-100">models</div>
-          <div className="mt-0.5 text-[length:var(--fs-xs)] text-text-300">
+          <div className="text-ui-caption font-medium text-text-100">models</div>
+          <div className="mt-0.5 text-ui-sm text-text-300">
             {tx(
               `${Object.keys(configuredModels).length} configured / ${catalogModelCount} available`,
               `已配置 ${Object.keys(configuredModels).length} 个 / 可选 ${catalogModelCount} 个`,
@@ -289,8 +289,8 @@ function ProviderModels({
               onClick={() => openModel(id)}
               className="group grid w-full grid-cols-[minmax(0,1fr)_auto_14px] items-center gap-3 py-3 text-left"
             >
-              <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">{id}</span>
-              <span className={`shrink-0 text-[length:var(--fs-xs)] ${isConfigured ? 'text-text-300' : 'text-text-400'}`}>
+              <span className="min-w-0 truncate text-ui-caption font-medium text-text-100">{id}</span>
+              <span className={`shrink-0 text-ui-sm ${isConfigured ? 'text-text-300' : 'text-text-400'}`}>
                 {isConfigured ? tx('configured', '已配置', lang) : tx('available', '可配置', lang)}
               </span>
               <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
@@ -319,7 +319,7 @@ function ProviderModels({
             setNewModel('')
           }}
           className={cn(
-            'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-[length:var(--fs-sm)] font-medium text-accent-main-100 disabled:opacity-40',
+            'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-ui-caption font-medium text-accent-main-100 disabled:opacity-40',
             interactive.accent,
           )}
         >
@@ -327,7 +327,7 @@ function ProviderModels({
           {tx('Add', '添加', lang)}
         </button>
       </div>
-      <div data-setting-desc className="text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+      <div data-setting-desc className="text-ui-sm leading-relaxed text-text-400">
         {tx('Model override keys cannot be reliably deleted through the official merge API. Edit fields instead, or Reset before saving newly added model ids.', '官方 merge API 不能可靠删除已保存的模型覆盖 key。请改字段，刚新增的模型 id 可在保存前 Reset。', lang)}
       </div>
     </div>
@@ -391,28 +391,28 @@ function ModelEditor({ value, onChange, lang }: { value: JsonRecord; onChange: (
       control: (
         <div className="space-y-3">
           {costMissing.length > 0 && (
-            <div className="rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-warning-100">
+            <div className="rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-ui-sm text-warning-100">
               {tx(`Required: ${costMissing.join(', ')}`, `必填：${costMissing.join(', ')}`, lang)}
             </div>
           )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {(['input', 'output', 'cache_read', 'cache_write'] as const).map(k => (
-            <label key={k} className="text-[length:var(--fs-xs)] text-text-500">
+            <label key={k} className="text-ui-sm text-text-500">
               {k}
               <NumberField value={cost[k]} onChange={v => onChange({ ...value, cost: { ...cost, [k]: v } })} />
             </label>
           ))}
           </div>
           <div className="rounded-lg border border-border-200/40 p-2">
-            <div className="mb-2 text-[length:var(--fs-xs)] font-medium text-text-400">context_over_200k</div>
+            <div className="mb-2 text-ui-sm font-medium text-text-400">context_over_200k</div>
             {contextOverMissing.length > 0 && (
-              <div className="mb-2 rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-warning-100">
+              <div className="mb-2 rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-ui-sm text-warning-100">
                 {tx(`Required when used: ${contextOverMissing.join(', ')}`, `使用时必填：${contextOverMissing.join(', ')}`, lang)}
               </div>
             )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {(['input', 'output', 'cache_read', 'cache_write'] as const).map(k => (
-                <label key={k} className="text-[length:var(--fs-xs)] text-text-500">
+                <label key={k} className="text-ui-sm text-text-500">
                   {k}
                   <NumberField value={contextOver200k[k]} onChange={v => onChange({ ...value, cost: { ...cost, context_over_200k: { ...contextOver200k, [k]: v } } })} />
                 </label>
@@ -430,12 +430,12 @@ function ModelEditor({ value, onChange, lang }: { value: JsonRecord; onChange: (
       control: (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {limitMissing.length > 0 && (
-            <div className="sm:col-span-3 rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-warning-100">
+            <div className="sm:col-span-3 rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-ui-sm text-warning-100">
               {tx(`Required: ${limitMissing.join(', ')}`, `必填：${limitMissing.join(', ')}`, lang)}
             </div>
           )}
           {(['context', 'input', 'output'] as const).map(k => (
-            <label key={k} className="text-[length:var(--fs-xs)] text-text-500">
+            <label key={k} className="text-ui-sm text-text-500">
               {k}
               <NumberField value={limit[k]} onChange={v => onChange({ ...value, limit: { ...limit, [k]: v } })} />
             </label>
@@ -450,9 +450,9 @@ function ModelEditor({ value, onChange, lang }: { value: JsonRecord; onChange: (
       desc: tx('Supported input/output modalities.', '支持的输入/输出模态。', lang),
       control: (
         <div className="space-y-2">
-          <div className="text-[length:var(--fs-xs)] text-text-500">input</div>
+          <div className="text-ui-sm text-text-500">input</div>
           <MultiToggle options={MODALITIES} value={asStringArray(modalities.input)} onChange={v => onChange({ ...value, modalities: { ...modalities, input: v } })} />
-          <div className="text-[length:var(--fs-xs)] text-text-500">output</div>
+          <div className="text-ui-sm text-text-500">output</div>
           <MultiToggle options={MODALITIES} value={asStringArray(modalities.output)} onChange={v => onChange({ ...value, modalities: { ...modalities, output: v } })} />
         </div>
       ),
@@ -530,7 +530,7 @@ function ModelVariantsEditor({ value, onChange, lang }: { value: unknown; onChan
       )}
       <div className="flex min-w-0 gap-2">
         <input value={newName} onChange={event => setNewName(event.target.value)} placeholder={tx('variant name', 'variant 名称', lang)} className={`${fieldClass} min-w-0 flex-1 font-mono`} />
-        <button type="button" disabled={!newName.trim() || hasOwn(rec, newName.trim())} onClick={() => { onChange({ ...rec, [newName.trim()]: { disabled: false } }); setNewName('') }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-200/60 px-3 py-2 text-[length:var(--fs-xs)] text-text-300 hover:bg-bg-100 disabled:opacity-40">
+        <button type="button" disabled={!newName.trim() || hasOwn(rec, newName.trim())} onClick={() => { onChange({ ...rec, [newName.trim()]: { disabled: false } }); setNewName('') }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-200/60 px-3 py-2 text-ui-sm text-text-300 hover:bg-bg-100 disabled:opacity-40">
           <PlusIcon size={13} />
           {tx('Add', '添加', lang)}
         </button>
@@ -549,7 +549,7 @@ function MultiToggle({ options, value, onChange }: { options: string[]; value: s
             key={option}
             type="button"
             onClick={() => onChange(active ? value.filter(v => v !== option) : [...value, option])}
-            className={`rounded-md border px-2.5 py-1 text-[length:var(--fs-xs)] transition-colors duration-150 ${
+            className={`rounded-md border px-2.5 py-1 text-ui-sm transition-colors duration-150 ${
               active
                 ? 'border-accent-main-100/20 bg-accent-main-100/10 text-accent-main-100'
                 : 'border-border-200/60 text-text-400 hover:bg-bg-200'

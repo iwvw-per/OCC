@@ -40,14 +40,14 @@ export function FieldRow({
     return (
       <div className="py-3" onFocus={onFocus} onBlur={onBlur}>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 break-all text-[length:var(--fs-sm)] font-medium text-text-100">{label}</span>
+          <span className="min-w-0 break-all text-ui-caption font-medium text-text-100">{label}</span>
           {badge && (
-            <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-warning-100">
+            <span className="shrink-0 text-ui-xs font-medium uppercase tracking-wide text-warning-100">
               {badge}
             </span>
           )}
         </div>
-        {desc && <p data-setting-desc className="mt-0.5 text-[length:var(--fs-xs)] leading-relaxed text-text-300">{desc}</p>}
+        {desc && <p data-setting-desc className="mt-0.5 text-ui-sm leading-relaxed text-text-300">{desc}</p>}
         <div className="mt-2 min-w-0 max-w-lg">{control}</div>
       </div>
     )
@@ -57,14 +57,14 @@ export function FieldRow({
     <div className="grid grid-cols-1 gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_200px] sm:items-center sm:gap-6" onFocus={onFocus} onBlur={onBlur}>
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 break-all text-[length:var(--fs-sm)] font-medium text-text-100">{label}</span>
+          <span className="min-w-0 break-all text-ui-caption font-medium text-text-100">{label}</span>
           {badge && (
-            <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-warning-100">
+            <span className="shrink-0 text-ui-xs font-medium uppercase tracking-wide text-warning-100">
               {badge}
             </span>
           )}
         </div>
-        {desc && <p data-setting-desc className="mt-0.5 text-[length:var(--fs-xs)] leading-relaxed text-text-300">{desc}</p>}
+        {desc && <p data-setting-desc className="mt-0.5 text-ui-sm leading-relaxed text-text-300">{desc}</p>}
       </div>
       <div className="min-w-0 sm:justify-self-end sm:w-full">{control}</div>
     </div>
@@ -72,7 +72,7 @@ export function FieldRow({
 }
 
 export function EmptyHint({ text }: { text: string }) {
-  return <div className="py-2 text-[length:var(--fs-sm)] text-text-400">{text}</div>
+  return <div className="py-2 text-ui-caption text-text-400">{text}</div>
 }
 
 function FieldRenderer({
@@ -189,8 +189,8 @@ export function GroupedFields({
 export function GroupHeader({ text, count, accent }: { text: string; count: number; accent?: boolean }) {
   return (
     <div className="mb-2 flex items-baseline gap-2">
-      <span className={`text-[length:var(--fs-sm)] font-medium ${accent ? 'text-text-100' : 'text-text-300'}`}>{text}</span>
-      <span className="text-[length:var(--fs-xs)] tabular-nums text-text-400">{count}</span>
+      <span className={`text-ui-caption font-medium ${accent ? 'text-text-100' : 'text-text-300'}`}>{text}</span>
+      <span className="text-ui-sm tabular-nums text-text-400">{count}</span>
     </div>
   )
 }
@@ -220,7 +220,7 @@ export function DuplicateIdField({
 
   return (
     <div className="space-y-2 pb-3">
-      <label htmlFor={inputId} className="text-[length:var(--fs-sm)] font-medium text-text-100">{tx('Copy as…', '复制为…', lang)}</label>
+      <label htmlFor={inputId} className="text-ui-caption font-medium text-text-100">{tx('Copy as…', '复制为…', lang)}</label>
       <div className="flex min-w-0 items-center gap-2">
         <input
           id={inputId}
@@ -236,13 +236,13 @@ export function DuplicateIdField({
           type="button"
           disabled={!target || exists}
           onClick={copy}
-          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-[length:var(--fs-sm)] font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-ui-caption font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
         >
           <CopyIcon size={13} />
           {tx('Copy', '复制', lang)}
         </button>
       </div>
-      {exists && <div className="text-[length:var(--fs-xs)] text-warning-100">{tx('This id already exists.', '该 id 已存在。', lang)}</div>}
+      {exists && <div className="text-ui-sm text-warning-100">{tx('This id already exists.', '该 id 已存在。', lang)}</div>}
     </div>
   )
 }
@@ -275,8 +275,8 @@ function SectionHeading({ title, description }: { title: string; description: st
   if (drill && drill.stack.length > 0) return null
   return (
     <div className="mb-4">
-      <h2 className="text-[length:var(--fs-md)] font-semibold text-text-100">{title}</h2>
-      <p data-setting-desc className="mt-1 max-w-[52ch] text-[length:var(--fs-xs)] leading-relaxed text-text-300">{description}</p>
+      <h2 className="text-ui-base font-semibold text-text-100">{title}</h2>
+      <p data-setting-desc className="mt-1 max-w-[52ch] text-ui-sm leading-relaxed text-text-300">{description}</p>
     </div>
   )
 }
@@ -341,14 +341,14 @@ export function NamedDrillList({
             >
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-[length:var(--fs-sm)] font-medium text-text-100">{name}</span>
+                  <span className="truncate text-ui-caption font-medium text-text-100">{name}</span>
                   {builtins?.includes(name) && (
-                    <span className="shrink-0 text-[length:var(--fs-xs)] text-text-400">
+                    <span className="shrink-0 text-ui-sm text-text-400">
                       {tx('built-in', '内置', lang)}
                     </span>
                   )}
                 </div>
-                {renderPreview && <div className="mt-0.5 truncate text-[length:var(--fs-xs)] text-text-400">{renderPreview(name)}</div>}
+                {renderPreview && <div className="mt-0.5 truncate text-ui-sm text-text-400">{renderPreview(name)}</div>}
               </div>
               <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
             </button>
@@ -369,13 +369,13 @@ export function NamedDrillList({
           type="button"
           disabled={!targetName || nameExists}
           onClick={add}
-          className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-border-200 px-2.5 text-[length:var(--fs-sm)] font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-border-200 px-2.5 text-ui-caption font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
         >
           <PlusIcon size={14} />
           {tx('Add', '添加', lang)}
         </button>
       </div>
-      {nameExists && <div className="text-[length:var(--fs-xs)] text-warning-100">{tx('This id already exists.', '该 id 已存在。', lang)}</div>}
+      {nameExists && <div className="text-ui-sm text-warning-100">{tx('This id already exists.', '该 id 已存在。', lang)}</div>}
     </div>
   )
 }

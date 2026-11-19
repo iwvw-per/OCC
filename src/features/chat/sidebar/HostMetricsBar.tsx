@@ -74,7 +74,7 @@ function MetricRow({ label, percent, detail }: { label: string; percent: number;
     <div className="flex flex-col gap-1">
       {/* 百分比交给进度条本身表达；右列只显示绝对值（负载 / 已用总量），
           侧栏宽度有限，再堆一个百分号会把两行挤乱 */}
-      <div className="flex items-baseline justify-between gap-2 text-[length:var(--fs-xxs)] leading-none">
+      <div className="flex items-baseline justify-between gap-2 text-ui-xs leading-none">
         <span className="text-text-400">{label}</span>
         {detail && <span className="text-text-500 tabular-nums">{detail}</span>}
       </div>

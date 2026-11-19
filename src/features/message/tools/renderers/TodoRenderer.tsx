@@ -121,7 +121,7 @@ export function TodoList({
   return (
     <div
       ref={rootRef}
-      className="border border-border-200/50 rounded-md overflow-hidden bg-bg-100 text-[length:var(--fs-sm)]"
+      className="border border-border-200/50 rounded-md overflow-hidden bg-bg-100 text-ui-caption"
     >
       <DisclosureRow
         ref={headerRef}
@@ -136,7 +136,7 @@ export function TodoList({
             <ProgressBar progress={progress} done={isAllDone} decorative className="w-12" />
             <span className="tabular-nums text-text-500">{t('todo.completedCount', { completed, total })}</span>
             <span
-              className={`tabular-nums text-[length:var(--fs-xxs)] font-medium ${
+              className={`tabular-nums text-ui-xs font-medium ${
                 isAllDone ? 'text-success-100' : 'text-text-400'
               }`}
             >
@@ -165,7 +165,7 @@ export function TodoList({
                 <span className="shrink-0 flex items-center">{getTodoIcon(todo.status)}</span>
                 <span className={todo.status === 'completed' ? 'line-through' : ''}>{todo.content}</span>
                 {todo.priority === 'high' && todo.status !== 'completed' && (
-                  <span className="text-[length:var(--fs-xxs)] text-warning-100 bg-warning-100/10 px-1 rounded ml-auto shrink-0">
+                  <span className="text-ui-xs text-warning-100 bg-warning-100/10 px-1 rounded ml-auto shrink-0">
                     !
                   </span>
                 )}

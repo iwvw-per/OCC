@@ -12,6 +12,16 @@ describe('cn', () => {
     expect(result).toContain('data-[state=active]:text-text-100')
   })
 
+  it('keeps text-ui-* font size tokens when a text color follows', () => {
+    const result = cn('px-2.5 text-ui-sm text-text-400')
+    expect(result).toContain('text-ui-sm')
+    expect(result).toContain('text-text-400')
+  })
+
+  it('lets a later text-ui-* token override the earlier one', () => {
+    expect(cn('text-ui-sm', 'text-ui-base')).toBe('text-ui-base')
+  })
+
   it('handles conditional values', () => {
     const active = true
     expect(cn('base', active && 'bg-accent-main-100/15', !active && 'bg-bg-200')).toBe('base bg-accent-main-100/15')

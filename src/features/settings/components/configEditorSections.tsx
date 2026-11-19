@@ -219,14 +219,14 @@ function SkillsContent({ config, setConfig, lang }: Pick<SectionProps, 'config' 
         {!editingCurrent && !editingLegacy && <DrillFields fields={skillFields} isConfigured={key => hasNested(config, key.split('.'))} lang={lang} />}
         {!editingLegacy && <div>
           <GroupHeader text={tx('References (@alias)', '引用（@alias）', lang)} count={Object.keys(references).length} />
-          <p data-setting-desc className="mb-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+          <p data-setting-desc className="mb-2 text-ui-sm leading-relaxed text-text-400">
             {tx('Named git or local directory references mentioned as @alias or @alias/path.', '命名的 git 或本地目录引用，可用 @alias 或 @alias/path 提及。', lang)}
           </p>
           <ReferenceEditor value={references} onChange={v => setConfig(setRoot(config, 'references', v))} lang={lang} drillPrefix="reference" />
         </div>}
         {hasRoot(config, 'reference') && !editingCurrent && <div>
           <GroupHeader text={tx('Legacy references (@alias)', '旧版引用（@alias）', lang)} count={Object.keys(legacyReferences).length} />
-          <p data-setting-desc className="mb-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+          <p data-setting-desc className="mb-2 text-ui-sm leading-relaxed text-text-400">
             {tx("Deprecated 'reference' entries. New aliases should be added above.", "已废弃的 'reference' 条目，新 alias 请添加到上方。", lang)}
           </p>
           <ReferenceEditor value={legacyReferences} onChange={v => setConfig(setRoot(config, 'reference', v))} lang={lang} drillPrefix="legacy-reference" />
@@ -279,8 +279,8 @@ function ReferenceEditor({ value, onChange, lang, drillPrefix }: { value: JsonRe
           <div key={alias} className="group flex items-center gap-2 rounded-lg px-2.5 transition-colors hover:bg-bg-200 active:bg-bg-300">
             <button type="button" onClick={() => enter({ id: `${drillPrefix}:${alias}`, title: `@${alias}` })} className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[length:var(--fs-sm)] font-medium text-text-100">@{alias}</div>
-                <div className="truncate text-[length:var(--fs-xs)] text-text-400">{type} · {previewValue(entry, lang)}</div>
+                <div className="truncate font-mono text-ui-caption font-medium text-text-100">@{alias}</div>
+                <div className="truncate text-ui-sm text-text-400">{type} · {previewValue(entry, lang)}</div>
               </div>
               <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
             </button>
@@ -297,13 +297,13 @@ function ReferenceEditor({ value, onChange, lang, drillPrefix }: { value: JsonRe
             setEntry(newAlias.trim(), '')
             setNewAlias('')
           }}
-          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-200/60 px-3 py-2 text-[length:var(--fs-xs)] text-text-300 hover:bg-bg-100 disabled:opacity-40"
+          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-200/60 px-3 py-2 text-ui-sm text-text-300 hover:bg-bg-100 disabled:opacity-40"
         >
           <PlusIcon size={13} />
           {tx('Add reference', '添加引用', lang)}
         </button>
       </div>
-      <div data-setting-desc className="text-[length:var(--fs-xs)] leading-relaxed text-text-500">
+      <div data-setting-desc className="text-ui-sm leading-relaxed text-text-500">
         {tx('Deleting saved reference keys is not supported by the official merge API. Edit the value instead, or Reset before saving newly added references.', '官方 merge API 不支持可靠删除已保存的 reference key。请改值，刚新增的引用可在保存前 Reset。', lang)}
       </div>
     </div>
@@ -390,8 +390,8 @@ function PluginsHome({ config, setConfig, lang }: SectionProps) {
               <div key={index} className="group flex items-center gap-2 rounded-lg px-2.5 transition-colors hover:bg-bg-200 active:bg-bg-300">
                 <button type="button" onClick={() => enter({ id: `plugin:${index}`, title: name || tx('plugin', '插件', lang) })} className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono text-[length:var(--fs-sm)] font-medium text-text-100">{name || tx('(empty)', '（空）', lang)}</div>
-                    <div className="truncate text-[length:var(--fs-xs)] text-text-400">{isTuple ? previewValue(options, lang) : tx('no options', '无配置项', lang)}</div>
+                    <div className="truncate font-mono text-ui-caption font-medium text-text-100">{name || tx('(empty)', '（空）', lang)}</div>
+                    <div className="truncate text-ui-sm text-text-400">{isTuple ? previewValue(options, lang) : tx('no options', '无配置项', lang)}</div>
                   </div>
                   <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
                 </button>
@@ -403,7 +403,7 @@ function PluginsHome({ config, setConfig, lang }: SectionProps) {
           })}
         </div>
       )}
-      <button type="button" onClick={() => set([...list, ''])} className="inline-flex items-center gap-1.5 rounded-lg border border-border-200/60 px-3 py-1.5 text-[length:var(--fs-xs)] text-text-300 hover:bg-bg-100">
+      <button type="button" onClick={() => set([...list, ''])} className="inline-flex items-center gap-1.5 rounded-lg border border-border-200/60 px-3 py-1.5 text-ui-sm text-text-300 hover:bg-bg-100">
         <PlusIcon size={13} />
         {tx('Add plugin', '添加插件', lang)}
       </button>
@@ -511,7 +511,7 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
   return (
     <div className="space-y-1">
       {list.length === 0 && (
-        <div className="py-2 text-[length:var(--fs-sm)] text-text-400">
+        <div className="py-2 text-ui-caption text-text-400">
           {tx('No policies yet. Add one below.', '还没有策略，可在下方添加。', lang)}
         </div>
       )}
@@ -522,7 +522,7 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
             <div key={index} className="space-y-2.5 py-3">
               <div className="flex min-w-0 items-center gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 text-[length:var(--fs-xs)] text-text-400">{tx('Action', '动作', lang)}</div>
+                  <div className="mb-1 text-ui-sm text-text-400">{tx('Action', '动作', lang)}</div>
                   <Select
                     value={rec.action}
                     options={[{ value: 'provider.use', label: 'provider.use' }]}
@@ -534,7 +534,7 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
                   />
                 </div>
                 <div className="w-[120px] shrink-0">
-                  <div className="mb-1 text-[length:var(--fs-xs)] text-text-400">{tx('Effect', '效果', lang)}</div>
+                  <div className="mb-1 text-ui-sm text-text-400">{tx('Effect', '效果', lang)}</div>
                   <Select
                     value={rec.effect}
                     options={enumChoices(['allow', 'deny'])}
@@ -555,7 +555,7 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
                 </button>
               </div>
               <div>
-                <div className="mb-1 text-[length:var(--fs-xs)] text-text-400">{tx('Resource', '资源', lang)}</div>
+                <div className="mb-1 text-ui-sm text-text-400">{tx('Resource', '资源', lang)}</div>
                 <TextField
                   value={rec.resource}
                   onChange={v => {
@@ -574,7 +574,7 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
       <button
         type="button"
         onClick={() => onChange([...list, { action: 'provider.use', effect: 'allow', resource: '' }])}
-        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-[length:var(--fs-sm)] font-medium text-text-100 transition-colors hover:border-border-300"
+        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-ui-caption font-medium text-text-100 transition-colors hover:border-border-300"
       >
         <PlusIcon size={13} />
         {tx('Add policy', '添加策略', lang)}
@@ -650,7 +650,7 @@ function ModeCompatEditor({ value, onChange, lang, models }: { value: unknown; o
             setNewName('')
           }}
           className={cn(
-            'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-[length:var(--fs-sm)] font-medium text-accent-main-100 disabled:opacity-40',
+            'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-ui-caption font-medium text-accent-main-100 disabled:opacity-40',
             interactive.accent,
           )}
         >
@@ -672,7 +672,7 @@ function AdvancedSection({ config, setConfig, lang }: SectionProps) {
   const rest = Object.entries(config as JsonRecord).filter(([key]) => !KNOWN_ROOT_KEYS.has(key))
   return (
     <SectionShell id="advanced" lang={lang}>
-      <div className="mb-3 space-y-2 rounded-lg border border-warning-100/25 bg-warning-100/10 px-3 py-2 text-[length:var(--fs-xs)] leading-relaxed text-warning-100">
+      <div className="mb-3 space-y-2 rounded-lg border border-warning-100/25 bg-warning-100/10 px-3 py-2 text-ui-sm leading-relaxed text-warning-100">
         <div>{tx('The official schema has additionalProperties=false. These fields are read-only by default.', '官方 schema 设置了 additionalProperties=false。这些字段默认只读。', lang)}</div>
         {rest.length > 0 && !editingUnknown && (
           <button type="button" onClick={() => setEditingUnknown(true)} className="rounded-md border border-warning-100/40 px-2 py-1 text-warning-100 transition-colors hover:bg-warning-100/10">
@@ -705,7 +705,7 @@ function AdvancedSection({ config, setConfig, lang }: SectionProps) {
                 }
               />
             ) : (
-              <FieldRow key={key} label={key} desc={tx('Read-only unknown field.', '只读未知字段。', lang)} control={<div className="truncate rounded-lg border border-border-200/40 bg-bg-100/40 px-3 py-2 font-mono text-[length:var(--fs-xs)] text-text-400">{previewValue(value, lang)}</div>} />
+              <FieldRow key={key} label={key} desc={tx('Read-only unknown field.', '只读未知字段。', lang)} control={<div className="truncate rounded-lg border border-border-200/40 bg-bg-100/40 px-3 py-2 font-mono text-ui-sm text-text-400">{previewValue(value, lang)}</div>} />
             )
           ))}
         </div>

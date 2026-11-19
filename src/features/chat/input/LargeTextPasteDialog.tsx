@@ -29,7 +29,7 @@ export function LargeTextPasteDialog({ isOpen, charCount, onClose, onAttach, onI
   return (
     <Dialog isOpen={isOpen} onClose={onClose} title={t('inputBox.largePasteTitle', { defaultValue: '粘贴大段文本' })} width={420}>
       <div className="flex flex-col gap-3">
-        <p className="text-[length:var(--fs-sm)] text-text-300">
+        <p className="text-ui-caption text-text-300">
           {t('inputBox.largePasteBody', {
             count: charCount,
             defaultValue: '粘贴的内容有 {{count}} 个字符，选择处理方式：',
@@ -45,10 +45,10 @@ export function LargeTextPasteDialog({ isOpen, charCount, onClose, onAttach, onI
               <PaperclipIcon size={16} />
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block text-[length:var(--fs-sm)] font-medium text-text-100">
+              <span className="block text-ui-caption font-medium text-text-100">
                 {t('inputBox.largePasteAsAttachment', { defaultValue: '作为附件' })}
               </span>
-              <span className="mt-0.5 block text-[length:var(--fs-xs)] text-text-400">
+              <span className="mt-0.5 block text-ui-sm text-text-400">
                 {t('inputBox.largePasteAsAttachmentDesc', { defaultValue: '保存为文本附件，输入框保持整洁' })}
               </span>
             </span>
@@ -62,10 +62,10 @@ export function LargeTextPasteDialog({ isOpen, charCount, onClose, onAttach, onI
               <ReturnIcon size={16} />
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block text-[length:var(--fs-sm)] font-medium text-text-100">
+              <span className="block text-ui-caption font-medium text-text-100">
                 {t('inputBox.largePasteInline', { defaultValue: '内联到输入框' })}
               </span>
-              <span className="mt-0.5 block text-[length:var(--fs-xs)] text-text-400">
+              <span className="mt-0.5 block text-ui-sm text-text-400">
                 {t('inputBox.largePasteInlineDesc', { defaultValue: '按原样插入输入框' })}
               </span>
             </span>

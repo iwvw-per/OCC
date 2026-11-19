@@ -29,8 +29,8 @@ function tokenTotal(tokens: TokenUsage | undefined): number {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="text-[length:var(--fs-xs)] font-medium text-text-400">{label}</div>
-      <div className="text-[length:var(--fs-base)] text-text-200 font-mono truncate" title={value}>
+      <div className="text-ui-sm font-medium text-text-400">{label}</div>
+      <div className="text-ui-base text-text-200 font-mono truncate" title={value}>
         {value}
       </div>
     </div>
@@ -137,7 +137,7 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
         )}
 
         {contextMsg && (
-          <div className="flex items-center justify-between text-[length:var(--fs-xs)] text-text-400">
+          <div className="flex items-center justify-between text-ui-sm text-text-400">
             <div className="flex items-center gap-2">
               <CpuIcon size={14} className="opacity-60" />
               <span className="font-mono">last: {contextMsg.info.id}</span>
@@ -148,7 +148,7 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
       </div>
 
       <div className="mt-6">
-        <div className="text-[length:var(--fs-xs)] font-medium text-text-400 mb-2">{t('contextDetails.rawMessages')}</div>
+        <div className="text-ui-sm font-medium text-text-400 mb-2">{t('contextDetails.rawMessages')}</div>
         <div className="space-y-1">
           {messages.map(msg => {
             const isExpanded = expandedId === msg.info.id
@@ -167,10 +167,10 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
                   className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left bg-bg-100 hover:bg-bg-200 transition-colors"
                 >
                   <div className="min-w-0">
-                    <div className="text-[length:var(--fs-sm)] text-text-200 font-mono truncate" title={headerLabel}>
+                    <div className="text-ui-caption text-text-200 font-mono truncate" title={headerLabel}>
                       {headerLabel}
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5 text-[length:var(--fs-xxs)] text-text-500 font-mono">
+                    <div className="flex items-center gap-2 mt-0.5 text-ui-xs text-text-500 font-mono">
                       <span className="tabular-nums">{time}</span>
                       {assistantTokens !== null && (
                         <>

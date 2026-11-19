@@ -11,6 +11,8 @@ OpenCodeUI (OCC) —— OpenCode 第三方 Web / 桌面前端界面。基于 Rea
 - **完整流水线验证**：`npm run validate` (`typecheck` -> `lint` -> `test:run` -> `build`)
   - 修改重要接口、核心 store 或通信层代码后，必须保证 `npm run validate` 通过。
 - **单测执行**：`npx vitest run path/to/target.test.ts`
+- **部署到 occ.dmuk.org**:`npm run deploy:local`(构建 -> 校验产物版本 -> 重启 `occ-preview.service` -> 探活)
+- **自动部署守护**:`npm run deploy:watch`(前台调试用;常驻由 systemd `occ-autodeploy.service` 托管,源码保存后自动重建并刷新站点)
 
 ## 仓库架构与文件域导引
 

@@ -112,7 +112,7 @@ function CodeBlockThemeSelect({
     if (themes.length === 0) return null
     return (
       <div>
-        <div className="px-2.5 py-1.5 text-[length:var(--fs-xxs)] font-medium uppercase tracking-wider text-text-400">
+        <div className="px-2.5 py-1.5 text-ui-xs font-medium uppercase tracking-wider text-text-400">
           {label}
         </div>
         {themes.map(theme => (
@@ -122,13 +122,13 @@ function CodeBlockThemeSelect({
             role="option"
             aria-selected={theme.id === value}
             onClick={() => selectTheme(theme.id)}
-            className={`flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] transition-colors border ${
+            className={`flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-ui-caption transition-colors border ${
               theme.id === value ? 'bg-bg-200 text-text-100 border-border-200' : 'text-text-100 hover:bg-bg-100 border-transparent'
             }`}
           >
             <span className="min-w-0">
               <span className="block truncate">{theme.displayName}</span>
-              <span className="mt-0.5 block truncate text-[length:var(--fs-xs)] text-text-400">{theme.id}</span>
+              <span className="mt-0.5 block truncate text-ui-sm text-text-400">{theme.id}</span>
             </span>
             {theme.id === value && <CheckIcon size={14} className="shrink-0 text-text-200" />}
           </button>
@@ -213,7 +213,7 @@ function CodeBlockThemeSelect({
             style={pos}
           >
             {!hasResults && (
-              <div className="px-3 py-2.5 text-[length:var(--fs-xs)] text-text-400">{t('common:noMatches')}</div>
+              <div className="px-3 py-2.5 text-ui-sm text-text-400">{t('common:noMatches')}</div>
             )}
             {renderGroup(sameTypeLabel, filteredSame)}
             {filteredSame.length > 0 && filteredOther.length > 0 && (
@@ -272,8 +272,8 @@ function CodeBlockPreview({
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[length:var(--fs-sm)] font-medium text-text-100">{t('appearance.codeBlockPreview')}</p>
-          <p className="mt-0.5 truncate text-[length:var(--fs-xs)] text-text-400">{themeDisplayName(themeId)}</p>
+          <p className="text-ui-caption font-medium text-text-100">{t('appearance.codeBlockPreview')}</p>
+          <p className="mt-0.5 truncate text-ui-sm text-text-400">{themeDisplayName(themeId)}</p>
         </div>
         <div className="w-[9.5rem] shrink-0">
           <SegmentedControl

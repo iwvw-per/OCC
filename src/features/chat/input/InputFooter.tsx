@@ -249,7 +249,7 @@ export const InputFooter = memo(function InputFooter({
 
   return (
     <div
-      className="relative flex h-full w-full items-center justify-center gap-2 px-3 text-[length:var(--fs-xs)] leading-none text-text-300"
+      className="relative flex h-full w-full items-center justify-center gap-2 px-3 text-ui-sm leading-none text-text-300"
       ref={popoverRef}
     >
       {/* Full Auto 三态切换: off -> session -> global -> off */}
@@ -331,7 +331,7 @@ export const InputFooter = memo(function InputFooter({
                   progressClassName={`transition-all duration-700 ease-out ${isAllDone ? 'text-accent-secondary-100' : 'text-accent-main-100'}`}
                 />
                 <span
-                  className={`absolute inset-0 flex items-center justify-center text-[length:var(--fs-base)] font-semibold ${
+                  className={`absolute inset-0 flex items-center justify-center text-ui-base font-semibold ${
                     isAllDone ? 'text-accent-secondary-100' : 'text-text-200'
                   }`}
                 >
@@ -339,12 +339,12 @@ export const InputFooter = memo(function InputFooter({
                 </span>
               </div>
               <div className="flex-1">
-                <div className="text-[length:var(--fs-base)] font-medium text-text-100">
+                <div className="text-ui-base font-medium text-text-100">
                   {isAllDone
                     ? t('inputFooter.allDone')
                     : t('inputFooter.tasksCount', { done: stats.completed, total: stats.total })}
                 </div>
-                <div className="mt-0.5 text-[length:var(--fs-sm)] text-text-500">
+                <div className="mt-0.5 text-ui-caption text-text-500">
                   {isAllDone
                     ? t('inputFooter.greatWork')
                     : stats.inProgress > 0
@@ -451,7 +451,7 @@ const TodoRow = memo(function TodoRow({ todo }: { todo: TodoItem }) {
 
   return (
     <div
-      className={`flex items-center gap-2 px-2 py-1.5 text-[length:var(--fs-sm)] ${
+      className={`flex items-center gap-2 px-2 py-1.5 text-ui-caption ${
         isCompleted ? 'text-text-500' : isInProgress ? 'text-text-100' : 'text-text-300'
       }`}
     >
@@ -463,7 +463,7 @@ const TodoRow = memo(function TodoRow({ todo }: { todo: TodoItem }) {
       </span>
       <span className={`flex-1 ${isCompleted ? 'line-through' : ''}`}>{todo.content}</span>
       {todo.priority === 'high' && !isCompleted && (
-        <span className="shrink-0 rounded bg-warning-100/10 px-1 text-[length:var(--fs-xxs)] text-warning-100">!</span>
+        <span className="shrink-0 rounded bg-warning-100/10 px-1 text-ui-xs text-warning-100">!</span>
       )}
     </div>
   )

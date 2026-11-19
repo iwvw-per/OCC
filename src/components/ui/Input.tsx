@@ -10,8 +10,8 @@ import { cn } from '../../utils/cn'
 export type InputSize = 'sm' | 'md'
 
 const sizeStyles: Record<InputSize, string> = {
-  sm: 'h-7 px-2 text-[length:var(--fs-xs)]',
-  md: 'h-8 px-2.5 text-[length:var(--fs-sm)]',
+  sm: 'h-7 px-2 text-ui-sm',
+  md: 'h-8 px-2.5 text-ui-caption',
 }
 
 const FIELD_BASE =
@@ -35,7 +35,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(({ classN
     ref={ref}
     className={cn(
       FIELD_BASE,
-      'px-2.5 py-2 text-[length:var(--fs-sm)] resize-y leading-relaxed custom-scrollbar',
+      'px-2.5 py-2 text-ui-caption resize-y leading-relaxed custom-scrollbar',
       className,
     )}
     {...props}

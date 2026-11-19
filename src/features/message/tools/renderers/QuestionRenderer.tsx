@@ -81,8 +81,8 @@ function AnsweredQuestion({ qa }: { qa: QAPair }) {
     <div className="space-y-2">
       {/* 问题文字 */}
       <div>
-        {qa.header && <div className="text-[length:var(--fs-xs)] text-text-400 font-medium mb-0.5">{qa.header}</div>}
-        <div className="text-[length:var(--fs-md)] text-text-100">{qa.question}</div>
+        {qa.header && <div className="text-ui-sm text-text-400 font-medium mb-0.5">{qa.header}</div>}
+        <div className="text-ui-base text-text-100">{qa.question}</div>
       </div>
 
       {/* 选项 — 和 InlineQuestion 一致的按钮组，已选中的高亮 */}
@@ -93,7 +93,7 @@ function AnsweredQuestion({ qa }: { qa: QAPair }) {
             <span
               key={idx}
               title={option.description}
-              className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-[length:var(--fs-sm)] leading-5 rounded-md ${
+              className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-ui-caption leading-5 rounded-md ${
                 isSelected ? 'bg-bg-200 text-text-100' : 'text-text-500'
               }`}
             >
@@ -119,7 +119,7 @@ function AnsweredQuestion({ qa }: { qa: QAPair }) {
           .map((customAnswer, idx) => (
             <span
               key={`custom-${idx}`}
-              className="inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-[length:var(--fs-sm)] leading-5 rounded-md bg-bg-200 text-text-100"
+              className="inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-ui-caption leading-5 rounded-md bg-bg-200 text-text-100"
             >
               {qa.multiple && (
                 <span className="inline-flex h-5 w-3.5 shrink-0 items-center justify-center">

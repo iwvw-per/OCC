@@ -443,7 +443,7 @@ export const FileExplorer = memo(function FileExplorer({
   // 没有选择目录
   if (!directory) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-text-400 text-[length:var(--fs-base)] gap-2 p-4">
+      <div className="flex flex-col items-center justify-center h-full text-text-400 text-ui-base gap-2 p-4">
         <img
           src={getMaterialIconUrl('folder', 'directory', false)}
           alt=""
@@ -485,7 +485,7 @@ export const FileExplorer = memo(function FileExplorer({
               placeholder={t('fileExplorer.searchFiles')}
               aria-label={t('fileExplorer.searchFiles')}
               autoComplete="off"
-              className="w-full bg-bg-200/40 hover:bg-bg-200/60 focus:bg-bg-000 border border-transparent focus:border-border-200 rounded-lg py-1 pl-[30px] pr-7 text-[length:var(--fs-xs)] text-text-100 placeholder:text-text-400/70 focus-visible:ring-1 focus-visible:ring-border-200 focus-visible:ring-inset transition-all"
+              className="w-full bg-bg-200/40 hover:bg-bg-200/60 focus:bg-bg-000 border border-transparent focus:border-border-200 rounded-lg py-1 pl-[30px] pr-7 text-ui-sm text-text-100 placeholder:text-text-400/70 focus-visible:ring-1 focus-visible:ring-border-200 focus-visible:ring-inset transition-all"
             />
             {searchQuery && (
               <IconButton
@@ -529,16 +529,16 @@ export const FileExplorer = memo(function FileExplorer({
               directory={directory}
             />
           ) : isLoading && tree.length === 0 ? (
-            <div className="flex items-center justify-center h-20 text-text-400 text-[length:var(--fs-sm)]">
+            <div className="flex items-center justify-center h-20 text-text-400 text-ui-caption">
               {t('common:loading')}
             </div>
           ) : error ? (
-            <div className="flex flex-col items-center justify-center h-20 text-danger-100 text-[length:var(--fs-sm)] gap-1 px-4">
+            <div className="flex flex-col items-center justify-center h-20 text-danger-100 text-ui-caption gap-1 px-4">
               <AlertCircleIcon size={16} />
               <span className="text-center">{error}</span>
             </div>
           ) : tree.length === 0 ? (
-            <div className="flex items-center justify-center h-20 text-text-400 text-[length:var(--fs-sm)]">
+            <div className="flex items-center justify-center h-20 text-text-400 text-ui-caption">
               {t('fileExplorer.noFilesFound')}
             </div>
           ) : (
@@ -657,12 +657,12 @@ const TextSearchResults = memo(function TextSearchResults({
   )
 
   if (isLoading && !hasFiles && !hasText) {
-    return <div className="flex items-center justify-center h-20 text-text-400 text-[length:var(--fs-sm)]">{t('common:loading')}</div>
+    return <div className="flex items-center justify-center h-20 text-text-400 text-ui-caption">{t('common:loading')}</div>
   }
 
   if (error && !hasFiles && !hasText) {
     return (
-      <div className="flex flex-col items-center justify-center h-20 text-danger-100 text-[length:var(--fs-sm)] gap-1 px-4">
+      <div className="flex flex-col items-center justify-center h-20 text-danger-100 text-ui-caption gap-1 px-4">
         <AlertCircleIcon size={16} />
         <span className="text-center">{error}</span>
       </div>
@@ -671,7 +671,7 @@ const TextSearchResults = memo(function TextSearchResults({
 
   if (!hasFiles && !hasText) {
     return (
-      <div className="flex items-center justify-center h-20 text-text-400 text-[length:var(--fs-sm)]">
+      <div className="flex items-center justify-center h-20 text-text-400 text-ui-caption">
         {t('fileExplorer.noTextMatches')}
       </div>
     )
@@ -681,7 +681,7 @@ const TextSearchResults = memo(function TextSearchResults({
     <div className="py-1">
       {hasFiles && (
         <>
-          <div className="px-2 py-1 text-[length:var(--fs-xxs)] font-medium text-text-500 uppercase tracking-wide">
+          <div className="px-2 py-1 text-ui-xs font-medium text-text-500 uppercase tracking-wide">
             {t('fileExplorer.fileMatches')}
           </div>
           {fileResults.map(path => {
@@ -716,9 +716,9 @@ const TextSearchResults = memo(function TextSearchResults({
                       e.currentTarget.style.visibility = 'hidden'
                     }}
                   />
-                  <span className="truncate text-[length:var(--fs-sm)] text-text-200">{name}</span>
+                  <span className="truncate text-ui-caption text-text-200">{name}</span>
                 </div>
-                <div className="mt-0.5 truncate pl-[22px] text-[length:var(--fs-xxs)] text-text-500">{path}</div>
+                <div className="mt-0.5 truncate pl-[22px] text-ui-xs text-text-500">{path}</div>
               </button>
             )
           })}
@@ -727,7 +727,7 @@ const TextSearchResults = memo(function TextSearchResults({
       {hasText && (
         <>
           {hasFiles && (
-            <div className="mt-1 px-2 py-1 text-[length:var(--fs-xxs)] font-medium text-text-500 uppercase tracking-wide">
+            <div className="mt-1 px-2 py-1 text-ui-xs font-medium text-text-500 uppercase tracking-wide">
               {t('fileExplorer.contentMatches')}
             </div>
           )}
@@ -766,18 +766,18 @@ const TextSearchResults = memo(function TextSearchResults({
                       e.currentTarget.style.visibility = 'hidden'
                     }}
                   />
-                  <span className="truncate text-[length:var(--fs-sm)] text-text-200">{name}</span>
-                  <span className="shrink-0 text-[length:var(--fs-xxs)] text-text-500">:{match.line_number}</span>
+                  <span className="truncate text-ui-caption text-text-200">{name}</span>
+                  <span className="shrink-0 text-ui-xs text-text-500">:{match.line_number}</span>
                 </div>
-                <div className="mt-0.5 truncate pl-[22px] font-mono text-[length:var(--fs-xxs)] text-text-400">{line}</div>
-                <div className="mt-0.5 truncate pl-[22px] text-[length:var(--fs-xxs)] text-text-500">{path}</div>
+                <div className="mt-0.5 truncate pl-[22px] font-mono text-ui-xs text-text-400">{line}</div>
+                <div className="mt-0.5 truncate pl-[22px] text-ui-xs text-text-500">{path}</div>
               </button>
             )
           })}
         </>
       )}
       {isLoading && (
-        <div className="px-2 py-1.5 text-center text-[length:var(--fs-xs)] text-text-500">{t('common:loading')}</div>
+        <div className="px-2 py-1.5 text-center text-ui-sm text-text-500">{t('common:loading')}</div>
       )}
     </div>
   )
@@ -868,7 +868,7 @@ const FileTreeItem = memo(function FileTreeItem({
         onTouchCancel={onTouchEnd}
         className={`
           w-full flex items-center gap-1 px-2 text-left cursor-default
-          select-none hover:bg-bg-200 transition-colors text-[length:var(--fs-sm)]
+          select-none hover:bg-bg-200 transition-colors text-ui-caption
           text-text-300
           ${touchFriendly ? 'py-2' : 'py-0.5'}
           ${node.ignored ? 'opacity-50' : ''}
@@ -989,7 +989,7 @@ function FilePreview({
         title: file.path,
         closeTitle: `${t('common:close')} ${file.name}`,
         iconPath: file.path,
-        label: <span className="block whitespace-nowrap text-[length:var(--fs-xs)] font-mono">{file.name}</span>,
+        label: <span className="block whitespace-nowrap text-ui-sm font-mono">{file.name}</span>,
       })),
     [previewFiles, t],
   )
@@ -1220,11 +1220,11 @@ function FilePreview({
       {/* Preview Content */}
       <div ref={scrollRef} className="flex-1 overflow-auto panel-scrollbar">
         {isLoading ? (
-          <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+          <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
             {t('common:loading')}
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full text-danger-100 text-[length:var(--fs-sm)] gap-1 px-4">
+          <div className="flex flex-col items-center justify-center h-full text-danger-100 text-ui-caption gap-1 px-4">
             <AlertCircleIcon size={16} />
             <span className="text-center">{error}</span>
           </div>
@@ -1285,7 +1285,7 @@ function FilePreview({
             targetRanges={targetRanges}
           />
         ) : (
-          <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+          <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
             {t('common:noContent')}
           </div>
         )}
@@ -1312,7 +1312,7 @@ function MediaPreview({ category, dataUrl, mimeType, fileName }: MediaPreviewPro
     case 'audio':
       return (
         <div className="flex flex-col items-center justify-center h-full gap-3 p-4">
-          <div className="text-text-400 text-[length:var(--fs-sm)]">{formatMimeType(mimeType)}</div>
+          <div className="text-text-400 text-ui-caption">{formatMimeType(mimeType)}</div>
           <audio controls src={dataUrl} className="w-full max-w-xs" />
         </div>
       )
@@ -1477,7 +1477,7 @@ function ImagePreview({ dataUrl, fileName }: ImagePreviewProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Zoom toolbar */}
-      <div className="shrink-0 flex items-center justify-center gap-1.5 px-2 py-1 border-b border-border-100/30 bg-bg-100/50 text-[length:var(--fs-xxs)]">
+      <div className="shrink-0 flex items-center justify-center gap-1.5 px-2 py-1 border-b border-border-100/30 bg-bg-100/50 text-ui-xs">
         <button
           onClick={zoomOut}
           className="px-1.5 py-0.5 rounded hover:bg-bg-200 text-text-300 transition-colors"
@@ -1561,7 +1561,7 @@ function TextMediaPreview({
   return (
     <div className="flex flex-col h-full">
       {/* Tab bar */}
-      <div className="shrink-0 flex items-center gap-0.5 px-2 py-1 border-b border-border-100/30 bg-bg-100/50 text-[length:var(--fs-xxs)]">
+      <div className="shrink-0 flex items-center gap-0.5 px-2 py-1 border-b border-border-100/30 bg-bg-100/50 text-ui-xs">
         <button
           onClick={() => setMode('preview')}
           className={`px-2 py-0.5 rounded transition-colors ${mode === 'preview' ? 'bg-bg-200 text-text-100 border border-border-200' : 'text-text-400 hover:bg-bg-200 border border-transparent'}`}
@@ -1620,7 +1620,7 @@ function HtmlFilePreview({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-0.5 border-b border-border-100/30 bg-bg-100/50 px-2 py-1 text-[length:var(--fs-xxs)]">
+      <div className="flex shrink-0 items-center gap-0.5 border-b border-border-100/30 bg-bg-100/50 px-2 py-1 text-ui-xs">
         <button
           type="button"
           onClick={() => setMode('preview')}
@@ -1676,7 +1676,7 @@ function MarkdownFilePreview({ text, isResizing = false, targetLine, targetKey, 
 
   return (
     <div className="flex flex-col h-full">
-      <div className="shrink-0 flex items-center gap-0.5 px-2 py-1 border-b border-border-100/30 bg-bg-100/50 text-[length:var(--fs-xxs)]">
+      <div className="shrink-0 flex items-center gap-0.5 px-2 py-1 border-b border-border-100/30 bg-bg-100/50 text-ui-xs">
         <button
           onClick={() => setMode('preview')}
           className={`px-2 py-0.5 rounded transition-colors ${mode === 'preview' ? 'bg-bg-200 text-text-100 border border-border-200' : 'text-text-400 hover:bg-bg-200 border border-transparent'}`}
@@ -1725,7 +1725,7 @@ function BinaryPlaceholder({ mimeType, fileName, onDownload }: BinaryPlaceholder
   const { t } = useTranslation(['components', 'common'])
 
   return (
-    <div className="flex flex-col items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)] gap-2 p-4">
+    <div className="flex flex-col items-center justify-center h-full text-text-400 text-ui-caption gap-2 p-4">
       <img
         src={getMaterialIconUrl(fileName, 'file')}
         alt=""
@@ -1738,11 +1738,11 @@ function BinaryPlaceholder({ mimeType, fileName, onDownload }: BinaryPlaceholder
       />
       <span className="font-medium text-text-300">{fileName}</span>
       <span>{formatMimeType(mimeType)}</span>
-      <span className="text-text-500 text-[length:var(--fs-xxs)]">{t('components:fileExplorer.binaryFile')}</span>
+      <span className="text-text-500 text-ui-xs">{t('components:fileExplorer.binaryFile')}</span>
       {onDownload && (
         <button
           onClick={onDownload}
-          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-bg-200 hover:bg-bg-300 text-text-200 rounded transition-colors text-[length:var(--fs-xs)]"
+          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-bg-200 hover:bg-bg-300 text-text-200 rounded transition-colors text-ui-sm"
         >
           <DownloadIcon size={12} />
           {t('common:download')}
@@ -1777,7 +1777,7 @@ export function DiffPreview({ hunks, isResizing = false }: DiffPreviewProps) {
       {hunks.map((hunk, hunkIdx) => (
         <div key={hunkIdx} className="border-b border-border-100/30 last:border-0">
           {/* Hunk Header */}
-          <div className="px-3 py-1 bg-bg-200/50 text-text-400 text-[length:var(--fs-xxs)]">
+          <div className="px-3 py-1 bg-bg-200/50 text-text-400 text-ui-xs">
             @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
           </div>
           {/* Lines */}

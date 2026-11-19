@@ -14,8 +14,8 @@ const toneStyles: Record<ChipTone, string> = {
 }
 
 const sizeStyles: Record<ChipSize, string> = {
-  xs: 'h-4 px-1 text-[length:var(--fs-xxs)] rounded-xs',
-  sm: 'h-5 px-1.5 text-[length:var(--fs-xxs)] rounded-sm',
+  xs: 'h-4 px-1 text-ui-xs rounded-xs',
+  sm: 'h-5 px-1.5 text-ui-xs rounded-sm',
 }
 
 interface ChipProps extends React.HTMLAttributes<HTMLSpanElement> {

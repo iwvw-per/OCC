@@ -522,7 +522,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             }}
             onKeyDown={handleKeyDown}
             placeholder={t('projectDialog.typePath')}
-            className="flex-1 bg-transparent border-none outline-none text-[length:var(--fs-base)] text-text-100 placeholder:text-text-400 font-mono"
+            className="flex-1 bg-transparent border-none outline-none text-ui-base text-text-100 placeholder:text-text-400 font-mono"
             autoComplete="off"
             spellCheck={false}
           />
@@ -531,7 +531,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
         {pathError && (
           <div
             role="alert"
-            className="mt-2 rounded-md border border-danger-100/40 bg-danger-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100"
+            className="mt-2 rounded-md border border-danger-100/40 bg-danger-100/10 px-3 py-2 text-ui-sm text-danger-100"
           >
             {pathError}
           </div>
@@ -543,14 +543,14 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
         {/* 输入框不是绝对路径：说明后端不会接受，提示改成绝对路径 */}
         {!error && relativeInput ? (
           <div
-            className="rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 text-[length:var(--fs-xs)] text-text-400"
+            className="rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 text-ui-sm text-text-400"
             data-testid="relative-path-hint"
           >
             {t('projectDialog.invalidPath')}
           </div>
         ) : null}
         {error ? (
-          <div className="flex items-center justify-center h-full text-danger-100 text-[length:var(--fs-sm)] px-4 text-center">
+          <div className="flex items-center justify-center h-full text-danger-100 text-ui-caption px-4 text-center">
             {error}
           </div>
         ) : (
@@ -572,7 +572,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
 
             {/* Empty State */}
             {filteredItems.length === 0 && !isLoading && (
-              <div className="flex flex-col items-center justify-center h-28 text-text-400/60 text-[length:var(--fs-sm)] gap-2">
+              <div className="flex flex-col items-center justify-center h-28 text-text-400/60 text-ui-caption gap-2">
                 <FolderIcon className="w-6 h-6 opacity-30" />
                 <span>{filterText ? t('projectDialog.noMatchingFolders') : t('common:emptyFolder')}</span>
               </div>
@@ -602,7 +602,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
                         e.stopPropagation()
                         handleSelectFolder(item.path)
                       }}
-                      className="flex items-center gap-1 text-[length:var(--fs-xxs)] bg-accent-main-100 hover:bg-accent-main-200 px-2 py-0.5 rounded text-oncolor-100 font-medium transition-colors"
+                      className="flex items-center gap-1 text-ui-xs bg-accent-main-100 hover:bg-accent-main-200 px-2 py-0.5 rounded text-oncolor-100 font-medium transition-colors"
                     >
                       <PlusIcon className="w-2.5 h-2.5" />
                       {t('common:add')}
@@ -620,7 +620,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
         <div className="shrink-0 border-t border-border-200/40 p-3 space-y-2">
           <div className="flex items-center gap-2">
             <GitBranchIcon className="w-3.5 h-3.5 shrink-0 text-text-400" />
-            <span className="text-[length:var(--fs-sm)] font-medium text-text-200">
+            <span className="text-ui-caption font-medium text-text-200">
               {t('projectDialog.cloneGitTitle')}
             </span>
           </div>
@@ -641,17 +641,17 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             }}
             placeholder={t('projectDialog.cloneUrlPlaceholder')}
             disabled={cloneRunning}
-            className="w-full rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 font-mono text-[length:var(--fs-sm)] text-text-100 outline-none placeholder:text-text-400 focus:border-accent-main-100/50 disabled:opacity-60"
+            className="w-full rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 font-mono text-ui-caption text-text-100 outline-none placeholder:text-text-400 focus:border-accent-main-100/50 disabled:opacity-60"
             autoComplete="off"
             spellCheck={false}
           />
 
           <div className="flex items-center gap-2">
-            <span className="shrink-0 font-mono text-[length:var(--fs-xxs)] text-text-400">
+            <span className="shrink-0 font-mono text-ui-xs text-text-400">
               {t('projectDialog.cloneInto')}
             </span>
             <span
-              className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-xxs)] text-text-300"
+              className="min-w-0 flex-1 truncate font-mono text-ui-xs text-text-300"
               title={inputValue}
             >
               {inputValue}
@@ -673,19 +673,19 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             }}
             placeholder={t('projectDialog.cloneDirNamePlaceholder')}
             disabled={cloneRunning}
-            className="w-full rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 font-mono text-[length:var(--fs-sm)] text-text-100 outline-none placeholder:text-text-400 focus:border-accent-main-100/50 disabled:opacity-60"
+            className="w-full rounded-md border border-border-200/60 bg-bg-000/40 px-3 py-2 font-mono text-ui-caption text-text-100 outline-none placeholder:text-text-400 focus:border-accent-main-100/50 disabled:opacity-60"
             autoComplete="off"
             spellCheck={false}
           />
 
           {cloneError && (
-            <div className="rounded-md border border-danger-100/40 bg-danger-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100">
+            <div className="rounded-md border border-danger-100/40 bg-danger-100/10 px-3 py-2 text-ui-sm text-danger-100">
               {cloneError}
             </div>
           )}
 
           {cloneOutput && (
-            <pre className="max-h-28 overflow-auto rounded-md border border-border-200/40 bg-bg-000/60 p-2 font-mono text-[length:var(--fs-xxs)] leading-4 text-text-300 whitespace-pre-wrap break-all">
+            <pre className="max-h-28 overflow-auto rounded-md border border-border-200/40 bg-bg-000/60 p-2 font-mono text-ui-xs leading-4 text-text-300 whitespace-pre-wrap break-all">
               {cloneOutput}
             </pre>
           )}
@@ -696,7 +696,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
               onClick={closeClone}
               disabled={cloneRunning}
               className={cn(
-                'rounded-md px-3 py-1.5 text-[length:var(--fs-sm)] text-text-300 transition-colors hover:bg-bg-200 disabled:opacity-50',
+                'rounded-md px-3 py-1.5 text-ui-caption text-text-300 transition-colors hover:bg-bg-200 disabled:opacity-50',
                 interactive.subtle,
               )}
             >
@@ -707,7 +707,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
               onClick={() => void handleClone()}
               disabled={cloneRunning || !cloneUrl.trim() || !cloneDirName.trim()}
               className={cn(
-                'flex items-center gap-1.5 rounded-md bg-accent-main-100 px-3 py-1.5 text-[length:var(--fs-sm)] font-medium text-oncolor-100 transition-colors hover:bg-accent-main-200 disabled:opacity-50',
+                'flex items-center gap-1.5 rounded-md bg-accent-main-100 px-3 py-1.5 text-ui-caption font-medium text-oncolor-100 transition-colors hover:bg-accent-main-200 disabled:opacity-50',
                 interactive.accent,
               )}
             >
@@ -727,7 +727,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
       {/* Footer */}
       <div className="relative p-3 flex items-center gap-3 shrink-0">
         <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-border-200/30" />
-        <div className="text-[length:var(--fs-xxs)] text-text-400 flex-1 min-w-0 font-mono whitespace-normal break-all leading-4">
+        <div className="text-ui-xs text-text-400 flex-1 min-w-0 font-mono whitespace-normal break-all leading-4">
           {inputValue}
         </div>
         {canUseNativePicker && (
@@ -737,7 +737,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
             title={t('projectDialog.pickInFileManager')}
             aria-label={t('projectDialog.pickInFileManager')}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap max-sm:px-2',
+              'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-ui-caption font-medium shrink-0 whitespace-nowrap max-sm:px-2',
               interactive.subtle,
             )}
           >
@@ -752,7 +752,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
           title={t('projectDialog.cloneGit')}
           aria-label={t('projectDialog.cloneGit')}
           className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap max-sm:px-2',
+            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-ui-caption font-medium shrink-0 whitespace-nowrap max-sm:px-2',
             interactive.subtle,
           )}
         >
@@ -765,7 +765,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
           title={t('projectDialog.addCurrent')}
           aria-label={t('projectDialog.addCurrent')}
           className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-[length:var(--fs-sm)] font-medium shrink-0 whitespace-nowrap max-sm:px-2',
+            'flex items-center gap-1.5 px-3 py-1.5 bg-bg-000/40 border border-border-200/60 hover:border-accent-main-100/30 text-text-200 rounded-md text-ui-caption font-medium shrink-0 whitespace-nowrap max-sm:px-2',
             interactive.accent,
           )}
         >
@@ -807,7 +807,7 @@ function ListItem({ id, icon, label, isSelected, onClick, onMouseEnter, onPointe
     >
       <div className="flex items-center gap-2.5 min-w-0">
         <span className={isSelected ? 'text-accent-main-100' : 'text-text-400'}>{icon}</span>
-        <span className="text-[length:var(--fs-base)] truncate">{label}</span>
+        <span className="text-ui-base truncate">{label}</span>
       </div>
       {action}
     </div>

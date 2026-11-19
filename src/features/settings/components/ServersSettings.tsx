@@ -120,12 +120,12 @@ function ServerItem({
         >
           <div className="min-w-0">
             <div
-              className="text-[length:var(--fs-md)] font-medium text-text-100 truncate"
+              className="text-ui-base font-medium text-text-100 truncate"
               title={server.name}
             >
               {server.name}
             </div>
-            <div className="text-[length:var(--fs-xs)] text-text-400 truncate font-mono flex items-center gap-1 mt-0.5 min-w-0">
+            <div className="text-ui-sm text-text-400 truncate font-mono flex items-center gap-1 mt-0.5 min-w-0">
               <span className="truncate min-w-0" title={server.url}>
                 {server.url}
               </span>
@@ -260,7 +260,7 @@ function EditServerForm({
       className="p-3 rounded-lg border border-accent-main-100/30 bg-accent-main-100/[0.02] space-y-2.5"
     >
       <div>
-        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.name')}</label>
+        <label className="block text-ui-sm font-medium text-text-300 mb-1">{t('servers.name')}</label>
         <input
           type="text"
           value={name}
@@ -275,7 +275,7 @@ function EditServerForm({
         />
       </div>
       <div>
-        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.url')}</label>
+        <label className="block text-ui-sm font-medium text-text-300 mb-1">{t('servers.url')}</label>
         <input
           type="text"
           value={url}
@@ -291,7 +291,7 @@ function EditServerForm({
       <button
         type="button"
         onClick={() => setShowAuth(!showAuth)}
-        className="flex items-center gap-1.5 text-[length:var(--fs-xs)] text-accent-main-100 transition-colors hover:bg-bg-200"
+        className="flex items-center gap-1.5 text-ui-sm text-accent-main-100 transition-colors hover:bg-bg-200"
       >
         <KeyIcon size={10} />
         {showAuth ? t('servers.hideAuth') : t('servers.addAuth')}
@@ -300,7 +300,7 @@ function EditServerForm({
       {showAuth && (
         <>
           <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.username')}</label>
+            <label className="block text-ui-sm font-medium text-text-300 mb-1">{t('servers.username')}</label>
             <input
               type="text"
               value={username}
@@ -313,7 +313,7 @@ function EditServerForm({
             />
           </div>
           <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.password')}</label>
+            <label className="block text-ui-sm font-medium text-text-300 mb-1">{t('servers.password')}</label>
             <input
               type="password"
               value={password}
@@ -329,12 +329,12 @@ function EditServerForm({
       )}
 
       {showHttpsIpWarning && (
-        <div className="text-[length:var(--fs-xs)] text-warning-100 bg-warning-bg border border-warning-100/20 rounded-md px-2.5 py-2 leading-relaxed">
+        <div className="text-ui-sm text-warning-100 bg-warning-bg border border-warning-100/20 rounded-md px-2.5 py-2 leading-relaxed">
           {t('servers.httpsIpWarning')}
         </div>
       )}
 
-      {error && <p className="text-[length:var(--fs-xs)] text-danger-100">{error}</p>}
+      {error && <p className="text-ui-sm text-danger-100">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           {t('common:cancel')}
@@ -408,7 +408,7 @@ function AddServerForm({
   return (
     <form onSubmit={handleSubmit} className="p-3 rounded-lg border border-border-200 bg-bg-100 space-y-2.5">
       <div>
-        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.name')}</label>
+        <label className="block text-ui-sm font-medium text-text-300 mb-1">{t('servers.name')}</label>
         <input
           type="text"
           value={name}
@@ -423,7 +423,7 @@ function AddServerForm({
         />
       </div>
       <div>
-        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.url')}</label>
+        <label className="block text-ui-sm font-medium text-text-300 mb-1">{t('servers.url')}</label>
         <input
           type="text"
           value={url}
@@ -439,7 +439,7 @@ function AddServerForm({
       <button
         type="button"
         onClick={() => setShowAuth(!showAuth)}
-        className="flex items-center gap-1.5 text-[length:var(--fs-xs)] text-accent-main-100 transition-colors hover:bg-bg-200"
+        className="flex items-center gap-1.5 text-ui-sm text-accent-main-100 transition-colors hover:bg-bg-200"
       >
         <KeyIcon size={10} />
         {showAuth ? t('servers.hideAuth') : t('servers.addAuth')}
@@ -448,7 +448,7 @@ function AddServerForm({
       {showAuth && (
         <>
           <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.username')}</label>
+            <label className="block text-ui-sm font-medium text-text-300 mb-1">{t('servers.username')}</label>
             <input
               type="text"
               value={username}
@@ -461,7 +461,7 @@ function AddServerForm({
             />
           </div>
           <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.password')}</label>
+            <label className="block text-ui-sm font-medium text-text-300 mb-1">{t('servers.password')}</label>
             <input
               type="password"
               value={password}
@@ -475,7 +475,7 @@ function AddServerForm({
           </div>
 
           {isCrossOrigin && password.trim() && (
-            <div className="text-[length:var(--fs-xs)] text-warning-100 bg-warning-bg border border-warning-100/20 rounded-md px-2.5 py-2 leading-relaxed">
+            <div className="text-ui-sm text-warning-100 bg-warning-bg border border-warning-100/20 rounded-md px-2.5 py-2 leading-relaxed">
               {t('servers.crossOriginWarning')}{' '}
               <a
                 href="https://github.com/anomalyco/opencode/issues/10047"
@@ -488,17 +488,17 @@ function AddServerForm({
             </div>
           )}
 
-          <div data-setting-desc className="text-[length:var(--fs-xs)] text-text-400 leading-relaxed">{t('servers.credentialsStorage')}</div>
+          <div data-setting-desc className="text-ui-sm text-text-400 leading-relaxed">{t('servers.credentialsStorage')}</div>
         </>
       )}
 
       {showHttpsIpWarning && (
-        <div className="text-[length:var(--fs-xs)] text-warning-100 bg-warning-bg border border-warning-100/20 rounded-md px-2.5 py-2 leading-relaxed">
+        <div className="text-ui-sm text-warning-100 bg-warning-bg border border-warning-100/20 rounded-md px-2.5 py-2 leading-relaxed">
           {t('servers.httpsIpWarning')}
         </div>
       )}
 
-      {error && <p className="text-[length:var(--fs-xs)] text-danger-100">{error}</p>}
+      {error && <p className="text-ui-sm text-danger-100">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           {t('common:cancel')}
@@ -638,7 +638,7 @@ export function ServersSettings() {
         )}
 
         {servers.length === 0 && !addingServer && (
-          <div className="text-[length:var(--fs-md)] text-text-400 text-center py-8">{t('servers.noServersConfigured')}</div>
+          <div className="text-ui-base text-text-400 text-center py-8">{t('servers.noServersConfigured')}</div>
         )}
       </div>
       </SettingsSection>

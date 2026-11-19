@@ -70,7 +70,7 @@ export function BreadcrumbList({
   return (
     <ol
       {...props}
-      className={cn('relative flex flex-wrap items-center gap-x-1 gap-y-1 text-[length:var(--fs-sm)]', className)}
+      className={cn('relative flex flex-wrap items-center gap-x-1 gap-y-1 text-ui-caption', className)}
     >
       <AnimatePresence initial={false} mode="popLayout">
         {visible}

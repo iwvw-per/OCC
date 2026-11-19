@@ -172,7 +172,7 @@ export function AiAgentAccountSettings() {
     <>
       {!account ? (
         <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-xs text-text-300">
+          <label className="flex flex-col gap-1 text-ui-sm text-text-300">
             面板域名
             <input
               className={settingsFieldClass}
@@ -182,7 +182,7 @@ export function AiAgentAccountSettings() {
               onChange={event => setDomain(event.target.value)}
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-text-300">
+          <label className="flex flex-col gap-1 text-ui-sm text-text-300">
             用户名
             <input
               className={settingsFieldClass}
@@ -191,7 +191,7 @@ export function AiAgentAccountSettings() {
               onChange={event => setUsername(event.target.value)}
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-text-300">
+          <label className="flex flex-col gap-1 text-ui-sm text-text-300">
             密码
             <input
               className={settingsFieldClass}
@@ -205,12 +205,12 @@ export function AiAgentAccountSettings() {
             <Button onClick={handleLogin} disabled={busy}>
               {busy ? '登录中…' : '登录'}
             </Button>
-            {error && <span className="text-xs text-danger-100">{error}</span>}
+            {error && <span className="text-ui-sm text-danger-100">{error}</span>}
           </div>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-300">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-ui-sm text-text-300">
             <span>
               已登录 <span className="text-text-100">{account.username}</span> @ {account.domain}
             </span>
@@ -225,7 +225,7 @@ export function AiAgentAccountSettings() {
           </div>
 
           {instances.length === 0 ? (
-            <p className="text-xs text-text-500">该账号下还没有登记实例。请先在面板的 AI Agent 模块添加。</p>
+            <p className="text-ui-sm text-text-500">该账号下还没有登记实例。请先在面板的 AI Agent 模块添加。</p>
           ) : (
             /* 只展示实例状态，不提供「切换」按钮：
                切服务器统一在下方「连接」清单里做。此前这里另有一个切换入口，
@@ -243,15 +243,15 @@ export function AiAgentAccountSettings() {
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-sm text-text-100">{instance.label}</span>
+                        <span className="truncate text-ui-caption text-text-100">{instance.label}</span>
                         <span
-                          className={`text-[10px] ${online ? 'text-success-100' : 'text-text-500'}`}
+                          className={`text-ui-xs ${online ? 'text-success-100' : 'text-text-500'}`}
                           title={offlineLabel}
                         >
                           {online ? '运行中' : '离线'}
                         </span>
                       </div>
-                      <div className="truncate text-[11px] text-text-500">
+                      <div className="truncate text-ui-xs text-text-500">
                         {instance.providerLabel || instance.provider} · {instance.hostName || instance.serverId} ·{' '}
                         {instance.port}
                       </div>
@@ -261,7 +261,7 @@ export function AiAgentAccountSettings() {
               })}
             </ul>
           )}
-          {error && <span className="text-xs text-danger-100">{error}</span>}
+          {error && <span className="text-ui-sm text-danger-100">{error}</span>}
         </div>
       )}
     </>

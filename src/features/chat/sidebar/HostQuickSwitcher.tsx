@@ -101,7 +101,7 @@ function HostQuickHostRow({
       {...(isActive ? { 'aria-expanded': metricsExpanded, 'aria-controls': 'host-metrics-panel' } : {})}
       title={isActive ? `${name} · ${metricsExpanded ? '点击收起资源监控' : '点击展开资源监控'}` : name}
       className={cn(
-        'flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[length:var(--fs-xxs)] transition-colors',
+        'flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-xs transition-colors',
         isActive
           ? 'bg-accent-main-100/15 text-text-100'
           : 'text-text-400 hover:bg-bg-200',

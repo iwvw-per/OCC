@@ -18,6 +18,7 @@
     "validate": "npm run typecheck && npm run lint && npm run test:run && npm run build",
     "release:prepare": "node scripts/prepare-release.mjs",
     "deploy:local": "node scripts/deploy-local.mjs",
+    "deploy:watch": "node scripts/watch-deploy.mjs",
     "check": "npm run format:check && npm run lint && npm run test:run && npm run build",
     "preview": "vite preview",
     "tauri": "tauri",

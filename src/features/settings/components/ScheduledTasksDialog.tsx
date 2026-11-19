@@ -79,7 +79,7 @@ export function ScheduledTasksDialog({ isOpen, onClose, defaultDirectory }: Sche
       fullscreenOnMobile
     >
       <div className="flex flex-col gap-4">
-        <p className="text-[length:var(--fs-xs)] text-text-400">
+        <p className="text-ui-sm text-text-400">
           {t('scheduledTasks.clientOnlyHint', {
             defaultValue: '任务仅在应用打开时触发；应用关闭期间不会补跑。',
           })}
@@ -103,7 +103,7 @@ export function ScheduledTasksDialog({ isOpen, onClose, defaultDirectory }: Sche
             </div>
 
             {tasks.length === 0 ? (
-              <p className="py-6 text-center text-[length:var(--fs-sm)] text-text-500">
+              <p className="py-6 text-center text-ui-caption text-text-500">
                 {t('scheduledTasks.empty', { defaultValue: '还没有定时任务' })}
               </p>
             ) : (
@@ -115,22 +115,22 @@ export function ScheduledTasksDialog({ isOpen, onClose, defaultDirectory }: Sche
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-[length:var(--fs-sm)] font-medium text-text-100">
+                        <span className="truncate text-ui-caption font-medium text-text-100">
                           {task.name}
                         </span>
                         {task.lastStatus && (
                           <span
                             className={
                               task.lastStatus === 'error'
-                                ? 'text-[length:var(--fs-xxs)] text-danger-100'
-                                : 'text-[length:var(--fs-xxs)] text-text-400'
+                                ? 'text-ui-xs text-danger-100'
+                                : 'text-ui-xs text-text-400'
                             }
                           >
                             {t(`scheduledTasks.status_${task.lastStatus}` as const, { defaultValue: task.lastStatus })}
                           </span>
                         )}
                       </div>
-                      <div className="mt-0.5 flex items-center gap-2 text-[length:var(--fs-xxs)] text-text-500">
+                      <div className="mt-0.5 flex items-center gap-2 text-ui-xs text-text-500">
                         <ClockIcon size={12} />
                         <span>
                           {t('scheduledTasks.nextRun', { defaultValue: '下次' })}: {formatNextRun(task.nextRunAt)}
@@ -183,12 +183,12 @@ function ScheduledTaskEditor({
   return (
     <div className="flex flex-col gap-3">
       <label className="flex flex-col gap-1">
-        <span className="text-[length:var(--fs-xs)] text-text-400">{t('scheduledTasks.name', { defaultValue: '名称' })}</span>
+        <span className="text-ui-sm text-text-400">{t('scheduledTasks.name', { defaultValue: '名称' })}</span>
         <Input value={task.name} onChange={e => onChange({ ...task, name: e.target.value })} />
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-[length:var(--fs-xs)] text-text-400">{t('scheduledTasks.prompt', { defaultValue: '提示词' })}</span>
+        <span className="text-ui-sm text-text-400">{t('scheduledTasks.prompt', { defaultValue: '提示词' })}</span>
         <Textarea
           value={task.execution.prompt}
           onChange={e => onChange({ ...task, execution: { ...task.execution, prompt: e.target.value } })}
@@ -197,7 +197,7 @@ function ScheduledTaskEditor({
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-[length:var(--fs-xs)] text-text-400">{t('scheduledTasks.directory', { defaultValue: '目录' })}</span>
+        <span className="text-ui-sm text-text-400">{t('scheduledTasks.directory', { defaultValue: '目录' })}</span>
         <Input
           value={task.execution.directory}
           onChange={e => onChange({ ...task, execution: { ...task.execution, directory: e.target.value } })}
@@ -205,7 +205,7 @@ function ScheduledTaskEditor({
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-[length:var(--fs-xs)] text-text-400">{t('scheduledTasks.model', { defaultValue: '模型' })}</span>
+        <span className="text-ui-sm text-text-400">{t('scheduledTasks.model', { defaultValue: '模型' })}</span>
         <Select
           value={modelValue}
           onValueChange={value => {
@@ -227,7 +227,7 @@ function ScheduledTaskEditor({
       </label>
 
       <div className="flex flex-col gap-2">
-        <span className="text-[length:var(--fs-xs)] text-text-400">{t('scheduledTasks.schedule', { defaultValue: '计划' })}</span>
+        <span className="text-ui-sm text-text-400">{t('scheduledTasks.schedule', { defaultValue: '计划' })}</span>
         <Select
           value={task.schedule.kind}
           onValueChange={value => patchSchedule({ kind: value as ScheduledTaskKind })}
@@ -272,7 +272,7 @@ function ScheduledTaskEditor({
                     else current.add(day)
                     patchSchedule({ weekdays: Array.from(current).sort() })
                   }}
-                  className={`h-7 w-9 rounded-md border text-[length:var(--fs-xs)] ${
+                  className={`h-7 w-9 rounded-md border text-ui-sm ${
                     active ? 'border-accent-main-100 bg-bg-200 text-text-100' : 'border-border-200 text-text-400'
                   }`}
                 >

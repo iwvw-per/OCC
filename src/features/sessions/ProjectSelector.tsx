@@ -113,8 +113,8 @@ export function ProjectSelector({
         title={getPath(currentProject)}
       >
         <div className="flex-1 min-w-0">
-          <div className="text-[length:var(--fs-base)] font-semibold text-text-100 truncate">{getDisplayName(currentProject)}</div>
-          <div className="text-[length:var(--fs-xxs)] text-text-400/70 truncate font-mono">{getPath(currentProject)}</div>
+          <div className="text-ui-base font-semibold text-text-100 truncate">{getDisplayName(currentProject)}</div>
+          <div className="text-ui-xs text-text-400/70 truncate font-mono">{getPath(currentProject)}</div>
         </div>
         <ChevronDownIcon
           className={`w-3 h-3 text-text-400 transition-all duration-200 shrink-0 ${
@@ -136,12 +136,12 @@ export function ProjectSelector({
       >
         <div className="glass border border-border-200/60 rounded-xl shadow-lg overflow-hidden">
           <div className="max-h-[280px] overflow-y-auto custom-scrollbar p-1">
-            <div className="px-2 py-1.5 text-[length:var(--fs-xxs)] font-semibold text-text-400/70 uppercase tracking-wider">
+            <div className="px-2 py-1.5 text-ui-xs font-semibold text-text-400/70 uppercase tracking-wider">
               {t('sessions.switchProject')}
             </div>
 
             {otherProjects.length === 0 ? (
-              <div className="px-3 py-4 text-center text-[length:var(--fs-sm)] text-text-400/60">{t('sessions.noOtherProjects')}</div>
+              <div className="px-3 py-4 text-center text-ui-caption text-text-400/60">{t('sessions.noOtherProjects')}</div>
             ) : (
               /* 条目之间留 2px：ProjectItem 是 rounded-lg + hover 底色，
                  紧贴时相邻圆角会拼成一条凹槽。不用容器 gap，避免撑开分组标题。 */
@@ -177,7 +177,7 @@ export function ProjectSelector({
                 onAddProject()
                 setIsOpen(false)
               }}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[length:var(--fs-sm)] text-text-300 hover:bg-bg-200 active:bg-bg-300 transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-ui-caption text-text-300 hover:bg-bg-200 active:bg-bg-300 transition-colors"
             >
               <PlusIcon className="w-3.5 h-3.5" />
               {t('sessions.addProject')}
@@ -244,8 +244,8 @@ function ProjectItem({ project, displayName, path, onSelect, onRemove }: Project
         </div>
 
         <div className="flex-1 min-w-0 text-left">
-          <div className="text-[length:var(--fs-base)] text-text-200 truncate">{displayName}</div>
-          <div className="text-[length:var(--fs-xxs)] text-text-400/60 truncate font-mono">{path}</div>
+          <div className="text-ui-base text-text-200 truncate">{displayName}</div>
+          <div className="text-ui-xs text-text-400/60 truncate font-mono">{path}</div>
         </div>
       </button>
 

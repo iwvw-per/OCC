@@ -507,7 +507,7 @@ export function SidePanel({
             {/* 用 hash 路由跳 home：`href="/"` 会触发整页导航，丢掉当前 hash，
                 未落盘的本地状态（如刚添加的项目）会因此看起来「消失」。 */}
             <a href="#/" className="flex items-center whitespace-nowrap h-full">
-              <span className="text-[length:var(--fs-heading-3)] font-semibold text-text-100 tracking-tight">
+              <span className="text-ui-base font-semibold text-text-100 tracking-tight">
                 {t('header.openCode')}
               </span>
             </a>
@@ -538,13 +538,13 @@ export function SidePanel({
             <NewChatIcon size={16} />
           </span>
           <span
-            className="ml-2 text-[length:var(--fs-base)] whitespace-nowrap transition-opacity duration-300"
+            className="ml-2 text-ui-base whitespace-nowrap transition-opacity duration-300"
             style={{ opacity: showLabels ? 1 : 0 }}
           >
             {t('sidebar.newChat')}
           </span>
           <span
-            className="ml-auto text-[length:var(--fs-xxs)] text-text-500 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
+            className="ml-auto text-ui-xs text-text-500 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
             style={{ opacity: showLabels ? undefined : 0 }}
           >
             {newChatShortcut}
@@ -572,7 +572,7 @@ export function SidePanel({
             <PlusIcon size={16} />
           </span>
           <span
-            className="ml-2 text-[length:var(--fs-base)] whitespace-nowrap transition-opacity duration-300"
+            className="ml-2 text-ui-base whitespace-nowrap transition-opacity duration-300"
             style={{ opacity: showLabels ? 1 : 0 }}
           >
             {t('sidebar.newProject')}
@@ -595,7 +595,7 @@ export function SidePanel({
               aria-label={t('sidebar.searchChats')}
               autoComplete="off"
               spellCheck={false}
-              className="h-8 w-full appearance-none rounded-lg border-0 bg-transparent pl-[34px] pr-[26px] text-[length:var(--fs-base)] text-text-100 shadow-none outline-none ring-0 placeholder:text-text-300 transition-shadow focus-visible:ring-1 focus-visible:ring-accent-main-100/30"
+              className="h-8 w-full appearance-none rounded-lg border-0 bg-transparent pl-[34px] pr-[26px] text-ui-base text-text-100 shadow-none outline-none ring-0 placeholder:text-text-300 transition-shadow focus-visible:ring-1 focus-visible:ring-accent-main-100/30"
             />
             {search && isLoading ? (
               <span
@@ -661,7 +661,7 @@ export function SidePanel({
             {isEditMode ? (
               <>
                 {/* 与 tab 同字号字重，左侧文案变成状态提示 */}
-                <span className="pl-[6px] pr-2 py-1.5 text-[length:var(--fs-xxs)] font-semibold uppercase tracking-wider text-text-100 min-w-0 truncate">
+                <span className="pl-[6px] pr-2 py-1.5 text-ui-xs font-semibold uppercase tracking-wider text-text-100 min-w-0 truncate">
                   {selectedSessionIds.size === 0 && selectedProjectIds.size === 0
                     ? t('sidebar.selectItems')
                     : selectedSessionIds.size > 0 && selectedProjectIds.size > 0
@@ -720,7 +720,7 @@ export function SidePanel({
               <>
                 {/* 最左：当前主机名（只读标识）；右侧按钮组仍靠右 */}
                 <span
-                  className="min-w-0 flex-1 truncate pl-[6px] text-[length:var(--fs-sm)] font-medium text-text-400"
+                  className="min-w-0 flex-1 truncate pl-[6px] text-ui-caption font-medium text-text-400"
                   title={activeServer?.name}
                 >
                   {activeServer?.name}
@@ -809,7 +809,7 @@ export function SidePanel({
           <>
             {t('sidebar.batchDeleteSessionsConfirm', { count: selectedSessionIds.size })}
             {selectedSessionId && selectedSessionIds.has(selectedSessionId) && (
-              <div className="mt-2 text-[length:var(--fs-sm)] text-warning-100">
+              <div className="mt-2 text-ui-caption text-warning-100">
                 {t('sidebar.batchDeleteIncludesCurrent')}
               </div>
             )}

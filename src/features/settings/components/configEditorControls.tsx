@@ -26,10 +26,10 @@ function useDraftReporter(context: React.Context<(id: string, invalid: boolean) 
  * - focus 只抬边框 + 轻 ring
  */
 export const fieldClass =
-  'min-w-0 w-full h-8 px-2.5 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30'
+  'min-w-0 w-full h-8 px-2.5 text-ui-caption rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30'
 
 export const fieldAreaClass =
-  'min-w-0 w-full min-h-[5rem] px-2.5 py-2 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 resize-y leading-relaxed custom-scrollbar'
+  'min-w-0 w-full min-h-[5rem] px-2.5 py-2 text-ui-caption rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 resize-y leading-relaxed custom-scrollbar'
 
 function enumChoices(values: string[]): Choice[] {
   return values.map(value => ({ value, label: value }))
@@ -143,11 +143,11 @@ export function NumberField({
         className={`${fieldClass} ${invalid ? '!border-error-100' : ''}`}
       />
       {focused && draft.trim() === '' && external !== '' && (
-        <div className="text-[length:var(--fs-xs)] text-text-400">
+        <div className="text-ui-sm text-text-400">
           {tx('Empty input will not remove a saved value; enter a new number or Reset before saving.', '留空不会删除已保存值；请输入新数字，或保存前 Reset。', lang)}
         </div>
       )}
-      {invalid && <div className="text-[length:var(--fs-xs)] text-error-100">{tx('Must be a valid number.', '必须是有效数字。', lang)}</div>}
+      {invalid && <div className="text-ui-sm text-error-100">{tx('Must be a valid number.', '必须是有效数字。', lang)}</div>}
     </div>
   )
 }
@@ -243,12 +243,12 @@ export function IntegerField({
         className={`${fieldClass} ${invalid ? '!border-error-100' : ''}`}
       />
       {focused && raw === '' && external !== '' && (
-        <div className="text-[length:var(--fs-xs)] text-text-400">
+        <div className="text-ui-sm text-text-400">
           {tx('Empty input will not remove a saved value; enter a new integer or Reset before saving.', '留空不会删除已保存值；请输入新整数，或保存前 Reset。', lang)}
         </div>
       )}
       {invalid && (
-        <div className="text-[length:var(--fs-xs)] text-error-100">
+        <div className="text-ui-sm text-error-100">
           {tx('Must be an integer in the allowed range.', '必须是允许范围内的整数。', lang)}
         </div>
       )}
@@ -430,7 +430,7 @@ export function Select({
             style={pos}
           >
             {filtered.length === 0 && (
-              <div className="px-3 py-2.5 text-[length:var(--fs-xs)] text-text-400">{tx('No matches', '无匹配项', lang)}</div>
+              <div className="px-3 py-2.5 text-ui-sm text-text-400">{tx('No matches', '无匹配项', lang)}</div>
             )}
             {filtered.map(option => (
               <button
@@ -443,7 +443,7 @@ export function Select({
                   onChange(option.value)
                   setOpen(false)
                 }}
-                className={`flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] transition-colors disabled:opacity-40 border ${
+                className={`flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-ui-caption transition-colors disabled:opacity-40 border ${
                   option.value === current
                     ? 'bg-bg-200 text-text-100 border-border-200'
                     : 'text-text-100 hover:bg-bg-100 border-transparent'
@@ -451,7 +451,7 @@ export function Select({
               >
                 <span className="min-w-0">
                   <span className="block truncate">{option.label}</span>
-                  {option.hint && <span className="mt-0.5 block truncate text-[length:var(--fs-xs)] text-text-400">{option.hint}</span>}
+                  {option.hint && <span className="mt-0.5 block truncate text-ui-sm text-text-400">{option.hint}</span>}
                 </span>
                 {option.value === current && <CheckIcon size={14} className="shrink-0 text-text-200" />}
               </button>
@@ -478,7 +478,7 @@ export function StringListField({
   if (Array.isArray(value) && value.some(item => typeof item !== 'string')) {
     return (
       <div className="space-y-2">
-        <div className="text-[length:var(--fs-xs)] text-warning-100">{tx('This field contains non-string items. Repair the JSON array before saving.', '该字段包含非字符串项，请在保存前修复 JSON 数组。', lang)}</div>
+        <div className="text-ui-sm text-warning-100">{tx('This field contains non-string items. Repair the JSON array before saving.', '该字段包含非字符串项，请在保存前修复 JSON 数组。', lang)}</div>
         <JsonStructuredEditor value={value} type="array" onChange={next => onChange(next as string[])} />
       </div>
     )
@@ -512,7 +512,7 @@ export function StringListField({
         type="button"
         onClick={() => onChange([...list, ''])}
         className={cn(
-          'inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-[length:var(--fs-sm)] font-medium text-accent-main-100',
+          'inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-ui-caption font-medium text-accent-main-100',
           interactive.accent,
           interactive.focusRingCompact,
         )}
@@ -617,7 +617,7 @@ export function JsonStructuredEditor({ value, type, onChange }: { value: unknown
         }}
         className={`${fieldAreaClass} font-mono`}
       />
-      {error && <div className="text-[length:var(--fs-xs)] text-error-100">{error}</div>}
+      {error && <div className="text-ui-sm text-error-100">{error}</div>}
     </div>
   )
 }
@@ -671,7 +671,7 @@ export function KeyValueField({
         return (
           <div key={key} className="space-y-2 border-b border-border-200/40 pb-3 last:border-b-0 last:pb-0">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-sm)] font-medium text-text-100">
+              <div className="min-w-0 flex-1 truncate font-mono text-ui-caption font-medium text-text-100">
                 {key}
               </div>
               <div className="w-full sm:w-40">
@@ -698,14 +698,14 @@ export function KeyValueField({
             type="button"
             disabled={!targetKey || hasOwn(record, targetKey)}
             onClick={addEntry}
-            className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-[length:var(--fs-sm)] font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
+            className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-ui-caption font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
           >
             <PlusIcon size={13} />
             {tx('Add', '添加', lang)}
           </button>
         </div>
       </div>
-      <div data-setting-desc className="text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+      <div data-setting-desc className="text-ui-sm leading-relaxed text-text-400">
         {tx('Existing object keys cannot be reliably deleted through the official merge API; change values instead, or reset before saving newly added keys.', '官方 merge API 不能可靠删除已保存的 object key；请改值，刚新增但不想保存的键可以在保存前 Reset。', lang)}
       </div>
     </div>
@@ -730,7 +730,7 @@ export function StringMapField({
   if (isRecord(value) && Object.values(value).some(item => typeof item !== 'string')) {
     return (
       <div className="space-y-2">
-        <div className="text-[length:var(--fs-xs)] text-warning-100">{tx('This map contains non-string values. Repair the JSON object before saving.', '该 map 包含非字符串值，请在保存前修复 JSON 对象。', lang)}</div>
+        <div className="text-ui-sm text-warning-100">{tx('This map contains non-string values. Repair the JSON object before saving.', '该 map 包含非字符串值，请在保存前修复 JSON 对象。', lang)}</div>
         <JsonStructuredEditor value={value} type="object" onChange={next => onChange(next as Record<string, string>)} />
       </div>
     )
@@ -746,7 +746,7 @@ export function StringMapField({
   }
   return (
     <div className="space-y-3">
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_12px_minmax(0,1fr)_32px] items-center gap-2 px-1 text-[length:var(--fs-xs)] font-medium text-text-400">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_12px_minmax(0,1fr)_32px] items-center gap-2 px-1 text-ui-sm font-medium text-text-400">
         <span>{tx('Key', '键', lang)}</span>
         <span aria-hidden="true" />
         <span>{tx('Value', '值', lang)}</span>
@@ -757,7 +757,7 @@ export function StringMapField({
           <div title={key} className={`${fieldClass} flex min-w-0 items-center truncate font-mono text-text-200`}>
             {key}
           </div>
-          <span aria-hidden="true" className="text-center font-mono text-[length:var(--fs-sm)] text-text-400">=</span>
+          <span aria-hidden="true" className="text-center font-mono text-ui-caption text-text-400">=</span>
           <TextField value={item} onChange={next => onChange({ ...record, [key]: next })} placeholder={valuePlaceholder ?? tx('value', '值', lang)} mono />
           <span aria-hidden="true" />
         </div>
@@ -777,7 +777,7 @@ export function StringMapField({
           placeholder={keyPlaceholder ?? tx('new key', '新键名', lang)}
           className={`${fieldClass} min-w-0 flex-1 font-mono`}
         />
-        <span aria-hidden="true" className="text-center font-mono text-[length:var(--fs-sm)] text-text-400">=</span>
+        <span aria-hidden="true" className="text-center font-mono text-ui-caption text-text-400">=</span>
         <input
           value={newValue}
           onChange={event => {
@@ -801,7 +801,7 @@ export function StringMapField({
           <PlusIcon size={13} />
         </button>
       </div>
-      <div data-setting-desc className="text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+      <div data-setting-desc className="text-ui-sm leading-relaxed text-text-400">
         {tx('This map only accepts string values. Existing keys cannot be reliably deleted through the official merge API.', '这个 map 只接受字符串值。官方 merge API 不能可靠删除已保存的 key。', lang)}
       </div>
     </div>

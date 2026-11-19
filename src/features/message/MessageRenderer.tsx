@@ -151,7 +151,7 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
       icon={isActive ? <Spinner size="sm" tone="accent" variant="pixel" /> : <LayersIcon size={13} className="text-text-500" />}
       meta={
         hasBreakdown ? (
-          <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[length:var(--fs-xxs)] tabular-nums text-text-500">
+          <span className="flex min-w-0 items-center gap-2 overflow-hidden text-ui-xs tabular-nums text-text-500">
             {/* 运行中优先显示「此刻在做什么」：长任务里它比步数更能说明「还在动」。
                 宽度跟容器走（min-w-0 + truncate），不写死 max-w —— 写死 22rem 在
                 窄屏上会比可用宽度还大，命令文本会顶出屏幕右边缘。 */}
@@ -449,7 +449,7 @@ export function ProcessCollapseBlock({
                * 隧道抖动、主机短暂不可用都会走到这里。此前静默吞掉，用户只看到
                * 一片空白，误以为「内容丢了」或「面板坏了」，只能反复刷新。
                */
-              <p className="flex items-center gap-2 px-1 py-2 text-[length:var(--fs-xs)] text-text-400">
+              <p className="flex items-center gap-2 px-1 py-2 text-ui-sm text-text-400">
                 <span>{t('process.hydrateFailed')}</span>
                 <button
                   type="button"
@@ -470,7 +470,7 @@ export function ProcessCollapseBlock({
                * 「Working for 12s」配一句「没有可展开的过程内容」，判定为坏了。
                * 运行中留空即可，header 的 Working 计时本身就是进度反馈。
                */
-              <p className="px-1 py-2 text-[length:var(--fs-xs)] text-text-400">
+              <p className="px-1 py-2 text-ui-sm text-text-400">
                 {t('process.emptyAfterExpand')}
               </p>
             ) : (
@@ -481,7 +481,7 @@ export function ProcessCollapseBlock({
       </MessageExpandPanel>
       {interrupted && (
         <p
-          className="flex items-center gap-1.5 px-1 pt-1 text-[length:var(--fs-xs)] text-text-400"
+          className="flex items-center gap-1.5 px-1 pt-1 text-ui-sm text-text-400"
           data-turn-interrupted
         >
           <AlertCircleIcon size={12} className="shrink-0 text-warning-100" />
@@ -721,7 +721,7 @@ const CollapsibleUserText = memo(function CollapsibleUserText({
     let disposed = false
     const measure = () => {
       if (disposed) return
-      const fsBase = Number.parseFloat(window.getComputedStyle(el).getPropertyValue('--fs-base'))
+      const fsBase = Number.parseFloat(window.getComputedStyle(el).getPropertyValue('--text-ui-base'))
       if (!Number.isFinite(fsBase) || fsBase <= 0) return
       const collapsedHeight = fsBase * LEADING_RELAXED * COLLAPSE_PREVIEW_LINES
       const next = el.scrollHeight > collapsedHeight + 1
@@ -755,13 +755,13 @@ const CollapsibleUserText = memo(function CollapsibleUserText({
             contentRef.current = node
             headerRef(node)
           }}
-          className={`m-0 break-words text-[length:var(--fs-base)] text-text-100 leading-relaxed${
+          className={`m-0 break-words text-ui-base text-text-100 leading-relaxed${
             renderMarkdown ? '' : ' whitespace-pre-wrap'
           }${isCollapsed ? ' overflow-hidden' : ''}`}
           style={
             isCollapsed
               ? {
-                  maxHeight: `calc(var(--fs-base) * ${LEADING_RELAXED} * ${COLLAPSE_PREVIEW_LINES})`,
+                  maxHeight: `calc(var(--text-ui-base) * ${LEADING_RELAXED} * ${COLLAPSE_PREVIEW_LINES})`,
                   contain: 'layout paint',
                 }
               : undefined
@@ -778,7 +778,7 @@ const CollapsibleUserText = memo(function CollapsibleUserText({
         <button
           type="button"
           onClick={() => withScrollLock(() => setExpanded(prev => !prev))}
-          className="mt-1 text-[length:var(--fs-sm)] text-text-400 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1 transition-colors"
+          className="mt-1 text-ui-caption text-text-400 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1 transition-colors"
           aria-expanded={expanded}
         >
           {expanded ? t('showLess') : t('showMore')}
@@ -1010,7 +1010,7 @@ const UserMessageView = memo(function UserMessageView({
               type="button"
               ref={systemContextHeaderRef}
               onClick={() => withSystemContextScrollLock(() => setShowSystemContext(!showSystemContext))}
-              className="flex items-center gap-1 text-[length:var(--fs-sm)] text-text-400 transition-colors py-1 px-2 rounded hover:bg-bg-200 hover:border-border-200 border border-transparent"
+              className="flex items-center gap-1 text-ui-caption text-text-400 transition-colors py-1 px-2 rounded hover:bg-bg-200 hover:border-border-200 border border-transparent"
             >
               <span>
                 {showSystemContext ? t('hideSystemContext') : t('showSystemContext', { count: syntheticParts.length })}
@@ -1103,7 +1103,7 @@ const UserAttachmentChip = memo(function UserAttachmentChip({
     <span
       data-user-attachment
       title={attachment.displayName}
-      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border-200 bg-bg-100 px-2.5 py-1 text-[length:var(--fs-xs)] text-text-300"
+      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border-200 bg-bg-100 px-2.5 py-1 text-ui-sm text-text-300"
     >
       <span className="shrink-0 text-text-400">{attachment.type === 'agent' ? 'agent' : 'file'}</span>
       <span className="truncate">{attachment.displayName}</span>
@@ -1279,7 +1279,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
       {/* 回合改动文件汇总：最终回复里也展示（工具步骤区已有各自概览） */}
       {turnFiles && turnFiles.length > 0 && (
         <div className={MSG_SPACING.finish}>
-          <span className="mb-1.5 block text-[length:var(--fs-xxs)] font-medium uppercase tracking-wider text-text-500">
+          <span className="mb-1.5 block text-ui-xs font-medium uppercase tracking-wider text-text-500">
             {t('system.filesChanged', { count: turnFiles.length })}
           </span>
           <DiffChips files={turnFiles} />
@@ -1289,7 +1289,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
       {processContentScope !== 'process' &&
         processContentScope !== 'inline' &&
         (showTurnDurationFooter || showCompletedAtFooter) && (
-          <div className="flex items-center gap-3 py-0.5 text-[length:var(--fs-xxs)] text-text-500">
+          <div className="flex items-center gap-3 py-0.5 text-ui-xs text-text-500">
             {showTurnDurationFooter && (
               <span>{t('stepFinish.totalDuration', { duration: formatDuration(turnDuration!) })}</span>
             )}
@@ -1470,7 +1470,7 @@ const ToolGroup = memo(function ToolGroup({
             growLabel={false}
             label={
               <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                <span className="text-[length:var(--fs-sm)] leading-5">
+                <span className="text-ui-caption leading-5">
                   {stepsSummary?.map((seg, i) => (
                     <span
                       key={i}
@@ -1488,7 +1488,7 @@ const ToolGroup = memo(function ToolGroup({
                 </span>
                 {!effectiveExpanded && <ToolIconStrip parts={parts} className="shrink-0" />}
                 {totalDiffStats && !hasActiveTools && (
-                  <span className="inline-flex items-center gap-1 text-[length:var(--fs-xxs)] font-medium tabular-nums">
+                  <span className="inline-flex items-center gap-1 text-ui-xs font-medium tabular-nums">
                     {totalDiffStats.additions > 0 && (
                       <span className="text-success-100">+{totalDiffStats.additions}</span>
                     )}
@@ -1512,7 +1512,7 @@ const ToolGroup = memo(function ToolGroup({
             showChevron={false}
             label={
               <span className="inline-flex items-baseline gap-2 whitespace-nowrap">
-                <span className="text-[length:var(--fs-md)] font-medium leading-tight">
+                <span className="text-ui-base font-medium leading-tight">
                   {isAllDone
                     ? t('stepsCount', { done: totalCount, total: totalCount })
                     : t('stepsCount', { done: doneCount, total: totalCount })}

@@ -202,7 +202,7 @@ export function ModelsSettings() {
           autoCorrect="off"
           autoComplete="off"
           autoCapitalize="off"
-          className="w-full h-9 bg-bg-200/70 hover:bg-bg-200 border border-border-200/50 rounded-lg pl-9 pr-9 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400/70 focus:outline-none transition-colors"
+          className="w-full h-9 bg-bg-200/70 hover:bg-bg-200 border border-border-200/50 rounded-lg pl-9 pr-9 text-ui-caption text-text-100 placeholder:text-text-400/70 focus:outline-none transition-colors"
         />
         {query && (
           <button
@@ -217,9 +217,9 @@ export function ModelsSettings() {
       </div>
 
       {isLoading ? (
-        <div className="py-10 text-center text-[length:var(--fs-sm)] text-text-400">{t('models.loading')}</div>
+        <div className="py-10 text-center text-ui-caption text-text-400">{t('models.loading')}</div>
       ) : groups.length === 0 ? (
-        <div className="py-10 text-center text-[length:var(--fs-sm)] text-text-400">
+        <div className="py-10 text-center text-ui-caption text-text-400">
           {query ? t('models.noResults') : t('models.empty')}
         </div>
       ) : (
@@ -247,10 +247,10 @@ export function ModelsSettings() {
                     title={group.providerName}
                     className="h-7 flex-1 min-w-0 flex items-center gap-1.5 rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100"
                   >
-                    <span className="min-w-0 text-[length:var(--fs-xxs)] font-semibold text-text-400/70 uppercase tracking-wider truncate">
+                    <span className="min-w-0 text-ui-xs font-semibold text-text-400/70 uppercase tracking-wider truncate">
                       {group.providerName}
                     </span>
-                    <span className="text-[length:var(--fs-xs)] text-text-500 shrink-0 tabular-nums">
+                    <span className="text-ui-sm text-text-500 shrink-0 tabular-nums">
                       {providerVisibleCount}/{providerModels.length}
                     </span>
                     <span className="text-text-400 shrink-0" aria-hidden="true">
@@ -266,7 +266,7 @@ export function ModelsSettings() {
                       modelVisibilityStore.setManyVisible(providerModels, nextVisible)
                       if (providerModels[0]) anchorKeyRef.current = getModelKey(providerModels[0])
                     }}
-                    className={`h-7 shrink-0 px-1.5 -mr-1.5 rounded-md text-[length:var(--fs-xs)] font-medium hover:bg-bg-200 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
+                    className={`h-7 shrink-0 px-1.5 -mr-1.5 rounded-md text-ui-sm font-medium hover:bg-bg-200 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
                       allProviderVisible ? 'text-text-400' : 'text-accent-main-100'
                     }`}
                   >
@@ -306,7 +306,7 @@ export function ModelsSettings() {
                           >
                             <div className="h-7 flex items-center min-w-0">
                               <div
-                                className={`min-w-0 truncate text-[length:var(--fs-md)] font-medium leading-snug ${
+                                className={`min-w-0 truncate text-ui-base font-medium leading-snug ${
                                   enabled ? 'text-text-100' : 'text-text-400'
                                 }`}
                               >
@@ -314,7 +314,7 @@ export function ModelsSettings() {
                               </div>
                             </div>
                             <div
-                              className={`truncate -mt-0.5 text-[length:var(--fs-xs)] font-mono leading-relaxed ${
+                              className={`truncate -mt-0.5 text-ui-sm font-mono leading-relaxed ${
                                 enabled ? 'text-text-400' : 'text-text-500'
                               }`}
                             >
@@ -323,7 +323,7 @@ export function ModelsSettings() {
                             </div>
                           </button>
                           {context && (
-                            <span className="hidden sm:flex h-7 items-center shrink-0 text-[length:var(--fs-xs)] text-text-500 tabular-nums">
+                            <span className="hidden sm:flex h-7 items-center shrink-0 text-ui-sm text-text-500 tabular-nums">
                               {context}
                             </span>
                           )}
@@ -349,7 +349,7 @@ export function ModelsSettings() {
         </div>
       )}
 
-      <p className="text-[length:var(--fs-xs)] text-text-400">{t('models.keepOneEnabled')}</p>
+      <p className="text-ui-sm text-text-400">{t('models.keepOneEnabled')}</p>
     </SettingsSection>
   )
 }

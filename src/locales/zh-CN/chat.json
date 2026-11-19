@@ -166,7 +166,9 @@
     "vision": "视觉",
     "unpin": "取消置顶",
     "pinToTop": "置顶",
-    "model": "模型"
+    "model": "模型",
+    "endpoint": "端点",
+    "effort": "思维强度"
   },
   "retryStatus": {
     "retrying": "重试中（第 {{attempt}} 次）",

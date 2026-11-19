@@ -30,8 +30,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       <div className="h-full min-h-0 overflow-y-auto bg-bg-000 px-5 pb-40 pt-24 text-text-100">
         <div className="mx-auto max-w-2xl space-y-3">
           <div className="rounded-2xl border border-danger-100/25 bg-danger-bg/60 p-4 shadow-sm">
-            <div className="mb-2 text-[length:var(--fs-lg)] font-semibold text-danger-100">{i18n.t('common:errorBoundary.title')}</div>
-            <div className="text-[length:var(--fs-sm)] leading-relaxed text-text-200">
+            <div className="mb-2 text-ui-lg font-semibold text-danger-100">{i18n.t('common:errorBoundary.title')}</div>
+            <div className="text-ui-caption leading-relaxed text-text-200">
               {this.state.error.message || i18n.t('common:errorBoundary.renderFailed')}
             </div>
           </div>
@@ -44,14 +44,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             <button
               type="button"
               onClick={() => this.setState({ error: null })}
-              className="rounded-lg border border-border-200 px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-200 hover:bg-bg-200"
+              className="rounded-lg border border-border-200 px-3 py-2 text-ui-caption font-medium text-text-200 hover:bg-bg-200"
             >
               {i18n.t('common:errorBoundary.tryAgain')}
             </button>
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="rounded-lg border border-border-200 px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-200 hover:bg-bg-200"
+              className="rounded-lg border border-border-200 px-3 py-2 text-ui-caption font-medium text-text-200 hover:bg-bg-200"
             >
               {i18n.t('common:errorBoundary.reload')}
             </button>

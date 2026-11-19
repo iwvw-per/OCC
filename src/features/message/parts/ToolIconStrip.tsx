@@ -55,7 +55,7 @@ export const ToolIconStrip = memo(function ToolIconStrip({ parts, className }: T
             </span>
           )
         })}
-        {overflow > 0 && <span className="text-[length:var(--fs-xxs)] tabular-nums text-text-500">+{overflow}</span>}
+        {overflow > 0 && <span className="text-ui-xs tabular-nums text-text-500">+{overflow}</span>}
       </span>
     </span>
   )

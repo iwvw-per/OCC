@@ -45,9 +45,9 @@ export function LoadingState({
     >
       <Spinner size={size} tone="accent" variant={variant} />
       {(label || elapsed) && (
-        <span className="flex items-baseline gap-2 text-[length:var(--fs-base)]">
+        <span className="flex items-baseline gap-2 text-ui-base">
           {label && <span>{label}</span>}
-          {elapsed && <span className="tabular-nums text-text-500 text-[length:var(--fs-sm)]">{elapsed}</span>}
+          {elapsed && <span className="tabular-nums text-text-500 text-ui-caption">{elapsed}</span>}
         </span>
       )}
     </div>

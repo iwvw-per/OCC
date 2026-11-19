@@ -376,11 +376,11 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
       {/* Items List */}
       <div ref={listRef} className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-0.5 p-1.5">
         {loading && items.length === 0 && (
-          <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">{t('common:loading')}</div>
+          <div className="px-2 py-4 text-center text-ui-base text-text-400">{t('common:loading')}</div>
         )}
 
         {!loading && items.length === 0 && (
-          <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">
+          <div className="px-2 py-4 text-center text-ui-base text-text-400">
             {query ? t('common:noResults') : t('common:emptyFolder')}
           </div>
         )}
@@ -400,8 +400,8 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
             }}
             title={t('mention.goBack')}
           >
-            <span className="text-[length:var(--fs-base)]">←</span>
-            <span className="text-[length:var(--fs-sm)] text-text-400 truncate">{normalizePath(currentPath)}</span>
+            <span className="text-ui-base">←</span>
+            <span className="text-ui-caption text-text-400 truncate">{normalizePath(currentPath)}</span>
           </button>
         )}
 
@@ -423,21 +423,21 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
             onPointerEnter={() => setSelectedIndex(index)}
           >
             <div className="flex-1 min-w-0">
-              <div className="text-[length:var(--fs-base)] truncate">
+              <div className="text-ui-base truncate">
                 <TypeBadge type={item.type} />
                 <span className="ml-1.5">{item.displayName}</span>
               </div>
               {item.relativePath && item.type !== 'agent' && (
-                <div className="text-[length:var(--fs-sm)] text-text-400 truncate ml-[calc(2ch+0.375rem)]">{item.relativePath}</div>
+                <div className="text-ui-caption text-text-400 truncate ml-[calc(2ch+0.375rem)]">{item.relativePath}</div>
               )}
             </div>
-            {item.type === 'folder' && <span className="text-text-400 text-[length:var(--fs-sm)] ml-2 flex-shrink-0">→</span>}
+            {item.type === 'folder' && <span className="text-text-400 text-ui-caption ml-2 flex-shrink-0">→</span>}
           </button>
         ))}
       </div>
 
       {/* Footer Hints - 只在桌面端显示 */}
-      <div className="hidden md:flex px-3 py-1.5 text-[length:var(--fs-xs)] text-text-500/70 gap-3">
+      <div className="hidden md:flex px-3 py-1.5 text-ui-sm text-text-500/70 gap-3">
         <span>{t('common:upDownSelect')}</span>
         <span>{t('common:enterConfirmShort')}</span>
         <span>{t('common:escCancel')}</span>
@@ -464,5 +464,5 @@ function TypeBadge({ type }: { type: MentionType }) {
     folder: t('mention.folder'),
   }
 
-  return <span className={`text-[length:var(--fs-sm)] font-medium ${colors[type]}`}>{labels[type]}:</span>
+  return <span className={`text-ui-caption font-medium ${colors[type]}`}>{labels[type]}:</span>
 }

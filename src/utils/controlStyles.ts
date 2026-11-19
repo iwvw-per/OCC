@@ -14,9 +14,9 @@ export type ControlSize = 'xs' | 'sm' | 'md'
 
 /** 行内小按钮（设置项右侧、卡片角落的操作）。 */
 export const controlSize: Record<ControlSize, string> = {
-  xs: 'h-6 px-1.5 text-[length:var(--fs-xxs)] rounded-md gap-1',
-  sm: 'h-7 px-2 text-[length:var(--fs-xs)] rounded-md gap-1.5',
-  md: 'h-8 px-3 text-[length:var(--fs-sm)] rounded-lg gap-2',
+  xs: 'h-6 px-1.5 text-ui-xs rounded-md gap-1',
+  sm: 'h-7 px-2 text-ui-sm rounded-md gap-1.5',
+  md: 'h-8 px-3 text-ui-caption rounded-lg gap-2',
 }
 
 /** 纯图标按钮的方形盒子（与 controlSize 对齐高度）。 */

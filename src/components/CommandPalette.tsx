@@ -40,7 +40,7 @@ function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd
       className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 
-                    text-[length:var(--fs-xs)] font-mono font-medium leading-none
+                    text-ui-sm font-mono font-medium leading-none
                     bg-bg-100 text-text-300 border border-border-200 rounded
                     shadow-[0_1px_0_0_var(--border-200)]"
     >
@@ -236,7 +236,7 @@ export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProp
               setSelectedIndex(0)
             }}
             placeholder={t('commandPalette.placeholder')}
-            className="flex-1 py-3.5 text-[length:var(--fs-base)] bg-transparent text-text-100 placeholder:text-text-400 
+            className="flex-1 py-3.5 text-ui-base bg-transparent text-text-100 placeholder:text-text-400 
                        outline-none border-none"
             autoComplete="off"
             spellCheck={false}
@@ -247,7 +247,7 @@ export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProp
                 setQuery('')
                 setSelectedIndex(0)
               }}
-              className="text-text-400 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1 text-[length:var(--fs-sm)]"
+              className="text-text-400 hover:bg-bg-200 hover:border-border-200 border border-transparent rounded px-1 text-ui-caption"
             >
               {t('common:clear')}
             </button>
@@ -258,7 +258,7 @@ export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProp
         {/* Command List */}
         <div ref={listRef} className="overflow-y-auto custom-scrollbar flex-1 flex flex-col gap-0.5 p-1">
           {filteredCommands.length === 0 ? (
-            <div className="px-4 py-8 text-center text-text-400 text-[length:var(--fs-base)]">{t('commandPalette.noCommandsFound')}</div>
+            <div className="px-4 py-8 text-center text-text-400 text-ui-base">{t('commandPalette.noCommandsFound')}</div>
           ) : (
             filteredCommands.map((cmd, index) => (
               <button
@@ -275,8 +275,8 @@ export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProp
                 <div className="flex items-center gap-2.5 min-w-0">
                   {cmd.icon && <span className="text-text-400 shrink-0">{cmd.icon}</span>}
                   <div className="min-w-0">
-                    <div className="text-[length:var(--fs-base)] truncate">{cmd.label}</div>
-                    {cmd.description && <div className="text-[length:var(--fs-sm)] text-text-400 truncate">{cmd.description}</div>}
+                    <div className="text-ui-base truncate">{cmd.label}</div>
+                    {cmd.description && <div className="text-ui-caption text-text-400 truncate">{cmd.description}</div>}
                   </div>
                 </div>
                 {cmd.shortcut && (
@@ -290,7 +290,7 @@ export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProp
         </div>
 
         {/* Footer */}
-        <div className="relative flex items-center gap-4 px-4 py-2 text-[length:var(--fs-xs)] text-text-400">
+        <div className="relative flex items-center gap-4 px-4 py-2 text-ui-sm text-text-400">
           <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-border-200/30" />
           <span className="flex items-center gap-1">
             <Kbd>↑</Kbd>

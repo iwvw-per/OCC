@@ -1289,7 +1289,7 @@ export const ChatPane = memo(function ChatPane({
           role="status"
           aria-live="polite"
         >
-          <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border-200/60 bg-bg-100/95 px-3 py-1 text-[length:var(--fs-xxs)] text-text-300 shadow-sm backdrop-blur">
+          <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border-200/60 bg-bg-100/95 px-3 py-1 text-ui-xs text-text-300 shadow-sm backdrop-blur">
             {resume.refreshing ? (
               <>
                 <Spinner size="xs" tone="current" variant="ring" />

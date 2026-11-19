@@ -64,7 +64,7 @@ export function WelcomeHero({ active, disableTransition = false }: WelcomeHeroPr
 
   const safeActive = pool.length > 0 ? activeIndex % pool.length : 0
   const greetingClass =
-    'px-4 text-center text-[26px] font-semibold leading-snug text-balance bg-gradient-to-r from-text-100 to-accent-main-100 bg-clip-text text-transparent sm:text-[32px]'
+    'px-4 text-center text-ui-settings-title font-semibold leading-snug text-balance bg-gradient-to-r from-text-100 to-accent-main-100 bg-clip-text text-transparent sm:text-ui-settings-title-lg'
   const glow = { filter: 'drop-shadow(0 0 22px hsl(var(--accent-main-100) / 0.18))' }
 
   return (
@@ -159,7 +159,7 @@ export function WelcomeProjectPill({
           aria-label={`${t('emptyState.switchProject')}: ${displayName}`}
           className={cn(
             // 标签式：骑在输入框顶边，底边与之相接（直角）。
-            'pointer-events-auto inline-flex max-w-full items-center gap-1.5 rounded-t-lg border border-b-0 border-border-200/60 bg-bg-000 px-3 py-1 text-[length:var(--fs-xs)] text-text-300 transition-opacity duration-200 hover:text-text-100',
+            'pointer-events-auto inline-flex max-w-full items-center gap-1.5 rounded-t-lg border border-b-0 border-border-200/60 bg-bg-000 px-3 py-1 text-ui-sm text-text-300 transition-opacity duration-200 hover:text-text-100',
             interactive.focusRingCompact,
             !active && 'opacity-0 pointer-events-none',
           )}
@@ -198,7 +198,7 @@ export function WelcomeProjectPill({
             value={query}
             onChange={event => setQuery(event.target.value)}
             placeholder={t('emptyState.searchProjects')}
-            className="min-w-0 flex-1 bg-transparent text-[length:var(--fs-sm)] text-text-200 outline-none placeholder:text-text-400"
+            className="min-w-0 flex-1 bg-transparent text-ui-caption text-text-200 outline-none placeholder:text-text-400"
           />
           {query && (
             <button
@@ -214,7 +214,7 @@ export function WelcomeProjectPill({
 
         <div className="max-h-52 overflow-y-auto custom-scrollbar p-1">
           {filtered.length === 0 ? (
-            <div className="px-3 py-5 text-center text-[length:var(--fs-sm)] text-text-400">
+            <div className="px-3 py-5 text-center text-ui-caption text-text-400">
               {t('emptyState.noMatchingProjects')}
             </div>
           ) : (
@@ -234,7 +234,7 @@ export function WelcomeProjectPill({
                   )}
                 >
                   <FolderIcon className={cn('size-3.5 shrink-0', isCurrent ? 'text-accent-main-100' : 'text-text-400')} />
-                  <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] text-text-200">
+                  <span className="min-w-0 flex-1 truncate text-ui-caption text-text-200">
                     {project.name || getDirectoryName(project.path)}
                   </span>
                   {isCurrent && <CheckIcon className="size-3.5 shrink-0 text-success-100" />}
@@ -254,7 +254,7 @@ export function WelcomeProjectPill({
             className={cn('flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-text-300', interactive.row)}
           >
             <PlusIcon className="size-3.5 shrink-0" />
-            <span className="text-[length:var(--fs-sm)]">{t('emptyState.newProject')}</span>
+            <span className="text-ui-caption">{t('emptyState.newProject')}</span>
           </button>
           <button
             type="button"
@@ -265,7 +265,7 @@ export function WelcomeProjectPill({
             className={cn('flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-text-300', interactive.row)}
           >
             <GlobeIcon className="size-3.5 shrink-0" />
-            <span className="text-[length:var(--fs-sm)]">{t('emptyState.workOutsideProject')}</span>
+            <span className="text-ui-caption">{t('emptyState.workOutsideProject')}</span>
           </button>
         </div>
       </PopoverContent>

@@ -378,15 +378,15 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
   const statusBanner = (
     <>
       {error && (
-        <div className="mb-3 break-words rounded-lg bg-error-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-error-100">{error}</div>
+        <div className="mb-3 break-words rounded-lg bg-error-100/10 px-3 py-2 text-ui-sm text-error-100">{error}</div>
       )}
       {schemaWarning && (
-        <div className="mb-3 break-words rounded-lg bg-warning-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-warning-100">
+        <div className="mb-3 break-words rounded-lg bg-warning-100/10 px-3 py-2 text-ui-sm text-warning-100">
           {schemaWarning}
         </div>
       )}
       {validationErrors.length > 0 && (
-        <div className="mb-3 max-h-32 overflow-y-auto rounded-lg bg-error-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-error-100 custom-scrollbar">
+        <div className="mb-3 max-h-32 overflow-y-auto rounded-lg bg-error-100/10 px-3 py-2 text-ui-sm text-error-100 custom-scrollbar">
           <div className="mb-1 font-medium">{t('config.validationFailed', { defaultValue: 'Config validation failed' })}</div>
           <div className="space-y-1">
             {validationErrors.slice(0, 12).map(item => (
@@ -406,19 +406,19 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
         </div>
       )}
       {loading && (
-        <div className="mb-3 rounded-lg bg-bg-100/50 px-3 py-2 text-[length:var(--fs-xs)] text-text-400">{t('config.loading')}</div>
+        <div className="mb-3 rounded-lg bg-bg-100/50 px-3 py-2 text-ui-sm text-text-400">{t('config.loading')}</div>
       )}
     </>
   )
 
   const actionButtons = (
     <div className="flex items-center gap-1.5">
-      {dirty && <span className="mr-1 hidden text-[length:var(--fs-xs)] text-warning-100 sm:inline">{t('config.unsaved')}</span>}
+      {dirty && <span className="mr-1 hidden text-ui-sm text-warning-100 sm:inline">{t('config.unsaved')}</span>}
       <button
         type="button"
         disabled={!dirty || busy}
         onClick={() => updateConfig(clone(original))}
-        className="inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-[length:var(--fs-xs)] text-text-300 transition-colors hover:bg-bg-200 disabled:opacity-40"
+        className="inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-ui-sm text-text-300 transition-colors hover:bg-bg-200 disabled:opacity-40"
       >
         <UndoIcon size={13} />
         {t('config.reset')}
@@ -466,7 +466,7 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
                         aria-controls={`config-panel-${id}`}
                         tabIndex={active ? 0 : -1}
                         onClick={() => switchSection(id)}
-                        className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[length:var(--fs-md)] font-medium transition-colors border ${
+                        className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-ui-base font-medium transition-colors border ${
                           active ? 'bg-bg-200 text-text-100 border-border-200' : 'text-text-300 hover:bg-bg-200 border-transparent'
                         }`}
                       >
@@ -500,7 +500,7 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
                     type="button"
                     disabled={!dirty || busy}
                     onClick={() => updateConfig(clone(original))}
-                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-300 transition-colors hover:bg-bg-200 active:bg-bg-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-ui-caption font-medium text-text-300 transition-colors hover:bg-bg-200 active:bg-bg-300 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <UndoIcon size={14} />
                     {t('config.reset')}
@@ -558,7 +558,7 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
               >
                 {CONFIG_SECTION_GROUPS.map(group => (
                   <div key={group.en}>
-                    <div className="mb-1.5 px-2.5 text-[length:var(--fs-xxs)] font-semibold uppercase tracking-wider text-text-400/75">
+                    <div className="mb-1.5 px-2.5 text-ui-xs font-semibold uppercase tracking-wider text-text-400/75">
                       {tx(group.en, group.zh, lang)}
                     </div>
                     <div className="space-y-0.5">
@@ -574,7 +574,7 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
                             aria-controls={`config-panel-${id}`}
                             tabIndex={active ? 0 : -1}
                             onClick={() => switchSection(id)}
-                            className={`flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[length:var(--fs-md)] font-medium transition-colors border ${
+                            className={`flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-ui-base font-medium transition-colors border ${
                           active ? 'bg-bg-200 text-text-100 border-border-200' : 'text-text-300 hover:bg-bg-200 border-transparent'
                             }`}
                           >
@@ -632,7 +632,7 @@ export function ConfigSettings() {
             type="button"
             onClick={() => setOpen(true)}
             className={cn(
-              'inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[length:var(--fs-sm)] font-medium text-accent-main-100',
+              'inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-ui-caption font-medium text-accent-main-100',
               interactive.accent,
             )}
           >
@@ -641,7 +641,7 @@ export function ConfigSettings() {
           </button>
         }
       >
-        <div className="flex items-start gap-2.5 rounded-lg border border-warning-100/20 bg-warning-bg/40 px-3.5 py-3 text-[length:var(--fs-sm)] leading-relaxed text-text-300">
+        <div className="flex items-start gap-2.5 rounded-lg border border-warning-100/20 bg-warning-bg/40 px-3.5 py-3 text-ui-caption leading-relaxed text-text-300">
           <AlertCircleIcon size={14} className="mt-0.5 shrink-0 text-warning-100" />
           <span>{t('config.sdkOnlyWarning')}</span>
         </div>

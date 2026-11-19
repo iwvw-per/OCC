@@ -85,11 +85,11 @@ function SessionTitleControl({
   }, [isEditingTitle, editTitle, compact])
 
   const inputClass = cn(
-    'py-1.5 text-[length:var(--fs-base)] font-medium text-text-100 bg-transparent border-none outline-none h-full',
+    'py-1.5 text-ui-base font-medium text-text-100 bg-transparent border-none outline-none h-full',
     compact ? 'px-2' : 'px-3',
   )
   const buttonClass = cn(
-    'py-1.5 text-[length:var(--fs-base)] font-medium text-text-200 transition-colors truncate max-w-full text-left cursor-text select-none',
+    'py-1.5 text-ui-base font-medium text-text-200 transition-colors truncate max-w-full text-left cursor-text select-none',
     compact ? 'px-2' : 'px-3',
   )
 
