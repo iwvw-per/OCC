@@ -22,8 +22,8 @@ export const CHAT_CONTENT_MIN = 640
 export const CHAT_CONTENT_ADAPTIVE_MIN = 680
 export const CHAT_CONTENT_ADAPTIVE_MAX = 920
 
-/** 两侧为拖拽手柄预留的总宽度（px），各 88px */
-export const CHAT_CONTENT_EDGE_BUDGET = 176
+/** 两侧为拖拽手柄预留的总宽度（px），各 24px */
+export const CHAT_CONTENT_EDGE_BUDGET = 48
 
 /** 消费轴的最大宽度内联样式，供消息列 / 输入框 / 对话框统一使用 */
 export const chatContentMaxWidthStyle = {
@@ -39,10 +39,7 @@ export const chatContentMaxWidthStyle = {
 export function resolveChatContentWidth(columnWidth: number, preference: number | null): number {
   const max = Math.max(CHAT_CONTENT_MIN, columnWidth - CHAT_CONTENT_EDGE_BUDGET)
   if (preference !== null) return Math.min(Math.max(preference, CHAT_CONTENT_MIN), max)
-  return Math.max(
-    CHAT_CONTENT_ADAPTIVE_MIN,
-    Math.min(columnWidth * 0.64, CHAT_CONTENT_ADAPTIVE_MAX),
-  )
+  return Math.max(CHAT_CONTENT_ADAPTIVE_MIN, Math.min(columnWidth * 0.64, CHAT_CONTENT_ADAPTIVE_MAX))
 }
 
 /**

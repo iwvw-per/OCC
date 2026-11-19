@@ -302,7 +302,9 @@ export function FolderRecentList({
 
   return (
     <>
-      <div className={`custom-scrollbar select-none ${embedded ? '' : 'h-full overflow-y-auto px-1.5 py-1'}`}>
+      <div
+        className={`custom-scrollbar scrollbar-none select-none ${embedded ? '' : 'h-full overflow-y-auto px-1.5 py-1'}`}
+      >
         {projects.length === 0 && pinnedSessions.length === 0 && unavailablePinnedEntries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-text-400 opacity-70">
             <p className="text-ui-caption font-medium text-text-300">{t('sidebar.noProjectFoldersYet')}</p>

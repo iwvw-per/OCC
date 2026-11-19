@@ -35,6 +35,22 @@ describe('overlayScrollbar lifecycle', () => {
     expect(parent.querySelector('.os-thumb')).not.toBeNull()
   })
 
+  it('suppresses thumb reveal during programmatic (auto) scrolling', () => {
+    const { parent, vp } = makeScrollContainer()
+    vp.setAttribute('data-os-suppress', '')
+    initOverlayScrollbars()
+
+    const thumb = parent.querySelector('.os-thumb') as HTMLElement
+    expect(thumb).not.toBeNull()
+
+    vp.dispatchEvent(new Event('scroll'))
+    expect(thumb.classList.contains('os-visible')).toBe(false)
+
+    vp.removeAttribute('data-os-suppress')
+    vp.dispatchEvent(new Event('scroll'))
+    expect(thumb.classList.contains('os-visible')).toBe(true)
+  })
+
   it('is idempotent — a second init does not duplicate work', () => {
     const { parent } = makeScrollContainer()
     initOverlayScrollbars()

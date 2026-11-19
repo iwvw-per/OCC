@@ -169,12 +169,12 @@ export function InputToolbar({
     // 右侧留出 ChatFab 的位置（FAB 绝对定位在输入框右下角，宽 32 + right 18）
     <div className="flex items-center justify-between pl-3 pr-14 pb-3 relative">
       {/* Left side: model + thinking level (merged into one menu) */}
-      <div className={`flex items-center min-w-0 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+      <div className={`flex items-center min-w-0 flex-1 ${isCompact ? 'gap-1' : 'gap-2'}`}>
         {/* Model Selector — 工具栏第一个入口（桌面 + 移动端）
             移动端必须保证入口可见可点：给它 shrink-0 与最小宽度，
             让 Variant 先让位，而不是把模型入口挤成 0 宽 */}
         {onModelChange && (
-          <div className={isCompact ? 'shrink-0 min-w-[6.5rem] max-w-[11rem]' : 'min-w-0 flex-1'}>
+          <div className="min-w-0 flex-1">
             <ModelSelector
               ref={modelSelectorRef}
               models={models}
@@ -191,7 +191,6 @@ export function InputToolbar({
             />
           </div>
         )}
-
       </div>
 
       {/* Action Buttons — 发送 / 停止已移出，由右下角的 ChatFab 承担（同一图标形变）。

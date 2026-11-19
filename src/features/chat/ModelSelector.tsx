@@ -255,13 +255,14 @@ export const ModelSelector = memo(
         recordModelUsage(model)
         onSelect(key, model)
         closeMenu({ focusTrigger: trigger !== 'toolbar' })
-        if (trigger === 'toolbar') {
+        // 触摸端选完模型不抢焦点:聚焦输入框会直接唤起软键盘。
+        if (trigger === 'toolbar' && !preferTouchUi) {
           window.setTimeout(() => {
             focusToolbarInput()
           }, 0)
         }
       },
-      [closeMenu, focusToolbarInput, onSelect, trigger],
+      [closeMenu, focusToolbarInput, onSelect, preferTouchUi, trigger],
     )
 
     /**
@@ -644,12 +645,13 @@ export const ModelSelector = memo(
           maxWidth="min(320px, calc(100vw - 24px))"
           mobileFullWidth
           constrainToRef={constrainToRef}
+          clampToViewport
           className="!p-0 flex flex-col"
         >
-          <div ref={menuRef} className="relative flex min-h-0 flex-col">
+          <div ref={menuRef} className="relative flex min-h-0 flex-1 flex-col">
             {preferTouchUi && endpointsOpen ? (
               // 触摸端不做向右浮层(会超出屏宽),退回列表内下钻。
-              <div className="flex flex-col p-1">
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-1">
                 <button
                   type="button"
                   onClick={() => setEndpointsOpen(false)}

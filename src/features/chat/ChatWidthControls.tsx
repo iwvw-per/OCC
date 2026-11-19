@@ -96,17 +96,20 @@ function WidthHandle({ side, onStart, onDrag, onCommit, onEnd }: WidthHandleProp
     [outwardWidth, updatePointerY],
   )
 
-  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
-    event.currentTarget.releasePointerCapture(event.pointerId)
-    cancelFrame()
-    latest.current = event.clientX
-    if (latest.current !== origin.current) callbacks.current.onCommit(outwardWidth())
-    setDragging(false)
-    document.documentElement.removeAttribute('data-chat-width-dragging')
-    setChatWidthDragging(false)
-    callbacks.current.onEnd()
-  }, [outwardWidth])
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+      event.currentTarget.releasePointerCapture(event.pointerId)
+      cancelFrame()
+      latest.current = event.clientX
+      if (latest.current !== origin.current) callbacks.current.onCommit(outwardWidth())
+      setDragging(false)
+      document.documentElement.removeAttribute('data-chat-width-dragging')
+      setChatWidthDragging(false)
+      callbacks.current.onEnd()
+    },
+    [outwardWidth],
+  )
 
   const handlePointerCancel = useCallback(() => {
     cancelFrame()
@@ -117,8 +120,8 @@ function WidthHandle({ side, onStart, onDrag, onCommit, onEnd }: WidthHandleProp
   }, [])
 
   // 命中条带：位于内容列外侧 24px 处，向外最多 24px；margin 不足时宽度收敛为 0。
-  const widthExpr = `min(24px, calc((100% - var(${CHAT_CONTENT_WIDTH_VAR}, ${CHAT_CONTENT_WIDTH_FALLBACK})) / 2 - 24px - 24px))`
-  const offsetExpr = `calc(50% + var(${CHAT_CONTENT_WIDTH_VAR}, ${CHAT_CONTENT_WIDTH_FALLBACK}) / 2 + 24px)`
+  const widthExpr = `min(24px, calc((100% - var(${CHAT_CONTENT_WIDTH_VAR}, ${CHAT_CONTENT_WIDTH_FALLBACK})) / 2 - 8px))`
+  const offsetExpr = `calc(50% + var(${CHAT_CONTENT_WIDTH_VAR}, ${CHAT_CONTENT_WIDTH_FALLBACK}) / 2 + 8px)`
 
   return (
     <div
@@ -190,10 +193,7 @@ export function ChatWidthControls({ container, enabled = true }: ChatWidthContro
   const handleDrag = useCallback(
     (width: number) => {
       if (!container) return
-      container.style.setProperty(
-        CHAT_CONTENT_WIDTH_VAR,
-        `${resolveChatContentWidth(columnRef.current, width)}px`,
-      )
+      container.style.setProperty(CHAT_CONTENT_WIDTH_VAR, `${resolveChatContentWidth(columnRef.current, width)}px`)
     },
     [container],
   )
@@ -202,9 +202,7 @@ export function ChatWidthControls({ container, enabled = true }: ChatWidthContro
     (width: number) => {
       if (!container) return
       const { preference, display } = dragStartRef.current
-      themeStore.setChatContentWidth(
-        preferenceFromDrag(columnRef.current, preference, display, width),
-      )
+      themeStore.setChatContentWidth(preferenceFromDrag(columnRef.current, preference, display, width))
     },
     [container],
   )

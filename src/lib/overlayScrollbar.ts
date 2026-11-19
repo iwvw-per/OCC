@@ -33,6 +33,11 @@ function wantsNoScrollbar(el: HTMLElement): boolean {
   return el.classList.contains('no-scrollbar') || el.classList.contains('scrollbar-none')
 }
 
+/** 程序滚动(流式自动贴底)期间由调用方短暂打标:隐藏滚动条,用户滚动时不打标 */
+function isSuppressed(el: HTMLElement): boolean {
+  return el.hasAttribute('data-os-suppress')
+}
+
 /** 读取 overflow 样式并缓存：getComputedStyle 会强制样式重算，同一元素只读一次 */
 function getOverflow(el: HTMLElement): { x: string; y: string; direction: string; flexDirection: string } {
   const cached = overflowCache.get(el)
@@ -133,6 +138,7 @@ function createAxisThumb(axis: 'v' | 'h', vp: HTMLElement, parent: HTMLElement):
   }
 
   const reveal = () => {
+    if (isSuppressed(vp)) return
     const overflow = axis === 'v' ? vp.scrollHeight > vp.clientHeight + 1 : vp.scrollWidth > vp.clientWidth + 1
     if (overflow) {
       thumb.classList.add('os-visible')
@@ -433,6 +439,7 @@ function attach(vp: HTMLElement) {
 
   /** 显示自身 + 内部后代 entry 的所有 thumb */
   const revealEntry = (e: Entry) => {
+    if (isSuppressed(e.vp)) return
     if (e.v && e.vp.scrollHeight > e.vp.clientHeight + 1) {
       e.v.update()
       e.v.thumb.classList.add('os-visible')

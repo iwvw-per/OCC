@@ -17,6 +17,8 @@ interface DropdownMenuProps {
   mobileFullWidth?: boolean
   /** 约束菜单在此容器的边界内（宽度 ≤ 容器 65%，不溢出左右） */
   constrainToRef?: React.RefObject<HTMLElement | null>
+  /** 按可用视口高度限制菜单最大高度,超出部分由内容自身滚动 */
+  clampToViewport?: boolean
   /** z-index，默认 100；在 Dialog 等高 z-index 容器内使用时需要调高 */
   zIndex?: number
   className?: string
@@ -39,6 +41,7 @@ export function DropdownMenu({
   maxWidth = 'min(320px, 90vw)',
   mobileFullWidth = false,
   constrainToRef,
+  clampToViewport = false,
   zIndex = 100,
   className = '',
   menuRef,
@@ -60,8 +63,10 @@ export function DropdownMenu({
     // --- 垂直定位 ---
     if (position === 'top') {
       pos.bottom = window.innerHeight - rect.top + gap
+      if (clampToViewport) size.maxHeight = Math.max(160, rect.top - gap - 8)
     } else {
       pos.top = rect.bottom + gap
+      if (clampToViewport) size.maxHeight = Math.max(160, window.innerHeight - rect.bottom - gap - 8)
     }
 
     // --- 水平定位 + 宽度 ---
@@ -102,7 +107,7 @@ export function DropdownMenu({
     }
 
     return { pos, size }
-  }, [triggerRef, position, align, width, minWidth, maxWidth, mobileFullWidth, constrainToRef])
+  }, [triggerRef, position, align, width, minWidth, maxWidth, mobileFullWidth, constrainToRef, clampToViewport])
 
   const updateStyles = useCallback(() => {
     const { pos, size } = calcStyles()

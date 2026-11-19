@@ -9,10 +9,13 @@ vi.mock('../../components/ui', () => ({
     isOpen ? <div>{children}</div> : null,
 }))
 
-const inputCapabilities = vi.hoisted(() => ({ canHover: false }))
+const inputCapabilities = vi.hoisted(() => ({ canHover: false, preferTouchUi: false }))
 
 vi.mock('../../hooks/useInputCapabilities', () => ({
-  useInputCapabilities: () => ({ preferTouchUi: false, canHover: inputCapabilities.canHover }),
+  useInputCapabilities: () => ({
+    preferTouchUi: inputCapabilities.preferTouchUi,
+    canHover: inputCapabilities.canHover,
+  }),
 }))
 
 vi.mock('../../utils/modelUtils', () => ({
@@ -203,9 +206,7 @@ describe('ModelSelector', () => {
   })
 
   it('swaps the loading indicator back to the chevron once models are available', () => {
-    const { rerender } = render(
-      <ModelSelector models={[]} selectedModelKey={null} onSelect={vi.fn()} isLoading />,
-    )
+    const { rerender } = render(<ModelSelector models={[]} selectedModelKey={null} onSelect={vi.fn()} isLoading />)
     expect(document.querySelector('[data-loading-indicator="true"]')).not.toBeNull()
 
     rerender(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
@@ -258,6 +259,40 @@ describe('ModelSelector', () => {
       expect(screen.getByRole('option', { name: /OpenAI/ })).toBeInTheDocument()
     } finally {
       inputCapabilities.canHover = false
+    }
+  })
+
+  it('does not focus the composer input on touch after selecting a model', async () => {
+    inputCapabilities.preferTouchUi = true
+
+    try {
+      const Harness = () => {
+        const constrainToRef = useRef<HTMLDivElement>(null)
+        return (
+          <div>
+            <div ref={constrainToRef}>
+              <textarea data-testid="composer" />
+            </div>
+            <ModelSelector
+              models={MODELS}
+              selectedModelKey={'openai:gpt-4.1'}
+              onSelect={vi.fn()}
+              trigger="toolbar"
+              constrainToRef={constrainToRef}
+            />
+          </div>
+        )
+      }
+
+      render(<Harness />)
+
+      fireEvent.click(screen.getByTitle('GPT-4.1'))
+      fireEvent.click(screen.getByText('GPT-4o Mini'))
+
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(screen.getByTestId('composer')).not.toHaveFocus()
+    } finally {
+      inputCapabilities.preferTouchUi = false
     }
   })
 })
