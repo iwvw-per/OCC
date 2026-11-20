@@ -98,7 +98,10 @@ export function parseBackgroundNotice(
       kind: 'shell',
       status: normalizeStatus(attrs.state),
       title: attrs.command ?? id,
-      output: text.slice((shell.index ?? 0) + shell[0].length).replace(/<\/shell>\s*$/i, '').trim(),
+      output: text
+        .slice((shell.index ?? 0) + shell[0].length)
+        .replace(/<\/shell>\s*$/i, '')
+        .trim(),
     }
   }
   const subagent = text.match(SUBAGENT_NOTICE_RE)
@@ -111,7 +114,10 @@ export function parseBackgroundNotice(
       kind: 'subagent',
       status: normalizeStatus(attrs.state),
       title: attrs.description ?? id,
-      output: text.slice((subagent.index ?? 0) + subagent[0].length).replace(/<\/subagent>\s*$/i, '').trim(),
+      output: text
+        .slice((subagent.index ?? 0) + subagent[0].length)
+        .replace(/<\/subagent>\s*$/i, '')
+        .trim(),
     }
   }
   return null
@@ -181,9 +187,7 @@ const BACKGROUND_RECEIPT_RE = /moved to the background/i
  *
  * 不能只看 `metadata.shellID`：前台命令同样有它。
  */
-function isBackgroundedShell(part: {
-  state: { input?: unknown; content?: unknown; output?: unknown }
-}): boolean {
+function isBackgroundedShell(part: { state: { input?: unknown; content?: unknown; output?: unknown } }): boolean {
   const input = part.state.input
   if (input && typeof input === 'object' && (input as Record<string, unknown>).background === true) {
     return true
@@ -342,9 +346,25 @@ export function collectBackgroundJobs(
     completed: 4,
   }
   const collected = [...byId.values()].filter(job => !dismissed?.has(job.id))
-  return collected.sort(
-    (a, b) => rank[a.status] - rank[b.status] || b.startedAt - a.startedAt,
-  )
+  return collected.sort((a, b) => rank[a.status] - rank[b.status] || b.startedAt - a.startedAt)
+}
+
+/**
+ * 去掉「已注册为子会话」的后台子代理。
+ *
+ * 转到后台的子代理会同时进「子代理」板块(childSessionStore,按子会话 id)与
+ * 「后台任务」板块(collectBackgroundJobs 的 kind='subagent')。同一个会话在
+ * 两处各列一行属于重复展示,故从后台任务里剔除已注册的那些。
+ *
+ * 保留没有对应子会话记录的子代理:OMO 后台子代理可能先发事件、后注册,那个
+ * 窗口里若一并过滤,任务会两个板块都不显示。
+ */
+export function excludeRegisteredSubagentJobs(
+  jobs: BackgroundJob[],
+  registeredSubagentIds: ReadonlySet<string>,
+): BackgroundJob[] {
+  if (registeredSubagentIds.size === 0) return jobs
+  return jobs.filter(job => !(job.kind === 'subagent' && registeredSubagentIds.has(job.id)))
 }
 
 /** 面板上显示的一行标题：优先命令行，其次工具名 */

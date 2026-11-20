@@ -27,6 +27,7 @@ import { Spinner } from '../../components/ui/Spinner'
 import { Switch } from '../../components/ui/Switch'
 import { getDirectoryName } from '../../utils/directoryUtils'
 import { formatCost, formatDuration } from '../../utils/formatUtils'
+import { sessionKeyToSessionId } from '../../utils/sessionKey'
 import { useMessages } from '../../store/messageStoreHooks'
 import { useTodos } from '../../store/todoStore'
 import { useChildSessions, type ChildSessionInfo } from '../../store/childSessionStore'
@@ -45,7 +46,7 @@ import {
   WorkStatusSection,
   WorkStatusValue,
 } from './WorkStatusPrimitives'
-import { collectBackgroundJobs, type BackgroundJob } from './backgroundJobs'
+import { collectBackgroundJobs, excludeRegisteredSubagentJobs, type BackgroundJob } from './backgroundJobs'
 import { BackgroundJobDialog } from './BackgroundJobDialog'
 import { SubagentDialog } from './SubagentDialog'
 import { useSessionNavigation } from '../../contexts/SessionNavigationContext'
@@ -354,7 +355,7 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
   )
   const dismissedKey = useMemo(() => [...dismissed].sort().join(','), [dismissed])
   const jobsKey = `${messages.length}:${messages[messages.length - 1]?.info.id ?? ''}:${liveSignature}:${dismissedKey}`
-  const jobs = useMemo(
+  const allJobs = useMemo(
     () => collectBackgroundJobs(messages, live, dismissed),
     // 只用粗筛键：messages 引用每帧都变，放进依赖等于每帧重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -367,8 +368,28 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
    * 校正时必须用它做白名单：`shell.list` 分不出前后台，直接拿来建条目会把
    * 正在执行的前台命令也列进面板（实测 `sleep 12; ...` 会占满面板）。
    */
-  const derivedJobIds = useMemo(() => new Set(jobs.map(job => job.id)), [jobs])
+  const derivedJobIds = useMemo(() => new Set(allJobs.map(job => job.id)), [allJobs])
   useReconcileRunningShells(sessionId, directory, serverId, derivedJobIds)
+
+  /**
+   * 子代理去重。
+   *
+   * 转到后台的子代理会同时进「子代理」板块(childSessionStore,按子会话 id)
+   * 与这里(collectBackgroundJobs 的 kind='subagent')。它已有专门的板块,
+   * 这里把「已注册为子会话」的后台子代理过滤掉,避免同一个会话在两处各列一行。
+   *
+   * 保留没有对应子会话记录的子代理:OMO 后台子代理可能先发事件、后注册,
+   * 那种窗口里若一并过滤,任务会两个板块都不显示。
+   */
+  const childSessions = useChildSessions(sessionId)
+  const backgroundSubagentIds = useMemo(
+    () => new Set(childSessions.map(child => sessionKeyToSessionId(child.id))),
+    [childSessions],
+  )
+  const jobs = useMemo(
+    () => excludeRegisteredSubagentJobs(allJobs, backgroundSubagentIds),
+    [allJobs, backgroundSubagentIds],
+  )
 
   /**
    * 弹窗里的任务跟随 jobs 的最新状态刷新，而不是保留打开那一刻的快照 ——

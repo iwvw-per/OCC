@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../../types/message'
-import { collectBackgroundJobs, parseBackgroundNotice } from './backgroundJobs'
+import { collectBackgroundJobs, excludeRegisteredSubagentJobs, parseBackgroundNotice } from './backgroundJobs'
 
 function userMessage(id: string, created: number): Message {
   return {
@@ -115,6 +115,37 @@ describe('parseBackgroundNotice', () => {
   it('normalizes unknown states', () => {
     const notice = parseBackgroundNotice('<shell id="sh_1" state="weird" command="x"></shell>')
     expect(notice?.status).toBe('unknown')
+  })
+})
+
+describe('excludeRegisteredSubagentJobs', () => {
+  const subagentJob = {
+    id: 'ses_child',
+    kind: 'subagent' as const,
+    title: '跑测试',
+    status: 'completed' as const,
+    messageId: 'm1',
+    startedAt: 1,
+  }
+  const shellJob = {
+    id: 'sh_1',
+    kind: 'shell' as const,
+    title: 'npm run dev',
+    status: 'running' as const,
+    messageId: 'm2',
+    startedAt: 2,
+  }
+
+  it('drops background subagents that are already registered as child sessions', () => {
+    expect(excludeRegisteredSubagentJobs([subagentJob, shellJob], new Set(['ses_child']))).toEqual([shellJob])
+  })
+
+  it('keeps background subagents that have no child session record yet', () => {
+    expect(excludeRegisteredSubagentJobs([subagentJob], new Set())).toEqual([subagentJob])
+  })
+
+  it('never drops shell jobs even if an id collides', () => {
+    expect(excludeRegisteredSubagentJobs([shellJob], new Set(['sh_1']))).toEqual([shellJob])
   })
 })
 

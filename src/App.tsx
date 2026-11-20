@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { Sidebar } from './features/chat'
@@ -62,6 +62,19 @@ const ScheduledTasksDialog = lazy(() =>
     default: module.ScheduledTasksDialog,
   })),
 )
+/**
+ * 惰性弹窗的「首次打开后保持挂载」闩锁。
+ *
+ * 无条件渲染 React.lazy 组件会让它在首次渲染时就 import(),把弹窗 chunk
+ * 拉进启动关键路径(即使从未打开)。用本 hook 门控:未打开过就不渲染、
+ * 不加载;打开过一次后保持挂载,保留开/关过渡动画与内部状态。
+ */
+function useLatchedOpen(open: boolean): boolean {
+  const [latched, setLatched] = useState(false)
+  if (open && !latched) setLatched(true)
+  return latched || open
+}
+
 function App() {
   const { t } = useTranslation(['commands', 'chat', 'common', 'components'])
   const router = useRouter()
@@ -540,11 +553,13 @@ function App() {
     ),
   )
 
-  const {
-    showCloseDialog,
-    handleCloseDialogConfirm,
-    handleCloseDialogCancel,
-  } = dialogs.closeService
+  const { showCloseDialog, handleCloseDialogConfirm, handleCloseDialogCancel } = dialogs.closeService
+
+  // 惰性弹窗的挂载闩锁:未打开过就不渲染,避免把它们的 chunk 拉进启动路径
+  const settingsMounted = useLatchedOpen(dialogs.settings.open)
+  const scheduledTasksMounted = useLatchedOpen(dialogs.scheduledTasks.open)
+  const commandPaletteMounted = useLatchedOpen(commandPaletteOpen)
+  const closeServiceMounted = useLatchedOpen(showCloseDialog)
 
   // 主区：surface + RightPanel 并排。Windows 全高侧栏模式下右侧列已有标题栏横跨整个宽度
   // （覆盖 RightPanel 上方），RightPanel 天然位于标题栏下方；网页/非全高模式没有全局标题栏，
@@ -681,29 +696,33 @@ function App() {
         )}
 
         <Suspense fallback={null}>
-          <SettingsDialog
-            isOpen={dialogs.settings.open}
-            onClose={closeSettings}
-            initialTab={dialogs.settings.initialTab}
-          />
-          <ScheduledTasksDialog
-            isOpen={dialogs.scheduledTasks.open}
-            onClose={closeScheduledTasks}
-            defaultDirectory={routeDirectory || currentDirectory || ''}
-          />
-          <CommandPalette
-            isOpen={commandPaletteOpen}
-            onClose={closeCommandPalette}
-            commands={commands}
-          />
+          {settingsMounted ? (
+            <SettingsDialog
+              isOpen={dialogs.settings.open}
+              onClose={closeSettings}
+              initialTab={dialogs.settings.initialTab}
+            />
+          ) : null}
+          {scheduledTasksMounted ? (
+            <ScheduledTasksDialog
+              isOpen={dialogs.scheduledTasks.open}
+              onClose={closeScheduledTasks}
+              defaultDirectory={routeDirectory || currentDirectory || ''}
+            />
+          ) : null}
+          {commandPaletteMounted ? (
+            <CommandPalette isOpen={commandPaletteOpen} onClose={closeCommandPalette} commands={commands} />
+          ) : null}
         </Suspense>
 
         <Suspense fallback={null}>
-          <CloseServiceDialog
-            isOpen={showCloseDialog}
-            onConfirm={handleCloseDialogConfirm}
-            onCancel={handleCloseDialogCancel}
-          />
+          {closeServiceMounted ? (
+            <CloseServiceDialog
+              isOpen={showCloseDialog}
+              onConfirm={handleCloseDialogConfirm}
+              onCancel={handleCloseDialogCancel}
+            />
+          ) : null}
         </Suspense>
       </ChatViewportProvider>
     </div>

@@ -6,6 +6,7 @@ import { i18nReady } from './i18n'
 import { initOverlayScrollbars } from './lib/overlayScrollbar'
 import App from './App.tsx'
 import { TooltipProvider } from './components/ui/Tooltip'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { DirectoryProvider, FullscreenProvider, SessionProvider } from './contexts'
 import { themeStore } from './store/themeStore'
 import { serverStore } from './store/serverStore'
@@ -45,6 +46,13 @@ ensureRandomUUID()
 
 // 禁用浏览器的 scroll restoration（刷新时不恢复旧 scrollTop），
 // 由 ChatArea 自行控制定位
+if (import.meta.env.DEV) {
+  window.setInterval(() => {
+    performance.clearMeasures()
+    performance.clearMarks()
+  }, 10_000)
+}
+
 if ('scrollRestoration' in history) {
   history.scrollRestoration = 'manual'
 }
@@ -205,7 +213,9 @@ async function bootstrap() {
           <DirectoryProvider>
             <SessionProvider>
               <FullscreenProvider>
-                <App />
+                <ErrorBoundary>
+                  <App />
+                </ErrorBoundary>
               </FullscreenProvider>
             </SessionProvider>
           </DirectoryProvider>

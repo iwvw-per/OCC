@@ -543,11 +543,7 @@ export const ChatPane = memo(function ChatPane({
    * 判定用 `sessionLoadedFromSkeleton`（由 messageStore 记录加载来源），
    * 比「有没有更早历史」准确 —— 小会话在分页路径下同样没有更早历史。
    */
-  useBackfillTurnOutline(
-    paneServerId,
-    routeRawSessionId,
-    loadState === 'loaded' && !sessionLoadedFromSkeleton,
-  )
+  useBackfillTurnOutline(paneServerId, routeRawSessionId, loadState === 'loaded' && !sessionLoadedFromSkeleton)
   const turnOutlineEntries = useTurnOutlineEntries(paneServerId, routeRawSessionId)
 
   /**
@@ -782,9 +778,9 @@ export const ChatPane = memo(function ChatPane({
       if (message.info.role !== 'assistant') continue
       const info = message.info as ModelCarrier & { modelID?: string; providerID?: string }
       // v2 适配层把 model 摊平到 modelID/providerID；也兼容仍有 model 对象的形状
-      const model = info.model ?? (info.modelID && info.providerID
-        ? { providerID: info.providerID, modelID: info.modelID }
-        : undefined)
+      const model =
+        info.model ??
+        (info.modelID && info.providerID ? { providerID: info.providerID, modelID: info.modelID } : undefined)
       if (model?.providerID && model?.modelID) {
         restoreFromMessage(model, info.variant ?? model.variant ?? null)
         return
@@ -1310,7 +1306,7 @@ export const ChatPane = memo(function ChatPane({
       )}
       <div key={activeServerId} className={`absolute inset-0 ${hostSlide}`}>
         <InlineToolRequestContext.Provider value={inlineToolRequestCtx}>
-          <ErrorBoundary onOpenSettings={onOpenSettings}>
+          <ErrorBoundary scope="chat" onOpenSettings={onOpenSettings} resetKeys={[routeSessionId]}>
             {chatAreaMountKey == null ? (
               <div className="h-full flex items-center justify-center">
                 <div className="session-loading-indicator">
@@ -1455,19 +1451,17 @@ export const ChatPane = memo(function ChatPane({
         />
       )}
 
-      {!inlineToolRequests &&
-        pendingPermissionRequests.length === 0 &&
-        pendingQuestionRequests.length > 0 && (
-          <QuestionDialog
-            request={pendingQuestionRequests[0]}
-            onReply={answers => handleQuestionReply(pendingQuestionRequests[0].id, answers, effectiveDirectory)}
-            onReject={() => handleQuestionReject(pendingQuestionRequests[0].id, effectiveDirectory)}
-            queueLength={pendingQuestionRequests.length}
-            isReplying={isReplying}
-            collapsed={questionCollapsed}
-            onCollapsedChange={setQuestionCollapsed}
-          />
-        )}
+      {!inlineToolRequests && pendingPermissionRequests.length === 0 && pendingQuestionRequests.length > 0 && (
+        <QuestionDialog
+          request={pendingQuestionRequests[0]}
+          onReply={answers => handleQuestionReply(pendingQuestionRequests[0].id, answers, effectiveDirectory)}
+          onReject={() => handleQuestionReject(pendingQuestionRequests[0].id, effectiveDirectory)}
+          queueLength={pendingQuestionRequests.length}
+          isReplying={isReplying}
+          collapsed={questionCollapsed}
+          onCollapsedChange={setQuestionCollapsed}
+        />
+      )}
     </div>
   )
 

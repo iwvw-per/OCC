@@ -35,7 +35,7 @@ interface BackgroundJobDialogProps {
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-3 text-ui-sm">
-      <span className="w-16 shrink-0 text-text-500">{label}</span>
+      <span className="w-20 shrink-0 text-text-500">{label}</span>
       <span className="min-w-0 flex-1 break-words text-text-200">{children}</span>
     </div>
   )
@@ -147,12 +147,7 @@ export const BackgroundJobDialog = memo(function BackgroundJobDialog({
     : ''
 
   return (
-    <Dialog
-      isOpen={job !== null}
-      onClose={onClose}
-      title={t('chat:workStatus.backgroundJob.dialogTitle')}
-      width={640}
-    >
+    <Dialog isOpen={job !== null} onClose={onClose} title={t('chat:workStatus.backgroundJob.dialogTitle')} width={840}>
       {job ? (
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
@@ -163,10 +158,7 @@ export const BackgroundJobDialog = memo(function BackgroundJobDialog({
             </DetailRow>
             <DetailRow label={t('chat:workStatus.backgroundJob.detailStatus')}>
               <span
-                className={cn(
-                  job.status === 'running' && 'text-info-100',
-                  job.status === 'error' && 'text-danger-100',
-                )}
+                className={cn(job.status === 'running' && 'text-info-100', job.status === 'error' && 'text-danger-100')}
               >
                 {statusLabel}
               </span>
@@ -192,33 +184,25 @@ export const BackgroundJobDialog = memo(function BackgroundJobDialog({
           </div>
 
           <div className="flex flex-col gap-1">
-            <span className="text-ui-sm text-text-500">
-              {t('chat:workStatus.backgroundJob.detailCommand')}
-            </span>
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-ui-xs text-text-200 custom-scrollbar">
+            <span className="text-ui-sm text-text-500">{t('chat:workStatus.backgroundJob.detailCommand')}</span>
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-ui-xs text-text-200 custom-scrollbar">
               {job.title}
             </pre>
           </div>
 
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
-              <span className="text-ui-sm text-text-500">
-                {t('chat:workStatus.backgroundJob.detailOutput')}
-              </span>
+              <span className="text-ui-sm text-text-500">{t('chat:workStatus.backgroundJob.detailOutput')}</span>
               {loading ? <Spinner size="xs" tone="muted" /> : null}
             </div>
-            <pre className="max-h-[45vh] overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-ui-xs text-text-200 custom-scrollbar">
+            <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-200/60 p-2 font-mono text-ui-xs text-text-200 custom-scrollbar">
               {hasOutput ? displayOutput : loading ? '' : t('chat:workStatus.backgroundJob.noOutput')}
             </pre>
-            {error ? (
-              <span className="text-ui-xs text-text-500">{error}</span>
-            ) : null}
+            {error ? <span className="text-ui-xs text-text-500">{error}</span> : null}
             {/* 只有「加载完成且确实没有输出」时才提示。
                 运行中的任务输出可能还没产生（或刚被读取），不该断言已被清理。 */}
             {!hasOutput && !loading && job.kind === 'shell' && job.status !== 'running' ? (
-              <span className="text-ui-xs text-text-500">
-                {t('chat:workStatus.backgroundJob.outputExpired')}
-              </span>
+              <span className="text-ui-xs text-text-500">{t('chat:workStatus.backgroundJob.outputExpired')}</span>
             ) : null}
           </div>
 

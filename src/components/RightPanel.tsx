@@ -6,18 +6,12 @@ import { createPtySession, removePtySession } from '../api/pty'
 import type { TerminalTab } from '../store/layoutStore'
 import { useKeybindingLabel } from '../hooks'
 import { ShortcutBadge } from './ui/Tooltip'
-import {
-  FolderIcon,
-  GitCommitIcon,
-  GitWorktreeIcon,
-  PlugIcon,
-  TeachIcon,
-  TerminalIcon,
-} from './Icons'
+import { FolderIcon, GitCommitIcon, GitWorktreeIcon, PlugIcon, TeachIcon, TerminalIcon } from './Icons'
 import { ResizablePanel } from './ui/ResizablePanel'
 import { logger } from '../utils/logger'
 import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
 import { useChatViewport } from '../features/chat/chatViewport'
+import { ErrorBoundary } from './ErrorBoundary'
 
 const SessionChangesPanel = lazy(() =>
   import('./SessionChangesPanel').then(module => ({ default: module.SessionChangesPanel })),
@@ -189,66 +183,68 @@ export const RightPanel = memo(function RightPanel({
       }
 
       return (
-        <>
-          {/* Keep files mounted so expanded folders and previews survive tab switches.
+        <ErrorBoundary variant="panel" scope="right-panel" resetKeys={[serverId, sessionId]}>
+          <>
+            {/* Keep files mounted so expanded folders and previews survive tab switches.
               切换服务器（serverId 变化）时重挂载：文件树展开/选中/预览整体重置，
               与单服务器模式切换工作区的"侧边栏整个变"体验一致 */}
-          <div className={activeTab.type === 'files' ? 'h-full' : 'hidden'}>
-            <Suspense fallback={<PanelFallback />}>
-              <FilesContent
-                key={serverId ?? 'default'}
-                activeTab={activeTab}
-                directory={normalizedDirectory}
-                isPanelResizing={isPanelResizing}
-                sessionId={sessionId}
-                serverId={serverId}
-              />
-            </Suspense>
-          </div>
-
-          {sessionId ? (
-            <div className={activeTab.type === 'changes' ? 'h-full' : 'hidden'}>
+            <div className={activeTab.type === 'files' ? 'h-full' : 'hidden'}>
               <Suspense fallback={<PanelFallback />}>
-                <ChangesContent
+                <FilesContent
                   key={serverId ?? 'default'}
                   activeTab={activeTab}
                   directory={normalizedDirectory}
-                  sessionId={sessionId}
                   isPanelResizing={isPanelResizing}
+                  sessionId={sessionId}
                   serverId={serverId}
                 />
               </Suspense>
             </div>
-          ) : activeTab.type === 'changes' ? (
-            <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
-              {t('rightPanel.noActiveSession')}
-            </div>
-          ) : null}
 
-          {activeTab.type === 'terminal' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <TerminalContent activeTab={activeTab} directory={normalizedDirectory} serverId={serverId} />
-            </Suspense>
-          ) : null}
+            {sessionId ? (
+              <div className={activeTab.type === 'changes' ? 'h-full' : 'hidden'}>
+                <Suspense fallback={<PanelFallback />}>
+                  <ChangesContent
+                    key={serverId ?? 'default'}
+                    activeTab={activeTab}
+                    directory={normalizedDirectory}
+                    sessionId={sessionId}
+                    isPanelResizing={isPanelResizing}
+                    serverId={serverId}
+                  />
+                </Suspense>
+              </div>
+            ) : activeTab.type === 'changes' ? (
+              <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
+                {t('rightPanel.noActiveSession')}
+              </div>
+            ) : null}
 
-          {activeTab.type === 'mcp' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <McpPanel isResizing={isPanelResizing} />
-            </Suspense>
-          ) : null}
+            {activeTab.type === 'terminal' ? (
+              <Suspense fallback={<PanelFallback />}>
+                <TerminalContent activeTab={activeTab} directory={normalizedDirectory} serverId={serverId} />
+              </Suspense>
+            ) : null}
 
-          {activeTab.type === 'skill' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <SkillPanel isResizing={isPanelResizing} />
-            </Suspense>
-          ) : null}
+            {activeTab.type === 'mcp' ? (
+              <Suspense fallback={<PanelFallback />}>
+                <McpPanel isResizing={isPanelResizing} />
+              </Suspense>
+            ) : null}
 
-          {activeTab.type === 'worktree' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <WorktreePanel isResizing={isPanelResizing} />
-            </Suspense>
-          ) : null}
-        </>
+            {activeTab.type === 'skill' ? (
+              <Suspense fallback={<PanelFallback />}>
+                <SkillPanel isResizing={isPanelResizing} />
+              </Suspense>
+            ) : null}
+
+            {activeTab.type === 'worktree' ? (
+              <Suspense fallback={<PanelFallback />}>
+                <WorktreePanel isResizing={isPanelResizing} />
+              </Suspense>
+            ) : null}
+          </>
+        </ErrorBoundary>
       )
     },
     [normalizedDirectory, sessionId, isPanelResizing, t, serverId, handleNewTerminal],

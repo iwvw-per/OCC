@@ -4,9 +4,8 @@ import { ToolPartView } from './ToolPartView'
 import { SessionNavigationContext } from '../../../contexts/SessionNavigationContext'
 import type { ToolPart } from '../../../types/message'
 
-const { getActiveCalibratedNowMock, useSessionStatusMock, useChildSessionStatusMock } = vi.hoisted(() => ({
+const { getActiveCalibratedNowMock, useChildSessionStatusMock } = vi.hoisted(() => ({
   getActiveCalibratedNowMock: vi.fn<() => number | undefined>(() => undefined),
-  useSessionStatusMock: vi.fn<() => { type: string } | undefined>(() => ({ type: 'busy' })),
   useChildSessionStatusMock: vi.fn<() => string | undefined>(() => undefined),
 }))
 
@@ -16,8 +15,6 @@ vi.mock('react-i18next', () => ({
       if (key === 'toolPart.running') return 'Running'
       if (key === 'toolPart.failed') return 'Failed'
       if (key === 'toolPart.interrupted') return 'Interrupted'
-      if (key === 'toolPart.maybeStuck') return 'Possibly stuck'
-      if (key === 'toolPart.abortStuck') return 'Abort session'
       return key
     },
   }),
@@ -44,10 +41,6 @@ vi.mock('../../../hooks/useTheme', () => ({
     immersiveMode: false,
     compactInlinePermission: false,
   }),
-}))
-
-vi.mock('../../../store/activeSessionStore', () => ({
-  useSessionStatus: useSessionStatusMock,
 }))
 
 vi.mock('../../../store/childSessionStore', () => ({
@@ -122,8 +115,6 @@ describe('ToolPartView running duration', () => {
     vi.setSystemTime(10_000)
     getActiveCalibratedNowMock.mockReset()
     getActiveCalibratedNowMock.mockReturnValue(undefined)
-    useSessionStatusMock.mockReset()
-    useSessionStatusMock.mockReturnValue({ type: 'busy' })
   })
 
   afterEach(() => {
@@ -179,59 +170,17 @@ describe('ToolPartView running duration', () => {
 
   it('shows an interrupted marker and duration for reconciled tool parts', () => {
     const part = createRunningToolPart()
-    part.state = { ...part.state, status: 'interrupted', metadata: { interrupted: true }, time: { start: 7_500, end: 10_000 } }
+    part.state = {
+      ...part.state,
+      status: 'interrupted',
+      metadata: { interrupted: true },
+      time: { start: 7_500, end: 10_000 },
+    }
 
     render(<ToolPartView part={part} />)
 
     expect(screen.getByText('Interrupted')).toBeInTheDocument()
     expect(screen.getByText('2.5s')).toBeInTheDocument()
-  })
-
-  it('does not flag a long-running tool while the session is still busy', () => {
-    getActiveCalibratedNowMock.mockReturnValue(7_500 + 60_000)
-    useSessionStatusMock.mockReturnValue({ type: 'busy' })
-
-    render(<ToolPartView part={createRunningToolPart()} />)
-
-    expect(screen.queryByText('Possibly stuck')).not.toBeInTheDocument()
-  })
-
-  it('flags a suspended tool once the session is no longer running', () => {
-    getActiveCalibratedNowMock.mockReturnValue(7_500 + 60_000)
-    useSessionStatusMock.mockReturnValue(undefined)
-
-    render(<ToolPartView part={createRunningToolPart()} />)
-
-    expect(screen.getByText('Possibly stuck')).toBeInTheDocument()
-    expect(screen.getByLabelText('Abort session')).toBeInTheDocument()
-  })
-
-  it('flags a busy session tool whose output has stalled', () => {
-    useSessionStatusMock.mockReturnValue({ type: 'busy' })
-    const part = createRunningToolPart()
-    part.state = { ...part.state, metadata: { output: 'building...' } }
-
-    render(<ToolPartView part={part} />)
-
-    act(() => {
-      vi.advanceTimersByTime(130_000)
-    })
-
-    expect(screen.getByText('Possibly stuck')).toBeInTheDocument()
-  })
-
-  it('does not flag a busy session tool whose output stalled below the threshold', () => {
-    useSessionStatusMock.mockReturnValue({ type: 'busy' })
-    const part = createRunningToolPart()
-    part.state = { ...part.state, metadata: { output: 'building...' } }
-
-    render(<ToolPartView part={part} />)
-
-    act(() => {
-      vi.advanceTimersByTime(60_000)
-    })
-
-    expect(screen.queryByText('Possibly stuck')).not.toBeInTheDocument()
   })
 })
 

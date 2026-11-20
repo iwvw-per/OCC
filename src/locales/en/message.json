@@ -46,9 +46,6 @@
     "running": "Running",
     "failed": "Failed",
     "interrupted": "Interrupted",
-    "maybeStuck": "Possibly stuck",
-    "abortStuck": "Abort session",
-    "moveToBackground": "Move to background (keep running)",
     "toolFailed": "Tool failed"
   },
   "toolSteps": {

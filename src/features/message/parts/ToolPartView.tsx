@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { diffLines } from 'diff'
 import { DisclosureRow } from '../../../components/ui/DisclosureRow'
 import { NativeTooltip } from '../../../components/ui/Tooltip'
-import { StopIcon, TaskDoneIcon, ChevronDownIcon } from '../../../components/Icons'
+import { StopIcon, TaskDoneIcon } from '../../../components/Icons'
 import { ToolParamChip } from './ToolParamChip'
 import type { ToolPart } from '../../../types/message'
 import { isSubagentToolName, getSubagentSessionId, isBackgroundSubagentOutput } from '../subagentUtils'
@@ -13,9 +13,8 @@ import { useMinDurationActive } from '../../../hooks/useMinDurationActive'
 import { serverStore } from '../../../store/serverStore'
 import { childSessionStore, useChildSessionStatus } from '../../../store/childSessionStore'
 import { messageStore } from '../../../store/messageStore'
-import { useSessionStatus } from '../../../store/activeSessionStore'
 import { useSessionNavigation } from '../../../contexts/SessionNavigationContext'
-import { abortSession, backgroundSessionTools } from '../../../api'
+import { abortSession } from '../../../api'
 import { makeSessionKey, splitSessionKey } from '../../../utils/sessionKey'
 import { useTheme } from '../../../hooks/useTheme'
 import { formatToolName, formatDuration } from '../../../utils/formatUtils'
@@ -47,20 +46,6 @@ import { getToolTitle } from './toolTitle'
 // ToolPartView - 单个工具调用
 // ============================================
 
-/**
- * 「可能卡住」判定：不看是否收到完成事件，而看任务本身是否还在运行/产出。
- *
- * 旧实现只看 part 停在 running 的时长，长命令（如构建）只要没回完成事件就误报。
- * 现在综合两个信号：
- * - 会话是否还在运行（busy/retry）：会话已停但仍 active，说明 part 悬空；
- * - 工具是否还在产出（输出内容仍在变化）：仍在产出则不算卡住。
- *
- * 会话已停：active 超过 STUCK_TOOL_THRESHOLD_MS 即提示。
- * 会话仍在运行：此前有输出、但停更超过 STUCK_TOOL_STALL_MS 才提示，
- * 避免对「还在跑但暂无输出」的长命令误报。
- */
-const STUCK_TOOL_THRESHOLD_MS = 60_000
-const STUCK_TOOL_STALL_MS = 120_000
 /** 工具耗时不可能超过 30 天；超过说明 start 是坏值（0 或单位错），视为缺失，避免「两万天」读数。 */
 const MAX_TOOL_DURATION_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -151,28 +136,6 @@ export const ToolPartView = memo(function ToolPartView({
         ? Math.max(0, rawDuration)
         : rawDuration
 
-  // 会话是否还在运行（busy/retry）。会话已停但 part 仍 active，即为悬空。
-  const sessionStatus = useSessionStatus(part.sessionID)
-  const sessionRunning = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry'
-
-  // 任务是否还在产出：运行态输出在 metadata.output，完成后在 state.output。
-  const progressOutput = state.output ?? (state.metadata?.output as string | undefined)
-  const [lastProgress, setLastProgress] = useState(() => ({ output: progressOutput ?? '', at: Date.now() }))
-  useEffect(() => {
-    if ((progressOutput ?? '') !== lastProgress.output) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 输出变化时刷新停更计时基准
-      setLastProgress({ output: progressOutput ?? '', at: Date.now() })
-    }
-  }, [progressOutput, lastProgress.output])
-  // 有输出但停更的时长；从未有过输出时返回 undefined，退回「会话是否运行」判断。
-  const stalledFor = progressOutput ? now - lastProgress.at : undefined
-
-  const isStuck =
-    isActive &&
-    duration !== undefined &&
-    (sessionRunning
-      ? stalledFor !== undefined && stalledFor >= STUCK_TOOL_STALL_MS
-      : duration >= STUCK_TOOL_THRESHOLD_MS)
   const { inlineToolRequests, immersiveMode, compactInlinePermission } = useTheme()
 
   const { pendingPermissions, pendingQuestions, onPermissionReply, onQuestionReply, onQuestionReject, isReplying } =
@@ -373,67 +336,6 @@ export const ToolPartView = memo(function ToolPartView({
       </NativeTooltip>
     ) : null
 
-  // 非 task 工具卡住时没有单工具中止接口，只能中止整个会话；task 走上面的子会话 Stop。
-  const handleAbortStuck = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      if (!currentSessionId) return
-      const { serverId } = splitSessionKey(currentSessionId)
-      const state = messageStore.getSessionState(currentSessionId)
-      void abortSession(currentSessionId, state?.directory || '', serverId || undefined)
-    },
-    [currentSessionId],
-  )
-
-  /**
-   * 把卡住的工具转入后台（v2 session.background）。
-   *
-   * 比 abortSession 温和得多：工具继续跑，会话立刻可以继续下一轮。
-   * 之前用户面对卡住的工具只有「中止整个会话」一条路，代价是这一轮全废。
-   */
-  const handleBackgroundStuck = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      if (!currentSessionId) return
-      const { serverId } = splitSessionKey(currentSessionId)
-      const state = messageStore.getSessionState(currentSessionId)
-      void backgroundSessionTools(currentSessionId, state?.directory || '', serverId || undefined).catch(() => {})
-    },
-    [currentSessionId],
-  )
-  const stuckHint = isStuck ? (
-    <span className="flex items-center gap-1 shrink-0 text-ui-xs font-medium text-warning-100">
-      {t('toolPart.maybeStuck')}
-      {!taskStopButton && (
-        <>
-          {/* 转后台：比「中止整个会话」温和得多 —— 工具继续跑，会话可以立刻继续 */}
-          <NativeTooltip>
-            <button
-              type="button"
-              onClick={handleBackgroundStuck}
-              aria-label={t('toolPart.moveToBackground')}
-              title={t('toolPart.moveToBackground')}
-              className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-accent-main-100 hover:bg-accent-main-100/10 active:bg-accent-main-100/20 rounded-sm transition-colors bg-transparent border-none"
-            >
-              <ChevronDownIcon size={10} />
-            </button>
-          </NativeTooltip>
-          <NativeTooltip>
-            <button
-              type="button"
-              onClick={handleAbortStuck}
-              aria-label={t('toolPart.abortStuck')}
-              title={t('toolPart.abortStuck')}
-              className="w-[18px] h-[18px] p-0 flex items-center justify-center text-warning-100 hover:text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20 rounded-sm transition-colors bg-transparent border-none"
-            >
-              <StopIcon size={10} />
-            </button>
-          </NativeTooltip>
-        </>
-      )}
-    </span>
-  ) : null
-
   const handleFullscreenChange = useCallback((isFullscreen: boolean) => {
     setIsChildFullscreen(isFullscreen)
   }, [])
@@ -519,7 +421,6 @@ export const ToolPartView = memo(function ToolPartView({
           }
           meta={
             <>
-              {stuckHint}
               {isInterrupted && (
                 <span className="shrink-0 text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
               )}
@@ -576,7 +477,6 @@ export const ToolPartView = memo(function ToolPartView({
             }
             meta={
               <>
-                {stuckHint}
                 {isInterrupted && (
                   <span className="text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
                 )}
@@ -654,7 +554,6 @@ export const ToolPartView = memo(function ToolPartView({
           meta={
             <>
               {taskStopButton}
-              {stuckHint}
               {isInterrupted && (
                 <span className="text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
               )}
