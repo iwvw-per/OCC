@@ -223,6 +223,7 @@ export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProp
           transition: 'all 150ms ease-out',
         }}
         onClick={e => e.stopPropagation()}
+        data-haptic="none"
       >
         {/* Search Input */}
         <div className="relative flex items-center gap-3 px-4">

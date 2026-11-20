@@ -165,3 +165,111 @@ export const interactive = {
    */
   toggleActiveNeutral: 'bg-bg-200 text-text-100 border border-border-200',
 } as const
+
+/**
+ * 「可点元素」选择器:供 document 级行为(触觉反馈 / 按下反馈)共用。
+ *
+ * 与 `interactive.*` 的分工:`interactive.*` 是给 className 的视觉词汇表,
+ * 这里是给 DOM 查询的结构选择器 —— 两者覆盖的语义一致,但用法不同,故同放
+ * 本文件,避免两处各自维护一份逐渐分叉的列表。
+ *
+ * 末尾的 `[data-haptic]` 让显式标注过的元素(含自定义行)也进入可点范围。
+ */
+export const PRESSABLE_SELECTOR = [
+  'button',
+  '[role="button"]',
+  '[role="menuitem"]',
+  '[role="menuitemradio"]',
+  '[role="menuitemcheckbox"]',
+  '[role="option"]',
+  '[role="tab"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  'a[href]',
+  'label[for]',
+  'summary',
+  '[data-haptic]',
+].join(',')
+
+export type PressStrength = 'light' | 'medium' | 'strong'
+
+export interface PressTarget {
+  /** 应当高亮 / 触发触觉的元素 */
+  element: HTMLElement
+  /** 语义级别;未显式标注时为 light */
+  strength: PressStrength
+}
+
+// React 把组件 props 挂到宿主节点上,键名形如 `__reactProps$<随机串>`;
+// 借此识别「自带 onClick 的无标签元素」(列表行、自定义行等)。
+// 这是对 React 内部实现的依赖:取不到时下面的 hasReactClickHandler 返回 false,
+// 退化为仅按 PRESSABLE_SELECTOR 判定,不会报错。
+const REACT_PROPS_PREFIX = '__reactProps$'
+
+// 从触点上溯的层数上限,避免为了找祖先一路走到 document 级容器。
+const MAX_ANCESTOR_WALK = 16
+
+const STRENGTH_WORDS: readonly PressStrength[] = ['light', 'medium', 'strong']
+
+function hasReactClickHandler(element: HTMLElement): boolean {
+  for (const key of Object.keys(element)) {
+    if (!key.startsWith(REACT_PROPS_PREFIX)) continue
+    const props = (element as unknown as Record<string, unknown>)[key]
+    if (!props || typeof props !== 'object') continue
+    const record = props as Record<string, unknown>
+    return typeof record.onClick === 'function' || typeof record.onClickCapture === 'function'
+  }
+  return false
+}
+
+function isDisabledElement(element: HTMLElement): boolean {
+  return element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true'
+}
+
+/**
+ * 从触点向上找到「最近的可点元素」及其语义级别。
+ *
+ * 逐层判定,首个命中者胜出:
+ *   1. `data-haptic="none"` —— 显式声明此处不参与(返回 null,连按下高亮也一并关掉);
+ *   2. `data-haptic="light|medium|strong"` —— 显式级别;
+ *   3. 命中 PRESSABLE_SELECTOR,或宿主节点自带 React onClick —— 默认 light。
+ *
+ * 「逐层首个命中」保证了祖先上的 `data-haptic="none"`(如整块面板的焦点区)
+ * 只会挡住「点到空白处」,不会影响其后代里真正的按钮 / 行 —— 它们会更早命中。
+ */
+function findPressTarget(target: EventTarget | null): PressTarget | null {
+  if (typeof document === 'undefined') return null
+  if (!(target instanceof Element)) return null
+
+  let element: Element | null = target
+  for (let depth = 0; element && element !== document.body && depth < MAX_ANCESTOR_WALK; depth += 1) {
+    if (element instanceof HTMLElement) {
+      const declared = element.getAttribute('data-haptic')
+      if (declared === 'none') return null
+      const matches = element.matches(PRESSABLE_SELECTOR) || hasReactClickHandler(element)
+      if (matches) {
+        if (isDisabledElement(element)) return null
+        return { element, strength: STRENGTH_WORDS.find(word => word === declared) ?? 'light' }
+      }
+    }
+    element = element.parentElement
+  }
+  return null
+}
+
+/**
+ * 触摸按下时,找出应当高亮的「最近可点祖先」。
+ *
+ * 只处理 touch:鼠标 / 触控笔有自己的 hover 与 `:active`,不需要这层覆盖。
+ * 禁用元素不返回,避免给出「可点」的错误暗示。
+ */
+export function resolvePressTarget(target: EventTarget | null, pointerType: string): PressTarget | null {
+  if (pointerType !== 'touch') return null
+  return findPressTarget(target)
+}
+
+/** click 触觉反馈用:不区分指针类型(由调用方决定是否启用)。 */
+export function resolveHapticTarget(target: EventTarget | null): PressTarget | null {
+  return findPressTarget(target)
+}

@@ -310,6 +310,7 @@ export function Dialog({
       }}
       onPointerDown={handleBackdropPointerDown}
       onClick={handleBackdropClick}
+      data-haptic="none"
     >
       <div
         className={`absolute inset-x-0 bottom-0 flex items-center justify-center ${
@@ -323,6 +324,7 @@ export function Dialog({
           handleBackdropClick(e)
           e.stopPropagation()
         }}
+        data-haptic="none"
       >
         {/* Dialog Panel */}
         <div

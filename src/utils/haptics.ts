@@ -35,17 +35,18 @@ export function hapticsSupported(): boolean {
 }
 
 // 每档的时长与振幅（振幅 1-255，仅原生桥支持）。pattern 为 [震动, 间隔, 震动…]。
+// 基线整体上扬:马达响应偏钝,原先 8/16ms、振幅 80/140 在真机上几乎察觉不到。
 const STRENGTH_PROFILE: Record<HapticStrength, { durations: number[]; amplitudes: number[]; fallbackMs: number }> = {
-  light: { durations: [8], amplitudes: [80], fallbackMs: 8 },
-  medium: { durations: [16], amplitudes: [140], fallbackMs: 16 },
-  strong: { durations: [22, 30, 22], amplitudes: [200, 0, 200], fallbackMs: 30 },
+  light: { durations: [12], amplitudes: [130], fallbackMs: 12 },
+  medium: { durations: [22], amplitudes: [175], fallbackMs: 22 },
+  strong: { durations: [30, 34, 30], amplitudes: [220, 0, 220], fallbackMs: 40 },
 }
 
 // 全局强度档对「时长」与「振幅」的缩放系数。时长向下取整后至少保留 1ms。
 const INTENSITY_SCALE: Record<HapticIntensity, { duration: number; amplitude: number }> = {
-  subtle: { duration: 0.6, amplitude: 0.5 },
+  subtle: { duration: 0.7, amplitude: 0.6 },
   standard: { duration: 1, amplitude: 1 },
-  strong: { duration: 1.4, amplitude: 1.3 },
+  strong: { duration: 1.3, amplitude: 1.2 },
 }
 
 function scaleProfile(

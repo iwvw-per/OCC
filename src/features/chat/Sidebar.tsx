@@ -377,6 +377,7 @@ export const Sidebar = memo(function Sidebar({
             height: 'calc(100% - var(--overlay-safe-top, 0px) - var(--desktop-titlebar-height, 0px))',
           }}
           onClick={handleBackdropClick}
+          data-haptic="none"
         />
 
         <div

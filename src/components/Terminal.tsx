@@ -1132,6 +1132,7 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
               focusTerminal()
             }
           }}
+          data-haptic="none"
           onTouchEnd={e => {
             if (terminalRef.current && e.target === containerRef.current) {
               focusTerminal()

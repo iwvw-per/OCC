@@ -9,6 +9,20 @@ import {
 } from 'react'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { cn } from '../../utils/cn'
+import { useInputCapabilities } from '../../hooks/useInputCapabilities'
+
+/**
+ * 触摸端不展示自绘提示。
+ *
+ * Radix 的气泡在 Trigger 聚焦时就会打开,而触摸设备「一戳即 focus」——提示
+ * 既不是用户主动触发、又容易停在屏幕上不消失。触摸端(preferTouchUi)因此
+ * 直接渲染 children,不建立任何 Tooltip 结构。
+ *
+ * 判定与全局一致:能 hover 的设备(含带鼠标的触屏笔记本)照常显示。
+ */
+function useTooltipsDisabledOnTouch(): boolean {
+  return useInputCapabilities().preferTouchUi
+}
 
 /**
  * Tooltip - 悬浮提示
@@ -109,7 +123,8 @@ export function Tooltip({
   delayDuration = 300,
   className,
 }: TooltipProps) {
-  if (!content) return <>{children}</>
+  const touchDisabled = useTooltipsDisabledOnTouch()
+  if (!content || touchDisabled) return <>{children}</>
   return (
     <TooltipRootScoped delayDuration={delayDuration}>
       <TooltipRoot delayDuration={delayDuration}>
@@ -158,7 +173,9 @@ export function HintTooltip({
   onOpenChange,
   children,
 }: HintTooltipProps) {
+  const touchDisabled = useTooltipsDisabledOnTouch()
   const hasDescription = description !== undefined && description !== null && description !== ''
+  if (touchDisabled) return <>{children}</>
   return (
     <TooltipRootScoped delayDuration={delayDuration}>
       <TooltipRoot open={open} onOpenChange={onOpenChange} delayDuration={delayDuration}>
@@ -213,8 +230,12 @@ export interface NativeTooltipProps {
  * 也无需手动搬运 title 文案。title 为空时原样渲染子元素。
  */
 export function NativeTooltip({ children, description, shortcut, side, align, delayDuration }: NativeTooltipProps) {
+  const touchDisabled = useTooltipsDisabledOnTouch()
   const title = children.props.title
   if (!title) return children
+  // 触摸端不建 Tooltip,但要保留「去掉原生 title」这一步:否则气泡没了,
+  // 长按却弹出浏览器原生 title 提示,与自绘提示的意图不一致。
+  if (touchDisabled) return cloneElement(children, { title: undefined })
   return (
     <HintTooltip
       title={title}

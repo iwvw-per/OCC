@@ -431,6 +431,7 @@ const MermaidZoomableSurface = memo(function MermaidZoomableSurface({
       tabIndex={preferTouchUi ? 0 : undefined}
       onClick={preferTouchUi ? handleContainerClick : undefined}
       onBlur={preferTouchUi ? handleContainerBlur : undefined}
+      data-haptic="none"
     >
       <div
         className={`absolute right-2 top-2 z-10 flex items-center gap-1 opacity-0 transition-opacity group-hover/mermaid:opacity-100 group-focus-within/mermaid:opacity-100 ${preferTouchUi ? '[@media(hover:none)]:opacity-0' : '[@media(hover:none)]:opacity-100'}`}
@@ -1307,6 +1308,7 @@ function HtmlPreviewSurface({
       style={style}
       tabIndex={preferTouchUi ? 0 : undefined}
       onClick={preferTouchUi ? handleClick : undefined}
+      data-haptic="none"
     >
       <NativeTooltip>
         <button

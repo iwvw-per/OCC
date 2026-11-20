@@ -969,6 +969,23 @@ body {
 }
 
 /* ============================================
+ * 触摸端按下反馈(press feedback)
+ * ============================================
+ * 触摸没有 hover、`:active` 又常常看不见,列表项点下去毫无反应。由
+ * useGlobalPressFeedback 在 pointerdown(touch) 时给最近的「可点祖先」打上
+ * data-pressed,抬起 / 移动 / 滚动 / 取消时移除。样式集中在这一条规则里。
+ *
+ * 用 inset box-shadow 叠一层底色,而不是改 background-color:
+ *   - 不改布局(不引入 active:scale 那类位移,见 utils/interaction 约定 1);
+ *   - 属性与 Tailwind 的 bg-* / ring-* 不同,不靠优先级打架;`!important`
+ *     仅用于保证在被 shadow-* / ring-* 占用 box-shadow 的元素上也压得住;
+ *   - 覆盖在元素背景之上、内容之下,文字与图标仍清晰。
+ */
+[data-pressed='true'] {
+  box-shadow: inset 0 0 0 9999px hsl(var(--bg-300) / 0.55) !important;
+}
+
+/* ============================================
  * Input Textarea + Overlay - 共享样式确保完全对齐
  * ============================================ */
 

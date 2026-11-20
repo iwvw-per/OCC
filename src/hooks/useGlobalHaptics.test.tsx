@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react'
+import { render, renderHook, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useGlobalHaptics } from './useGlobalHaptics'
 
@@ -71,5 +71,38 @@ describe('useGlobalHaptics', () => {
     document.body.appendChild(button)
     clickOn(button)
     expect(hapticTapMock).not.toHaveBeenCalled()
+  })
+
+  it('fires for a custom row whose host node carries a React onClick', () => {
+    renderHook(() => useGlobalHaptics(true))
+    render(
+      <div onClick={() => {}}>
+        <span>row label</span>
+      </div>,
+    )
+    clickOn(screen.getByText('row label'))
+    expect(hapticTapMock).toHaveBeenCalledWith('light')
+  })
+
+  it('honors a data-haptic="none" zone around a plain node', () => {
+    renderHook(() => useGlobalHaptics(true))
+    render(
+      <div data-haptic="none" onClick={() => {}}>
+        <span>pane</span>
+      </div>,
+    )
+    clickOn(screen.getByText('pane'))
+    expect(hapticTapMock).not.toHaveBeenCalled()
+  })
+
+  it('still fires for a button nested inside a data-haptic="none" zone', () => {
+    renderHook(() => useGlobalHaptics(true))
+    render(
+      <div data-haptic="none" onClick={() => {}}>
+        <button type="button">inside</button>
+      </div>,
+    )
+    clickOn(screen.getByText('inside'))
+    expect(hapticTapMock).toHaveBeenCalledWith('light')
   })
 })

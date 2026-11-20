@@ -22,7 +22,7 @@ describe('haptics', () => {
 
     hapticTap('strong')
 
-    expect(vibratePattern).toHaveBeenCalledWith('22,30,22', '200,0,200')
+    expect(vibratePattern).toHaveBeenCalledWith('30,34,30', '220,0,220')
     expect(vibrate).not.toHaveBeenCalled()
   })
 
@@ -32,7 +32,7 @@ describe('haptics', () => {
 
     hapticTap('medium')
 
-    expect(vibrate).toHaveBeenCalledWith(16)
+    expect(vibrate).toHaveBeenCalledWith(22)
   })
 
   it('uses the W3C Vibration API when no bridge exists', () => {
@@ -41,7 +41,7 @@ describe('haptics', () => {
 
     hapticTap('light')
 
-    expect(vibrate).toHaveBeenCalledWith(8)
+    expect(vibrate).toHaveBeenCalledWith(12)
   })
 
   it('does nothing when the toggle is off', () => {
@@ -66,11 +66,11 @@ describe('haptics', () => {
 
     hapticStore.setIntensity('strong')
     hapticTap('medium')
-    expect(vibratePattern).toHaveBeenLastCalledWith('22', '182')
+    expect(vibratePattern).toHaveBeenLastCalledWith('29', '210')
 
     hapticStore.setIntensity('subtle')
     hapticTap('medium')
-    expect(vibratePattern).toHaveBeenLastCalledWith('10', '70')
+    expect(vibratePattern).toHaveBeenLastCalledWith('15', '105')
   })
 
   it('scales the Vibration API fallback duration by intensity', () => {
@@ -79,6 +79,6 @@ describe('haptics', () => {
 
     hapticStore.setIntensity('subtle')
     hapticTap('light')
-    expect(vibrate).toHaveBeenLastCalledWith(5)
+    expect(vibrate).toHaveBeenLastCalledWith(8)
   })
 })

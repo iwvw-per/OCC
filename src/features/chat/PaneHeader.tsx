@@ -173,6 +173,7 @@ export function PaneHeader({
       }`}
       onClick={onFocus}
       onPointerDown={handlePointerDragStart}
+      data-haptic="none"
     >
       {/* Left: Title */}
       <div className="flex items-center min-w-0 flex-1">

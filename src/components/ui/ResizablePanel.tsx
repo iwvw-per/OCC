@@ -275,6 +275,7 @@ export const ResizablePanel = memo(function ResizablePanel({
             `}
             style={position === 'right' ? { top: 'calc(var(--overlay-safe-top, 0px) + var(--desktop-titlebar-height, 0px))', left: 0, right: 0, bottom: 0 } : undefined}
             onClick={onClose}
+            data-haptic="none"
           />
         )}
 
