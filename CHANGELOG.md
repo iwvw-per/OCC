@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.2.7] - 2026-11-20
+
+- feat: scoped error boundaries, defer lazy dialogs, dedupe background subagents (de086299)
+
 ## [v2.0.69] - 2026-11-11
 
 - fix(chat): **撤销后消息立刻恢复、无法编辑**（回归修复）。上一版按「stage 只是暂存、commit 才持久化」的理解给 `nativeRevertMessage` 补了 `revert.commit`，实测与官方源码都表明这是反的：`stage` 会把回退点写进 `session.revert` 并回滚文件快照（**撤销态本身就是持久化的**，stage 后 `GET /api/session` 立刻能读到 revert）；而 `commit` 在 `projector.ts` 里会 `delete from SessionMessage where seq >= boundary.seq` 并 `setSession(..., { revert: null })` —— **物理删消息并清空撤销态**。撤销态一没了，任何一次 `setMessages` 都会把本地 revert 清空，界面就退回发送态。现在只 stage、不 commit。真实服务端对照：只 stage → revert 连续 3 次读取稳定、消息保留；stage+commit → revert 变 null、6 条消息被删到只剩 3 条
