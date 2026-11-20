@@ -377,7 +377,7 @@ function QuestionItem({
             onClick={() => (isMultiple ? onToggleCustom() : onSelectCustom())}
             data-haptic="light"
             className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-colors cursor-pointer ${
-              isCustomEnabled ? 'border-text-100 bg-bg-200' : 'border-border-200/50 hover:bg-bg-200'
+              isCustomEnabled ? 'border-text-100 bg-bg-200' : 'border-border-200/50 hover:bg-bg-200 active:bg-bg-300'
             }`}
           >
             <div className="pt-0.5">

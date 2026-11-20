@@ -1,6 +1,6 @@
 {
   "name": "occ",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "description": "A third-party web frontend for OpenCode",
   "license": "GPL-3.0-only",
   "type": "module",

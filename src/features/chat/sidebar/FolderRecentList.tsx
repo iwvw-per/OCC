@@ -1016,7 +1016,7 @@ function FolderRecentSection({
                 // 点击/展开反馈走 transition-colors，与 interactive 词汇表一致；
                 // 再叠一个 150ms 的箭头旋转（见下方 ChevronDownIcon），
                 // 让"点了一下"有明确反馈而不是瞬变。
-                'transition-colors duration-150 active:bg-bg-200/60 active:duration-75',
+                'transition-colors duration-150',
               )}
             >
               {/* hover 时图标淡出、展开/收起箭头淡入（两者叠放做交叉淡入淡出）。

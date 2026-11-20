@@ -327,7 +327,7 @@ export const ContentBlock = memo(function ContentBlock({
       {/* Header */}
       <div
         className={`flex items-center gap-2 px-3 h-8 select-none transition-colors ${
-          canCollapse ? 'cursor-pointer' : ''
+          canCollapse ? 'cursor-pointer active:bg-bg-300' : ''
         } ${headerClass}`}
         onClick={canCollapse ? () => setCachedCollapsed(!collapsed) : undefined}
         data-haptic={canCollapse ? 'light' : undefined}

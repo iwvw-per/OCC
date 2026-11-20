@@ -167,15 +167,19 @@ export const interactive = {
 } as const
 
 /**
- * 「可点元素」选择器:供 document 级行为(触觉反馈 / 按下反馈)共用。
+ * 「可点元素」选择器:供触觉反馈判定使用。
  *
- * 与 `interactive.*` 的分工:`interactive.*` 是给 className 的视觉词汇表,
- * 这里是给 DOM 查询的结构选择器 —— 两者覆盖的语义一致,但用法不同,故同放
- * 本文件,避免两处各自维护一份逐渐分叉的列表。
+ * 与 `interactive.*` 的分工:`interactive.*` 是给 className 的视觉词汇表
+ * (hover / active 的按下反馈),这里是给 DOM 查询的结构选择器 —— 两者覆盖的
+ * 语义一致,但用法不同,故同放本文件,避免两处各自维护一份逐渐分叉的列表。
  *
  * 末尾的 `[data-haptic]` 让显式标注过的元素(含自定义行)也进入可点范围。
  * 无标签的自定义行(div / span)必须显式标注 `data-haptic`;不要改成探测
  * React 事件 props —— 内容容器上的委托点击会被误判成可点。
+ *
+ * 注意:这里只负责「是否震动」。按下高亮一律走各组件自身的 `:active`
+ * (interactive.* 词汇表),不要再叠一层全局高亮 —— 两套并存时,嵌套元素会
+ * 同时出现祖先的 active 底色与子元素的高亮,表现为「点一下出现两个样式」。
  */
 export const PRESSABLE_SELECTOR = [
   'button',
@@ -194,16 +198,16 @@ export const PRESSABLE_SELECTOR = [
   '[data-haptic]',
 ].join(',')
 
-export type PressStrength = 'light' | 'medium' | 'strong'
+export type HapticStrengthWord = 'light' | 'medium' | 'strong'
 
-export interface PressTarget {
-  /** 应当高亮 / 触发触觉的元素 */
+export interface HapticTarget {
+  /** 触发触觉的元素 */
   element: HTMLElement
   /** 语义级别;未显式标注时为 light */
-  strength: PressStrength
+  strength: HapticStrengthWord
 }
 
-const STRENGTH_WORDS: readonly PressStrength[] = ['light', 'medium', 'strong']
+const STRENGTH_WORDS: readonly HapticStrengthWord[] = ['light', 'medium', 'strong']
 
 function isDisabledElement(element: HTMLElement): boolean {
   return element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true'
@@ -213,15 +217,15 @@ function isDisabledElement(element: HTMLElement): boolean {
  * 从触点向上找到「最近的可点元素」及其语义级别。
  *
  * 逐层判定,首个命中者胜出:
- *   1. `data-haptic="none"` —— 显式声明此处不参与(返回 null,连按下高亮也一并关掉);
+ *   1. `data-haptic="none"` —— 显式声明此处不参与(返回 null);
  *   2. `data-haptic="light|medium|strong"` —— 显式级别;
  *   3. 命中 PRESSABLE_SELECTOR(原生标签 / ARIA 角色 / 显式标注)—— 默认 light。
  *
  * 只认「元素自身是可点控件」,不去探测 React 事件 props:委托式的 onClick
- * (文档正文根、消息列表根等)会让「点背景 / 点任意文本」都产生反馈。
+ * (文档正文根、消息列表根等)会让「点背景 / 点任意文本」都震动。
  * 自定义的无标签行请在根节点标 `data-haptic`,由上一档规则接管。
  */
-function findPressTarget(target: EventTarget | null): PressTarget | null {
+function findHapticTarget(target: EventTarget | null): HapticTarget | null {
   if (typeof document === 'undefined') return null
   if (!(target instanceof Element)) return null
 
@@ -240,18 +244,7 @@ function findPressTarget(target: EventTarget | null): PressTarget | null {
   return null
 }
 
-/**
- * 触摸按下时,找出应当高亮的「最近可点祖先」。
- *
- * 只处理 touch:鼠标 / 触控笔有自己的 hover 与 `:active`,不需要这层覆盖。
- * 禁用元素不返回,避免给出「可点」的错误暗示。
- */
-export function resolvePressTarget(target: EventTarget | null, pointerType: string): PressTarget | null {
-  if (pointerType !== 'touch') return null
-  return findPressTarget(target)
-}
-
-/** click 触觉反馈用:不区分指针类型(由调用方决定是否启用)。 */
-export function resolveHapticTarget(target: EventTarget | null): PressTarget | null {
-  return findPressTarget(target)
+/** click 触觉反馈用:找出应当震动的元素与级别(由调用方决定是否启用)。 */
+export function resolveHapticTarget(target: EventTarget | null): HapticTarget | null {
+  return findHapticTarget(target)
 }

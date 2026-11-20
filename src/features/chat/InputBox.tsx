@@ -1788,7 +1788,7 @@ function InputBoxComponent({
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 className={`bg-bg-100 rounded-2xl relative overflow-hidden focus-within:outline-none shadow-lg ${
-                  isCollapsed ? 'pointer-events-auto' : ''
+                  isCollapsed ? 'pointer-events-auto active:bg-bg-200' : ''
                 } ${
                   isDragging || isInternalFileDragging
                     ? 'border border-accent-main-100 ring-2 ring-accent-main-100/30'

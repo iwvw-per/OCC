@@ -370,7 +370,7 @@ function InlineQuestionItem({
           }}
           data-haptic="light"
           className={`flex min-h-7 items-start gap-1.5 rounded-md px-2.5 py-1 transition-colors ${
-            isCustomEnabled ? 'bg-bg-200' : 'hover:bg-bg-200'
+            isCustomEnabled ? 'bg-bg-200' : 'hover:bg-bg-200 active:bg-bg-300'
           }`}
         >
           {isMultiple && (

@@ -164,7 +164,7 @@ export function SettingRow({
         // 行自带边框而非由容器 divide-y，是因为 SettingRow/SettingField 是
         // 独立组件，容器拿不到它们的数量。
         'w-full border-t border-border-200/40 px-4 py-3 first:border-t-0',
-        onClick && !disabled ? 'cursor-pointer' : '',
+        onClick && !disabled ? 'cursor-pointer active:bg-bg-300' : '',
         disabled ? 'opacity-55' : '',
         className,
       )}

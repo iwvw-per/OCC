@@ -10,7 +10,6 @@ import { BottomPanel } from './components/BottomPanel'
 import { DesktopTitlebar } from './components/DesktopTitlebar'
 import { useDirectory, useGlobalEvents, useGlobalKeybindings, useRouter } from './hooks'
 import { useGlobalHaptics } from './hooks/useGlobalHaptics'
-import { useGlobalPressFeedback } from './hooks/useGlobalPressFeedback'
 import { useInputCapabilities } from './hooks/useInputCapabilities'
 import { useViewportHeight } from './hooks/useViewportHeight'
 import { useWakeLock } from './hooks/useWakeLock'
@@ -163,9 +162,6 @@ function App() {
   // 仅在触摸优先设备启用，桌面/混合设备不震。
   const { preferTouchUi } = useInputCapabilities()
   useGlobalHaptics(preferTouchUi)
-  // 触摸端全局「按下」高亮:列表项 / 菜单项点下去有即时反馈,
-  // 与触觉反馈同一批可点元素(见 useGlobalPressFeedback)。
-  useGlobalPressFeedback(preferTouchUi)
 
   const activeDirectories = useMemo(
     () =>

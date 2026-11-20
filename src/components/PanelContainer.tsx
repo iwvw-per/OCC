@@ -580,7 +580,7 @@ const PanelTabButton = memo(function PanelTabButton({
         group flex items-center gap-1.5 px-2 py-1 rounded-md text-ui-caption shrink-0
         border border-transparent cursor-pointer select-none
         transition-all duration-150 ease-out
-        ${isActive ? 'bg-bg-000 text-text-100 shadow-sm border-border-200/50' : 'text-text-300 hover:bg-bg-200'}
+        ${isActive ? 'bg-bg-000 text-text-100 shadow-sm border-border-200/50' : 'text-text-300 hover:bg-bg-200 active:bg-bg-300'}
         ${isDragging ? 'opacity-40 scale-95' : ''}
         ${isDragOver ? 'border-accent-main-100 bg-accent-main-100/10' : ''}
       `}

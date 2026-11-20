@@ -26,8 +26,8 @@ export const ContextMenuItem = forwardRef<HTMLButtonElement, ContextMenuItemProp
         'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left',
         'text-ui-caption transition-colors duration-150',
         tone === 'danger'
-          ? 'text-danger-100 hover:bg-danger-100/10'
-          : 'text-text-200 hover:bg-bg-200',
+          ? 'text-danger-100 hover:bg-danger-100/10 active:bg-danger-100/20'
+          : 'text-text-200 hover:bg-bg-200 active:bg-bg-300',
         disabled && 'cursor-not-allowed opacity-40 hover:bg-transparent hover:text-text-200',
         className,
       )}

@@ -1,24 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { resolveHapticTarget, resolvePressTarget } from './interaction'
+import { resolveHapticTarget } from './interaction'
 
-describe('resolvePressTarget', () => {
-  it('finds the nearest pressable ancestor for touch and defaults to light', () => {
+describe('resolveHapticTarget', () => {
+  it('finds the nearest pressable ancestor and defaults to light', () => {
     const outer = document.createElement('button')
     const inner = document.createElement('span')
     outer.appendChild(inner)
     document.body.appendChild(outer)
 
-    expect(resolvePressTarget(inner, 'touch')).toEqual({ element: outer, strength: 'light' })
-
-    document.body.innerHTML = ''
-  })
-
-  it('ignores non-touch pointer types', () => {
-    const button = document.createElement('button')
-    document.body.appendChild(button)
-
-    expect(resolvePressTarget(button, 'mouse')).toBeNull()
-    expect(resolvePressTarget(button, 'pen')).toBeNull()
+    expect(resolveHapticTarget(inner)).toEqual({ element: outer, strength: 'light' })
 
     document.body.innerHTML = ''
   })
@@ -27,19 +17,31 @@ describe('resolvePressTarget', () => {
     const button = document.createElement('button')
     button.setAttribute('disabled', '')
     document.body.appendChild(button)
-    expect(resolvePressTarget(button, 'touch')).toBeNull()
+    expect(resolveHapticTarget(button)).toBeNull()
 
     const ariaDisabled = document.createElement('div')
     ariaDisabled.setAttribute('role', 'button')
     ariaDisabled.setAttribute('aria-disabled', 'true')
     document.body.appendChild(ariaDisabled)
-    expect(resolvePressTarget(ariaDisabled, 'touch')).toBeNull()
+    expect(resolveHapticTarget(ariaDisabled)).toBeNull()
 
     document.body.innerHTML = ''
   })
 
   it('returns null for non-element targets', () => {
-    expect(resolvePressTarget(null, 'touch')).toBeNull()
+    expect(resolveHapticTarget(null)).toBeNull()
+  })
+
+  it('does not treat a content container with only an onClick as pressable', () => {
+    const container = document.createElement('div')
+    container.setAttribute('onclick', 'void 0')
+    const text = document.createElement('span')
+    container.appendChild(text)
+    document.body.appendChild(container)
+
+    expect(resolveHapticTarget(text)).toBeNull()
+
+    document.body.innerHTML = ''
   })
 
   it('reads an explicit data-haptic strength', () => {

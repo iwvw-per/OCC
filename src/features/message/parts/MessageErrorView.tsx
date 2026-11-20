@@ -77,7 +77,7 @@ export const MessageErrorView = memo(function MessageErrorView({ error, stateKey
     <div ref={rootRef} className={`px-3 py-2 rounded-md border ${borderClass} bg-bg-100/50`}>
       <div
         ref={headerRef}
-        className={`flex items-center gap-2 ${hasDetails ? 'cursor-pointer' : ''}`}
+        className={`flex items-center gap-2 ${hasDetails ? 'cursor-pointer active:bg-bg-300' : ''}`}
         onClick={() => hasDetails && withScrollLock(() => setExpanded(!expanded))}
         data-haptic={hasDetails ? 'light' : undefined}
       >

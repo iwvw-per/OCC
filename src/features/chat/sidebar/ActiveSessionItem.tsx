@@ -63,7 +63,7 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
       onClick={handleClick}
       data-haptic="light"
       className={`group relative flex items-start pl-[6px] pr-3 py-2 rounded-lg cursor-default select-none transition-all duration-200 border border-transparent ${
-        isSelected ? 'bg-bg-000 shadow-sm ring-1 ring-border-200/50' : 'hover:bg-bg-200'
+        isSelected ? 'bg-bg-000 shadow-sm ring-1 ring-border-200/50' : 'hover:bg-bg-200 active:bg-bg-300'
       } ${!resolvedSession ? 'opacity-50 cursor-default' : ''}`}
     >
       {/* Content */}

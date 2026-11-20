@@ -129,7 +129,7 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
           setHasFocusWithin(false)
         }
       }}
-      className={`group relative flex items-start pl-[6px] pr-3 py-2 rounded-lg cursor-default select-none transition-all duration-200 border border-transparent hover:bg-bg-200 ${showActions ? 'bg-bg-200/50' : ''} ${entry.read ? 'opacity-50' : ''}`}
+      className={`group relative flex items-start pl-[6px] pr-3 py-2 rounded-lg cursor-default select-none transition-all duration-200 border border-transparent hover:bg-bg-200 active:bg-bg-300 ${showActions ? 'bg-bg-200/50' : ''} ${entry.read ? 'opacity-50' : ''}`}
     >
       <button
         type="button"

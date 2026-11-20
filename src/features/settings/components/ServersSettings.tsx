@@ -107,7 +107,7 @@ function ServerItem({
           ${
             isActive
               ? 'border-accent-main-100/50 bg-accent-main-100/10'
-              : 'border-border-200/50 bg-bg-200/40 hover:border-border-200 hover:bg-bg-200/60'
+              : 'border-border-200/50 bg-bg-200/40 hover:border-border-200 hover:bg-bg-200/60 active:bg-bg-200'
           }`}
       >
         <button

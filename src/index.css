@@ -969,25 +969,6 @@ body {
 }
 
 /* ============================================
- * 触摸端按下反馈(press feedback)
- * ============================================
- * 触摸没有 hover、`:active` 又常常看不见,列表项点下去毫无反应。由
- * useGlobalPressFeedback 在 pointerdown(touch) 时给最近的「可点元素」打上
- * data-pressed,抬起 / 移动 / 滚动 / 取消时移除。样式集中在这一条规则里。
- *
- * 用 background-image 叠一层半透明前景色,而不是改 background-color:
- *   - 不改布局(不引入 active:scale 那类位移,见 utils/interaction 约定 1);
- *   - 与 Tailwind 的 bg-* (background-color) 不冲突,也不会像 box-shadow
- *     那样覆盖元素自带的 ring / shadow;需要时 `!important` 仅用于压过
- *     元素自身的渐变背景(极少数);
- *   - 用 --text-100 当前景色:浅色主题下加深、深色主题下提亮,一套规则自适应;
- *   - 覆盖在背景之上、内容之下,文字与图标仍清晰。
- */
-[data-pressed='true'] {
-  background-image: linear-gradient(hsl(var(--text-100) / 0.1), hsl(var(--text-100) / 0.1)) !important;
-}
-
-/* ============================================
  * Input Textarea + Overlay - 共享样式确保完全对齐
  * ============================================ */
 

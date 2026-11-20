@@ -351,7 +351,7 @@ function ClickToCopyCommand({ command }: { command: string }) {
   return (
     <NativeTooltip>
       <div
-        className="cursor-pointer group/cmd whitespace-pre-wrap break-all"
+        className="cursor-pointer group/cmd whitespace-pre-wrap break-all active:opacity-70"
         onClick={handleClick}
         title={copied ? t('copied') : t('clickToCopy')}
         data-haptic="light"
