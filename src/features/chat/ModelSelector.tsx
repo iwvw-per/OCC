@@ -456,6 +456,8 @@ export const ModelSelector = memo(
         </button>
       )
 
+    const triggerWithHint = <NativeTooltip>{triggerButton}</NativeTooltip>
+
     // ---- Menu pieces ----
 
     const endpointLabel = t('modelSelector.endpoint')
@@ -633,7 +635,7 @@ export const ModelSelector = memo(
         className={`relative font-sans ${trigger === 'toolbar' ? 'min-w-0 overflow-hidden' : ''}`}
         data-dropdown-open={isOpen || undefined}
       >
-        {triggerButton}
+        {triggerWithHint}
 
         <DropdownMenu
           triggerRef={triggerRef}

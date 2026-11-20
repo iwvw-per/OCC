@@ -173,7 +173,8 @@ export function WelcomeProjectPill({
       <PopoverContent
         align="start"
         side="top"
-        className="w-64 p-0"
+        /** 底色与输入框一致(bg-100);默认 .glass 是 bg-000,在浅色主题下会偏白。 */
+        className="w-64 p-0 glass-alt"
         /**
          * 触摸端不让 Radix 自动把焦点交给内容里的第一个可聚焦元素。
          *

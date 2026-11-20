@@ -79,7 +79,7 @@ describe('ModelSelector', () => {
 
     render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={onSelect} />)
 
-    fireEvent.click(screen.getByTitle('GPT-4.1'))
+    fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
     fireEvent.click(screen.getByText('GPT-4o Mini'))
 
     expect(onSelect).toHaveBeenCalledWith('openai:gpt-4o-mini', expect.objectContaining({ name: 'GPT-4o Mini' }))
@@ -88,7 +88,7 @@ describe('ModelSelector', () => {
   it('always shows the endpoint row, even with a single provider', () => {
     render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
 
-    fireEvent.click(screen.getByTitle('GPT-4.1'))
+    fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
 
     const endpointButton = screen.getByRole('button', { name: /Endpoint/ })
     expect(endpointButton).toHaveTextContent('OpenAI')
@@ -97,7 +97,7 @@ describe('ModelSelector', () => {
   it('no longer renders a search box, pin buttons, or context length', () => {
     render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
 
-    fireEvent.click(screen.getByTitle('GPT-4.1'))
+    fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
 
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pin to top|Unpin/ })).not.toBeInTheDocument()
@@ -107,7 +107,7 @@ describe('ModelSelector', () => {
   it('opens from ArrowUp at the last model', async () => {
     render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
 
-    const trigger = screen.getByTitle('GPT-4.1')
+    const trigger = screen.getByRole('button', { name: /^GPT-4\.1/ })
     fireEvent.keyDown(trigger, { key: 'ArrowUp' })
 
     const lastOption = document.getElementById('ms-item-1') as HTMLButtonElement | null
@@ -136,7 +136,7 @@ describe('ModelSelector', () => {
 
     render(<ToolbarSelectorHarness />)
 
-    fireEvent.click(screen.getByTitle('GPT-4.1'))
+    fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
     fireEvent.click(screen.getByText('GPT-4o Mini'))
 
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Chat input' })).toHaveFocus())
@@ -157,7 +157,7 @@ describe('ModelSelector', () => {
       />,
     )
 
-    fireEvent.click(screen.getByTitle('GPT-4.1 · Low'))
+    fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
     expect(screen.getByText('Thinking level')).toBeInTheDocument()
 
     const slider = screen.getByRole('slider', { name: 'Thinking level' })
@@ -180,7 +180,7 @@ describe('ModelSelector', () => {
       <ModelSelector models={[...MODELS, anthropicModel]} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />,
     )
 
-    fireEvent.click(screen.getByTitle('GPT-4.1'))
+    fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
 
     // 默认只展示当前模型所属端点
     expect(screen.getByText('GPT-4o Mini')).toBeInTheDocument()
@@ -227,7 +227,7 @@ describe('ModelSelector', () => {
   it('keeps capability icons beside the name and the check mark in its own trailing column', () => {
     render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
 
-    fireEvent.click(screen.getByTitle('GPT-4.1'))
+    fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
 
     const selectedItem = document.querySelector('[data-model-key="openai:gpt-4.1"]') as HTMLElement
     const cells = Array.from(selectedItem.children)
@@ -251,7 +251,7 @@ describe('ModelSelector', () => {
     try {
       render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
 
-      fireEvent.click(screen.getByTitle('GPT-4.1'))
+      fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
       expect(screen.queryByRole('option', { name: /OpenAI/ })).not.toBeInTheDocument()
 
       fireEvent.mouseEnter(screen.getByRole('button', { name: /Endpoint/ }))
@@ -286,7 +286,7 @@ describe('ModelSelector', () => {
 
       render(<Harness />)
 
-      fireEvent.click(screen.getByTitle('GPT-4.1'))
+      fireEvent.click(screen.getByRole('button', { name: /^GPT-4\.1/ }))
       fireEvent.click(screen.getByText('GPT-4o Mini'))
 
       await new Promise(resolve => setTimeout(resolve, 0))

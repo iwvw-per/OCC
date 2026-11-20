@@ -58,8 +58,8 @@ export const TooltipContent = forwardRef<
       className={cn(
         'z-[300] max-w-[min(320px,80vw)] rounded-lg border border-border-200/60 bg-tooltip px-2 py-1',
         'text-ui-sm leading-relaxed text-tooltip-foreground shadow-lg',
-        // 开合动画由 index.css 的 .overlay-surface 驱动。
-        'overlay-surface',
+        // 开合动画由 index.css 的 .overlay-tooltip 驱动(位移淡入,不缩放)。
+        'overlay-tooltip',
         className,
       )}
       {...props}

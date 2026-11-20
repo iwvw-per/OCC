@@ -1246,6 +1246,68 @@ body {
   }
 }
 
+/* ============================================
+ * Tooltip 动效(对齐 ZCode)
+ * 气泡不缩放:从触发元素一侧轻推 3px 淡入,退场反向淡出。
+ * 方向由 Radix 的 data-side 决定。
+ *
+ * 注意:Radix Popper 用内联 transform 定位,所以位移必须走独立的
+ * `translate` 属性,不能写 transform,否则气泡会被丢到左上角。
+ * ============================================ */
+.overlay-tooltip {
+  --tooltip-shift-x: 0px;
+  --tooltip-shift-y: 0px;
+}
+
+.overlay-tooltip[data-side='top'] {
+  --tooltip-shift-y: 3px;
+}
+.overlay-tooltip[data-side='bottom'] {
+  --tooltip-shift-y: -3px;
+}
+.overlay-tooltip[data-side='left'] {
+  --tooltip-shift-x: 3px;
+}
+.overlay-tooltip[data-side='right'] {
+  --tooltip-shift-x: -3px;
+}
+
+@keyframes tooltip-shift-in {
+  from {
+    opacity: 0;
+    translate: var(--tooltip-shift-x) var(--tooltip-shift-y);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes tooltip-shift-out {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    translate: var(--tooltip-shift-x) var(--tooltip-shift-y);
+  }
+}
+
+.overlay-tooltip:is([data-state='open'], [data-state='delayed-open'], [data-state='instant-open']) {
+  animation: tooltip-shift-in 130ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.overlay-tooltip[data-state='closed'] {
+  animation: tooltip-shift-out 90ms ease-in both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-tooltip {
+    animation-duration: 1ms !important;
+  }
+}
+
 @keyframes reasoning-shimmer {
   0% {
     background-position: 200% 0;

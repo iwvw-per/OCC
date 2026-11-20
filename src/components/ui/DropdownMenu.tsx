@@ -31,14 +31,20 @@ interface DropdownMenuProps {
  * Dropdown menu that renders via portal to avoid overflow clipping
  * Supports animation and auto-width
  */
+/** 把 number | string 宽度归一化为 CSS 值 */
+function toCssSize(value: number | string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  return typeof value === 'number' ? `${value}px` : value
+}
+
 export function DropdownMenu({
   triggerRef,
   isOpen,
   position = 'bottom',
   align = 'left',
   width,
-  minWidth = '200px',
-  maxWidth = 'min(320px, 90vw)',
+  minWidth,
+  maxWidth,
   mobileFullWidth = false,
   constrainToRef,
   clampToViewport = false,
@@ -63,10 +69,15 @@ export function DropdownMenu({
     // --- 垂直定位 ---
     if (position === 'top') {
       pos.bottom = window.innerHeight - rect.top + gap
-      if (clampToViewport) size.maxHeight = Math.max(160, rect.top - gap - 8)
     } else {
       pos.top = rect.bottom + gap
-      if (clampToViewport) size.maxHeight = Math.max(160, window.innerHeight - rect.bottom - gap - 8)
+    }
+
+    if (clampToViewport) {
+      // 只看可用空间会让菜单在手机上几乎顶满整屏;这里再压一个舒适上限(约 60vh,240~460px)。
+      const available = position === 'top' ? rect.top - gap - 8 : window.innerHeight - rect.bottom - gap - 8
+      const preferred = Math.min(Math.max(window.innerHeight * 0.6, 240), 460)
+      size.maxHeight = Math.max(160, Math.min(available, preferred))
     }
 
     // --- 水平定位 + 宽度 ---
@@ -76,18 +87,23 @@ export function DropdownMenu({
       // 按钮中点相对容器位置，决定对齐方向
       const btnCenter = (rect.left + rect.right) / 2
       const containerCenter = (cRect.left + cRect.right) / 2
+      let containerMax = 0
 
       if (btnCenter > containerCenter) {
         // 按钮偏右 → 右对齐，maxWidth = 按钮右边缘到容器左边缘
         pos.right = window.innerWidth - rect.right
-        size.maxWidth = rect.right - cRect.left
+        containerMax = rect.right - cRect.left
         size.transformOrigin = position === 'top' ? 'bottom right' : 'top right'
       } else {
         // 按钮偏左 → 左对齐，maxWidth = 容器右边缘到按钮左边缘
         pos.left = rect.left
-        size.maxWidth = cRect.right - rect.left
+        containerMax = cRect.right - rect.left
         size.transformOrigin = position === 'top' ? 'bottom left' : 'top left'
       }
+      // 容器边界只是上限:同时尊重调用方的 width/minWidth/maxWidth,避免菜单被容器拉成满宽。
+      size.maxWidth = maxWidth !== undefined ? `min(${containerMax}px, ${toCssSize(maxWidth)})` : `${containerMax}px`
+      if (width !== undefined) size.width = toCssSize(width)
+      if (minWidth !== undefined) size.minWidth = toCssSize(minWidth)
     } else if (mobileFullWidth && window.innerWidth < 640) {
       // 移动端全宽（无 constrainToRef 时的 fallback）
       pos.left = 12
@@ -101,8 +117,8 @@ export function DropdownMenu({
         pos.left = rect.left
       }
       size.width = width || 'auto'
-      size.minWidth = minWidth
-      size.maxWidth = maxWidth
+      size.minWidth = minWidth ?? '200px'
+      size.maxWidth = maxWidth ?? 'min(320px, 90vw)'
       size.transformOrigin = position === 'top' ? 'bottom' : 'top'
     }
 
