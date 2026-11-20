@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "OCC",
-  "version": "2.2.1",
-  "identifier": "com.opencodeui.occ",
+  "version": "2.2.2",
+  "identifier": "com.occ.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5176",

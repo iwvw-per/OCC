@@ -54,8 +54,9 @@ export const Switch = forwardRef<React.ElementRef<typeof SwitchPrimitive.Root>, 
         // 两态描边都保留，只换颜色
         'data-[state=checked]:border-accent-main-100 data-[state=checked]:bg-accent-main-100',
         'data-[state=checked]:hover:border-accent-main-200 data-[state=checked]:hover:bg-accent-main-200',
-        'data-[state=unchecked]:border-border-200 data-[state=unchecked]:bg-bg-300',
-        'data-[state=unchecked]:hover:bg-bg-200',
+        // 关闭态用更深的轨道 + 更实的描边,避免在浅色卡片上「和背景糊在一起」
+        'data-[state=unchecked]:border-border-300 data-[state=unchecked]:bg-bg-400',
+        'data-[state=unchecked]:hover:border-border-300 data-[state=unchecked]:hover:bg-text-500/45',
         className,
       )}
       style={{ width: TRACK_W, height: TRACK_H, ...props.style }}

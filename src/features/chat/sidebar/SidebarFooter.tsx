@@ -9,7 +9,6 @@ import { CogIcon, SunIcon, MoonIcon, SystemIcon, MinimizeIcon, ShareIcon, Archiv
 import { CircularProgress } from '../../../components/CircularProgress'
 import { SegmentedControl } from '../../settings/components/SettingsUI'
 import { formatTokens, formatCost, useTheme, useSessionStats } from '../../../hooks'
-import { useServerStore, type ServerHealth } from '../../../hooks/useServerStore'
 import { interactive } from '../../../utils/interaction'
 
 // 状态指示器 - 上下文占用圆环
@@ -41,20 +40,15 @@ function StatusIndicator({ percent, size = 20 }: { percent: number; size?: numbe
 
 export interface SidebarFooterProps {
   showLabels: boolean
-  connectionState: string
   contextLimit?: number
   onOpenSettings?: () => void
 }
 
-export function SidebarFooter({ showLabels, connectionState, contextLimit = 0, onOpenSettings }: SidebarFooterProps) {
+export function SidebarFooter({ showLabels, contextLimit = 0, onOpenSettings }: SidebarFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { mode: themeMode, setThemeWithAnimation: onThemeChange, chatContentWidth, resetChatContentWidth } = useTheme()
   // 统计留在 footer：流式时不让整个 SidePanel 跟着 messages 重渲
   const stats = useSessionStats(contextLimit)
-  const { activeServer, getHealth } = useServerStore()
-  // 健康探测优先于 SSE 连接态：SSE 长连接在进程死后可能长时间挂着，
-  // health 是真 HTTP 探测（5s 超时判离线），用它决定状态点颜色更准。
-  const activeHealth: ServerHealth | null = activeServer ? getHealth(activeServer.id) : null
   const [isOpen, setIsOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 260, fromBottom: false })
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
@@ -66,24 +60,6 @@ export function SidebarFooter({ showLabels, connectionState, contextLimit = 0, o
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const closeTimeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // 菜单中连接状态显示用：health 优先（真实可达性），SSE 仅补充 connecting 过渡态
-  const statusColorClass = (() => {
-    switch (activeHealth?.status) {
-      case 'online':
-        return 'bg-success-100'
-      case 'checking':
-        return 'bg-warning-100 animate-pulse'
-      case 'unauthorized':
-        return 'bg-warning-100'
-      case 'offline':
-      case 'error':
-        return 'bg-danger-100'
-      default:
-        // 从未探测过：fallback 到 SSE 连接态（connecting 用黄点提示正在握手）
-        return connectionState === 'connecting' ? 'bg-warning-100 animate-pulse' : 'bg-text-500/60'
-    }
-  })()
 
   /** 上下文窗口是否已知：未知时不画占用条、不显示百分比（见 contextPercent 为 null 的约定） */
   const contextKnown = stats.contextPercent !== null
@@ -312,13 +288,6 @@ export function SidebarFooter({ showLabels, connectionState, contextLimit = 0, o
               <CogIcon size={14} />
               <span>{t('sidebar.settings')}</span>
             </button>
-          </div>
-
-          {/* Connection Status */}
-          <div className="relative flex items-center gap-2 px-3 py-2 text-ui-xs text-text-300 cursor-default">
-            <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-border-200/30" />
-            <div className={`w-1.5 h-1.5 rounded-full ${statusColorClass}`} />
-            <span className="capitalize">{activeHealth ? activeHealth.status : connectionState}</span>
           </div>
         </div>,
         document.body,

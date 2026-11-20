@@ -9,7 +9,7 @@ cleanup() {
 
 trap cleanup TERM INT
 
-opencodeui-router &
+occ-router &
 ROUTER_PID=$!
 
 caddy run --config /etc/caddy/Caddyfile &

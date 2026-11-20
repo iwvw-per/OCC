@@ -70,6 +70,9 @@ export const MessageErrorView = memo(function MessageErrorView({ error, stateKey
     }
   }, [details])
 
+  // 手动中断是用户主动操作,不展示「消息已中止」错误卡片
+  if (error.name === 'MessageAbortedError') return null
+
   return (
     <div ref={rootRef} className={`px-3 py-2 rounded-md border ${borderClass} bg-bg-100/50`}>
       <div

@@ -34,9 +34,7 @@ import { pinnedSessionsStore } from '../../../store/pinnedSessionsStore'
 import {
   updateSession,
   deleteSession as apiDeleteSession,
-  subscribeToConnectionState,
   type ApiSession,
-  type ConnectionInfo,
 } from '../../../api'
 import { isSameDirectory } from '../../../utils'
 import { makeSessionKey, splitSessionKey } from '../../../utils/sessionKey'
@@ -110,7 +108,6 @@ export function SidePanel({
   // all = 始终列出全部子会话；active = 只列活跃/正在查看；off = 不额外列出
   const showAllChildSessions = sidebarChildSessions === 'all'
   const showActiveChildSessions = sidebarChildSessions !== 'off'
-  const [connectionState, setConnectionState] = useState<ConnectionInfo | null>(null)
   const selection = useSessionSelection2()
   const {
     isEditMode,
@@ -156,10 +153,6 @@ export function SidePanel({
   )
   // Notification history
   const notifications = useNotifications()
-
-  useEffect(() => {
-    return subscribeToConnectionState(setConnectionState)
-  }, [])
 
   const { sessions, search, setSearch, refresh, isLoading } = useSessionContext()
 
@@ -822,7 +815,6 @@ export function SidePanel({
       {/* ===== Footer ===== */}
       <SidebarFooter
         showLabels={showLabels}
-        connectionState={connectionState?.state || 'disconnected'}
         contextLimit={contextLimit}
         onOpenSettings={onOpenSettings}
       />

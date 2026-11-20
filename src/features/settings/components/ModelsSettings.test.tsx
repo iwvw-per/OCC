@@ -3,11 +3,12 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ModelsSettings } from './ModelsSettings'
 import type { ModelInfo } from '../../../api'
 
-const { useModelsMock, useHiddenModelKeysMock, setVisibleMock, setManyVisibleMock } = vi.hoisted(() => ({
+const { useModelsMock, useHiddenModelKeysMock, useHiddenProviderNamesMock, setVisibleMock, setProviderVisibleMock } = vi.hoisted(() => ({
   useModelsMock: vi.fn(),
   useHiddenModelKeysMock: vi.fn(),
+  useHiddenProviderNamesMock: vi.fn(),
   setVisibleMock: vi.fn(),
-  setManyVisibleMock: vi.fn(),
+  setProviderVisibleMock: vi.fn(),
 }))
 
 vi.mock('../../../hooks', () => ({
@@ -17,9 +18,11 @@ vi.mock('../../../hooks', () => ({
 vi.mock('../../../store', () => ({
   modelVisibilityStore: {
     setVisible: setVisibleMock,
-    setManyVisible: setManyVisibleMock,
+    setManyVisible: vi.fn(),
+    setProviderVisible: setProviderVisibleMock,
   },
   useHiddenModelKeys: useHiddenModelKeysMock,
+  useHiddenProviderNames: useHiddenProviderNamesMock,
 }))
 
 vi.mock('../../../utils/modelUtils', () => ({
@@ -73,20 +76,22 @@ describe('ModelsSettings', () => {
   beforeEach(() => {
     useModelsMock.mockReturnValue({ models: MODELS, isLoading: false })
     useHiddenModelKeysMock.mockReturnValue([])
+    useHiddenProviderNamesMock.mockReturnValue([])
     setVisibleMock.mockReset()
-    setManyVisibleMock.mockReset()
+    setProviderVisibleMock.mockReset()
   })
 
   it('renders model rows with semantic buttons and labeled switches', () => {
     render(<ModelsSettings />)
 
     const modelButton = screen.getByRole('button', { name: /GPT-4.1/i })
-    const switches = screen.getAllByRole('switch')
+    const modelSwitch = screen.getByRole('switch', { name: 'Hide GPT-4.1' })
+
+    expect(modelSwitch).toHaveAttribute('aria-checked', 'true')
 
     fireEvent.click(modelButton)
 
     expect(modelButton).toHaveAttribute('aria-pressed', 'true')
-    expect(switches[0]).toHaveAttribute('aria-label', 'Hide GPT-4.1')
     expect(setVisibleMock).toHaveBeenCalledWith(MODELS[0], false)
   })
 
@@ -108,13 +113,22 @@ describe('ModelsSettings', () => {
 
     render(<ModelsSettings />)
 
-    const switches = screen.getAllByRole('switch')
+    expect(screen.getByRole('switch', { name: 'Show GPT-4.1' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('switch', { name: 'Hide GPT-4o Mini' })).toHaveAttribute('aria-checked', 'true')
+  })
 
-    expect(switches).toHaveLength(2)
-    expect(switches[0]).toHaveAttribute('aria-checked', 'false')
-    expect(switches[1]).toHaveAttribute('aria-checked', 'true')
+  it('shows the endpoint count and toggles the endpoint itself from the left column', () => {
+    useHiddenModelKeysMock.mockReturnValue(['openai:gpt-4o-mini'])
+    useHiddenProviderNamesMock.mockReturnValue(['OpenAI'])
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show all' }))
-    expect(setManyVisibleMock).toHaveBeenCalledWith(MODELS, true)
+    render(<ModelsSettings />)
+
+    expect(screen.getByText('1/2')).toBeInTheDocument()
+
+    const endpointToggle = screen.getByRole('switch', { name: /OpenAI · Enable endpoint/ })
+    expect(endpointToggle).toHaveAttribute('aria-checked', 'false')
+
+    fireEvent.click(endpointToggle)
+    expect(setProviderVisibleMock).toHaveBeenCalledWith('OpenAI', true)
   })
 })

@@ -1,4 +1,4 @@
-package com.opencodeui.occ
+package com.occ.app
 
 import android.app.NotificationManager
 import android.content.Context

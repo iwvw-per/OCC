@@ -221,6 +221,8 @@
     "noResults": "没有匹配当前搜索的模型",
     "showAll": "全部显示",
     "hideAll": "全部隐藏",
+    "enableEndpoint": "启用端点",
+    "disableEndpoint": "禁用端点",
     "showModel": "显示 {{name}}",
     "hideModel": "隐藏 {{name}}",
     "providerCount": "{{count}} 个模型"

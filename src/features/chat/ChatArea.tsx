@@ -336,7 +336,6 @@ const VirtualRow = memo(
                   stepCount={processStepCount(item.children)}
                   reasoningCount={processReasoningCount(item.children)}
                   activeLabel={item.isActive ? processActiveLabel(item.children) : undefined}
-                  interrupted={item.interrupted === true}
                   onExpand={
                     item.userMessageId && onHydrateTurn
                       ? () => onHydrateTurn(item.userMessageId!)

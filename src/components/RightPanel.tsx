@@ -4,6 +4,16 @@ import { useLayoutStore, layoutStore, type PanelTab } from '../store/layoutStore
 import { PanelContainer } from './PanelContainer'
 import { createPtySession, removePtySession } from '../api/pty'
 import type { TerminalTab } from '../store/layoutStore'
+import { useKeybindingLabel } from '../hooks'
+import { ShortcutBadge } from './ui/Tooltip'
+import {
+  FolderIcon,
+  GitCommitIcon,
+  GitWorktreeIcon,
+  PlugIcon,
+  TeachIcon,
+  TerminalIcon,
+} from './Icons'
 import { ResizablePanel } from './ui/ResizablePanel'
 import { logger } from '../utils/logger'
 import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
@@ -23,6 +33,86 @@ function PanelFallback() {
   return (
     <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
       {t('rightPanel.loadingPanel')}
+    </div>
+  )
+}
+
+interface RightPanelEmptyStateProps {
+  sessionId?: string | null
+  onNewTerminal: () => void
+}
+
+/**
+ * 右侧面板没有打开任何标签页时的初始页:
+ * 用一组快捷入口代替空白,新开面板时也能直接进入常用视图。
+ */
+function RightPanelEmptyState({ sessionId, onNewTerminal }: RightPanelEmptyStateProps) {
+  const { t } = useTranslation(['components', 'common'])
+  const newTerminalShortcut = useKeybindingLabel('newTerminal')
+
+  const actions = [
+    sessionId
+      ? {
+          key: 'changes',
+          icon: <GitCommitIcon size={14} />,
+          label: t('panelContainer.changes'),
+          shortcut: undefined,
+          onClick: () => layoutStore.addChangesTab('right'),
+        }
+      : null,
+    {
+      key: 'files',
+      icon: <FolderIcon size={14} />,
+      label: t('panelContainer.files'),
+      shortcut: undefined,
+      onClick: () => layoutStore.addFilesTab('right'),
+    },
+    {
+      key: 'terminal',
+      icon: <TerminalIcon size={14} />,
+      label: t('terminal.terminal'),
+      shortcut: newTerminalShortcut,
+      onClick: onNewTerminal,
+    },
+    {
+      key: 'mcp',
+      icon: <PlugIcon size={14} />,
+      label: t('panelContainer.mcpServers'),
+      shortcut: undefined,
+      onClick: () => layoutStore.addMcpTab('right'),
+    },
+    {
+      key: 'skill',
+      icon: <TeachIcon size={14} />,
+      label: t('panelContainer.skills'),
+      shortcut: undefined,
+      onClick: () => layoutStore.addSkillTab('right'),
+    },
+    {
+      key: 'worktree',
+      icon: <GitWorktreeIcon size={14} />,
+      label: t('panelContainer.worktrees'),
+      shortcut: undefined,
+      onClick: () => layoutStore.addWorktreeTab('right'),
+    },
+  ].filter((action): action is NonNullable<typeof action> => action !== null)
+
+  return (
+    <div className="flex h-full flex-col items-center justify-center px-6">
+      <div className="flex w-full max-w-sm flex-col gap-1.5">
+        {actions.map(action => (
+          <button
+            key={action.key}
+            type="button"
+            onClick={action.onClick}
+            className="flex h-10 w-full items-center gap-2 rounded-lg border border-border-200/50 bg-bg-200/40 px-3 text-left text-ui-caption text-text-200 transition-colors hover:bg-bg-200 hover:text-text-100"
+          >
+            <span className="shrink-0 text-text-400">{action.icon}</span>
+            <span className="min-w-0 flex-1 truncate">{action.label}</span>
+            {action.shortcut ? <ShortcutBadge>{action.shortcut}</ShortcutBadge> : null}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -95,11 +185,7 @@ export const RightPanel = memo(function RightPanel({
   const renderContent = useCallback(
     (activeTab: PanelTab | null) => {
       if (!activeTab) {
-        return (
-          <div className="flex items-center justify-center h-full text-text-400 text-ui-caption">
-            {t('common:noContent')}
-          </div>
-        )
+        return <RightPanelEmptyState sessionId={sessionId} onNewTerminal={handleNewTerminal} />
       }
 
       return (
@@ -165,7 +251,7 @@ export const RightPanel = memo(function RightPanel({
         </>
       )
     },
-    [normalizedDirectory, sessionId, isPanelResizing, t, serverId],
+    [normalizedDirectory, sessionId, isPanelResizing, t, serverId, handleNewTerminal],
   )
 
   if (inline) {

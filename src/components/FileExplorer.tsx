@@ -1003,12 +1003,12 @@ function FilePreview({
     if (isHtmlPreview(language, content.mimeType)) {
       return {
         type: 'html' as const,
-        text: isBinaryContent(content.encoding) ? decodeBase64Text(content.content) : content.content,
+        text: isBinaryContent(content.encoding) ? decodeBase64Text(content.content ?? '') : (content.content ?? ''),
       }
     }
 
     if (isMarkdownPreview(language, content.mimeType)) {
-      const text = isBinaryContent(content.encoding) ? decodeBase64Text(content.content) : content.content
+      const text = isBinaryContent(content.encoding) ? decodeBase64Text(content.content ?? '') : (content.content ?? '')
       return {
         type: 'markdown' as const,
         text,
@@ -1019,7 +1019,7 @@ function FilePreview({
     // 优先级最高：即使以 base64 传输，也支持解码为文本查看
     if (isTextualMedia(content.mimeType)) {
       const isBase64 = isBinaryContent(content.encoding)
-      const text = isBase64 ? decodeBase64Text(content.content) : content.content
+      const text = isBase64 ? decodeBase64Text(content.content ?? '') : (content.content ?? '')
       const dataUrl = isBase64
         ? buildDataUrl(content.mimeType!, content.content)
         : buildTextDataUrl(content.mimeType!, content.content)
@@ -1061,7 +1061,7 @@ function FilePreview({
     // 显示文件内容
     return {
       type: 'text' as const,
-      text: content.content,
+      text: content.content ?? '',
     }
   }, [content, language])
 

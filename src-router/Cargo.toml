@@ -1,5 +1,5 @@
 [package]
-name = "opencodeui-router"
+name = "occ-router"
 version = "0.1.0"
 edition = "2024"
 

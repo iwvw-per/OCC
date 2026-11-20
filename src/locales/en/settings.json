@@ -221,6 +221,8 @@
     "noResults": "No models match the current search",
     "showAll": "Show all",
     "hideAll": "Hide all",
+    "enableEndpoint": "Enable endpoint",
+    "disableEndpoint": "Disable endpoint",
     "showModel": "Show {{name}}",
     "hideModel": "Hide {{name}}",
     "providerCount": "{{count}} models"

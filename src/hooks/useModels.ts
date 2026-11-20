@@ -1,6 +1,7 @@
 import { useSyncExternalStore, useCallback, useEffect } from 'react'
 import { getActiveModels, type ModelInfo } from '../api'
 import { serverStore } from '../store/serverStore'
+import { modelVisibilityStore } from '../store/modelVisibilityStore'
 import i18n from '../i18n'
 
 // ============================================
@@ -51,6 +52,10 @@ async function _fetchModels(serverId: string, force = false) {
       const data = await getActiveModels(undefined, serverId)
       if (generation === _fetchGenerations.get(serverId)) {
         _setState(serverId, { models: data, isLoading: false })
+        // 上游新出现的模型默认关闭(仅活动服务器的可见性列表生效)
+        if (serverId === serverStore.getActiveServerId()) {
+          modelVisibilityStore.syncKnownModels(data)
+        }
         if (data.length > 0) {
           _failureCount.delete(serverId)
         } else {

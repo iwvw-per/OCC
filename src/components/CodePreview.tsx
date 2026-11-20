@@ -31,14 +31,16 @@ export function CodePreview({
 }: CodePreviewProps) {
   const { codeWordWrap, codeFontScale } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
   const resolvedWordWrap = wordWrap ?? codeWordWrap
-  const { tokensRef, version } = useSyntaxHighlightRef(code, {
+  // 内容可能尚未就绪:归一化为字符串,避免下游 CodeMirror 拿到 undefined
+  const source = typeof code === 'string' ? code : ''
+  const { tokensRef, version } = useSyntaxHighlightRef(source, {
     lang: language,
     enabled: language !== 'text',
   })
 
   return (
     <CodeMirrorReadonly
-      code={code}
+      code={source}
       tokensRef={tokensRef}
       tokensVersion={version}
       wordWrap={resolvedWordWrap}

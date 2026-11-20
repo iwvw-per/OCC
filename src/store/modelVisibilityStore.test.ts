@@ -73,4 +73,45 @@ describe('modelVisibilityStore', () => {
     expect(reloaded.modelVisibilityStore.isVisible(models[1])).toBe(true)
     expect(reloaded.modelVisibilityStore.getSnapshot()).toEqual([])
   })
+
+  it('adopts the existing models on first sync without hiding any of them', async () => {
+    const { modelVisibilityStore } = await import('./modelVisibilityStore')
+    const a = model('openai', 'gpt-4')
+
+    modelVisibilityStore.syncKnownModels([a])
+
+    expect(modelVisibilityStore.isVisible(a)).toBe(true)
+    expect(readHiddenKeys()).toEqual([])
+  })
+
+  it('hides models that show up later and keeps the choice across reloads', async () => {
+    const { modelVisibilityStore } = await import('./modelVisibilityStore')
+    const a = model('openai', 'gpt-4')
+    const b = model('openai', 'gpt-5')
+
+    modelVisibilityStore.syncKnownModels([a])
+    modelVisibilityStore.syncKnownModels([a, b])
+
+    expect(modelVisibilityStore.isVisible(a)).toBe(true)
+    expect(modelVisibilityStore.isVisible(b)).toBe(false)
+    expect(readHiddenKeys()).toEqual(['openai:gpt-5'])
+
+    vi.resetModules()
+    const reloaded = await import('./modelVisibilityStore')
+    expect(reloaded.modelVisibilityStore.isVisible(a)).toBe(true)
+    expect(reloaded.modelVisibilityStore.isVisible(b)).toBe(false)
+  })
+
+  it('adopts a fully replaced model set instead of hiding everything (endpoint renamed)', async () => {
+    const { modelVisibilityStore } = await import('./modelVisibilityStore')
+    const old = model('openai', 'gpt-4')
+    const a = model('anthropic', 'claude-3')
+    const b = model('anthropic', 'claude-4')
+
+    modelVisibilityStore.syncKnownModels([old])
+    modelVisibilityStore.syncKnownModels([a, b])
+
+    expect(modelVisibilityStore.isVisible(a)).toBe(true)
+    expect(modelVisibilityStore.isVisible(b)).toBe(true)
+  })
 })

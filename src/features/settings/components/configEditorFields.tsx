@@ -276,7 +276,7 @@ function SectionHeading({ title, description }: { title: string; description: st
   return (
     <div className="mb-4">
       <h2 className="text-ui-base font-semibold text-text-100">{title}</h2>
-      <p data-setting-desc className="mt-1 max-w-[52ch] text-ui-sm leading-relaxed text-text-300">{description}</p>
+      <p data-setting-desc className="mt-1 max-w-[46rem] text-ui-sm leading-relaxed text-text-300">{description}</p>
     </div>
   )
 }

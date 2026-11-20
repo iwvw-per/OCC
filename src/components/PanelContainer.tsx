@@ -403,7 +403,7 @@ export const PanelContainer = memo(function PanelContainer({
         createPortal(
           <div
             ref={contextMenuRef}
-            className="fixed z-[9999] bg-bg-100 border border-border-200 rounded-lg shadow-lg p-1 min-w-[160px]"
+            className="fixed z-[9999] bg-bg-100 border border-border-200 rounded-lg shadow-lg p-1 min-w-[160px] overlay-context"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             {manualTerminalTitles && contextTab?.type === 'terminal' && (
@@ -421,7 +421,7 @@ export const PanelContainer = memo(function PanelContainer({
         createPortal(
           <div
             ref={addMenuRef}
-            className="fixed z-[9999] bg-bg-100 border border-border-200 rounded-lg shadow-lg flex flex-col gap-0.5 p-1 min-w-[140px]"
+            className="fixed z-[9999] bg-bg-100 border border-border-200 rounded-lg shadow-lg flex flex-col gap-0.5 p-1 min-w-[140px] overlay-context"
             style={{
               top: addMenuPos.y,
               left: addMenuPos.align === 'left' ? addMenuPos.x : undefined,

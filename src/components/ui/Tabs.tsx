@@ -52,19 +52,19 @@ const triggerVariant: Record<TabsVariant, { base: string; active: string; inacti
     // 浅底 + 主文字色：与 TaskRenderer / ProjectSelector 的既有写法一致，
     // 全主题下激活态对比度 >= 9.9:1（原 bg-accent-main-100 + 白字仅 2.1~6.2:1）。
     active: 'bg-accent-main-100/15 text-text-100 border-border-200',
-    inactive: 'text-text-500 hover:bg-bg-200',
+    inactive: 'text-text-500 hover:text-text-100',
   },
   slider: {
     // 激活态由 TabsList 的滑动指示层呈现，trigger 自身只负责文字色。
     // 在 grid 布局下需要自己居中内容。
     base: 'relative z-10 justify-center font-medium',
     active: 'text-text-100',
-    inactive: 'text-text-400 hover:bg-bg-200',
+    inactive: 'text-text-400 hover:text-text-100',
   },
   underline: {
     base: 'rounded-none border-b-2 -mb-px font-medium',
     active: 'border-accent-main-100 text-text-100',
-    inactive: 'border-transparent text-text-500 hover:bg-bg-200',
+    inactive: 'border-transparent text-text-500 hover:text-text-100',
   },
 }
 
@@ -161,6 +161,8 @@ type TabsTriggerProps = React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trig
 const triggerActive: Record<TabsVariant, string> = {
   segmented:
     'data-[state=active]:bg-accent-main-100/15 data-[state=active]:text-text-100 data-[state=active]:border-border-200',
+  // 悬浮只提亮文字,不铺背景:trigger 在滑块上层(z-10),
+  // 铺 hover 背景会盖住下面的白色滑块。
   slider: 'data-[state=active]:text-text-100',
   underline: 'data-[state=active]:border-accent-main-100 data-[state=active]:text-text-100',
 }

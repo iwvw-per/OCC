@@ -91,7 +91,7 @@ function ProjectNameTitle({
        * 改用纯 CSS 变量 + 一条全局规则控制，见下方 `<style>` 说明。
        */
       data-project-title
-      className={`min-w-0 flex-1 whitespace-nowrap text-ui-caption font-semibold optical-center transition-[padding] duration-150 ${
+      className={`min-w-0 flex-1 whitespace-nowrap text-ui-caption font-normal optical-center transition-[padding] duration-150 ${
         overflows ? 'name-fade-right overflow-hidden' : 'truncate'
       } ${className}`}
       style={reserveRightPx > 0 ? ({ '--project-actions-w': `${reserveRightPx}px` } as React.CSSProperties) : undefined}
@@ -1018,7 +1018,6 @@ function FolderRecentSection({
                 // 让"点了一下"有明确反馈而不是瞬变。
                 'transition-colors duration-150 active:bg-bg-200/60 active:duration-75',
               )}
-              title={project.worktree}
             >
               {/* hover 时图标淡出、展开/收起箭头淡入（两者叠放做交叉淡入淡出）。
                 箭头常态不可见但仍占位，避免 hover 瞬间撑开会引起文字位移。

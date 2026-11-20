@@ -76,7 +76,7 @@ export type { ActiveSessionEntry } from './activeSessionStore'
 export { serviceStore, useServiceStore, exportServiceSettingsBackup, importServiceSettingsBackup } from './serviceStore'
 export type { ServiceSettingsBackup } from './serviceStore'
 
-export { modelVisibilityStore, useHiddenModelKeys } from './modelVisibilityStore'
+export { modelVisibilityStore, useHiddenModelKeys, useHiddenProviderNames } from './modelVisibilityStore'
 
 export { aiRenameModelStore, useAiRenameModelKey, AI_RENAME_MODEL_STORAGE_KEY } from './aiRenameModelStore'
 

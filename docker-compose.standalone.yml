@@ -12,8 +12,8 @@
 
 services:
   frontend:
-    image: ghcr.io/lehhair/opencodeui-frontend:latest
-    container_name: opencodeui
+    image: ghcr.io/iwvw-per/occ-frontend:latest
+    container_name: occ
     restart: unless-stopped
     ports:
       - '${PORT:-3000}:3000'

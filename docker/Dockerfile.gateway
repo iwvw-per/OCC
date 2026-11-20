@@ -15,7 +15,7 @@ RUN apk add --no-cache docker-cli
 
 WORKDIR /app
 
-COPY --from=router-builder /build/target/release/opencodeui-router /usr/local/bin/opencodeui-router
+COPY --from=router-builder /build/target/release/occ-router /usr/local/bin/occ-router
 COPY docker/entrypoint-gateway.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 COPY docker/Caddyfile.gateway /etc/caddy/Caddyfile

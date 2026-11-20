@@ -18,7 +18,7 @@
 services:
   # ---- 统一入口：网关 ----
   gateway:
-    image: ghcr.io/lehhair/opencodeui-gateway:latest
+    image: ghcr.io/iwvw-per/occ-gateway:latest
     container_name: opencode-gateway
     restart: unless-stopped
     ports:
@@ -46,7 +46,7 @@ services:
 
   # ---- 前端：预构建镜像 ----
   frontend:
-    image: ghcr.io/lehhair/opencodeui-frontend:latest
+    image: ghcr.io/iwvw-per/occ-frontend:latest
     container_name: opencode-frontend
     restart: unless-stopped
     networks:
@@ -54,7 +54,7 @@ services:
 
   # ---- 后端：预构建镜像 ----
   backend:
-    image: ghcr.io/lehhair/opencodeui-backend:latest
+    image: ghcr.io/iwvw-per/occ-backend:latest
     container_name: opencode-backend
     restart: unless-stopped
     deploy:

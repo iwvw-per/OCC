@@ -1,31 +1,30 @@
-// 验证 v2 原生 file 访问层在真实 v2 沙盒上工作。
-
 import { describe, expect, it } from 'vitest'
-import { serverStore } from '../store/serverStore'
-import { nativeListDirectory, nativeFindFiles } from './v2NativeFile'
+import { normalizeFileReadResult } from './v2NativeFile'
 
-const URL = import.meta.env.VITE_V2_SANDBOX_URL as string | undefined
-const PWD = import.meta.env.VITE_V2_SANDBOX_PASSWORD as string | undefined
-const SERVER_ID = 'v2-sandbox-file-test'
+describe('normalizeFileReadResult', () => {
+  it('decodes text bytes into the shape the preview expects', () => {
+    const raw = new TextEncoder().encode('# title\nbody')
 
-const enabled = !!(URL && PWD)
-const describeIf = enabled ? describe : describe.skip
-
-async function ensureServer() {
-  serverStore.removeServer(SERVER_ID)
-  serverStore.addServerWithId(SERVER_ID, { name: 'v2-native', url: URL!, auth: { username: 'opencode', password: PWD! } })
-}
-
-describeIf('v2 原生 file 访问层', () => {
-  it('nativeListDirectory 返回文件列表', async () => {
-    await ensureServer()
-    const files = await nativeListDirectory(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir', path: '' })
-    expect(Array.isArray(files)).toBe(true)
+    expect(normalizeFileReadResult(raw, 'README.md')).toEqual({
+      type: 'text',
+      content: '# title\nbody',
+      mimeType: 'text/markdown',
+    })
   })
 
-  it('nativeFindFiles 返回路径', async () => {
-    await ensureServer()
-    const paths = await nativeFindFiles(SERVER_ID, { directory: '/tmp/opencode/v2-sandbox-isolated/workdir', query: 'package' })
-    expect(Array.isArray(paths)).toBe(true)
+  it('turns binary bytes into base64 with an inferred mime type', () => {
+    const raw = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01])
+
+    expect(normalizeFileReadResult(raw, 'logo.png')).toMatchObject({
+      type: 'binary',
+      encoding: 'base64',
+      mimeType: 'image/png',
+    })
+  })
+
+  it('passes non-byte payloads through untouched', () => {
+    const payload = { type: 'text', content: 'already shaped' }
+
+    expect(normalizeFileReadResult(payload, 'a.ts')).toBe(payload)
   })
 })

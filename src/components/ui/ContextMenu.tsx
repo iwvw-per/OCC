@@ -60,6 +60,11 @@ export function ContextMenu({
     const maxHeight = vh - margin * 2
     el.style.left = `${left}px`
     el.style.top = `${top}px`
+    // 以鼠标按下的位置为缩放原点:菜单从指针处展开,与 ZCode 的观感一致
+    el.style.transformOrigin = `${Math.min(Math.max(position.x - left, 0), rect.width)}px ${Math.min(
+      Math.max(position.y - top, 0),
+      rect.height,
+    )}px`
     if (rect.height > maxHeight) el.style.maxHeight = `${maxHeight}px`
     el.style.visibility = 'visible'
   }, [position, margin])
@@ -96,7 +101,7 @@ export function ContextMenu({
       ref={menuRef}
       role="menu"
       aria-label={ariaLabel}
-      className="fixed glass border border-border-200/60 rounded-xl shadow-lg p-1 overflow-y-auto overlay-surface"
+      className="fixed glass border border-border-200/60 rounded-xl shadow-lg p-1 overflow-y-auto overlay-context"
       style={{
         left: position.x,
         top: position.y,

@@ -1,4 +1,4 @@
-package com.opencodeui.occ
+package com.occ.app
 
 import android.content.Intent
 import android.content.pm.PackageManager

@@ -53,7 +53,10 @@ export function CodeMirrorReadonly({
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const constrainedHeight = maxHeight !== undefined
-  const lineNumberWidth = useMemo(() => getLineNumberColumnWidth(getLineCount(code)), [code])
+  // 预览内容可能来自尚未加载完成 / 字段缺失的响应:统一归一化为字符串,
+  // 避免 undefined 在 getLineCount / EditorState 里直接抛错导致整页白屏。
+  const source = typeof code === 'string' ? code : ''
+  const lineNumberWidth = useMemo(() => getLineNumberColumnWidth(getLineCount(source)), [source])
 
   const extensions = useMemo(
     () =>
@@ -75,7 +78,7 @@ export function CodeMirrorReadonly({
 
     const view = new EditorView({
       parent: host,
-      state: EditorState.create({ doc: code, extensions }),
+      state: EditorState.create({ doc: source, extensions }),
     })
 
     viewRef.current = view
@@ -85,7 +88,7 @@ export function CodeMirrorReadonly({
       view.destroy()
       if (viewRef.current === view) viewRef.current = null
     }
-  }, [code, extensions, tokensRef])
+  }, [source, extensions, tokensRef])
 
   useEffect(() => {
     const view = viewRef.current
@@ -116,7 +119,7 @@ export function CodeMirrorReadonly({
       if (clearTimerId !== null) clearTimeout(clearTimerId)
       if (viewRef.current === view) clearTargetLine(view)
     }
-  }, [code, isVisible, targetKey, targetLine, targetRanges])
+  }, [source, isVisible, targetKey, targetLine, targetRanges])
 
   useEffect(() => {
     const view = viewRef.current

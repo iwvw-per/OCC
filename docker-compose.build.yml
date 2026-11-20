@@ -5,19 +5,19 @@
 
 services:
   gateway:
-    image: opencodeui-gateway:local
+    image: occ-gateway:local
     build:
       context: .
       dockerfile: docker/Dockerfile.gateway
 
   frontend:
-    image: opencodeui-frontend:local
+    image: occ-frontend:local
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
 
   backend:
-    image: opencodeui-backend:local
+    image: occ-backend:local
     build:
       context: .
       dockerfile: docker/Dockerfile.backend

@@ -55,7 +55,7 @@ describe('androidUpdater 安装阶段', () => {
       if (command === 'device_target_arch') return 'aarch64'
       if (command === 'android_download_apk') {
         // 模拟 Rust 侧：把 APK 写到 cacheDir/updates/<传入的 fileName>，返回绝对路径
-        return { path: `/data/user/0/com.opencodeui.occ/cache/updates/${args?.fileName}` }
+        return { path: `/data/user/0/com.occ.app/cache/updates/${args?.fileName}` }
       }
       throw new Error(`unexpected command: ${command}`)
     })

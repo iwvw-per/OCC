@@ -23,6 +23,15 @@ const mockThemeSnapshot = {
 }
 
 describe('CodePreview', () => {
+  it('renders an empty editor instead of crashing when code is missing', () => {
+    const { container } = render(
+      <CodePreview code={undefined as unknown as string} language="text" />,
+    )
+
+    expect(container.querySelector('.cm-editor')).toBeInTheDocument()
+    expect(screen.getByText('1')).toBeInTheDocument()
+  })
+
   it('renders code through CodeMirror with line numbers', () => {
     const { container } = render(<CodePreview code={'first line\nsecond line'} language="text" />)
 

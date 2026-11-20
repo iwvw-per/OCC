@@ -51,7 +51,7 @@ import { useDirectory } from '../../contexts/useDirectory'
 import { usesCustomDesktopTitlebar } from '../../utils/tauri'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { autoApproveStore } from '../../store/autoApproveStore'
-import { messageStore, paneControllerStore, useHiddenModelKeys } from '../../store'
+import { messageStore, paneControllerStore, useHiddenModelKeys, useHiddenProviderNames } from '../../store'
 import { restoreModelSelection } from '../../utils/sessionHelpers'
 import { findModelByKey, getModelKey } from '../../utils/modelUtils'
 import { attachTodoBridge, detachTodoBridge } from '../../utils/todoSyncBridge'
@@ -222,9 +222,13 @@ export const ChatPane = memo(function ChatPane({
   )
   const hostSlide = hostSlideState.className
   const hiddenModelKeys = useHiddenModelKeys()
+  const hiddenProviderNames = useHiddenProviderNames()
   const visibleModels = useMemo(
-    () => models.filter(model => !hiddenModelKeys.includes(getModelKey(model))),
-    [models, hiddenModelKeys],
+    () =>
+      models.filter(
+        model => !hiddenProviderNames.includes(model.providerName) && !hiddenModelKeys.includes(getModelKey(model)),
+      ),
+    [models, hiddenModelKeys, hiddenProviderNames],
   )
   const {
     selectedModelKey,

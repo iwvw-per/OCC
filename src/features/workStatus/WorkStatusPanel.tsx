@@ -204,7 +204,7 @@ export const WorkStatusPanel = memo(function WorkStatusPanel({
         'max-h-[calc(100%-var(--chat-header-height,2.75rem)-var(--app-safe-top,0px)-1.5rem)]',
         interactive ? 'ml-2 mr-4' : 'ml-0 mr-0',
         'motion-reduce:transition-none',
-        'rounded-xl border border-border-200/50 bg-bg-100/40',
+        'rounded-xl border border-border-200/50 bg-bg-100',
         'shadow-[0_2px_8px_-3px_hsl(var(--always-black)/0.08)]',
       )}
       style={{

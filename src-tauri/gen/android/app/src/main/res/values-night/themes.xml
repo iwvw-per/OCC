@@ -1,6 +1,6 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme (dark). -->
-    <style name="Theme.opencodeui" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.OCC" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- 状态栏和导航栏透明，实现沉浸式 -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

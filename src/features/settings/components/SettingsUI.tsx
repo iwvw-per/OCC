@@ -259,6 +259,8 @@ export interface SettingsSectionProps {
    * 自带内边距与分隔线，再套卡片会双重留白，这些用 plain 明确跳过。
    */
   plain?: boolean
+  /** 内容区附加 class(如撑满剩余高度) */
+  contentClassName?: string
 }
 
 /**
@@ -279,6 +281,7 @@ export function SettingsSection({
   actions,
   children,
   className,
+  contentClassName,
   plain = false,
 }: SettingsSectionProps) {
   return (
@@ -290,15 +293,20 @@ export function SettingsSection({
           {actions && <div className="shrink-0 flex items-center gap-1.5">{actions}</div>}
         </div>
         {description && (
-          <p data-setting-desc className="text-ui-sm text-text-300 mt-1 leading-relaxed max-w-[52ch]">
+          <p data-setting-desc className="text-ui-sm text-text-300 mt-1 leading-relaxed max-w-[46rem]">
             {description}
           </p>
         )}
       </div>
       {plain ? (
-        <div className="flex flex-col gap-3">{children}</div>
+        <div className={cn('flex flex-col gap-3', contentClassName)}>{children}</div>
       ) : (
-        <div className="flex flex-col overflow-hidden rounded-xl border border-border-200/50 bg-bg-100/40">
+        <div
+          className={cn(
+            'flex flex-col overflow-hidden rounded-xl border border-border-200/50 bg-bg-100/40',
+            contentClassName,
+          )}
+        >
           {children}
         </div>
       )}
