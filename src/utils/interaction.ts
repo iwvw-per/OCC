@@ -174,6 +174,8 @@ export const interactive = {
  * 本文件,避免两处各自维护一份逐渐分叉的列表。
  *
  * 末尾的 `[data-haptic]` 让显式标注过的元素(含自定义行)也进入可点范围。
+ * 无标签的自定义行(div / span)必须显式标注 `data-haptic`;不要改成探测
+ * React 事件 props —— 内容容器上的委托点击会被误判成可点。
  */
 export const PRESSABLE_SELECTOR = [
   'button',
@@ -201,27 +203,7 @@ export interface PressTarget {
   strength: PressStrength
 }
 
-// React 把组件 props 挂到宿主节点上,键名形如 `__reactProps$<随机串>`;
-// 借此识别「自带 onClick 的无标签元素」(列表行、自定义行等)。
-// 这是对 React 内部实现的依赖:取不到时下面的 hasReactClickHandler 返回 false,
-// 退化为仅按 PRESSABLE_SELECTOR 判定,不会报错。
-const REACT_PROPS_PREFIX = '__reactProps$'
-
-// 从触点上溯的层数上限,避免为了找祖先一路走到 document 级容器。
-const MAX_ANCESTOR_WALK = 16
-
 const STRENGTH_WORDS: readonly PressStrength[] = ['light', 'medium', 'strong']
-
-function hasReactClickHandler(element: HTMLElement): boolean {
-  for (const key of Object.keys(element)) {
-    if (!key.startsWith(REACT_PROPS_PREFIX)) continue
-    const props = (element as unknown as Record<string, unknown>)[key]
-    if (!props || typeof props !== 'object') continue
-    const record = props as Record<string, unknown>
-    return typeof record.onClick === 'function' || typeof record.onClickCapture === 'function'
-  }
-  return false
-}
 
 function isDisabledElement(element: HTMLElement): boolean {
   return element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true'
@@ -233,22 +215,22 @@ function isDisabledElement(element: HTMLElement): boolean {
  * 逐层判定,首个命中者胜出:
  *   1. `data-haptic="none"` —— 显式声明此处不参与(返回 null,连按下高亮也一并关掉);
  *   2. `data-haptic="light|medium|strong"` —— 显式级别;
- *   3. 命中 PRESSABLE_SELECTOR,或宿主节点自带 React onClick —— 默认 light。
+ *   3. 命中 PRESSABLE_SELECTOR(原生标签 / ARIA 角色 / 显式标注)—— 默认 light。
  *
- * 「逐层首个命中」保证了祖先上的 `data-haptic="none"`(如整块面板的焦点区)
- * 只会挡住「点到空白处」,不会影响其后代里真正的按钮 / 行 —— 它们会更早命中。
+ * 只认「元素自身是可点控件」,不去探测 React 事件 props:委托式的 onClick
+ * (文档正文根、消息列表根等)会让「点背景 / 点任意文本」都产生反馈。
+ * 自定义的无标签行请在根节点标 `data-haptic`,由上一档规则接管。
  */
 function findPressTarget(target: EventTarget | null): PressTarget | null {
   if (typeof document === 'undefined') return null
   if (!(target instanceof Element)) return null
 
   let element: Element | null = target
-  for (let depth = 0; element && element !== document.body && depth < MAX_ANCESTOR_WALK; depth += 1) {
+  while (element && element !== document.body) {
     if (element instanceof HTMLElement) {
       const declared = element.getAttribute('data-haptic')
       if (declared === 'none') return null
-      const matches = element.matches(PRESSABLE_SELECTOR) || hasReactClickHandler(element)
-      if (matches) {
+      if (element.matches(PRESSABLE_SELECTOR)) {
         if (isDisabledElement(element)) return null
         return { element, strength: STRENGTH_WORDS.find(word => word === declared) ?? 'light' }
       }

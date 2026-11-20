@@ -150,6 +150,7 @@ export const DiffView = memo(function DiffView({
       <div
         className="flex items-center gap-3 px-3 h-8 bg-bg-200/50 cursor-pointer hover:bg-bg-200 transition-colors select-none"
         onClick={() => setCollapsed(!collapsed)}
+        data-haptic="light"
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <div className={`transition-transform duration-200 ${collapsed ? '-rotate-90' : ''} text-text-400`}>

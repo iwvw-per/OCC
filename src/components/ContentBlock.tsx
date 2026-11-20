@@ -330,6 +330,7 @@ export const ContentBlock = memo(function ContentBlock({
           canCollapse ? 'cursor-pointer' : ''
         } ${headerClass}`}
         onClick={canCollapse ? () => setCachedCollapsed(!collapsed) : undefined}
+        data-haptic={canCollapse ? 'light' : undefined}
       >
         {/* Left: chevron + label + filename */}
         <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">

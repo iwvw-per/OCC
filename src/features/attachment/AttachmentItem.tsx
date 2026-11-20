@@ -74,6 +74,7 @@ function AttachmentItemComponent({
           canExpand && interactive.subtle,
         )}
         onClick={canExpand ? () => setIsExpanded(!isExpanded) : undefined}
+        data-haptic={canExpand ? 'light' : undefined}
       >
         {materialIconUrl ? (
           <img

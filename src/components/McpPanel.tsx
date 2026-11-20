@@ -578,6 +578,7 @@ const ServerItem = memo(function ServerItem({ server, isLoading, onConnect, onDi
       <div
         className={cn('flex items-center gap-2 rounded-md px-2 py-2', canExpand && interactive.subtle)}
         onClick={() => canExpand && setExpanded(!expanded)}
+        data-haptic={canExpand ? 'light' : undefined}
       >
         {/* Expand icon only if there are details to show */}
         {canExpand ? (

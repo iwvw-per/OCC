@@ -79,6 +79,7 @@ function Toast({ item, onDismiss, onClick }: { item: ToastItem; onDismiss: () =>
       className="group relative flex items-center gap-2.5 p-3 glass border border-border-200/60 rounded-xl shadow-lg cursor-pointer hover:bg-bg-100/80 hover:border-border-300 transition-colors duration-150 pointer-events-auto"
       onClick={onClick}
       role="alert"
+      data-haptic="light"
     >
       {/* Icon with accent background */}
       <div className={`shrink-0 flex items-center justify-center w-6 h-6 rounded-md ${config.bgAccent}`}>
@@ -130,6 +131,7 @@ function UpdateToast({ onOpenAbout }: { onOpenAbout: () => void }) {
         updateStore.hideToastForCurrentVersion()
         onOpenAbout()
       }}
+      data-haptic="light"
       role="status"
     >
       <div className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-info-bg">

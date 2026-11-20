@@ -102,6 +102,7 @@ function ServerItem({
     <>
       <div
         onClick={onSelect}
+        data-haptic="light"
         className={`group flex items-center gap-1.5 p-2.5 rounded-lg border transition-colors min-w-0
           ${
             isActive

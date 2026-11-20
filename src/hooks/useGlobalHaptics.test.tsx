@@ -73,7 +73,7 @@ describe('useGlobalHaptics', () => {
     expect(hapticTapMock).not.toHaveBeenCalled()
   })
 
-  it('fires for a custom row whose host node carries a React onClick', () => {
+  it('ignores a content container that merely carries an onClick (no data-haptic)', () => {
     renderHook(() => useGlobalHaptics(true))
     render(
       <div onClick={() => {}}>
@@ -81,6 +81,17 @@ describe('useGlobalHaptics', () => {
       </div>,
     )
     clickOn(screen.getByText('row label'))
+    expect(hapticTapMock).not.toHaveBeenCalled()
+  })
+
+  it('fires light for a custom row explicitly marked data-haptic', () => {
+    renderHook(() => useGlobalHaptics(true))
+    render(
+      <div data-haptic="light" onClick={() => {}}>
+        <span>session row</span>
+      </div>,
+    )
+    clickOn(screen.getByText('session row'))
     expect(hapticTapMock).toHaveBeenCalledWith('light')
   })
 

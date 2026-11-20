@@ -117,6 +117,7 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
       ref={itemRef}
       onClick={handleClick}
       onTouchStart={handleTouchStart}
+      data-haptic="light"
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onFocusCapture={() => {

@@ -559,6 +559,7 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
       onMouseMove={onZoneMove}
       onMouseLeave={onZoneLeave}
       onClick={onZoneClick}
+      data-haptic="light"
     >
       <div
         className="flex justify-end py-1"

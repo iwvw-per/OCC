@@ -158,6 +158,7 @@ export function SettingRow({
       data-setting-label={typeof label === 'string' ? label : undefined}
       data-setting-context={searchContext}
       data-setting-row
+      data-haptic={onClick && !disabled ? 'light' : undefined}
       className={cn(
         // 卡片内的一行：内边距 + 上分隔线（首行不画）。
         // 行自带边框而非由容器 divide-y，是因为 SettingRow/SettingField 是

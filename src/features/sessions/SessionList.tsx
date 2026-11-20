@@ -934,6 +934,7 @@ function SessionListItemComponent({
       ref={itemRef}
       {...selectionAttrs}
       onClick={handleClick}
+      data-haptic="light"
       onMouseDown={handleSelectionMouseDown}
       onContextMenu={handleContextMenu}
       onMouseEnter={!isEditMode ? schedulePrefetch : undefined}

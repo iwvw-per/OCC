@@ -568,6 +568,7 @@ const PanelTabButton = memo(function PanelTabButton({
     <div
       data-tab-id={tab.id}
       data-panel-tab-id={tab.id}
+      data-haptic="light"
       title={tab.type === 'terminal' ? label : undefined}
       aria-label={tab.type === 'terminal' ? label : undefined}
       onPointerDown={handlePointerDragStart}

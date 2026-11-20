@@ -354,6 +354,7 @@ function ClickToCopyCommand({ command }: { command: string }) {
         className="cursor-pointer group/cmd whitespace-pre-wrap break-all"
         onClick={handleClick}
         title={copied ? t('copied') : t('clickToCopy')}
+        data-haptic="light"
       >
         <span className="inline-block w-[1ch] text-center text-accent-main-100 select-none font-semibold">
           {copied ? '✓' : '$'}

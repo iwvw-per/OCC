@@ -84,6 +84,7 @@ export function MentionTag({ type, value, displayName, onClick, className = '', 
       `}
         onClick={handleClick}
         title={value}
+        data-haptic="light"
         // contentEditable 相关属性
         {...(inEditor ? { contentEditable: 'false' } : {})}
       >

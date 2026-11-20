@@ -314,6 +314,7 @@ export function ModelsSettings() {
                         if (disabled && !e.shiftKey && !isModClick(e)) return
                         handleModelActivate(model, e)
                       }}
+                      data-haptic={disabled ? undefined : 'light'}
                       className={`group w-full flex items-start justify-between gap-3 px-2.5 py-2 rounded-lg transition-colors select-none
                         ${disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-bg-200'}`}
                     >

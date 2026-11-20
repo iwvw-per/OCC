@@ -229,6 +229,7 @@ function ProjectItem({ project, displayName, path, onSelect, onRemove }: Project
     <div
       className="group w-full flex items-center gap-2.5 px-2 py-2 rounded-lg cursor-pointer select-none transition-colors hover:bg-bg-200 active:bg-bg-300"
       onClick={onSelect}
+      data-haptic="light"
     >
       <NativeTooltip>
         <button

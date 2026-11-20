@@ -1781,6 +1781,7 @@ function InputBoxComponent({
                 data-collapsed={isCollapsed ? '' : undefined}
                 data-pane-id={paneId}
                 onClick={isCollapsed ? handleExpandInput : undefined}
+                data-haptic={isCollapsed ? 'light' : undefined}
                 onPointerDown={handleContainerPointerDown}
                 onDragEnter={handleDragEnter}
                 onDragOver={handleDragOver}
