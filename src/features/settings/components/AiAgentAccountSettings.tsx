@@ -72,7 +72,7 @@ export function PreferencesSyncSettings() {
   }, [])
 
   return (
-    <SettingsSection title="设置同步" description="把主题、布局、快捷键等本地设置同步到面板，在多台设备间保持一致。">
+    <SettingsSection title="设置同步" description="把项目列表、置顶、模型可见性、主题、对话体验等本地设置同步到面板，在多台设备间保持一致。">
       <SettingRow label="启用同步" description={describeSyncState(syncState)}>
         <div className="flex items-center gap-2">
           <Button

@@ -140,6 +140,15 @@ const BACKGROUND_KEEPALIVE_INTERVAL = 30000
 /** onReconnected 广播 cooldown */
 const RECONNECTED_COOLDOWN = 2000
 
+/**
+ * 「长连接最近是否仍在收数据」的判定窗口(供健康检查佐证使用)。
+ *
+ * 服务端空闲期约每 15s 发一次 `: heartbeat` 注释帧,窗口取其两倍以内即可
+ * 认为连接仍活着。刻意比 HEARTBEAT_TIMEOUT(60s)窄:进程死后 lastActivityAt
+ * 不再推进,约 25s 后本判据即为假,不会长期把已死的主机撑成在线。
+ */
+const CONNECTION_LIVENESS_WINDOW_MS = 25_000
+
 /** 稳定引用：未连接的服务器默认状态（避免 getSnapshot 每次新建对象导致无限循环） */
 const DEFAULT_CONNECTION_INFO: ConnectionInfo = {
   state: 'disconnected',
@@ -1146,6 +1155,26 @@ export function disconnectServerSSE(serverId: string, error?: string) {
  */
 export function getServerConnectionInfo(serverId: string): ConnectionInfo {
   return connections.get(serverId)?.info ?? DEFAULT_CONNECTION_INFO
+}
+
+/**
+ * 长连接最近是否仍在收数据(含心跳注释帧)。
+ *
+ * 作为健康探测的佐证:HTTP 探测失败但长连接仍活跃时,说明主机可达、进程存活,
+ * 不应把状态点判成离线。窗口见 CONNECTION_LIVENESS_WINDOW_MS。
+ */
+export function isServerConnectionLive(serverId: string, now = Date.now()): boolean {
+  const conn = connections.get(serverId)
+  if (!conn || conn.info.state !== 'connected') return false
+  const lastSeen = Math.max(conn.info.lastEventTime, conn.lastActivityAt)
+  return now - lastSeen <= CONNECTION_LIVENESS_WINDOW_MS
+}
+
+// serverStore 不依赖本模块(会形成循环),改为在加载时注入可达性佐证。
+// 用 typeof 守卫:单测常以「部分桩」模拟 serverStore,缺少该方法时跳过注入即可
+// (此时健康检查退化为「连续失败达阈值才判离线」)。
+if (typeof serverStore.setConnectionLivenessProbe === 'function') {
+  serverStore.setConnectionLivenessProbe(isServerConnectionLive)
 }
 
 /**

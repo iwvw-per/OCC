@@ -398,6 +398,15 @@ class ThemeStore {
   private listeners = new Set<() => void>()
 
   constructor() {
+    this.state = this.readStateFromStorage()
+  }
+
+  /**
+   * 从 localStorage 读取全部可持久化偏好,组装出完整状态。
+   *
+   * 构造与「偏好同步拉取后的重读」共用同一段逻辑,保证两条路径口径一致。
+   */
+  private readStateFromStorage(): ThemeState {
     const savedPreset = localStorage.getItem(STORAGE_KEY_PRESET) || DEFAULT_THEME_ID
     const normalizedPreset = getThemePreset(savedPreset) ? savedPreset : DEFAULT_THEME_ID
     const savedMode = (localStorage.getItem(STORAGE_KEY_COLOR_MODE) as ColorMode) || 'system'
@@ -523,7 +532,7 @@ class ThemeStore {
       DEFAULT_CODE_BLOCK_THEME_DARK,
     )
 
-    this.state = {
+    return {
       presetId: normalizedPreset,
       colorMode: savedMode,
       customCSS: savedCSS,
@@ -558,6 +567,20 @@ class ThemeStore {
       codeBlockThemeLight,
       codeBlockThemeDark,
     }
+  }
+
+  /**
+   * 从 localStorage 重新读取受同步管理的偏好并重新应用。
+   *
+   * 偏好同步引擎在拉取到别的端的改动后直接写 localStorage(不经本 store),
+   * 若不重读,UI 会停在旧快照上,表现为「同步了但没生效」。
+   */
+  reloadFromStorage() {
+    this.state = this.readStateFromStorage()
+    this.applyTheme()
+    this.applyFontScale()
+    this.applyGlassClass()
+    this.emit()
   }
 
   // ---- Getters ----

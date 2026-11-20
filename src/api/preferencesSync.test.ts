@@ -125,6 +125,8 @@ describe('preferences sync', () => {
     expect(isSyncableKey('opencode-pinned-messages')).toBe(true)
     // 模型可见性 / 置顶模型：一端隐藏了模型，另一端还列出来会被当成 bug
     expect(isSyncableKey('srv:aiagent:inst_1:hidden-model-keys')).toBe(true)
+    expect(isSyncableKey('srv:aiagent:inst_1:hidden-provider-names')).toBe(true)
+    expect(isSyncableKey('srv:aiagent:inst_1:known-model-keys')).toBe(true)
     expect(isSyncableKey('srv:aiagent:inst_1:model-pinned')).toBe(true)
     // 单调计数（逐键取 max，天然无冲突）
     expect(isSyncableKey('opencode-read-watermarks')).toBe(true)
@@ -132,22 +134,37 @@ describe('preferences sync', () => {
     // 主题
     expect(isSyncableKey('theme-preset')).toBe(true)
     expect(isSyncableKey('theme-mode')).toBe(true)
+    // 对话体验:换端看到「长消息没折叠 / 思考样式变了」会被当成状态丢了
+    for (const key of [
+      'collapse-user-messages',
+      'render-user-markdown',
+      'outline-current-highlight',
+      'actions-on-latest-assistant-only',
+      'desktop-collapsed-input-dock',
+      'show-input-status-bar',
+      'input-status-bar-fields',
+      'session-stats-fields-desktop',
+      'session-stats-fields-mobile',
+      'reasoning-display-mode',
+      'opencode-send-on-enter',
+      'opencode:large-text-paste',
+    ]) {
+      expect(isSyncableKey(key), key).toBe(true)
+    }
   })
 
-  it('no longer syncs personalization settings', async () => {
+  it('no longer syncs device-shape settings', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
 
-    // 外观 / 布局 / 字号：不再跨端同步（见文件头「个性化设置不同步」）
+    // 外观 / 布局 / 字号：不再跨端同步（见文件头「设备形态与瞬时状态不同步」）
     for (const key of [
       'chat-content-width',
       'code-word-wrap',
-      'collapse-user-messages',
       'descriptive-tool-steps',
       'diff-style',
       'font-scale',
       'glass-effect',
       'i18nextLng',
-      'reasoning-display-mode',
       'sidebar-width',
       'theme-custom-css',
     ]) {
@@ -160,7 +177,6 @@ describe('preferences sync', () => {
       'opencode:toast-enabled',
       'opencode:update-check',
       'opencode:haptic-settings',
-      'opencode:large-text-paste',
       'opencode-keybindings',
       'opencode-sidebar-project-sort',
       'opencode-right-panel-width',

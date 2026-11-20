@@ -45,6 +45,7 @@ const {
     getTrimmedCount: vi.fn(() => 0),
     settleByAuthoritativeIdle: vi.fn(() => true),
     getSessionChangeVersion: vi.fn(() => 0),
+    getRevertGeneration: vi.fn(() => 0),
     subscribe: vi.fn(() => () => {}),
     subscribeSession: vi.fn(() => () => {}),
     onSessionEvicted: vi.fn(() => () => {}),

@@ -571,7 +571,6 @@ export const ChatPane = memo(function ChatPane({
     const sizeLabel = formatHeavyBytes(heavyContent.totalBytes)
     return {
       label: t('chat:inputBox.heavyContextLabel', { defaultValue: 'heavy' }).replace('{{size}}', sizeLabel),
-      title: t('chat:inputBox.heavyContextTitle'),
     }
   }, [heavyContent, t])
 
@@ -1102,9 +1101,13 @@ export const ChatPane = memo(function ChatPane({
 
   // 工作状态面板：用户开关 + 视口宽度共同决定是否占位。
   // 分屏 pane 不显示（宽度不够，且信息会和主视图重复）。
+  // 欢迎层(home 空态)判定:无 session、无消息、未流式。放在这里是因为
+  // 「是否欢迎页」同时决定工作状态面板要不要占位。
+  const showWelcome = !routeSessionId && renderedMessages.length === 0 && !sessionRunning && chatAreaMountKey !== null
+
   const workStatus = useWorkStatus()
   const { rowRef: workStatusRowRef, visible: workStatusVisible } = useWorkStatusVisibility({
-    disabled: showCompactShell,
+    disabled: showCompactShell || showWelcome,
     enabled: workStatus.enabled,
   })
 
@@ -1209,10 +1212,7 @@ export const ChatPane = memo(function ChatPane({
 
   // ============================================
   // 欢迎层（home 空态）
-  // 只在「无 session 且没有消息且未流式」时展示。发送第一条消息后 routeSessionId
-  // 立即从 null 变为有值，welcome 自然退场——不需要自己维护 docked 状态。
   // ============================================
-  const showWelcome = !routeSessionId && renderedMessages.length === 0 && !sessionRunning && chatAreaMountKey !== null
   const handleWelcomeSelectProject = useCallback(
     (path: string) => {
       // 欢迎页主动选项目 = 用户明确的「我要用这个项目」，登记进侧栏。

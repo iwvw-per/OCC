@@ -8,7 +8,6 @@
 
 import { useTranslation } from 'react-i18next'
 import { Popover, PopoverTrigger, PopoverContent } from '../../../components/ui'
-import { Tooltip } from '../../../components/ui/Tooltip'
 import { StatsIcon, GaugeIcon, DatabaseIcon } from '../../../components/Icons'
 import { formatDuration, formatTokenRate } from '../../../utils/formatUtils'
 import type { SessionTurnStats } from '../../../hooks/useSessionTurnStats'
@@ -103,29 +102,27 @@ export function SessionStatsPopover({ stats, tokensPerSec, displayFields }: Sess
 
   return (
     <Popover>
-      <Tooltip content={t('inputFooter.tokenRate')}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className="shrink-0 max-w-full flex items-center gap-1.5 tabular-nums border border-transparent px-1.5 py-0.5 rounded-md hover:bg-bg-200 hover:border-border-200 transition-colors data-[state=open]:text-text-100 overflow-hidden"
-          >
-            <StatsIcon size={11} className="shrink-0 text-text-400" />
-            {hasBottomItems ? (
-              <span className="flex items-center gap-1.5 min-w-0 truncate">
-                {bottomItems.map((item, index) => (
-                  <span key={item.key} className="flex items-center gap-1 shrink-0">
-                    {index > 0 && <span className="text-text-400/50">·</span>}
-                    <span className="text-text-400 text-ui-xs">{item.label}</span>
-                    <span className="text-text-200 font-medium">{item.value}</span>
-                  </span>
-                ))}
-              </span>
-            ) : (
-              <span className="text-ui-xs text-text-400">{t('sessionStats.title')}</span>
-            )}
-          </button>
-        </PopoverTrigger>
-      </Tooltip>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="shrink-0 max-w-full flex items-center gap-1.5 tabular-nums border border-transparent px-1.5 py-0.5 rounded-md hover:bg-bg-200 hover:border-border-200 transition-colors data-[state=open]:text-text-100 overflow-hidden"
+        >
+          <StatsIcon size={11} className="shrink-0 text-text-400" />
+          {hasBottomItems ? (
+            <span className="flex items-center gap-1.5 min-w-0 truncate">
+              {bottomItems.map((item, index) => (
+                <span key={item.key} className="flex items-center gap-1 shrink-0">
+                  {index > 0 && <span className="text-text-400/50">·</span>}
+                  <span className="text-text-400 text-ui-xs">{item.label}</span>
+                  <span className="text-text-200 font-medium">{item.value}</span>
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="text-ui-xs text-text-400">{t('sessionStats.title')}</span>
+          )}
+        </button>
+      </PopoverTrigger>
       <PopoverContent align="end" side="top" sideOffset={8} className="w-72 p-0">
         <div className="flex items-center gap-2 border-b border-border-200/50 px-4 py-2.5 text-ui-caption font-medium text-text-200">
           <StatsIcon size={13} className="shrink-0 text-text-400" />

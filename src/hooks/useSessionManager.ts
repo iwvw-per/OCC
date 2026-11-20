@@ -341,6 +341,16 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
        */
       const snapshotGeneration = messageStore.getSessionChangeVersion(sid)
 
+      /**
+       * 撤销态本地代际:同样在请求发出前记一份。
+       *
+       * 撤销/重做是**本地先落状态**的(见 handleUndoWithAnimation 的乐观提交),
+       * 而本次请求的 sessionInfo 可能在 stage 落库之前就已发出、`revert` 仍是
+       * 旧值(null 或上一个撤销点)。若拿它覆盖本地,表现就是「消息进入编辑态,
+       * 又立刻弹回对话,过一会儿才回来」。落地时代际变了就跳过,不碰撤销态。
+       */
+      const revertGeneration = messageStore.getRevertGeneration(sid)
+
       const seq = (loadSequenceRef.current.get(sid) ?? 0) + 1
       loadSequenceRef.current.set(sid, seq)
       const isStale = () => loadSequenceRef.current.get(sid) !== seq
@@ -677,7 +687,9 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
              * 「点了撤销、消息闪一下又全回来了」。传 undefined 表示「本次不涉及」，
              * 保留本地状态。
              */
-            ...(sessionInfo ? { revertState: sessionInfo.revert ?? null } : {}),
+            ...(sessionInfo && messageStore.getRevertGeneration(sid) === revertGeneration
+              ? { revertState: sessionInfo.revert ?? null }
+              : {}),
             shareUrl: sessionInfo?.share?.url,
             compactedAt: skeleton.compactedAt,
             compactionMarker: skeleton.compaction,
@@ -889,7 +901,9 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           title: sessionInfo?.title,
           ...paging,
           // 同上：拿不到会话详情时不覆盖本地撤销态
-          ...(sessionInfo ? { revertState: sessionInfo.revert ?? null } : {}),
+          ...(sessionInfo && messageStore.getRevertGeneration(sid) === revertGeneration
+            ? { revertState: sessionInfo.revert ?? null }
+            : {}),
           shareUrl: sessionInfo?.share?.url,
           compactedAt: page.compactedAt,
           compactionMarker: page.compaction,

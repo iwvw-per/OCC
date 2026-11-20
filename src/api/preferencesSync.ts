@@ -15,13 +15,16 @@
 //   2. opencode-pinned-sessions / opencode-pinned-messages —— 置顶
 //   3. opencode-read-watermarks / opencode-project-last-used —— 单调计数
 //   4. theme-preset / theme-mode —— 主题
-//   5. srv:aiagent:{id}:hidden-model-keys / model-pinned —— 模型可见性与置顶
+//   5. srv:aiagent:{id}:hidden-model-keys / hidden-provider-names /
+//      known-model-keys / model-pinned —— 模型与端点的可见性、置顶
 //   6. srv:aiagent:{id}:opencode-hidden-projects —— 被隐藏的派生项目
 //   7. opencode-sidebar-expanded-projects —— 项目行展开/收起
 //
-// **个性化设置不同步**：外观、布局、字号、音效、通知开关等一律不参与。
-// 它们对跨端一致性的要求低，却需要额外的时间戳仲裁与冲突处理；去掉之后
-// 同步层只剩「并集」与「取最大」两种幂等合并，多端同时操作天然不冲突。
+// **设备形态与瞬时状态不同步**：字号、毛玻璃、面板开合、侧栏宽度等等一律
+// 不参与 —— 它们要么描述「这一屏长什么样」，要么本就随设备不同（桌面 vs 手机）。
+// 对话体验类设置是例外：换端看到「长消息没折叠 / 思考样式变了」会被当成状态
+// 丢了，因此进白名单。去掉这些之后，同步层只剩「并集」与「取最大」两种幂等
+// 合并，多端同时操作天然不冲突。
 //
 // 白名单必须显式登记，不会因为新增一个 localStorage 键就自动同步
 // （「意外泄露」被转换成「必须显式登记」）。历史教训：此前采用黑名单制，
@@ -78,7 +81,7 @@
 //   - opencode-pinned-sessions：数组，按 sessionId 去重并集
 //   - opencode-saved-directories：数组，按 path 去重并集
 //   - opencode-pinned-messages：数组，按 sessionId 去重并集
-//   - hidden-model-keys / model-pinned：字符串数组，元素本身即 id
+//   - hidden-model-keys / hidden-provider-names / known-model-keys / model-pinned：字符串数组，元素本身即 id
 //   - opencode-hidden-projects：字符串数组（被隐藏的项目目录）
 //   - opencode-sidebar-expanded-projects：字符串数组（展开的项目名）
 //
@@ -117,6 +120,9 @@ import { layoutStore } from '../store/layoutStore'
 import { serverStore } from '../store/serverStore'
 import { readWatermarkStore } from '../store/readWatermarkStore'
 import { sessionActivityStore } from '../store/sessionActivityStore'
+import { themeStore } from '../store/themeStore'
+import { modelVisibilityStore } from '../store/modelVisibilityStore'
+import { largeTextPasteStore } from '../store/largeTextPasteStore'
 
 /**
  * B 类缺陷 1：同步时间戳的时钟。
@@ -183,23 +189,24 @@ const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 /**
  * 跨设备同步的白名单。
  *
- * 只有「多端看到不一致会被当成 bug」的数据才能出现在这里：
- *   - 项目列表（按服务器分桶）
+ * 只有「多端看到不一致会被当成 bug」的数据才能出现在这里:
+ *   - 项目列表(按服务器分桶)
  *   - 置顶会话 / 置顶消息
- *   - 模型可见性（隐藏的模型）/ 置顶模型
+ *   - 模型 / 端点的可见性(被隐藏的模型、被关闭的端点)、已见模型集合、置顶模型
  *   - 被用户隐藏的派生项目
  *   - 已读水位、项目最后活跃时间
- *   - 主题（preset + mode）
+ *   - 主题(preset + mode)
+ *   - 对话体验设置(折叠长消息、渲染用户 Markdown、思考展示方式等)
  *
- * 外观/布局/音效/通知等个性化设置**不参与同步**：它们对跨端一致性要求低，
- * 却带来大量合并分支与流量，收益远小于成本。要新增同步项，必须在
- * SYNCABLE_PATTERNS 里显式登记，并为其指定合并策略（见 MERGE_RULES）。
+ * 字号 / 毛玻璃 / 面板开合等「设备形态」设置**不参与同步**:它们要么对跨端
+ * 一致性要求低,要么本就随设备不同,收益远小于成本。要新增同步项,必须在
+ * SYNCABLE_PATTERNS 里显式登记,并为其指定合并策略(见 MERGE_RULES)。
  *
- * 判定标准是「用户是否会把不一致当成故障」：
- *   - 隐藏模型后另一端仍列出它 → 用户认为隐藏没生效；
- *   - 侧栏字号/动画速度不一致 → 用户认为是设备差异，不是 bug。
- * 模型可见性与置顶模型属于前者，因此进白名单；它们都是字符串数组，
- * 走 'string-array' 合并（并集 + 墓碑）。
+ * 判定标准是「用户是否会把不一致当成故障」:
+ *   - 隐藏模型后另一端仍列出它 → 用户认为隐藏没生效;
+ *   - 侧栏字号 / 动画速度不一致 → 用户认为是设备差异,不是 bug。
+ * 模型可见性、已见模型与置顶模型属于前者,因此进白名单;它们是字符串数组,
+ * 走 'string-array' 合并(并集 + 墓碑)。
  */
 const SYNCABLE_PATTERNS: RegExp[] = [
   // 项目列表：按服务器分桶，数组并集 + 墓碑
@@ -208,8 +215,10 @@ const SYNCABLE_PATTERNS: RegExp[] = [
   // 这里同时接受带前缀与裸键两种形态，兼容旧客户端写下的数据）
   /^(srv:aiagent:[^:]+:)?opencode-pinned-sessions$/,
   /^(srv:aiagent:[^:]+:)?opencode-pinned-messages$/,
-  // 模型可见性 / 置顶模型：per-server 分桶的字符串数组
+  // 模型 / 端点可见性与置顶:per-server 分桶的字符串数组
   /^srv:aiagent:[^:]+:hidden-model-keys$/,
+  /^srv:aiagent:[^:]+:hidden-provider-names$/,
+  /^srv:aiagent:[^:]+:known-model-keys$/,
   /^srv:aiagent:[^:]+:model-pinned$/,
   /**
    * 侧栏项目行的展开/收起（存的是项目名，不是路径）。
@@ -227,6 +236,19 @@ const SYNCABLE_PATTERNS: RegExp[] = [
   /^opencode-project-last-used$/,
   // 主题：仅这两个键，标量 LWW
   /^theme-(preset|mode)$/,
+  // 对话体验(设置页「对话体验」区块):换端看到「长消息没折叠 / 思考样式变了」
+  // 会被当成状态丢了,因此纳入同步。均为标量键(字段对象整体覆盖)。
+  /^collapse-user-messages$/,
+  /^render-user-markdown$/,
+  /^outline-current-highlight$/,
+  /^actions-on-latest-assistant-only$/,
+  /^desktop-collapsed-input-dock$/,
+  /^show-input-status-bar$/,
+  /^input-status-bar-fields$/,
+  /^session-stats-fields-(desktop|mobile)$/,
+  /^reasoning-display-mode$/,
+  /^opencode-send-on-enter$/,
+  /^opencode:large-text-paste$/,
 ]
 
 /**
@@ -237,9 +259,7 @@ export const DEPRECATED_SYNCABLE_KEYS: string[] = [
   // 外观 / 布局
   'chat-content-width',
   'code-word-wrap',
-  'collapse-user-messages',
   'descriptive-tool-steps',
-  'desktop-collapsed-input-dock',
   'diff-style',
   'external-file-drop-mode',
   'font-scale',
@@ -247,14 +267,11 @@ export const DEPRECATED_SYNCABLE_KEYS: string[] = [
   'i18nextLng',
   'process-collapse-enabled',
   'queue-followup-messages',
-  'reasoning-display-mode',
-  'render-user-markdown',
   'sidebar-width',
   'step-finish-display',
   'theme-custom-css',
   // 音效 / 通知 / 设备相关
   'opencode:haptic-settings',
-  'opencode:large-text-paste',
   'opencode:notification-event-settings',
   'opencode:sound-settings',
   'opencode:toast-enabled',
@@ -541,6 +558,17 @@ const MERGE_RULES: Record<string, MergeRule> = {
   // 模型可见性（被用户隐藏的模型键）与置顶模型：集合语义的字符串数组，
   // 多端一致才符合直觉——一端隐藏了模型，另一端还列在候选里会被当成 bug。
   'hidden-model-keys': {
+    kind: 'string-array',
+  },
+  // 端点(provider)级可见性:被关闭的端点名。与 hidden-model-keys 同构 ——
+  // 一端关掉的端点,另一端仍列在菜单里会被当成「开关没生效」。
+  'hidden-provider-names': {
+    kind: 'string-array',
+  },
+  // 已见过的模型键集合。上游新增模型时靠它判定「新模型默认关闭」;
+  // 跨端一致才能保证同一批新模型在各端都被默认收起(否则一端没有历史,
+  // 首次运行会把新模型全部当作已知、直接放出来)。
+  'known-model-keys': {
     kind: 'string-array',
   },
   // 侧栏项目行的展开/收起：只向上合并（并集），本地收起不上传。
@@ -1320,6 +1348,15 @@ export async function pullPreferences(account?: AiAgentAccount | null): Promise<
     // 项目「最后活动时间」水位同理：拉取到另一端的活动时间后重读，未点开的项目
     // 顺序/时间才立即对齐（否则要等点进会话或流式抬高 time.updated）。
     sessionActivityStore.reload()
+    // 对话体验(themeStore 的裸键)与此前不同:themeStore 只在内存里维护一份
+    // 快照,不订阅任何存储事件。拉取写入后必须让它重读并重新应用主题,否则
+    // 表现为「同步显示成功,但长消息折叠/思考样式这一刻没变,重启才生效」。
+    themeStore.reloadFromStorage()
+    // 模型 / 端点可见性同样由 store 内存快照驱动(per-server 键),不重读的话
+    // 另一端关掉的端点仍会列在菜单里。
+    modelVisibilityStore.reloadFromStorage()
+    // 大段粘贴方式(裸键 opencode:large-text-paste)同理。
+    largeTextPasteStore.reloadFromStorage()
   }
   return written
 }

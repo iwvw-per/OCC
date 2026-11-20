@@ -20,7 +20,7 @@ export function useServerConnectionState(serverId: string): ConnectionState {
 
 /**
  * 状态点颜色以健康探测为准（真实可达性），SSE 仅补充 connecting 过渡态 ——
- * 进程死后 SSE 长连接可能还挂着，health 是 5s 超时的真实探测，能立刻判离线。
+ * 进程死后 SSE 长连接可能还挂着，health 是 5s 超时的真实探测，连续失败达阈值后即判离线。
  */
 export function statusDotClass(health: ServerHealth | null, state: ConnectionState): string {
   switch (health?.status) {

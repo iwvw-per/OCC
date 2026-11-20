@@ -6,6 +6,7 @@ const { getSessionMock, getSessionTurnPageMock, messageStoreMock } = vi.hoisted(
   messageStoreMock: {
     getSessionState: vi.fn(),
     setMessages: vi.fn(),
+    getRevertGeneration: vi.fn(() => 0),
   },
 }))
 
@@ -27,6 +28,8 @@ describe('sessionPrefetch', () => {
     getSessionTurnPageMock.mockReset()
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setMessages.mockReset()
+    messageStoreMock.getRevertGeneration.mockReset()
+    messageStoreMock.getRevertGeneration.mockReturnValue(0)
 
     messageStoreMock.getSessionState.mockReturnValue(null)
     getSessionMock.mockResolvedValue({ id: 'session-1', directory: '/workspace/demo' })

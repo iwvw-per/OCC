@@ -39,6 +39,7 @@ const {
     getTrimmedCount: vi.fn(() => 0),
     settleByAuthoritativeIdle: vi.fn(() => false),
     getSessionChangeVersion: vi.fn(() => 0),
+    getRevertGeneration: vi.fn(() => 0),
   },
   activeSessionStoreMock: {
     getSessionStatus: vi.fn(),
@@ -124,6 +125,8 @@ describe('useSessionManager', () => {
     messageStoreMock.getTrimmedCount.mockReset()
     messageStoreMock.settleByAuthoritativeIdle.mockReset()
     messageStoreMock.getTrimmedCount.mockReturnValue(0)
+    messageStoreMock.getRevertGeneration.mockReset()
+    messageStoreMock.getRevertGeneration.mockReturnValue(0)
     sessionErrorHandlerMock.mockReset()
     revertMessageMock.mockReset()
     extractUserMessageContentMock.mockReset()
@@ -1139,5 +1142,57 @@ describe('运行中会话但骨架未标 unsettled：末轮也要补拉', () => 
 
     const applied = messageStoreMock.setMessages.mock.calls.at(-1)?.[1] as Array<{ info: { id: string } }>
     expect(applied.map(m => m.info.id)).not.toContain('live_reply')
+  })
+
+  it('skips the server revert state when a local edit happened during the load', async () => {
+    /**
+     * 回归:点「重编辑」后消息进入编辑态,下一秒却弹回对话,再过一会儿才回来。
+     *
+     * 根因是撤销态是**本地先落**的,而并发的那次 loadSession 的 sessionInfo
+     * 在 stage 落库前就已发出(revert 仍是旧值 null)。落地时用 null 覆盖本地,
+     * 编辑态瞬间消失;等权威结果回来才恢复 —— 就是那一下闪烁。
+     *
+     * 这里模拟「加载发起后本地才改撤销态」:代际从 0 变 1,落地必须跳过 revertState。
+     */
+    let revertGen = 0
+    messageStoreMock.getRevertGeneration.mockImplementation(() => revertGen)
+    getSessionMock.mockImplementation(async () => {
+      // 请求返回前用户点了撤销/重做 → 本地代际前进
+      revertGen = 1
+      return { id: 'session-1', directory: '/workspace/demo', revert: null }
+    })
+    getSessionTurnPageMock.mockResolvedValue({
+      messages: [{ info: { id: 'm1', role: 'user', time: { created: 1 } }, parts: [] }],
+      nextCursor: undefined,
+      hasMore: false,
+    })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: null, directory: '/workspace/demo' }))
+    await act(async () => {
+      await result.current.loadSession('session-1', { force: true })
+    })
+
+    const options = messageStoreMock.setMessages.mock.calls.at(-1)?.[2] as Record<string, unknown>
+    expect(options).toBeTruthy()
+    // 不传 revertState(等价于 undefined),让本地撤销态原样保留
+    expect('revertState' in options).toBe(false)
+  })
+
+  it('applies the server revert state when nothing changed locally during the load', async () => {
+    messageStoreMock.getRevertGeneration.mockReturnValue(0)
+    getSessionMock.mockResolvedValue({ id: 'session-1', directory: '/workspace/demo', revert: null })
+    getSessionTurnPageMock.mockResolvedValue({
+      messages: [{ info: { id: 'm1', role: 'user', time: { created: 1 } }, parts: [] }],
+      nextCursor: undefined,
+      hasMore: false,
+    })
+
+    const { result } = renderHook(() => useSessionManager({ sessionId: null, directory: '/workspace/demo' }))
+    await act(async () => {
+      await result.current.loadSession('session-1', { force: true })
+    })
+
+    const options = messageStoreMock.setMessages.mock.calls.at(-1)?.[2] as Record<string, unknown>
+    expect(options.revertState).toBeNull()
   })
 })

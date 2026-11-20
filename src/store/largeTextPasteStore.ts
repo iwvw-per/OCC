@@ -63,6 +63,12 @@ class LargeTextPasteStore {
     saveSettings(this.settings)
     this.subscribers.forEach(cb => cb())
   }
+
+  /** 从 localStorage 重读(供偏好同步拉取后调用)。 */
+  reloadFromStorage() {
+    this.settings = loadSettings()
+    this.subscribers.forEach(cb => cb())
+  }
 }
 
 export const largeTextPasteStore = new LargeTextPasteStore()

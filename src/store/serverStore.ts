@@ -139,6 +139,14 @@ const ACTIVE_SERVER_KEY = 'opencode-active-server'
 export const LOCAL_SERVER_ID = 'local'
 
 /**
+ * 网络层失败需要连续出现多少次才判离线。
+ *
+ * 设为 2(即「一次失败先保留上一次结论,第二次仍失败才翻红」):15s 轮询下,
+ * 真实离线最迟约 15~30s 内被识别,而单次抖动不会再让状态点闪红。
+ */
+const OFFLINE_CONFIRMATIONS = 2
+
+/**
  * Server Store
  * 管理多个 OpenCode 后端服务器配置
  */
@@ -149,6 +157,19 @@ class ServerStore {
   private healthCheckSeqMap = new Map<string, number>()
   /** 每台服务器的在途健康检查：并发触发只发一次网络 */
   private healthInflight = new Map<string, Promise<ServerHealth>>()
+  /**
+   * 每台服务器连续网络失败的次数。
+   *
+   * 单次探测失败(隧道瞬断、移动网络切换、后台被冻结后回前台)并不等于主机
+   * 真的下线,立刻翻红会让状态点在 15s 轮询下周期性闪烁。连续失败达到阈值
+   * 才判离线;只要拿到任何响应(含 4xx/5xx)就说明主机可达,计数清零。
+   */
+  private healthFailureStreakMap = new Map<string, number>()
+  /**
+   * 「长连接最近仍在收数据」的判据(由 SSE 层注入,见 setConnectionLivenessProbe)。
+   * null 表示尚未注入,此时健康检查退化为「连续失败达阈值才判离线」。
+   */
+  private connectionLivenessProbe: ((serverId: string) => boolean) | null = null
   private clockCalibrationMap = new Map<string, ServerClockCalibration>()
   private listeners: Set<Listener> = new Set()
   private localServerUrlOverride: string | null = null
@@ -439,6 +460,16 @@ class ServerStore {
     return this._healthMapSnapshot
   }
 
+  /**
+   * 注入「长连接最近仍在收数据」的判据(由 SSE 层调用)。
+   *
+   * serverStore 不直接依赖 events(会形成循环),改用注入口。健康探测失败时
+   * 用它佐证可达性:长连接最近仍活跃说明主机在线,不该翻红。
+   */
+  setConnectionLivenessProbe(probe: ((serverId: string) => boolean) | null): void {
+    this.connectionLivenessProbe = probe
+  }
+
   getActiveCalibratedNow(): number | undefined {
     return this.getCalibratedNow(this.getActiveServerId())
   }
@@ -540,6 +571,7 @@ class ServerStore {
     this.healthMap.delete(id)
     this.healthCheckSeqMap.delete(id)
     this.healthInflight.delete(id)
+    this.healthFailureStreakMap.delete(id)
     this.clockCalibrationMap.delete(id)
 
     // 如果删除的是当前选中的，切换到默认
@@ -665,6 +697,9 @@ class ServerStore {
         headers,
       })
 
+      // 拿到响应即证明主机可达(哪怕是 4xx/5xx):网络层连续失败计数清零。
+      this.healthFailureStreakMap.delete(serverId)
+
       const latency = Date.now() - startTime
       const responseBody = await response.text().catch(err => `[Failed to read response body: ${normalizeConnectionError(err)}]`)
       const details = formatResponseDiagnostics({ url: infoUrl, response, latency, body: responseBody })
@@ -725,6 +760,29 @@ class ServerStore {
         return commitHealth(health)
       }
     } catch (err) {
+      const streak = (this.healthFailureStreakMap.get(serverId) ?? 0) + 1
+      this.healthFailureStreakMap.set(serverId, streak)
+
+      // 佐证优先:SSE 长连接最近仍在收数据(含心跳注释帧)说明主机可达且进程
+      // 存活 —— 此时 /api/info 打不通多半是路径 / 代理层的抖动,不应把状态点
+      // 刷红。恢复「在线」并沿用上次的版本号。
+      const previous = this.healthMap.get(serverId)
+      if (this.connectionLivenessProbe?.(serverId) === true) {
+        return commitHealth({
+          status: 'online',
+          latency: previous?.latency,
+          lastCheck: Date.now(),
+          version: previous?.version,
+        })
+      }
+
+      // 单次网络失败保留上一次的成功结论:这类失败往往是抖动(隧道瞬断、
+      // 移动网络切换、后台被冻结后回前台),立刻翻红会让状态点闪烁。
+      // 只有连续 OFFLINE_CONFIRMATIONS 次失败,或此前从未成功过,才判离线。
+      if (streak < OFFLINE_CONFIRMATIONS && previous?.status === 'online') {
+        return previous
+      }
+
       const health: ServerHealth = {
         status: 'offline',
         lastCheck: Date.now(),

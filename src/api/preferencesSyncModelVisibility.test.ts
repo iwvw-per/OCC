@@ -84,6 +84,43 @@ describe('model visibility sync', () => {
     )
   }
 
+  /** 与 seedBaseline 同构,但针对任意键(端点可见性、已见模型集合)。 */
+  function seedBaselineForKey(key: string, snapshotValue: string[]) {
+    localStorage.setItem(
+      SYNC_STAMPS_KEY,
+      JSON.stringify({
+        stamps: { [key]: '2029-01-01T00:00:00Z' },
+        known: { __snapshot__: JSON.stringify({ [key]: JSON.stringify(snapshotValue) }) },
+      }),
+    )
+  }
+
+  /** 服务端只返回指定键一条记录(其余键不出现)。 */
+  function stubServerForKey(key: string, serverValue: unknown) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/api/aiagent/preferences')) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              data:
+                serverValue === null
+                  ? []
+                  : [{ key, value: serverValue, updatedAt: '2030-01-01T00:00:00Z' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+        return new Response(JSON.stringify({ success: true, data: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+  }
+
   it('is in the sync whitelist', async () => {
     const { isSyncableKey } = await import('./preferencesSync')
     expect(isSyncableKey(KEY)).toBe(true)
@@ -160,5 +197,53 @@ describe('model visibility sync', () => {
     await pullPreferences(account)
 
     expect(JSON.parse(localStorage.getItem(KEY) || '[]')).toEqual([])
+  })
+
+  const PROVIDER_KEY = 'srv:aiagent:inst_work:hidden-provider-names'
+  const KNOWN_KEY = 'srv:aiagent:inst_work:known-model-keys'
+
+  it('syncs provider-level visibility and the known-model set', async () => {
+    const { isSyncableKey } = await import('./preferencesSync')
+    // 端点级隐藏:一端关掉的端点在另一端仍列出会被当成「开关没生效」。
+    expect(isSyncableKey(PROVIDER_KEY)).toBe(true)
+    // 已见模型集合跨端一致,新模型才会在各端都被默认收起。
+    expect(isSyncableKey(KNOWN_KEY)).toBe(true)
+  })
+
+  it('merges hidden providers from both sides (union)', async () => {
+    const account = await seedAccount()
+    localStorage.setItem(PROVIDER_KEY, JSON.stringify(['anthropic']))
+    seedBaselineForKey(PROVIDER_KEY, ['anthropic'])
+    stubServerForKey(PROVIDER_KEY, ['anthropic', 'openai'])
+
+    const { pullPreferences } = await import('./preferencesSync')
+    await pullPreferences(account)
+
+    expect(JSON.parse(localStorage.getItem(PROVIDER_KEY) || '[]')).toEqual(['anthropic', 'openai'])
+  })
+
+  it('does not resurrect a provider the user just re-enabled', async () => {
+    const account = await seedAccount()
+    // 基线里有两个端点,本地只剩一个 → 用户重新启用了 openai
+    localStorage.setItem(PROVIDER_KEY, JSON.stringify(['anthropic']))
+    seedBaselineForKey(PROVIDER_KEY, ['anthropic', 'openai'])
+    stubServerForKey(PROVIDER_KEY, ['anthropic', 'openai'])
+
+    const { pullPreferences } = await import('./preferencesSync')
+    await pullPreferences(account)
+
+    expect(JSON.parse(localStorage.getItem(PROVIDER_KEY) || '[]')).toEqual(['anthropic'])
+  })
+
+  it('merges the known-model set from both sides (union)', async () => {
+    const account = await seedAccount()
+    localStorage.setItem(KNOWN_KEY, JSON.stringify(['anthropic/claude']))
+    seedBaselineForKey(KNOWN_KEY, ['anthropic/claude'])
+    stubServerForKey(KNOWN_KEY, ['anthropic/claude', 'openai/gpt'])
+
+    const { pullPreferences } = await import('./preferencesSync')
+    await pullPreferences(account)
+
+    expect(JSON.parse(localStorage.getItem(KNOWN_KEY) || '[]')).toEqual(['anthropic/claude', 'openai/gpt'])
   })
 })

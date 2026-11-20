@@ -335,6 +335,76 @@ describe('serverStore health check', () => {
 
     expect(health.status).toBe('error')
   })
+
+  it('keeps the last online result on a single network failure, then goes offline', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ version: '2.0.28' }))
+      .mockRejectedValueOnce(new TypeError('network down'))
+      .mockRejectedValueOnce(new TypeError('network down'))
+    const { serverStore } = await import('./serverStore')
+
+    expect((await serverStore.checkHealth('local')).status).toBe('online')
+
+    // 第一次网络失败:判为抖动,保留上一次的成功结论,状态点不翻红
+    expect((await serverStore.checkHealth('local')).status).toBe('online')
+    expect(serverStore.getHealth('local')?.status).toBe('online')
+
+    // 连续第二次失败 → 判离线
+    expect((await serverStore.checkHealth('local')).status).toBe('offline')
+    expect(serverStore.getHealth('local')?.status).toBe('offline')
+  })
+
+  it('resets the failure streak after a successful probe', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ version: '2.0.28' }))
+      .mockRejectedValueOnce(new TypeError('blip'))
+      .mockResolvedValueOnce(jsonResponse({ version: '2.0.28' }))
+      .mockRejectedValueOnce(new TypeError('blip'))
+    const { serverStore } = await import('./serverStore')
+
+    expect((await serverStore.checkHealth('local')).status).toBe('online')
+    // 失败 1 次(保留 online)
+    expect((await serverStore.checkHealth('local')).status).toBe('online')
+    // 成功一次 → 计数清零
+    expect((await serverStore.checkHealth('local')).status).toBe('online')
+    // 再失败 1 次,仍是「第一次失败」,不会因为历史累积而翻红
+    expect((await serverStore.checkHealth('local')).status).toBe('online')
+    expect(serverStore.getHealth('local')?.status).toBe('online')
+  })
+
+  it('reports offline immediately when the very first probe fails', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError('network down'))
+    const { serverStore } = await import('./serverStore')
+
+    // 没有任何成功记录可保留,首次失败即离线
+    expect((await serverStore.checkHealth('local')).status).toBe('offline')
+  })
+
+  it('treats a live long connection as online even when the HTTP probe fails', async () => {
+    vi.mocked(fetch).mockRejectedValue(new TypeError('network down'))
+    const { serverStore } = await import('./serverStore')
+    // 模拟 SSE 层注入的佐证:长连接最近仍在收数据
+    serverStore.setConnectionLivenessProbe(() => true)
+
+    // HTTP 探测全失败,但长连接活跃 → 主机可达,判在线而不是离线
+    expect((await serverStore.checkHealth('local')).status).toBe('online')
+    expect(serverStore.getHealth('local')?.status).toBe('online')
+  })
+
+  it('recovers to online when a live long connection contradicts an offline result', async () => {
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new TypeError('down'))
+      .mockRejectedValueOnce(new TypeError('down'))
+    const { serverStore } = await import('./serverStore')
+
+    // 没有佐证且首次失败 → 离线
+    expect((await serverStore.checkHealth('local')).status).toBe('offline')
+
+    // 佐证在线 → 恢复
+    serverStore.setConnectionLivenessProbe(() => true)
+    expect((await serverStore.checkHealth('local')).status).toBe('online')
+    expect(serverStore.getHealth('local')?.status).toBe('online')
+  })
 })
 
 describe('serverStore enable/disable', () => {

@@ -2,7 +2,6 @@ import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowDownIcon, SendIcon, StopIcon } from '../../../components/Icons'
 import { Spinner } from '../../../components/ui/Spinner'
-import { NativeTooltip } from '../../../components/ui/Tooltip'
 
 // ============================================
 // ChatFab — 收起态「回到底部」/ 展开态「发送 / 停止」三合一按钮
@@ -40,28 +39,25 @@ export const ChatFab = memo(function ChatFab({ collapsed, mode, sending, disable
           : t('inputToolbar.sendMessage')
 
   return (
-    <NativeTooltip>
-      <button
-        type="button"
-        data-collapsed={collapsed}
-        data-mode={mode}
-        data-haptic={mode === 'send' ? 'medium' : mode === 'stop' ? 'strong' : 'light'}
-        disabled={disabled}
-        onClick={onClick}
-        aria-label={label}
-        title={label}
-        className="chat-fab"
-      >
-        <span className="chat-fab-icon icon-scroll">
-          <ArrowDownIcon size={16} />
-        </span>
-        <span className="chat-fab-icon icon-send">
-          {sending ? <Spinner size="xs" tone="current" variant="ring" /> : <SendIcon size={15} />}
-        </span>
-        <span className="chat-fab-icon icon-stop">
-          <StopIcon size={13} />
-        </span>
-      </button>
-    </NativeTooltip>
+    <button
+      type="button"
+      data-collapsed={collapsed}
+      data-mode={mode}
+      data-haptic={mode === 'send' ? 'medium' : mode === 'stop' ? 'strong' : 'light'}
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={label}
+      className="chat-fab"
+    >
+      <span className="chat-fab-icon icon-scroll">
+        <ArrowDownIcon size={16} />
+      </span>
+      <span className="chat-fab-icon icon-send">
+        {sending ? <Spinner size="xs" tone="current" variant="ring" /> : <SendIcon size={15} />}
+      </span>
+      <span className="chat-fab-icon icon-stop">
+        <StopIcon size={13} />
+      </span>
+    </button>
   )
 })

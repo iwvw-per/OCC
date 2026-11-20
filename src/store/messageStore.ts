@@ -111,6 +111,16 @@ class MessageStore {
   private allSessionsVersion = 0
   private changeVersion = 0
   private sessionAccessTime = new Map<string, number>()
+  /**
+   * 每会话的「撤销态本地代际」。
+   *
+   * 只在**本地主动改撤销态**时递增(setRevertState / truncateAfterRevert /
+   * restoreSendRollback),服务端快照写入不算。加载路径在请求发起时记一份,
+   * 落地时若代际变了,说明这次拉取期间用户建立/清除了撤销点 —— 该快照的
+   * `revert` 字段必然来自更早的请求,不能拿它覆盖本地,否则表现为
+   * 「点了重编辑,消息进入编辑态又立刻弹回对话,过一会儿才回来」。
+   */
+  private revertGeneration = new Map<string, number>()
   /** 被分屏 pane 保护的 sessionId 集合，evict 时跳过 */
   private protectedSessions = new Set<string>()
   private pendingNotify = false
@@ -219,6 +229,16 @@ class MessageStore {
   /** 公开的版本读取：供 React 快照缓存判断某 session 是否已变化 */
   getSessionChangeVersion(sessionId: string): number {
     return this.getSessionVersion(sessionId)
+  }
+
+  /** 撤销态本地代际:加载路径请求前后比对,判断期间是否发生过本地撤销/重做。 */
+  getRevertGeneration(sessionId: string | null): number {
+    if (!sessionId) return 0
+    return this.revertGeneration.get(this.resolveKey(sessionId)) ?? 0
+  }
+
+  private bumpRevertGeneration(sessionId: string) {
+    this.revertGeneration.set(sessionId, (this.revertGeneration.get(sessionId) ?? 0) + 1)
   }
 
   private markPendingSessionNotifications(sessionIds?: Iterable<string> | 'all') {
@@ -645,6 +665,7 @@ class MessageStore {
       this.forgetOptimisticMessagesOf(oldestId)
       this.sessions.delete(oldestId)
       this.sessionAccessTime.delete(oldestId)
+      this.revertGeneration.delete(oldestId)
       this.dirtyPartsBySession.delete(oldestId)
       this.pendingDeltas.delete(oldestId)
       this.idleGeneration.delete(oldestId)
@@ -1575,6 +1596,7 @@ class MessageStore {
     const droppedKeys = [...this.sessions.keys()]
     this.sessions.clear()
     this.sessionAccessTime.clear()
+    this.revertGeneration.clear()
     this.dirtyPartsBySession.clear()
     this.pendingDeltas.clear()
     this.idleGeneration.clear()
@@ -1597,6 +1619,7 @@ class MessageStore {
     this.forgetOptimisticMessagesOf(sessionId)
     this.sessions.delete(sessionId)
     this.sessionAccessTime.delete(sessionId)
+    this.revertGeneration.delete(sessionId)
     this.dirtyPartsBySession.delete(sessionId)
     this.pendingDeltas.delete(sessionId)
     this.idleGeneration.delete(sessionId)
@@ -2069,6 +2092,7 @@ class MessageStore {
       state.messages = state.messages.slice(0, revertIndex)
     }
     state.revertState = null
+    this.bumpRevertGeneration(sessionId)
     this.notify([sessionId])
   }
 
@@ -2099,6 +2123,7 @@ class MessageStore {
         }
       : null
     state.isStreaming = false
+    this.bumpRevertGeneration(sessionId)
     this.notify([sessionId])
   }
 
@@ -2107,6 +2132,7 @@ class MessageStore {
     const state = this.sessions.get(sessionId)
     if (!state) return
     state.revertState = revertState
+    this.bumpRevertGeneration(sessionId)
     this.notify([sessionId])
   }
 

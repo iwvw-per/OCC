@@ -12,7 +12,6 @@
  */
 
 import { useState, useRef, useEffect, useMemo, useCallback, memo, forwardRef, useImperativeHandle } from 'react'
-import { NativeTooltip } from '../../components/ui/Tooltip'
 import { useTranslation } from 'react-i18next'
 import {
   CheckIcon,
@@ -402,7 +401,6 @@ export const ModelSelector = memo(
     )
 
     const thoughtLabel = thoughtLevels[thoughtIndex]?.label ?? t('inputToolbar.default')
-    const triggerTitle = variants.length > 0 ? `${displayName} · ${thoughtLabel}` : displayName
 
     const triggerDisabledClasses =
       'disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:active:bg-transparent'
@@ -424,7 +422,6 @@ export const ModelSelector = memo(
           disabled={disabled || isLoading}
           aria-expanded={isOpen}
           className={`group flex h-7 items-center gap-1 rounded-lg pl-2 pr-1.5 text-ui-base text-text-200 transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer ${triggerDisabledClasses}`}
-          title={triggerTitle}
         >
           <PackageIcon size={16} className="shrink-0 text-text-400" />
           <span className={`min-w-0 max-w-[240px] truncate font-medium ${labelTone}`}>{displayName}</span>
@@ -447,7 +444,6 @@ export const ModelSelector = memo(
           disabled={disabled || isLoading}
           aria-expanded={isOpen}
           className={`flex h-7 items-center gap-1 rounded-lg pl-2 pr-1.5 text-ui-base transition-colors duration-150 hover:bg-bg-200 active:bg-bg-300 cursor-pointer min-w-0 overflow-hidden w-full ${triggerDisabledClasses}`}
-          title={triggerTitle}
         >
           <PackageIcon size={16} className="shrink-0 text-text-400" />
           <span className={`min-w-0 flex-1 truncate text-ui-base ${labelTone}`}>{displayName}</span>
@@ -455,8 +451,6 @@ export const ModelSelector = memo(
           {trailingIndicator}
         </button>
       )
-
-    const triggerWithHint = <NativeTooltip>{triggerButton}</NativeTooltip>
 
     // ---- Menu pieces ----
 
@@ -527,46 +521,43 @@ export const ModelSelector = memo(
             const isSelected = selectedModelKey === itemKey
             const isHL = highlightedIndex === index
             return (
-              <NativeTooltip>
-                <button
-                  key={itemKey}
-                  id={`${idPrefix}-${index}`}
-                  data-model-key={itemKey}
-                  data-focus-target="item"
-                  type="button"
-                  onClick={() => handleSelect(model)}
-                  onFocus={() => setHighlightedIndex(index)}
-                  onMouseMove={() => setHighlightedIndex(index)}
-                  onKeyDown={e => handleItemKeyDown(e, index)}
-                  title={`${model.name} · ${model.providerName}`}
-                  className={`flex w-full min-h-7 items-center gap-2 rounded-md px-2 text-left text-ui-base transition-colors duration-100 hover:bg-bg-200 ${
-                    isSelected || isHL ? 'text-text-100' : 'text-text-200'
-                  }`}
-                >
-                  <span className="min-w-0 truncate">{model.name}</span>
-                  <span className="flex shrink-0 items-center gap-1">
-                    {model.supportsImages && (
-                      <span
-                        data-model-capability="vision"
-                        className="rounded-full bg-text-100/10 px-1.5 text-ui-xs leading-normal text-text-400"
-                      >
-                        {t('modelSelector.vision')}
-                      </span>
-                    )}
-                    {model.supportsReasoning && (
-                      <span
-                        data-model-capability="thinking"
-                        className="rounded-full bg-text-100/10 px-1.5 text-ui-xs leading-normal text-text-400"
-                      >
-                        {t('modelSelector.thinking')}
-                      </span>
-                    )}
-                  </span>
-                  <span className="ml-auto flex w-4 shrink-0 items-center justify-center">
-                    {isSelected && <CheckIcon size={16} className="text-text-400" />}
-                  </span>
-                </button>
-              </NativeTooltip>
+              <button
+                key={itemKey}
+                id={`${idPrefix}-${index}`}
+                data-model-key={itemKey}
+                data-focus-target="item"
+                type="button"
+                onClick={() => handleSelect(model)}
+                onFocus={() => setHighlightedIndex(index)}
+                onMouseMove={() => setHighlightedIndex(index)}
+                onKeyDown={e => handleItemKeyDown(e, index)}
+                className={`flex w-full min-h-7 items-center gap-2 rounded-md px-2 text-left text-ui-base transition-colors duration-100 hover:bg-bg-200 ${
+                  isSelected || isHL ? 'text-text-100' : 'text-text-200'
+                }`}
+              >
+                <span className="min-w-0 truncate">{model.name}</span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {model.supportsImages && (
+                    <span
+                      data-model-capability="vision"
+                      className="rounded-full bg-text-100/10 px-1.5 text-ui-xs leading-normal text-text-400"
+                    >
+                      {t('modelSelector.vision')}
+                    </span>
+                  )}
+                  {model.supportsReasoning && (
+                    <span
+                      data-model-capability="thinking"
+                      className="rounded-full bg-text-100/10 px-1.5 text-ui-xs leading-normal text-text-400"
+                    >
+                      {t('modelSelector.thinking')}
+                    </span>
+                  )}
+                </span>
+                <span className="ml-auto flex w-4 shrink-0 items-center justify-center">
+                  {isSelected && <CheckIcon size={16} className="text-text-400" />}
+                </span>
+              </button>
             )
           })
         )}
@@ -635,7 +626,7 @@ export const ModelSelector = memo(
         className={`relative font-sans ${trigger === 'toolbar' ? 'min-w-0 overflow-hidden' : ''}`}
         data-dropdown-open={isOpen || undefined}
       >
-        {triggerWithHint}
+        {triggerButton}
 
         <DropdownMenu
           triggerRef={triggerRef}

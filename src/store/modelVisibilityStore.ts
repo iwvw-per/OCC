@@ -132,6 +132,12 @@ class ModelVisibilityStore {
     return () => this.listeners.delete(listener)
   }
 
+  /** 从 localStorage 重读(供偏好同步拉取后调用)。 */
+  reloadFromStorage() {
+    this.reload()
+    this.emit()
+  }
+
   getSnapshot = (): string[] => this.snapshot
 
   getProviderSnapshot = (): string[] => this.providerSnapshot

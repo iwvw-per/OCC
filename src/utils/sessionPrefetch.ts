@@ -47,6 +47,8 @@ export function prefetchSessionMessages(sessionId: string, directory?: string, s
   const sessionKey = makeSessionKey(resolvedServerId, sessionId)
   if (!shouldPrefetch(sessionKey)) return
 
+  const revertGeneration = messageStore.getRevertGeneration(sessionKey)
+
   const request = (async () => {
     const [sessionInfo, page] = await Promise.all([
       getSession(sessionId, directory, resolvedServerId).catch(() => null),
@@ -63,7 +65,9 @@ export function prefetchSessionMessages(sessionId: string, directory?: string, s
       hasMoreHistory: page.hasMore,
       historyCursor: page.nextCursor,
       // 拿不到会话详情时不覆盖本地撤销态（三态语义见 messageStore.setMessages）
-      ...(sessionInfo ? { revertState: sessionInfo.revert ?? null } : {}),
+      ...(sessionInfo && messageStore.getRevertGeneration(sessionKey) === revertGeneration
+        ? { revertState: sessionInfo.revert ?? null }
+        : {}),
       shareUrl: sessionInfo?.share?.url,
     })
   })()

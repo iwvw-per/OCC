@@ -80,4 +80,21 @@ describe('setMessages 的撤销态三态语义', () => {
     expect(messageStore.getRevertState('s')?.messageId).toBe('m2')
     expect(messageStore.getVisibleMessages('s').map(m => m.info.id)).toEqual(['m1'])
   })
+
+  it('撤销态本地代际只在本地改撤销态时前进,服务端快照不前进', () => {
+    messageStore.setMessages('s', [msg('m1'), msg('m2')])
+    const before = messageStore.getRevertGeneration('s')
+
+    // 服务端快照写入(含显式 null)不算本地改动,代际不动
+    messageStore.setMessages('s', [msg('m1'), msg('m2')])
+    messageStore.setMessages('s', [msg('m1'), msg('m2')], { revertState: null })
+    expect(messageStore.getRevertGeneration('s')).toBe(before)
+
+    // 本地撤销 / 重做(含清空)前进,加载路径据此判定「期间发生过本地撤销」
+    messageStore.setRevertState('s', { messageId: 'm2', history: [] })
+    expect(messageStore.getRevertGeneration('s')).toBe(before + 1)
+
+    messageStore.setRevertState('s', null)
+    expect(messageStore.getRevertGeneration('s')).toBe(before + 2)
+  })
 })
