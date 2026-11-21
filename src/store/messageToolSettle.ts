@@ -182,7 +182,32 @@ export function finalizeStreamingMessages(
           completed: messageCompletedAt(m) ?? completedAt,
         },
       },
+      content: closeOpenTextParts(m.content, completedAt),
     }
   })
   return { messages: changed ? next : messages, changed }
+}
+
+/**
+ * 给「有 time 但没有 end」的 text / reasoning part 补上 end(未变则返回原引用)。
+ *
+ * v2 的正文/推理是增量拼装的:`text.started` 建 part,`text.ended` 才补 `time.end`;
+ * 而 `handlePartDelta` 正靠 `time.end` 丢弃迟到增量。收尾时不补,定时/中断后仍在途
+ * 的 delta 会继续追加到已定稿的正文末尾 —— 表现为「停止后内容还在往里流」,且两个端
+ * 拼出不同结果。
+ *
+ * 判据与 `isLastTurnComplete` 一致:只认「**有** time 但**没有** end」。历史快照里的
+ * text part 根本不带 `time`(见 v2/message.ts 的 adaptAssistantParts),给它们补 end
+ * 会误伤,故跳过。
+ */
+function closeOpenTextParts(content: Message['content'], end: number): Message['content'] {
+  let changed = false
+  const next = content.map(part => {
+    if (part.type !== 'text' && part.type !== 'reasoning') return part
+    const time = part.time
+    if (!time || time.end != null) return part
+    changed = true
+    return { ...part, time: { ...time, end } }
+  })
+  return changed ? next : content
 }

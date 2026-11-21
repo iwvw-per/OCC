@@ -326,6 +326,37 @@ describe('seq 缺口检测（durable 事件序号）', () => {
     unsubscribe()
   })
 
+  it('重复投递（seq <= 水位）的事件被丢弃，不再二次应用', async () => {
+    /**
+     * 回归:accept 早已把 `seq <= 水位` 判为 duplicate 并注明「重复投递 / 乱序旧
+     * 事件:丢弃」,但传输层此前只处理 gap、对 duplicate 放行,导致同一条 durable
+     * 事件被二次应用(重复的错误 toast / 重复堆叠的权限条目)。
+     */
+    subscribeMock.mockReturnValue(
+      source([
+        durableEvent('session.execution.started', { sessionID: 'ses-dup' }, 'ses-dup', 10),
+        durableEvent('session.execution.started', { sessionID: 'ses-dup' }, 'ses-dup', 10), // 重复投递
+        durableEvent('session.execution.started', { sessionID: 'ses-dup' }, 'ses-dup', 11),
+      ]),
+    )
+
+    const { subscribeToEvents, onSeqGap } = await import('./events')
+    const gaps: string[] = []
+    const offGap = onSeqGap((_s, a) => gaps.push(a))
+
+    let applied = 0
+    const unsubscribe = subscribeToEvents({ onSessionStatus: () => applied++ })
+
+    await vi.waitFor(() => expect(applied).toBe(2))
+    // 留出一个宏任务:若丢弃逻辑失效,重复事件会在此计入,计数变成 3
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(applied).toBe(2)
+    // 重复不应被误报为缺口
+    expect(gaps).toEqual([])
+    offGap()
+    unsubscribe()
+  })
+
   it('ephemeral 事件（无 durable）不参与缺口检测', async () => {
     // delta / status 之类没有 seq，不能因为「没序号」就被当成缺口
     subscribeMock.mockReturnValue(

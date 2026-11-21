@@ -41,7 +41,7 @@ import { serverStore } from './store/serverStore'
 import { initNotificationSound } from './utils/notificationSoundBridge'
 import { initLiveUpdateSync } from './utils/liveUpdateSync'
 import { desktopAutoUpdate } from './utils/desktopAutoUpdate'
-import { scheduleTunnelWarmup } from './utils/tunnelWarmup'
+import { scheduleTunnelWarmup, rescheduleTunnelWarmup } from './utils/tunnelWarmup'
 import { createPtySession } from './api/pty'
 import type { TerminalTab } from './store/layoutStore'
 import { isTauri, isTauriMobile, usesCustomDesktopTitlebar } from './utils/tauri'
@@ -141,6 +141,12 @@ function App() {
    */
   useEffect(() => {
     scheduleTunnelWarmup()
+    // 池子会随空闲/断线收缩:回前台补热一次,避免长时间挂着后首屏又要等握手
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') rescheduleTunnelWarmup()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
 
   useEffect(() => {

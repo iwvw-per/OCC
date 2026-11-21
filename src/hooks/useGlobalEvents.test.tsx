@@ -550,6 +550,9 @@ describe('useGlobalEvents', () => {
     await waitFor(() => {
       expect(activeSessionStoreMock.replaceServerStatus).toHaveBeenCalledWith('local', {})
     })
+    // 回归:对账必须取**新鲜**快照(绕过 microCache)。缓存有 1.5s 陈旧窗口,
+    // 会让「本轮刚开始」被误判为已结束(见 settleByAuthoritativeIdle 的时间守卫)。
+    expect(getSessionStatusMock).toHaveBeenCalledWith(undefined, 'local', { fresh: true })
   })
 
   it('ignores stale initialization responses after directories change', async () => {

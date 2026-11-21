@@ -7,7 +7,7 @@ import {
   computeTrimCount,
   estimateMessageBytes,
 } from './messageToolSettle'
-import type { Message, ToolPart, ToolContent } from '../types/message'
+import type { Message, ToolPart, TextContent, Content } from '../types/message'
 
 const toolPart = (
   callID: string,
@@ -23,7 +23,7 @@ const toolPart = (
   state: { status, input: {}, ...extra },
 })
 
-const assistantMessage = (content: ToolContent[], isStreaming = false): Message =>
+const assistantMessage = (content: Content[], isStreaming = false): Message =>
   ({
     info: {
       id: 'm1',
@@ -41,6 +41,9 @@ const assistantMessage = (content: ToolContent[], isStreaming = false): Message 
     content,
     isStreaming,
   }) as unknown as Message
+
+const textPart = (text: string, time?: { start: number; end?: number }): TextContent =>
+  ({ id: 'prt_t', sessionID: 's1', messageID: 'm1', type: 'text', text, ...(time ? { time } : {}) }) as TextContent
 
 describe('isUnsettledToolPart', () => {
   it('is true only for running/pending tool parts', () => {
@@ -165,6 +168,37 @@ describe('finalizeStreamingMessages', () => {
     const { messages: next, changed } = finalizeStreamingMessages(messages, 3000)
     expect(changed).toBe(false)
     expect(next).toBe(messages)
+  })
+
+  /**
+   * 回归:中断/结束时若不把正文 part 合上(`time.end`),`handlePartDelta` 的
+   * 「已定稿丢弃迟到增量」判据就失效 —— 停止后内容还会继续往里流。
+   */
+  it('closes an open text part so late deltas are dropped', () => {
+    const messages = [assistantMessage([textPart('partial', { start: 100 })], true)]
+    const { messages: next, changed } = finalizeStreamingMessages(messages, 3000)
+
+    expect(changed).toBe(true)
+    expect((next[0].content[0] as TextContent).time?.end).toBe(3000)
+    // 保留原 start
+    expect((next[0].content[0] as TextContent).time?.start).toBe(100)
+  })
+
+  it('does not add a time to parts that never had one (historical snapshot)', () => {
+    // 历史快照的 text part 不带 time;补 end 会误伤,必须原样保留引用
+    const part = textPart('history')
+    const messages = [assistantMessage([part], true)]
+    const { messages: next } = finalizeStreamingMessages(messages, 3000)
+    const closed = next[0].content[0] as TextContent
+    expect(closed.time).toBeUndefined()
+    expect(closed).toBe(part)
+  })
+
+  it('leaves an already-ended text part untouched', () => {
+    const part = textPart('done', { start: 1, end: 2 })
+    const messages = [assistantMessage([part], true)]
+    const { messages: next } = finalizeStreamingMessages(messages, 3000)
+    expect(next[0].content[0]).toBe(part)
   })
 })
 

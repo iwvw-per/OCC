@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { dedupeSessionListRequest, sessionListCacheKey } from './sessionListCache'
+import {
+  dedupeSessionListRequest,
+  sessionListCacheKey,
+  sessionListCacheToken,
+  writeSessionListCache,
+  readSessionListCache,
+  invalidateSessionListCache,
+} from './sessionListCache'
 import { ttlCacheInvalidate } from '../utils/ttlCache'
 import type { ApiSession } from './types'
 
@@ -97,5 +104,44 @@ describe('dedupeSessionListRequest', () => {
       makeSessions(['b']),
     )
     expect(succeeding).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * 回归:列表请求在途期间发生失效(删除/归档)时,该请求落地不得回写旧列表,
+ * 否则已删除的会话会在 30s 缓存里复活。
+ */
+describe('writeSessionListCache 失效代次防护', () => {
+  it('拒绝把失效之后才落地的旧列表写回缓存', () => {
+    const serverId = 'srv-token-stale'
+    const query = { directory: 'E:/Code/App', limit: 51 }
+    // 请求发起时取 token
+    const token = sessionListCacheToken(serverId)
+    const stale = makeSessions(['deleted', 'kept'])
+
+    // 请求在途期间发生失效(等价于 session.deleted 事件到达)
+    invalidateSessionListCache(serverId)
+
+    writeSessionListCache(serverId, query, stale, token)
+    expect(readSessionListCache(serverId, query)).toBeUndefined()
+  })
+
+  it('未失效时按 token 正常写入', () => {
+    const serverId = 'srv-token-ok'
+    const query = { directory: 'E:/Code/App', limit: 51 }
+    const token = sessionListCacheToken(serverId)
+    const list = makeSessions(['a'])
+
+    writeSessionListCache(serverId, query, list, token)
+    expect(readSessionListCache(serverId, query)).toEqual(list)
+  })
+
+  it('不传 token 时保持既有行为(仍然写入)', () => {
+    const serverId = 'srv-token-legacy'
+    const query = { directory: 'E:/Code/App', limit: 51 }
+    const list = makeSessions(['a'])
+
+    writeSessionListCache(serverId, query, list)
+    expect(readSessionListCache(serverId, query)).toEqual(list)
   })
 })

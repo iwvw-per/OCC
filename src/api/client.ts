@@ -9,6 +9,7 @@ import { nativeGetCurrentProject, nativeListProjects, nativeInitGit } from './v2
 import { directoryCacheKey } from '../utils/directoryUtils'
 import { serverStore } from '../store/serverStore'
 import { ttlCacheGet, ttlCacheSet } from '../utils/ttlCache'
+import { microCache } from '../utils/microCache'
 import { singleFlight } from '../utils/singleFlight'
 import type { ModelInfo, ApiProject, ApiPath } from './types'
 
@@ -60,7 +61,16 @@ export * from './lsp'
 export async function getActiveModels(directory?: string, serverId?: string): Promise<ModelInfo[]> {
   const sid = serverId ?? serverStore.getActiveServerId()
   const data = requireRecord(
-    await nativeGetProviders(sid, { directory }),
+    /**
+     * 用 microCache 合并「模块级预取 + 组件挂载」两次拉取(每次是两个请求:
+     * provider.list + model.list,经隧道各约 1.1s)。这里只读该对象、另建
+     * models 数组,所以共享缓存引用是安全的。
+     */
+    await microCache(
+      `providers-models:${sid}:${directoryCacheKey(directory ?? '')}`,
+      () => nativeGetProviders(sid, { directory }),
+      { ttlMs: 1500 },
+    ),
     'Invalid OpenCode providers response',
   )
   const providers = requireArray<Record<string, unknown>>(data.providers, 'Invalid OpenCode providers response')

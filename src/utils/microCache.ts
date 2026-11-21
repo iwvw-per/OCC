@@ -48,7 +48,16 @@ export function microCache<T>(key: string, factory: () => Promise<T>, options: M
 
   const request = factory()
     .then(value => {
-      if (ttlMs > 0) ttlCacheSet(key, value, ttlMs)
+      /**
+       * 只在「本请求仍是在途登记」时才回写。
+       *
+       * `invalidateMicroCache` 会同时删掉 ttl 条目与在途登记。若本请求是在失效
+       * 之前发起、失效之后才落地的,此处 `inflight.get(key)` 已不是自己 —— 此时
+       * 回写会把**失效前的旧结果**重新塞回缓存:表现为「刚答完的授权/提问弹窗
+       * 又冒出来」「已删除的条目复活」等,直到 TTL 过期。跳过回写即可,返回值
+       * 仍照常交给调用方。
+       */
+      if (ttlMs > 0 && inflight.get(key) === request) ttlCacheSet(key, value, ttlMs)
       return value
     })
     .finally(() => {

@@ -5,6 +5,7 @@
 // → vcs.get 的 provider 兜底。用 mock 覆盖各条路径，避免依赖真实沙盒。
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { invalidateMicroCache } from '../utils/microCache'
 
 const { locationGetMock, projectListMock, vcsGetMock } = vi.hoisted(() => ({
   locationGetMock: vi.fn(),
@@ -22,6 +23,10 @@ vi.mock('./sdkV2', () => ({
 
 describe('nativeGetCurrentProject vcs 检测', () => {
   beforeEach(() => {
+    // location.get 与 project.list 现在都经 microCache 合并:
+    // 测试里 serverId/目录固定,必须逐例失效,否则后续用例会读到上一例的缓存。
+    invalidateMicroCache('location:')
+    invalidateMicroCache('project-list-raw:')
     locationGetMock.mockReset()
     projectListMock.mockReset()
     vcsGetMock.mockReset()
@@ -73,5 +78,20 @@ describe('nativeGetCurrentProject vcs 检测', () => {
     const { nativeGetCurrentProject } = await import('./v2NativeProject')
     const p = await nativeGetCurrentProject('s1', { directory: '/d' })
     expect(p.vcs).toBe('git')
+  })
+
+  it('同一 server + 目录的 location.get 合并为一次请求', async () => {
+    // 回归:项目面板与 worktree 面板会对同一目录各调一次,URL 完全相同
+    // (实测打开会话时该请求发了两遍,经隧道每次约 1.1s)。
+    locationGetMock.mockResolvedValue({ directory: '/d', project: { id: 'p1', directory: '/d', canonical: '/d' } })
+    projectListMock.mockResolvedValue([{ id: 'p1', canonical: '/d', vcs: 'git' }])
+    const { nativeGetCurrentProject } = await import('./v2NativeProject')
+
+    await nativeGetCurrentProject('s1', { directory: '/d' })
+    await nativeGetCurrentProject('s1', { directory: '/d' })
+
+    expect(locationGetMock).toHaveBeenCalledTimes(1)
+    // project.list 也被两处(项目面板 vcs 检测 / 侧栏分组)共用,同样只发一次
+    expect(projectListMock).toHaveBeenCalledTimes(1)
   })
 })

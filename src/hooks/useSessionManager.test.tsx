@@ -6,6 +6,7 @@ import { HISTORY_TURN_BATCH_SIZE } from '../constants'
 const {
   getSessionMock,
   getSessionTurnPageMock,
+  getSessionFirstScreenMock,
   lightweightMessagesMock,
   probeLightweightSupportMock,
   peekLightweightSupportMock,
@@ -19,6 +20,7 @@ const {
 } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   getSessionTurnPageMock: vi.fn(),
+  getSessionFirstScreenMock: vi.fn(),
   lightweightMessagesMock: vi.fn(),
   probeLightweightSupportMock: vi.fn(async () => false),
   peekLightweightSupportMock: vi.fn(),
@@ -56,10 +58,7 @@ vi.mock('../api', () => ({
   getSessionTurnPage: (...args: unknown[]) => getSessionTurnPageMock(...args),
   // 首屏两段式：测试里等价于「一次就取够」，不额外发第二段请求。
   // 需要验证分段行为时单独 mock getSessionFirstScreenMock。
-  getSessionFirstScreen: async (...args: unknown[]) => {
-    const page = await getSessionTurnPageMock(...args)
-    return { ...page, complete: true }
-  },
+  getSessionFirstScreen: (...args: unknown[]) => getSessionFirstScreenMock(...args),
   getSessionMessagePage: (...args: unknown[]) => getSessionTurnPageMock(...args),
   // 轮次骨架路径：只有 peekLightweightSupport 已确认支持时才会被调用。
   // 未知时首屏一律走按量分页，绝不为探测付几十 MB 的代价。
@@ -101,6 +100,12 @@ describe('useSessionManager', () => {
   beforeEach(() => {
     getSessionMock.mockReset()
     getSessionTurnPageMock.mockReset()
+    getSessionFirstScreenMock.mockReset()
+    // 默认:首屏两段式等价于「一次取够」,不额外发第二段请求
+    getSessionFirstScreenMock.mockImplementation(async (...args: unknown[]) => {
+      const page = await getSessionTurnPageMock(...args)
+      return { ...page, complete: true }
+    })
     lightweightMessagesMock.mockReset()
     probeLightweightSupportMock.mockReset()
     probeLightweightSupportMock.mockResolvedValue(false)
@@ -565,6 +570,54 @@ describe('useSessionManager', () => {
     const [sid, candidates] = messageStoreMock.prependMessages.mock.calls.at(-1) as [string, unknown[]]
     expect(sid).toBe('session-1')
     expect(candidates).toEqual([older])
+  })
+
+  it('applies the background "fill remaining turns" even when trim recovery bumps the load sequence', async () => {
+    /**
+     * 回归:首屏被内存预算裁剪时,代码先安排「后台补齐剩余轮次」(firstScreen.rest),
+     * 紧接着触发 trim 恢复(内部走 loadMoreHistory)。后者会递增共享的
+     * loadSequenceRef,续补若用 isStale() 判废,结果一到就被丢弃 —— 大会话的补齐
+     * 永远不生效。正确判据是本次加载的 abort 信号。
+     */
+    const kept = { info: { id: 'msg-kept', role: 'assistant', time: { created: 9 } }, content: [], parts: [] }
+    const older = { info: { id: 'msg-older', role: 'user', time: { created: 1 } }, content: [], parts: [] }
+
+    getSessionMock.mockResolvedValue({ id: 'session-1', directory: '/workspace/demo' })
+    getSessionFirstScreenMock.mockResolvedValue({
+      messages: [kept],
+      hasMore: true,
+      nextCursor: 'cursor-1',
+      complete: false,
+      rest: async () => ({ messages: [older, kept], hasMore: false, nextCursor: undefined }),
+    })
+    // trim 恢复会走 loadMoreHistory;让它取不到新内容,确保 prepend 的 older 只可能来自续补
+    getSessionTurnPageMock.mockResolvedValue({ messages: [], nextCursor: undefined, hasMore: false })
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [kept],
+      loadState: 'idle',
+      isStale: false,
+      directory: '/workspace/demo',
+      hasMoreHistory: false,
+      historyCursor: undefined,
+    })
+    // 有裁剪 → 触发 trim 恢复,它会递增 loadSequenceRef
+    messageStoreMock.getTrimmedCount.mockReturnValue(700)
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'session-1', directory: '/workspace/demo' }),
+    )
+
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    await waitFor(() => {
+      const gotOlder = messageStoreMock.prependMessages.mock.calls.some(call => {
+        const list = call[1] as Array<{ info?: { id?: string } }>
+        return Array.isArray(list) && list.some(m => m.info?.id === 'msg-older')
+      })
+      expect(gotOlder).toBe(true)
+    })
   })
 
   it('gap recovery fetches OLDER from the oldest loaded message, not the newest page', async () => {

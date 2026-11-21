@@ -210,6 +210,40 @@ describe('messageStore', () => {
     expect(state?.messages[0].content[0]).toMatchObject({ id: 'part-1', text: '完整句子' })
   })
 
+  it('drops late deltas after finalize, because finalize closes open text parts', () => {
+    /**
+     * 回归:本地中断(发新消息取代旧轮次)会立刻 handleSessionIdle 落定。若收尾时
+     * 不把正文 part 合上(time.end),abort 往返期间在途的 delta 仍会追加到已定稿的
+     * 正文后面 —— 表现为「点了发送,旧回复末尾又冒出几个字」。
+     */
+    messageStore.handleMessageUpdated(createAssistantMessage('message-1'))
+    // 事件流建的正文 part:有 time.start,尚未 time.end
+    messageStore.handlePartUpdated({
+      ...createTextPart('part-1', 'message-1', 'partial'),
+      time: { start: 1000 },
+    } as unknown as ApiPart & { sessionID: string; messageID: string })
+
+    messageStore.handleSessionIdle('session-1')
+
+    const closed = messageStore.getSessionState('session-1')?.messages[0].content[0] as {
+      text: string
+      time?: { end?: number }
+    }
+    // 收尾必须合上 part(renderer 靠它收起光标,handlePartDelta 靠它丢弃迟到增量)
+    expect(closed.time?.end).toBeTypeOf('number')
+
+    messageStore.handlePartDelta({
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      partID: 'part-1',
+      field: 'text',
+      delta: 'LATE',
+    })
+
+    const after = messageStore.getSessionState('session-1')?.messages[0].content[0] as { text: string }
+    expect(after.text).toBe('partial')
+  })
+
   it('marks cached sessions stale after reconnect and clears the flag after a fresh load', () => {
     messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
 

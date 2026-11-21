@@ -703,7 +703,7 @@ export function seedSeq(serverId: string, aggregateID: string, seq: number): voi
 }
 
 /**
- * 检查事件是否构成 seq 跳号；构成则通知订阅者做快照对账，但**仍然应用该事件**。
+ * 检查事件是否构成 seq 跳号或重复投递：跳号照常应用（只通知上层做快照对账），重复丢弃。
  *
  * ⚠️ 旧实现跳号时 return true（丢弃该事件），且水位不推进 —— 于是该会话此后
  * 每一条事件都被连环判为跳号、全部丢弃。而实测证明跳号是服务端正常行为
@@ -714,13 +714,22 @@ export function seedSeq(serverId: string, aggregateID: string, seq: number): voi
  * 现在的语义：跳号 = 「可能有事件没广播」，照常应用当前事件，另外让上层做一次
  * HTTP 快照对账兜底（覆盖断连/背压这类真的丢事件）。
  *
- * @returns 恒为 false —— 任何事件都不再被传输层丢弃
+ * 重复（duplicate，`seq <= 水位`）：**丢弃**。`SeqGapTracker.accept` 已把这类判为
+ * duplicate 并注明「重复投递 / 乱序旧事件：丢弃」，但此前传输层只处理 gap、对
+ * duplicate 放行，判定形同虚设。重连缓冲回放、或同一后端被两条前缀同时接入时，
+ * 同一 durable 事件会再次投递；照常应用会让非幂等消费者重复生效（错误通知 push、
+ * 待处理权限 addPending）—— 表现为重复的错误 toast、重复堆叠的权限条目。
+ * 只丢「重复」，跳号仍照常应用，不会退回当年「缺口连环丢」的老 bug。
+ *
+ * @returns true 表示该事件应被传输层丢弃（仅 duplicate）；gap 与正常事件返回 false
  */
 function checkSeqGap(conn: ServerConnection, raw: unknown): boolean {
   const durable = durableOf(raw)
   if (!durable) return false // ephemeral 事件不参与
 
   const verdict = getSeqTracker(conn.serverId).accept(conn.serverId, durable.aggregateID, durable.seq)
+  // 重复投递 / 乱序旧事件:丢弃,避免非幂等 handler 二次生效(见本函数上方注释)
+  if (verdict.kind === 'duplicate') return true
   if (verdict.kind !== 'gap') return false
 
   if (import.meta.env.DEV) {

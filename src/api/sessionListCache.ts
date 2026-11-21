@@ -18,6 +18,22 @@ import { directoryCacheKey } from '../utils/directoryUtils'
 const SESSION_LIST_TTL_MS = 30_000
 const SESSION_LIST_CACHE_PREFIX = 'session-list:'
 
+/**
+ * 失效代次:防「在途请求回写旧列表」。
+ *
+ * 列表请求发出后、返回前若发生删除/归档等失效,该请求的 factory 仍会带着
+ * **失效前**的列表回来调用 `writeSessionListCache`;若照写,已删除的会话会在
+ * 缓存里复活最长 30s。调用方在请求发起前取一次 `sessionListCacheToken`,
+ * 写入时回传;期间失效过则 token 不匹配,直接拒绝回写。
+ */
+let invalidateEpoch = 0
+const serverInvalidateEpoch = new Map<string, number>()
+
+/** 请求发起前取该 server 的缓存代次;写入时回传以判断期间是否失效过。 */
+export function sessionListCacheToken(serverId: string): string {
+  return `${invalidateEpoch}:${serverInvalidateEpoch.get(serverId) ?? 0}`
+}
+
 type SessionListQuery = SessionListParams & {
   includeArchived?: boolean
   archivedOnly?: boolean
@@ -51,8 +67,15 @@ export function readSessionListCache(serverId: string, query: SessionListQuery):
   return ttlCacheGet<ApiSession[]>(sessionListCacheKey(serverId, query), SESSION_LIST_TTL_MS)
 }
 
-export function writeSessionListCache(serverId: string, query: SessionListQuery, sessions: ApiSession[]): void {
+export function writeSessionListCache(
+  serverId: string,
+  query: SessionListQuery,
+  sessions: ApiSession[],
+  token?: string,
+): void {
   if (!isCacheable(query)) return
+  // 失效发生在请求在途时,拒绝回写:否则会把失效前的旧列表重新塞回缓存
+  if (token !== undefined && token !== sessionListCacheToken(serverId)) return
   ttlCacheSet(sessionListCacheKey(serverId, query), sessions, SESSION_LIST_TTL_MS)
 }
 
@@ -91,5 +114,11 @@ export function dedupeSessionListRequest(
  * session-list:${serverId}|... 的 key 结构保证前缀能精确匹配单台服务器。
  */
 export function invalidateSessionListCache(serverId?: string): void {
-  ttlCacheInvalidate(serverId ? `${SESSION_LIST_CACHE_PREFIX}${serverId}|` : SESSION_LIST_CACHE_PREFIX)
+  if (serverId) {
+    serverInvalidateEpoch.set(serverId, (serverInvalidateEpoch.get(serverId) ?? 0) + 1)
+    ttlCacheInvalidate(`${SESSION_LIST_CACHE_PREFIX}${serverId}|`)
+    return
+  }
+  invalidateEpoch += 1
+  ttlCacheInvalidate(SESSION_LIST_CACHE_PREFIX)
 }

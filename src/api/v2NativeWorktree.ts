@@ -6,13 +6,11 @@
 // ============================================
 
 import { getV2Client } from './sdkV2'
+import { nativeGetLocation } from './v2NativeProject'
 import { rec, str } from './v2/adapt'
 
 async function resolveProjectID(serverId: string | undefined, input: { directory?: string }): Promise<string> {
-  const client = getV2Client(serverId)
-  const info = rec(await client.location.get({
-    location: input.directory ? { directory: input.directory } : undefined,
-  }))
+  const info = await nativeGetLocation(serverId, input.directory)
   const project = rec(info.project)
   return str(project.id) ?? str(project.directory) ?? ''
 }

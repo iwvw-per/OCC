@@ -958,7 +958,17 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           const restPromise = firstScreen.rest
           void restPromise()
             .then(rest => {
-              if (isStale()) return
+              /**
+               * 用本次加载的 abort 信号判废,**不用 `isStale()`**。
+               *
+               * `isStale()` 比对的是共享的 `loadSequenceRef`,而紧随其后的 trim 恢复
+               * (下面的 `recoverTrimmedHistoryRef`)会走 `loadMoreHistory`,它自己也会
+               * 递增该序号 —— 续补结果一到就被判为过期、静默丢弃。首次加载若裁过内存
+               * (大会话首屏最常见的形态),「后台补齐剩余轮次」就永远不生效。
+               * abort 信号只在「新的一次 loadSession / 切走会话」时触发,正是应当
+               * 作废续补的场景。
+               */
+              if (abortController.signal.aborted) return
               // 期间用户可能已切走/重新加载，只在仍是同一请求时替换
               const latest = messageStore.getSessionState(sid)
               if (!latest) return

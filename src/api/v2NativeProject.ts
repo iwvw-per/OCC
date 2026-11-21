@@ -7,6 +7,9 @@
 import { getV2Client } from './sdkV2'
 import { adaptEnvelope } from './v2/session'
 import { rec, str } from './v2/adapt'
+import { microCache } from '../utils/microCache'
+import { directoryCacheKey } from '../utils/directoryUtils'
+import { serverStore } from '../store/serverStore'
 
 /** 规范化路径：统一分隔符、去尾斜杠；foldCase 时再折叠大小写（Windows 盘符/路径大小写不敏感）。 */
 function normalizePath(p: string | undefined, foldCase: boolean): string {
@@ -22,6 +25,30 @@ function pathMatches(a: string | undefined, b: string | undefined): boolean {
   const bn = normalizePath(b, false)
   if (!an || !bn) return false
   return an === bn || an.toLowerCase() === bn.toLowerCase()
+}
+
+/**
+ * 取 location 信息(v2 `location.get`),按「server + 目录」合并。
+ *
+ * 项目面板(`nativeGetCurrentProject`)与 worktree 面板(`nativeListWorktrees`)
+ * 会在**同一目录**上各调一次,URL 完全相同 —— 经隧道每次约 1.1s(实测同一目录
+ * 打开会话时该请求发了两遍)。用 microCache 合并:一次交互里同一目录只发一次。
+ */
+export async function nativeGetLocation(
+  serverId: string | undefined,
+  directory?: string,
+): Promise<Record<string, unknown>> {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  return microCache(
+    `location:${sid}:${directoryCacheKey(directory)}`,
+    async () =>
+      rec(
+        await getV2Client(sid).location.get({
+          location: directory ? { directory } : undefined,
+        }),
+      ),
+    { ttlMs: 1500 },
+  )
 }
 
 /**
@@ -43,9 +70,7 @@ export async function nativeGetCurrentProject(
   input: { directory?: string },
 ): Promise<{ id: string; worktree: string; vcs?: 'git'; name?: string }> {
   const client = getV2Client(serverId)
-  const info = rec(await client.location.get({
-    location: input.directory ? { directory: input.directory } : undefined,
-  }))
+  const info = await nativeGetLocation(serverId, input.directory)
   const project = rec(info.project)
   const locationId = str(project.id) ?? ''
   const directory = str(project.directory)
@@ -60,7 +85,7 @@ export async function nativeGetCurrentProject(
 
   // 1) project.list 同 id，或规范化路径匹配（list 才带 vcs）
   try {
-    const list = await client.project.list({})
+    const list = await nativeListProjects(serverId, {})
     if (Array.isArray(list)) {
       const matched =
         (locationId ? list.find(p => str(rec(p).id) === locationId) : undefined) ??
@@ -97,10 +122,25 @@ export async function nativeGetCurrentProject(
 /**
  * 原生获取项目列表（v2 project.list）。
  */
-export async function nativeListProjects(serverId: string | undefined, _input: { directory?: string }): Promise<unknown[]> {
-  const client = getV2Client(serverId)
-  const res = await client.project.list({})
-  return Array.isArray(res) ? res : []
+export async function nativeListProjects(
+  serverId: string | undefined,
+  _input: { directory?: string },
+): Promise<unknown[]> {
+  /**
+   * 同一份**全局**列表在打开会话时会被拉两次:项目面板的 vcs 检测
+   * (`nativeGetCurrentProject`)与侧栏项目分组各一次,URL 完全相同
+   * (`GET /api/project`)—— 经隧道每次约 1.1s。用 microCache 合并。
+   * TTL 取 1.5s:项目列表变化很罕见,短 TTL 也不会长期显示陈旧列表。
+   */
+  const sid = serverId ?? serverStore.getActiveServerId()
+  return microCache(
+    `project-list-raw:${sid}`,
+    async () => {
+      const res = await getV2Client(sid).project.list({})
+      return Array.isArray(res) ? res : []
+    },
+    { ttlMs: 1500 },
+  )
 }
 
 /**

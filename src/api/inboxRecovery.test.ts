@@ -97,4 +97,24 @@ describe('recoverPendingInbox', () => {
     await recoverPendingInbox('local')
     expect(typeof upsertUser.mock.calls[0][1].createdAt).toBe('number')
   })
+
+  it('分批恢复,不对全部会话同时铺开', async () => {
+    // 回归:此前是 Promise.all(全部会话同时发起);重连瞬间(单服务器可达 48 个)
+    // 会一次铺开几十个请求,把紧跟着的关键请求排在它们后面。
+    getKeys.mockReturnValue(['local::s1', 'local::s2', 'local::s3', 'local::s4', 'local::s5'])
+    let inFlight = 0
+    let maxInFlight = 0
+    listInbox.mockImplementation(async () => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await Promise.resolve()
+      inFlight -= 1
+      return []
+    })
+
+    await recoverPendingInbox('local')
+
+    expect(listInbox).toHaveBeenCalledTimes(5)
+    expect(maxInFlight).toBeLessThanOrEqual(3)
+  })
 })

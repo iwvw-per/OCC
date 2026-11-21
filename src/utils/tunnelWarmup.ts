@@ -27,11 +27,12 @@ import { isTauri } from './tauri'
  *
  * 打开一个会话实测会并发发出 15+ 个短请求（session 元数据、message、
  * permission、question、agent、mcp、vcs、skill…）。网关池子按并发峰值
- * （MaxIdleConnsPerHost=128）配置，这里取 8 是折中：
- *   - 足够覆盖首屏最关键的几个请求；
- *   - 不会让「刚打开应用」时的并发连接数过大。
+ * （MaxIdleConnsPerHost=128）配置。但首屏实测并发 15+，取 8 只覆盖一半：
+ * 剩下约 7 个请求仍要现付一次 700-900ms 握手，正好砸在首屏上。取 16 与峰值对齐。
+ *   - 覆盖首屏全部关键请求；
+ *   - 仍远低于网关池上限，不会让启动瞬间并发失控。
  */
-const WARMUP_CONCURRENCY = 8
+const WARMUP_CONCURRENCY = 16
 
 /** 每个服务器只预热一次（重复预热没有收益，池子已经是热的） */
 const warmedServers = new Set<string>()
@@ -66,6 +67,27 @@ export async function warmupServerTunnels(serverId: string): Promise<void> {
     return
   }
   logger.log(`[warmup] ${serverId}: ${ok}/${WARMUP_CONCURRENCY} tunnels ready in ${Date.now() - started}ms`)
+}
+
+/**
+ * 重新预热某服务器:清掉「已预热」标记后再预热一次。
+ *
+ * 池子是「用到才建」,且会随空闲超时 / 断线收缩。应用长时间开着时池子可能已经
+ * 空掉,而 `warmedServers` 让启动时的预热只做一次、之后不再补 —— 于是「挂了很久
+ * 再点会话」又会退回每个请求现付一次握手。回前台时补一次即可。
+ * 幂等:预热中/已热时重复调用无害;失败静默。
+ */
+export function rewarmServerTunnels(serverId: string): void {
+  if (!serverId) return
+  warmedServers.delete(serverId)
+  void warmupServerTunnels(serverId).catch(() => {})
+}
+
+/** 重新预热所有已启用服务器(回前台补热,见上)。 */
+export function rescheduleTunnelWarmup(): void {
+  for (const server of serverStore.getEnabledServers()) {
+    rewarmServerTunnels(server.id)
+  }
 }
 
 /**

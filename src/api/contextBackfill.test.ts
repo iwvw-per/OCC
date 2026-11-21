@@ -12,6 +12,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const getSession = vi.fn()
+/** 带缓存的 getSession(普通路径用);测试里委托给同一个 nativeGetSession mock */
+const getSessionCachedMock = vi.fn()
 const getContext = vi.fn()
 const recordFallback = vi.fn()
 const recordSnapshot = vi.fn()
@@ -22,6 +24,11 @@ let evictListener: ((key: string) => void) | null = null
 vi.mock('./v2NativeSession', () => ({
   nativeGetSessionContext: getContext,
   nativeGetSession: getSession,
+}))
+// 普通路径走带缓存的 getSession(与 loadSession 共享);测试里路由到同一个
+// nativeGetSession mock,断言口径不变。force 仍直连 nativeGetSession。
+vi.mock('./session', () => ({
+  getSession: (...args: unknown[]) => getSessionCachedMock(...args),
 }))
 vi.mock('../store/messageStore', () => ({
   messageStore: {
@@ -40,6 +47,12 @@ vi.mock('../utils/sessionKey', () => ({
   sessionKeyToServerId: (key: string) => key.slice(0, key.indexOf('::')),
 }))
 vi.mock('../utils', () => ({ logger: { warn: vi.fn() } }))
+
+// 普通路径经带缓存的 getSession → 委托到同一个 nativeGetSession mock,
+// 让既有「设置 getSession 返回值」的用例继续生效。
+getSessionCachedMock.mockImplementation(async (_id: unknown, _dir: unknown, serverId: unknown) =>
+  getSession(serverId, _id),
+)
 
 const { backfillSessionUsage, resetContextBackfill } = await import('./contextBackfill')
 
@@ -323,31 +336,93 @@ describe('轻量路径：优先用 session 接口的累计 tokens', () => {
   })
 })
 
-describe('force：周期对账绕过去重', () => {
+describe('force：周期对账只穿透轻量 totals', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetContextBackfill()
-    getSession.mockResolvedValue(null)
   })
 
-  it('force 时即使已补过也会重新请求', async () => {
+  it('force 会重新请求轻量的 session（累计用量）', async () => {
     /**
      * 周期对账的目的就是纠正「ephemeral 事件丢失后数字停在旧值」，
-     * 若被「已补过」挡住就完全失去意义。
+     * 若被「已补过」挡住就完全失去意义。轻量的 session 接口（约 504 字节）
+     * 允许被 force 穿透。
      */
-    getContext.mockResolvedValue([assistant({ input: 1 })])
+    getSession.mockResolvedValue({
+      tokens: { input: 5, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: 0,
+    })
+    getContext.mockResolvedValue([assistant({ input: 5 })])
     await backfillSessionUsage(KEY)
+    await backfillSessionUsage(KEY, { force: true })
+    expect(getSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('force 不重复拉 session.context（大会话可达十几 MB）', async () => {
+    /**
+     * 回归：此前 force 会让周期对账（每 60s / 回前台）对**所有**已加载会话
+     * 重拉 session.context，大会话可达十几 MB，直接占满隧道带宽。
+     * 逐条明细本就「每个内存状态只需一次」，force 只该穿透轻量的 totals。
+     */
+    getSession.mockResolvedValue({
+      tokens: { input: 5, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: 0,
+    })
+    getContext.mockResolvedValue([assistant({ input: 5 })])
+
     await backfillSessionUsage(KEY)
     expect(getContext).toHaveBeenCalledTimes(1)
 
+    await backfillSessionUsage(KEY, { force: true })
+    await backfillSessionUsage(KEY, { force: true })
+    expect(getContext).toHaveBeenCalledTimes(1)
+  })
+
+  it('force 之后普通调用仍整体受去重约束', async () => {
+    getSession.mockResolvedValue({
+      tokens: { input: 5, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: 0,
+    })
+    getContext.mockResolvedValue([assistant({ input: 1 })])
+    await backfillSessionUsage(KEY, { force: true })
+    await backfillSessionUsage(KEY)
+    expect(getSession).toHaveBeenCalledTimes(1)
+    expect(getContext).toHaveBeenCalledTimes(1)
+  })
+
+  it('状态被淘汰后，force 也能重新拉一次 session.context', async () => {
+    getSession.mockResolvedValue({
+      tokens: { input: 5, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: 0,
+    })
+    getContext.mockResolvedValue([assistant({ input: 5 })])
+
+    await backfillSessionUsage(KEY)
+    expect(getContext).toHaveBeenCalledTimes(1)
+
+    evictListener!(KEY)
     await backfillSessionUsage(KEY, { force: true })
     expect(getContext).toHaveBeenCalledTimes(2)
   })
 
-  it('force 之后普通调用仍受去重约束', async () => {
-    getContext.mockResolvedValue([assistant({ input: 1 })])
-    await backfillSessionUsage(KEY, { force: true })
+  it('普通路径走带缓存的 getSession，force 才绕过缓存直连原生接口', async () => {
+    /**
+     * 回归:此前两条路径都直接调 nativeGetSession,于是「刚 loadSession 拉过的
+     * /session/{id}」会紧接着再打一次(经隧道约 1.1s)。普通路径改用带
+     * singleFlight + 15s 缓存的 getSession 后,这里零请求。
+     */
+    getSession.mockResolvedValue({
+      tokens: { input: 5, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: 0,
+    })
+    getContext.mockResolvedValue([assistant({ input: 5 })])
+
     await backfillSessionUsage(KEY)
-    expect(getContext).toHaveBeenCalledTimes(1)
+    expect(getSessionCachedMock).toHaveBeenCalledTimes(1)
+
+    getSessionCachedMock.mockClear()
+    await backfillSessionUsage(KEY, { force: true })
+    // force 必须绕过缓存包装,否则对账永远读到 15s 内的旧值,纠不了丢失事件的错
+    expect(getSessionCachedMock).not.toHaveBeenCalled()
   })
 })

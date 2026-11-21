@@ -27,7 +27,7 @@ import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermis
 import { onSeqGap } from '../api/events'
 import { reportSessionViewed } from '../api/sessionView'
 import { recoverPendingInbox } from '../api/inboxRecovery'
-import { backfillSessionUsage } from '../api/contextBackfill'
+import { scheduleReconcileSessionUsage } from '../api/contextBackfill'
 import { enqueueLowPriority } from '../utils/lowPriorityQueue'
 import { invalidateSessionListCache } from '../api/sessionListCache'
 import { sessionListIndexStore } from '../store/sessionListIndexStore'
@@ -272,6 +272,30 @@ function rememberPendingShell(
     if (!oldest.done) pendingShellCandidates.delete(oldest.value)
   }
   pendingShellCandidates.set(id, value)
+}
+
+/**
+ * 早到的 `shell.exited` 终态:退出可能先于「工具 part 认领候选」到达。
+ *
+ * 此时按 id 反查不到归属(`sessionIdsFor` 为空),候选也还没进 store,终态会被
+ * 直接丢弃 —— 表现为面板先写 running、再靠 `useReconcileRunningShells` 轮询纠正,
+ * 期间一直显示「运行中」,退出码/输出还会丢。这里按 id 暂存终态,供随后认领候选
+ * 时直接落成终态。有界:与候选同一容量上限。
+ */
+const pendingShellTerminals = new Map<
+  string,
+  { status: 'completed' | 'error' | 'cancelled'; at: number; exit?: number }
+>()
+
+function rememberPendingShellTerminal(
+  id: string,
+  value: { status: 'completed' | 'error' | 'cancelled'; at: number; exit?: number },
+): void {
+  if (pendingShellTerminals.size >= PENDING_SHELL_CANDIDATE_LIMIT) {
+    const oldest = pendingShellTerminals.keys().next()
+    if (!oldest.done) pendingShellTerminals.delete(oldest.value)
+  }
+  pendingShellTerminals.set(id, value)
 }
 
 /**
@@ -773,7 +797,10 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
     const reconcileServerStatus = (serverId: string) => {
       const currentVersion = (reconcileVersions.get(serverId) ?? 0) + 1
       reconcileVersions.set(serverId, currentVersion)
-      void getSessionStatus(undefined, serverId)
+      // 必须绕过 microCache(1.5s TTL)取权威快照:缓存可能已略旧,而本轮若在
+      // 缓存生成之后才开始,旧快照的「不在运行」会误判本轮已结束(见下方注释)。
+      const requestedAt = Date.now()
+      void getSessionStatus(undefined, serverId, { fresh: true })
         .then(statusMap => {
           if (disposed || currentVersion !== reconcileVersions.get(serverId)) return
           const scoped: SessionStatusMap = {}
@@ -789,10 +816,12 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
            * 项目行转圈、消息半透明都停不下来。而 `/session/active` 是权威快照，
            * 它说「不在跑」就一定不在跑。
            *
-           * 判据用 `Date.now()`：服务端此刻没把它列为运行中，即「现在已结束」，
-           * 这个时间必然不早于最后一条 assistant（后者是过去产生的）。
+           * 判据用 `requestedAt`（快照请求发出的时刻），不用 `Date.now()`：快照是
+           * 权威的，但它反映的是**请求发出那一瞬**的状态。若本轮在该请求之后才开始，
+           * `Date.now()` 恒 ≥ 所有消息时间，`settleByAuthoritativeIdle` 的时间守卫
+           * 会形同虚设，把刚开始的轮次误判为已结束；用 requestedAt 作上界才能否决。
            */
-          const now = Date.now()
+          const now = requestedAt
           for (const sessionKey of messageStore.getAllSessionKeys()) {
             if (sessionKeyToServerId(sessionKey) !== serverId) continue
             // 服务端仍认为它在跑 → 不动
@@ -991,24 +1020,21 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
                * part.updated 的到达时间准确），也确认了归属会话。
                */
               const candidate = pendingShellCandidates.get(job.id)
-              if (candidate) {
-                pendingShellCandidates.delete(job.id)
-                backgroundJobStore.set(scopedId, {
-                  id: job.id,
-                  status: 'running',
-                  at: candidate.startedAt,
-                  title: job.title,
-                  authoritative: true,
-                })
-              } else {
-                backgroundJobStore.set(scopedId, {
-                  id: job.id,
-                  status: 'running',
-                  at: Date.now(),
-                  title: job.title,
-                  authoritative: true,
-                })
-              }
+              if (candidate) pendingShellCandidates.delete(job.id)
+              /**
+               * 退出事件若早于本次认领到达,直接用终态登记,避免先写 running、
+               * 再靠轮询纠正(期间面板一直显示「运行中」且丢失退出码)。
+               */
+              const terminal = pendingShellTerminals.get(job.id)
+              if (terminal) pendingShellTerminals.delete(job.id)
+              backgroundJobStore.set(scopedId, {
+                id: job.id,
+                status: terminal?.status ?? 'running',
+                at: terminal?.at ?? candidate?.startedAt ?? Date.now(),
+                ...(terminal?.exit != null ? { exit: terminal.exit } : {}),
+                title: job.title,
+                authoritative: true,
+              })
             }
             scheduleScroll(scopedId)
           }
@@ -1528,15 +1554,30 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
                 : status === 'killed'
                   ? 'cancelled'
                   : 'completed'
-          for (const sessionId of backgroundJobStore.sessionIdsFor(id)) {
-            backgroundJobStore.set(sessionId, {
-              id,
-              status: jobStatus,
-              at: endedAt,
-              ...(exit != null ? { exit } : {}),
-              authoritative: true,
-            })
+          const registered = backgroundJobStore.sessionIdsFor(id)
+          if (registered.length > 0) {
+            for (const sessionId of registered) {
+              backgroundJobStore.set(sessionId, {
+                id,
+                status: jobStatus,
+                at: endedAt,
+                ...(exit != null ? { exit } : {}),
+                authoritative: true,
+              })
+            }
+            return
           }
+          /**
+           * 归属尚未登记:退出可能早于「工具 part 认领候选」到达。此处**不写 store**
+           * (候选未必是后台任务,前台命令不该出现在面板上),只暂存终态,供随后
+           * 认领候选时直接落成终态。
+           */
+          if (!pendingShellCandidates.has(id)) return
+          rememberPendingShellTerminal(id, {
+            status: jobStatus,
+            at: endedAt,
+            ...(exit != null ? { exit } : {}),
+          })
         },
 
         onSessionDeleted: sessionId => {          const scopedId = scope(sessionId)
@@ -1918,8 +1959,8 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
      * 服务端重启、浏览器丢事件）后，没有第二次机会把它清掉。这条 busy 会永久
      * 留着 —— 表现为折叠的项目行一直转圈，而那个会话其实早就结束了。
      *
-     * 频率取 60s：/api/session/active 只返回正在跑的会话，开销很小；且该接口
-     * 走 microCache，与其它路径的调用会合并。页面隐藏时不拉，省流量。
+     * 频率取 60s：/api/session/active 只返回正在跑的会话，开销很小。对账取新鲜
+     * 快照（刻意不经 microCache），才能保证「不在运行」的判据权威；页面隐藏时不拉，省流量。
      */
     const activeStatusReconcileTimer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
@@ -1943,7 +1984,10 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
      */
     const reconcileUsage = () => {
       for (const sessionKey of messageStore.getAllSessionKeys()) {
-        void backfillSessionUsage(sessionKey, { force: true })
+        // 收进低优先级池:对账属辅助请求,不该与首屏/主链路抢隧道带宽
+        // (池并发上限 2、idle 驱动)。轻量 totals 允许 force 穿透纠错,
+        // 重磅 session.context 仍每个内存状态只拉一次(见 contextBackfill)。
+        scheduleReconcileSessionUsage(sessionKey)
       }
     }
 

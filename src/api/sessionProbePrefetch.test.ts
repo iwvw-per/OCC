@@ -42,6 +42,7 @@ vi.mock('./sessionListCache', () => ({
   writeSessionListCache: () => {},
   invalidateSessionListCache: () => {},
   dedupeSessionListRequest: async (_s: string, _q: unknown, factory: () => Promise<ApiSession[]>) => factory(),
+  sessionListCacheToken: () => 'test-token',
 }))
 vi.mock('../utils/ephemeralSessions', () => ({ isEphemeralSession: () => false }))
 vi.mock('./sanitize', () => ({ stripSessionListDetails: (session: ApiSession) => session }))

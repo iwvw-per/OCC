@@ -28,7 +28,17 @@ const PENDING_TTL_MS = 1500
  */
 function pendingScopeKey(kind: 'permission' | 'question', directory?: string, serverId?: string): string {
   const sid = serverId ?? serverStore.getActiveServerId()
-  return `${kind}:${sid}:${directoryCacheKey(directory)}`
+  /**
+   * 权限与问题的目录语义不同,key 不能一刀切:
+   *   - `permission.request.list` 是**全局**接口(`nativeListPermissions` 不接受
+   *     directory,见 useGlobalEvents.ts 的 fetchActiveScopeData 注释)。key 若含
+   *     directory,同一份全局结果会被不同 directory 的调用方各拉一次、各缓存一份;
+   *     回复时按各自的 directory 失效还会打不中 —— 已答的授权弹窗因此复活。
+   *   - `form.list` 确实按 `location.directory` 查询,必须保留 directory,
+   *     否则不同目录的待答表单会互相串味。
+   */
+  const scope = kind === 'permission' ? '' : directoryCacheKey(directory)
+  return `${kind}:${sid}:${scope}`
 }
 
 /** 回复/拒绝后让待处理列表立即失效，避免继续返回已处理的那条 */

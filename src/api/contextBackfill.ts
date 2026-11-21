@@ -35,6 +35,7 @@
 // 3. 只在缺失时写入（见 messageStore 的各个 record* 方法）。
 
 import { nativeGetSession, nativeGetSessionContext } from '../api/v2NativeSession'
+import { getSession } from './session'
 import { messageStore } from '../store/messageStore'
 import { rawSessionIdOfKey } from '../store/messagePartMerge'
 import { sessionKeyToServerId } from '../utils/sessionKey'
@@ -43,7 +44,9 @@ import { logger } from '../utils'
 import type { TokenUsage } from '../types/message'
 
 /** 已经补过用量的会话（含失败），避免重复请求 */
-const backfilled = new Set<string>()
+const totalsBackfilled = new Set<string>()
+/** 已补过「逐条明细」(`session.context`,大会话可达十几 MB)的会话 */
+const contextBackfilled = new Set<string>()
 
 /**
  * 会话状态被丢弃（内存淘汰 / 清空）时，允许重新补一次。
@@ -57,7 +60,8 @@ const backfilled = new Set<string>()
  * 语义保持「同一份内存状态只补一次」：只有 state 真被丢掉才重新允许补。
  */
 messageStore.onSessionEvicted(sessionKey => {
-  backfilled.delete(sessionKey)
+  totalsBackfilled.delete(sessionKey)
+  contextBackfilled.delete(sessionKey)
 })
 
 /**
@@ -87,7 +91,8 @@ function totalsOfSession(info: Record<string, unknown>): SessionTotals | null {
 
 /** 测试用 */
 export function resetContextBackfill(): void {
-  backfilled.clear()
+  totalsBackfilled.clear()
+  contextBackfilled.clear()
 }
 
 function num(value: unknown): number {
@@ -179,6 +184,17 @@ export function scheduleBackfillSessionUsage(sessionKey: string): void {
 }
 
 /**
+ * 周期对账入口:只走低优先级池,并只穿透「轻量 totals」的去重。
+ *
+ * 对账(每 60s / 回前台)属辅助请求,不该和首屏、主链路抢隧道带宽;且它只是
+ * 为了纠正丢失的 `usage.updated`,轻量的 `session` 接口已足够,无需重拉十几 MB
+ * 的 `session.context`。
+ */
+export function scheduleReconcileSessionUsage(sessionKey: string): void {
+  enqueueLowPriority(() => backfillSessionUsage(sessionKey, { force: true }))
+}
+
+/**
  * 从轻量接口汇总会话累计用量，并按 id 回填骨架消息。
  *
  * ## 为什么优先用 `session` 而不是 `session.context`
@@ -216,12 +232,10 @@ export async function backfillSessionUsage(
     force?: boolean
   } = {},
 ): Promise<void> {
-  if (!options.force) {
-    if (backfilled.has(sessionKey)) return
-  }
+  if (!options.force && totalsBackfilled.has(sessionKey)) return
   // 两条路径都登记：force 只是「允许本次穿透去重」，不应该让紧随其后的
   // 普通调用再白跑一次（那会让周期对账后紧跟一次加载变成双请求）。
-  backfilled.add(sessionKey)
+  totalsBackfilled.add(sessionKey)
 
   const serverId = sessionKeyToServerId(sessionKey)
   const bareId = rawSessionIdOfKey(sessionKey)
@@ -234,7 +248,16 @@ export async function backfillSessionUsage(
      * 大部分会话靠这一步就够了 —— 圆环百分比和累计消耗都能立刻正确显示，
      * 不必等十几 MB 的 context 响应。
      */
-    const sessionInfo = await nativeGetSession(serverId, bareId).catch(() => null)
+    const sessionInfo = await (
+      /**
+       * 普通路径用带 singleFlight + 15s TTL 的 `getSession`:它返回的是**同一份**
+       * `nativeGetSession` 结果,只是合并了在途请求并短期缓存 —— loadSession 刚拉过
+       * 同一会话时这里零请求。此前直接 `nativeGetSession` 会紧跟着再打一次
+       * `/session/{id}`(经隧道约 1.1s)。
+       * 周期对账(force)刻意取新鲜值:否则会被缓存挡住、纠不了丢事件的错。
+       */
+      options.force ? nativeGetSession(serverId, bareId) : getSession(bareId, undefined, serverId)
+    ).catch(() => null)
     const totals = sessionInfo ? totalsOfSession(sessionInfo as unknown as Record<string, unknown>) : null
     if (totals) {
       messageStore.recordSessionUsageFallback(sessionKey, totals.tokens, totals.cost)
@@ -249,6 +272,12 @@ export async function backfillSessionUsage(
      * ⚠️ 大会话上这个响应可达十几 MB（工具大输出全在里面），因此对失败或
      * 超时一律静默：累计用量已经写入，缺的只是逐条明细，属于可选增强。
      */
+    // 逐条明细(`session.context`)每个内存状态只补一次;周期对账(force)只穿透
+    // 轻量 totals 的去重,绝不重复拉这一步 —— 否则大会话每 60s 重拉十几 MB,
+    // 直接占满隧道带宽(这是「远程加载慢」的主要来源之一)。
+    if (contextBackfilled.has(sessionKey)) return
+    contextBackfilled.add(sessionKey)
+
     const messages = await nativeGetSessionContext(serverId, bareId)
     let input = 0
     let output = 0

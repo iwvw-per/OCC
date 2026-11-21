@@ -21,7 +21,7 @@ import {
 } from './v2NativeSession'
 import { peekLightweightSupport, probeLightweightSupport } from './message'
 import { resolveSessionTarget } from '../utils/sessionKey'
-import { formatPathForApi, directoryCacheKey } from '../utils/directoryUtils'
+import { formatPathForApi } from '../utils/directoryUtils'
 import { getSessionMessages } from './message'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { normalizeFileDiffs } from '../types/api/file'
@@ -32,6 +32,7 @@ import {
   writeSessionListCache,
   invalidateSessionListCache,
   dedupeSessionListRequest,
+  sessionListCacheToken,
 } from './sessionListCache'
 import { singleFlight } from '../utils/singleFlight'
 import { microCache } from '../utils/microCache'
@@ -57,15 +58,27 @@ export { invalidateSessionListCache }
  *
  * TTL 取 1.5s 且不影响实时性：session 状态的权威更新走 SSE，这里只是兜底。
  */
-export async function getSessionStatus(directory?: string, serverId?: string): Promise<SessionStatusMap> {
+export async function getSessionStatus(
+  _directory?: string,
+  serverId?: string,
+  options: { fresh?: boolean } = {},
+): Promise<SessionStatusMap> {
   const sid = serverId ?? serverStore.getActiveServerId()
-  return microCache(
-    `status:${sid}:${directoryCacheKey(directory)}`,
-    async () => {
-      return nativeActiveSessions(sid) as unknown as SessionStatusMap
-    },
-    { ttlMs: 1500 },
-  )
+  const fetchStatus = async () => nativeActiveSessions(sid) as unknown as SessionStatusMap
+  /**
+   * 权威对账(`reconcileServerStatus`)要求**新鲜**快照:它用「服务端说不在跑」
+   * 去落定本地仍在流式的轮次,而 1.5s 的缓存陈旧窗口足以把「本轮刚开始」误判
+   * 成「已结束」——缓存的快照里根本没有这个刚起的轮次。故此处绕过 microCache。
+   */
+  if (options.fresh) return fetchStatus()
+  /**
+   * key **不含 directory**:`/api/session/active`(`nativeActiveSessions`)是全局
+   * 接口,忽略 directory —— 同一份结果。此前 key 带 `directoryCacheKey(directory)`,
+   * 于是传 dir 与传 undefined 的两个调用方(`useSessionManager` / `useGlobalEvents`)
+   * 各拉一次,经隧道每次约 1.1s,还都能各自命中缓存而互不可见。
+   * directory 仍保留在签名里以兼容既有调用方。
+   */
+  return microCache(`status:${sid}`, fetchStatus, { ttlMs: 1500 })
 }
 
 /**
@@ -189,6 +202,9 @@ export async function getSessions(
   if (cached) return cached.filter(session => !isEphemeralSession(session.id))
 
   return dedupeSessionListRequest(cacheServerId, cacheQuery, async () => {
+    // 记下发起时的缓存代次:期间若发生删除/归档等失效,写入会被拒绝,
+    // 避免把失效前的旧列表(含已删会话)重新塞回 30s 缓存
+    const cacheToken = sessionListCacheToken(cacheServerId)
     // rootsOnly 交给服务端在分页前过滤（`parentID=null`），见 nativeListSessions 的注释：
     // 客户端过滤会让子会话白占一页名额，导致「展开更多」实际增量小于 limit。
     const sessions = (
@@ -214,7 +230,7 @@ export async function getSessions(
     // 这些字段单条可达数百 KB，且会被缓存 30s，去掉后缓存占用同步下降。
     const result = visible.map(stripSessionListDetails)
 
-    writeSessionListCache(cacheServerId, cacheQuery, result)
+    writeSessionListCache(cacheServerId, cacheQuery, result, cacheToken)
 
     // A1：列表成功返回后**后台预热**骨架能力探测。
     //

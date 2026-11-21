@@ -22,6 +22,15 @@ import { makeSessionKey } from '../utils/sessionKey'
 import { rawSessionIdOfKey } from '../store/messagePartMerge'
 import { logger } from '../utils'
 
+/**
+ * 恢复时的并发上限。
+ *
+ * `Promise.all` 会对**全部**已加载会话一次性铺开(单服务器可达 48 个),而主机
+ * Agent 对单条隧道是串行处理的 —— 重连瞬间铺开这么多,只会把紧跟着的其它关键
+ * 请求排在它们后面。分批(每批 3 个)保留覆盖,又不制造突发。
+ */
+const RECOVERY_CONCURRENCY = 3
+
 function rec(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
@@ -44,8 +53,7 @@ export async function recoverPendingInbox(serverId: string): Promise<void> {
   const sessionKeys = messageStore.getLoadedSessionKeysForServer(serverId)
   if (sessionKeys.length === 0) return
 
-  await Promise.all(
-    sessionKeys.map(async sessionKey => {
+  const recoverOne = async (sessionKey: string): Promise<void> => {
       const bareId = rawSessionIdOfKey(sessionKey)
       if (!bareId) return
       try {
@@ -67,6 +75,9 @@ export async function recoverPendingInbox(serverId: string): Promise<void> {
       } catch (error) {
         logger.warn('[inboxRecovery] failed to recover pending inbox', { sessionKey, error })
       }
-    }),
-  )
+  }
+  // 分批执行:避免对全部已加载会话同时铺开请求(见 RECOVERY_CONCURRENCY)
+  for (let i = 0; i < sessionKeys.length; i += RECOVERY_CONCURRENCY) {
+    await Promise.all(sessionKeys.slice(i, i + RECOVERY_CONCURRENCY).map(recoverOne))
+  }
 }
