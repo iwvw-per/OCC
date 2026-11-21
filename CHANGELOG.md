@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.2.8] - 2026-11-21
+
+- perf(sync): dedupe tunnel requests, fix data-timing races (0c75a6ac)
+
 ## [v2.2.7] - 2026-11-20
 
 - feat: scoped error boundaries, defer lazy dialogs, dedupe background subagents (de086299)
