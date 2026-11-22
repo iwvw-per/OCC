@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.2.9] - 2026-11-22
+
+- feat(mobile): edge-swipe right panel, shared long-press, overlay a11y & PWA icons (6faa22b1)
+
 ## [v2.2.8] - 2026-11-21
 
 - perf(sync): dedupe tunnel requests, fix data-timing races (0c75a6ac)
