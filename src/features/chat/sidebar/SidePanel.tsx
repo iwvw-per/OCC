@@ -78,6 +78,118 @@ interface SidePanelProps {
   headerContent?: ReactNode
 }
 
+/**
+ * 侧栏搜索输入框(自持草稿 + 防抖提交)。
+ *
+ * `search` 存在顶层 SessionContext,而 Provider 包着整棵应用。若每次按键都
+ * `setSearch`,Provider value 每帧变化 → 侧栏 23 个文件夹 section 及全部会话行
+ * 一起重渲染,输入明显卡顿。这里把「即时文本」留在组件本地,防抖 180ms 后才提交
+ * 到 context:只有用户暂歇时才触发一次列表过滤,输入本身始终跟手。
+ */
+export function SidebarSearchInput({
+  value,
+  onCommit,
+  isLoading,
+  inputRef,
+  placeholder,
+  searchingLabel,
+  clearLabel,
+}: {
+  value: string
+  onCommit: (next: string) => void
+  isLoading: boolean
+  inputRef: React.RefObject<HTMLInputElement | null>
+  placeholder: string
+  searchingLabel: string
+  clearLabel: string
+}) {
+  const [draft, setDraft] = useState(value)
+  const timerRef = useRef<number | null>(null)
+  // 最新草稿 / 外部值的镜像:卸载补交时不依赖闭包即可读到最新值
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const valueRef = useRef(value)
+  valueRef.current = value
+
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  // 外部值变化(清空、同步、切服务器等)时对齐草稿
+  useEffect(() => {
+    // 外部更新到来时同时取消尚未提交的防抖,否则那个迟到的 onCommit 会把外部值顶回去
+    clearTimer()
+    setDraft(value)
+  }, [value])
+
+  // 卸载时补交尚未提交的输入:输入框在收起侧栏时会卸载;若只清掉定时器,
+  // 最后 180ms 内打的字会被静默丢弃(旧实现每次按键即提交,没有这个窗口)。
+  useEffect(
+    () => () => {
+      const hadPending = timerRef.current !== null
+      clearTimer()
+      if (hadPending && draftRef.current !== valueRef.current) onCommit(draftRef.current)
+    },
+    // 仅卸载时执行;最新值经 ref 读取,onCommit(setSearch)身份稳定
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
+  const commit = (next: string) => {
+    setDraft(next)
+    clearTimer()
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null
+      onCommit(next)
+    }, 180)
+  }
+
+  const clear = () => {
+    clearTimer()
+    setDraft('')
+    onCommit('')
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="text"
+        name="sidebar-chat-search"
+        value={draft}
+        onChange={e => commit(e.target.value)}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        autoComplete="off"
+        spellCheck={false}
+        className="h-8 w-full appearance-none rounded-lg border-0 bg-transparent pl-[34px] pr-[26px] text-ui-base text-text-100 shadow-none outline-none ring-0 placeholder:text-text-300 transition-shadow focus-visible:ring-1 focus-visible:ring-accent-main-100/30"
+      />
+      {draft && isLoading ? (
+        <span
+          className="absolute right-[6px] top-1/2 flex size-[14px] -translate-y-1/2 items-center justify-center"
+          aria-label={searchingLabel}
+        >
+          <Spinner size="xs" tone="accent" variant="pixel" />
+        </span>
+      ) : (
+        draft && (
+          <button
+            type="button"
+            onClick={clear}
+            className="absolute right-[6px] top-1/2 flex size-[14px] -translate-y-1/2 items-center justify-center text-text-400 hover:text-text-100"
+            aria-label={clearLabel}
+          >
+            <CloseIcon size={14} />
+          </button>
+        )
+      )}
+    </>
+  )
+}
+
 export function SidePanel({
   onNewSession,
   onSelectSession,
@@ -596,37 +708,15 @@ export function SidePanel({
             <span className="pointer-events-none absolute left-[6px] top-1/2 -translate-y-1/2 size-5 flex items-center justify-center text-text-300">
               <SearchIcon size={16} />
             </span>
-            <input
-              ref={searchInputRef}
-              type="text"
-              name="sidebar-chat-search"
+            <SidebarSearchInput
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onCommit={setSearch}
+              isLoading={isLoading}
+              inputRef={searchInputRef}
               placeholder={t('sidebar.searchChats')}
-              aria-label={t('sidebar.searchChats')}
-              autoComplete="off"
-              spellCheck={false}
-              className="h-8 w-full appearance-none rounded-lg border-0 bg-transparent pl-[34px] pr-[26px] text-ui-base text-text-100 shadow-none outline-none ring-0 placeholder:text-text-300 transition-shadow focus-visible:ring-1 focus-visible:ring-accent-main-100/30"
+              searchingLabel={t('sidebar.searchingChats', { defaultValue: 'Searching' })}
+              clearLabel={t('sidebar.clearSearch')}
             />
-            {search && isLoading ? (
-              <span
-                className="absolute right-[6px] top-1/2 flex size-[14px] -translate-y-1/2 items-center justify-center"
-                aria-label={t('sidebar.searchingChats', { defaultValue: 'Searching' })}
-              >
-                <Spinner size="xs" tone="accent" variant="pixel" />
-              </span>
-            ) : (
-              search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="absolute right-[6px] top-1/2 flex size-[14px] -translate-y-1/2 items-center justify-center text-text-400 hover:text-text-100"
-                  aria-label={t('sidebar.clearSearch')}
-                >
-                  <CloseIcon size={14} />
-                </button>
-              )
-            )}
           </div>
         ) : (
           <NativeTooltip>

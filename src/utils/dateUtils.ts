@@ -20,8 +20,15 @@ export function formatRelativeTime(timestamp: number): string {
 }
 
 /** 月/日（不含年份），如 10/3 */
+const monthDayFormatters = new Map<string, Intl.DateTimeFormat>()
 export function formatMonthDay(timestamp: number): string {
-  return new Date(timestamp).toLocaleDateString(i18n.language, { month: 'numeric', day: 'numeric' })
+  const locale = i18n.language || 'en'
+  let formatter = monthDayFormatters.get(locale)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric' })
+    monthDayFormatters.set(locale, formatter)
+  }
+  return formatter.format(timestamp)
 }
 
 /**

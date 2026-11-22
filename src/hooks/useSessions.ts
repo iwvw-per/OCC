@@ -134,10 +134,23 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   const bucketIdKey = `${resolvedServerId}\u0000${isAggregate ? directoriesKey : (normalizedDirectory ?? '')}`
 
   // 全局版本订阅：任何桶变化都触发重算（聚合需要感知所有目录桶）。
+  // 细粒度快照:订阅仍是全局的(emit 通知所有订阅者),但快照取「本组件关心的
+  // 桶」的内容版本。侧栏 N 个文件夹各有一个 useSessions;若快照取全局 version,
+  // 每次 emit 都会让所有 section 重渲染一次(展开全部 → O(N²))。取本桶版本后,
+  // 没变化的桶 React 会直接跳过重渲染。
+  const bucketRevision = useCallback(() => {
+    if (!isAggregate) return sessionListIndexStore.getRevision(bucket)
+    // 用「按位置的指纹」而不是求和:桶版本在桶被淘汰 / 重建时会回到 0,求和可能
+    // 相互抵消而返回同一个值 → useSyncExternalStore 误判无变化、漏重渲。
+    return directoryBuckets.map(dirBucket => sessionListIndexStore.getRevision(dirBucket)).join(':')
+    // bucket / directoryBuckets 每帧新建,用稳定键代替
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAggregate, directoryBuckets, bucketIdKey])
+
   const indexVersion = useSyncExternalStore(
     cb => sessionListIndexStore.subscribe(cb),
-    () => sessionListIndexStore.getVersion(),
-    () => sessionListIndexStore.getVersion(),
+    bucketRevision,
+    bucketRevision,
   )
 
   // 索引快照（同步、引用稳定）：这是「切回旧主机首帧即有内容」的关键。

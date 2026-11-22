@@ -277,4 +277,52 @@ describe('sessionListIndexStore', () => {
     expect(item?.time?.archived).toBe(42)
     expect(item?.time?.created).toBe(1)
   })
+
+  // ---------------------------------------------------------------------------
+  // 细粒度快照:侧栏 O(N²) 重渲染回归
+  // ---------------------------------------------------------------------------
+  // 侧栏每个项目文件夹各有一个 useSessions,快照取本桶版本。若某次 emit 让
+  // **无关**桶的快照引用也变了,顶层 SessionContext 的 Provider value 就会变化,
+  // 连带侧栏所有 section 重渲染(展开 N 个文件夹 → O(N²))。
+
+  it('emit 不清空快照缓存:无关桶的快照引用保持稳定', () => {
+    sessionListIndexStore.replace(active, [makeSession('a')], { limit: 5, hasMore: false })
+    const before = sessionListIndexStore.getSnapshot(active)
+
+    // 另一个桶发生变化并 emit
+    sessionListIndexStore.replace(globalActive, [makeSession('g')], { limit: 5, hasMore: false })
+
+    const after = sessionListIndexStore.getSnapshot(active)
+    expect(after).toBe(before) // 同一引用 → React 会跳过重渲染
+  })
+
+  it('getRevision 按桶隔离:其他桶变化不改变本桶版本', () => {
+    sessionListIndexStore.replace(active, [makeSession('a')], { limit: 5, hasMore: false })
+    const rev = sessionListIndexStore.getRevision(active)
+
+    sessionListIndexStore.replace(globalActive, [makeSession('g')], { limit: 5, hasMore: false })
+
+    expect(sessionListIndexStore.getRevision(active)).toBe(rev)
+    expect(sessionListIndexStore.getRevision(globalActive)).not.toBe(0)
+  })
+
+  it('invalidateArchivedView 递增归档桶版本(细粒度订阅者才会重读)', () => {
+    sessionListIndexStore.replace(archived, [makeSession('a')], { limit: 5, hasMore: false })
+    const rev = sessionListIndexStore.getRevision(archived)
+
+    sessionListIndexStore.invalidateArchivedView('srv-a')
+
+    expect(sessionListIndexStore.getRevision(archived)).not.toBe(rev)
+  })
+
+  it('本桶内容变化时快照引用与版本都更新', () => {
+    sessionListIndexStore.replace(active, [makeSession('a')], { limit: 5, hasMore: false })
+    const rev = sessionListIndexStore.getRevision(active)
+    const snapshot = sessionListIndexStore.getSnapshot(active)
+
+    sessionListIndexStore.replace(active, [makeSession('a'), makeSession('b')], { limit: 5, hasMore: false })
+
+    expect(sessionListIndexStore.getRevision(active)).not.toBe(rev)
+    expect(sessionListIndexStore.getSnapshot(active)).not.toBe(snapshot)
+  })
 })
