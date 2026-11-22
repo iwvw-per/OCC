@@ -23,7 +23,7 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { contextWindowKey, looksLikeContextOverflow, recordContextOverflow } from '../utils/contextWindowObservation'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
-import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions, invalidateSessionMetaCache, abortSession } from '../api'
+import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions, invalidateSessionMetaCache } from '../api'
 import { onSeqGap } from '../api/events'
 import { reportSessionViewed } from '../api/sessionView'
 import { recoverPendingInbox } from '../api/inboxRecovery'
@@ -1225,13 +1225,23 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           const scopedId = scope(data.sessionID)
           // started 只是开始信号：标记一下并等待结果，不提示也不刷新。
           if (data.status === 'started') {
-            // 开始即中断:压缩不该排在最后一个命令之后,分隔条同步前移到末尾。
+            // 服务端自动压缩(auto)**在这里不做任何事**。
+            //
+            // 它由服务端自己调度(上下文逼近上限时),此刻往往还有一轮正在跑。客户端
+            // 一旦在这里 interrupt,打断的不只是那一轮,还会把刚入队的压缩一起打断
+            // —— 服务端回 session.compaction.failed
+            // { type: aborted, message: Compaction cancelled },上下文不缩,界面还弹
+            // 「会话压缩失败」。自动压缩的收尾交给后续状态事件处理。
+            if (data.reason === 'auto') return
+
+            // 用户手动触发(/compact 或面板的「压缩」按钮):收敛 handleCommand 的
+            // 乐观置忙,并把压缩分隔条前移到末尾。这里同样**不能** interrupt:
+            // handleCommand 已在派发前中断过真正在跑的那一轮,再发一次就会把刚刚
+            // 入队、已经开始的压缩直接打断(现象同上)。
             const runningStatus = activeSessionStore.getSnapshot().statusMap[scopedId]
             if (runningStatus && runningStatus.type !== 'idle') {
               activeSessionStore.updateStatus(scopedId, { type: 'idle' })
               messageStore.handleSessionIdle(scopedId)
-              const directory = activeSessionStore.getSessionMeta(scopedId)?.directory
-              void abortSession(data.sessionID, directory, serverId).catch(() => {})
             }
             messageStore.recordCompactionResult(scopedId, { at: Date.now() })
             return

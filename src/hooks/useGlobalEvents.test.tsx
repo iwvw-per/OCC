@@ -430,7 +430,7 @@ describe('useGlobalEvents', () => {
     expect(messageStore.markServerSessionsStale).not.toHaveBeenCalled()
   })
 
-  it('interrupts the running turn and shows the divider when compaction starts', async () => {
+  it('does nothing when a server-initiated (auto) compaction starts', async () => {
     let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
     subscribeToEventsMock.mockImplementation(cb => {
       callbacks = cb
@@ -438,7 +438,8 @@ describe('useGlobalEvents', () => {
     })
     vi.mocked(abortSession).mockClear()
 
-    // 主对话仍在跑:压缩开始时应被立即中断,而不是等最后一个命令跑完
+    // 服务端自动压缩触发时,往往还有一轮正在跑。客户端一旦 interrupt,
+    // 打断的不只是那一轮,还会把刚入队的压缩一起打断(→ compaction.failed/aborted)。
     activeSessionStoreMock.getSnapshot.mockReturnValue({
       statusMap: { 'local::ses_1': { type: 'busy' } },
     } as never)
@@ -448,9 +449,33 @@ describe('useGlobalEvents', () => {
 
     callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'started', reason: 'auto' })
 
+    expect(vi.mocked(abortSession)).not.toHaveBeenCalled()
+    expect(activeSessionStoreMock.updateStatus).not.toHaveBeenCalled()
+    expect(messageStore.recordCompactionResult).not.toHaveBeenCalled()
+  })
+  it('does not re-interrupt a manual compaction it just started (regression)', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    vi.mocked(abortSession).mockClear()
+
+    // 用户手动压缩:handleCommand 已经中断过当前轮次、并乐观置忙。
+    // 此时 started 事件若再次 interrupt,会把刚开始的压缩直接打断
+    // (服务端回 session.compaction.failed / aborted,界面同时弹成功+失败两个 toast)。
+    activeSessionStoreMock.getSnapshot.mockReturnValue({
+      statusMap: { 'local::ses_1': { type: 'busy' } },
+    } as never)
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'started', reason: 'manual' })
+
+    expect(vi.mocked(abortSession)).not.toHaveBeenCalled()
+    // 仍然把本地状态收回 idle 并前移分隔条
     expect(activeSessionStoreMock.updateStatus).toHaveBeenCalledWith('local::ses_1', { type: 'idle' })
-    expect(vi.mocked(abortSession)).toHaveBeenCalledWith('ses_1', '/workspace', 'local')
-    // 分隔条立即前移,与压缩完成后的分界一致
     expect(messageStore.recordCompactionResult).toHaveBeenCalledWith(
       'local::ses_1',
       expect.objectContaining({ at: expect.any(Number) }),
