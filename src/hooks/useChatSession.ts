@@ -1180,7 +1180,15 @@ export function useChatSession({
           // 同样先本地乐观置忙；纯本地命令（不发消息）不会被任何事件佐证，超时后自动回收。
           // 同上：补 directory，供项目行归类 busy 会话。
           if (effectiveDirectory) activeSessionStore.setSessionMeta(sessionId, undefined, effectiveDirectory)
+
+          // 压缩不应接在最后一个命令之后继续:主对话正在跑时先掐掉当前轮次
+          if (sessionId === routeSessionId && isSessionBusy) {
+            await handleAbort()
+          }
+
           activeSessionStore.applyOptimisticBusy(sessionId)
+
+          if (sessionId) messageStore.recordCompactionResult(sessionId, { at: Date.now() })
 
           // Commands should count as sent once they are accepted for execution.
           // Do not keep the draft alive until the long-running compaction finishes.
@@ -1222,6 +1230,8 @@ export function useChatSession({
       handleNewChat,
       paneServerId,
       onWorkDirectoryUsed,
+      handleAbort,
+      isSessionBusy,
     ],
   )
 

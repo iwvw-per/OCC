@@ -70,6 +70,8 @@ interface WorkStatusPanelProps {
   /** 面板当前是否应占位 */
   visible: boolean
   onScrollToMessage: (messageId: string) => void
+  /** 触发压缩命令:先中断当前轮次,再压缩并显示分隔条 */
+  onCompact: () => void
 }
 
 export const WorkStatusPanel = memo(function WorkStatusPanel({
@@ -79,6 +81,7 @@ export const WorkStatusPanel = memo(function WorkStatusPanel({
   contextLimit,
   visible,
   onScrollToMessage,
+  onCompact,
 }: WorkStatusPanelProps) {
   const { t } = useTranslation(['chat', 'components'])
   const state = useWorkStatus()
@@ -146,8 +149,8 @@ export const WorkStatusPanel = memo(function WorkStatusPanel({
   // 板块元素在 useMemo 里创建，展开态由各折叠板块自己订阅 store，
   // 因此这里不需要把展开态放进依赖。
   const sectionContext = useMemo(
-    () => ({ sessionId, directory, serverId, contextLimit, onScrollToMessage }),
-    [sessionId, directory, serverId, contextLimit, onScrollToMessage],
+    () => ({ sessionId, directory, serverId, contextLimit, onScrollToMessage, onCompact }),
+    [sessionId, directory, serverId, contextLimit, onScrollToMessage, onCompact],
   )
 
   // 让这些元素由面板自己持有：主要读数的更新不会通过组合回调重渲无关板块

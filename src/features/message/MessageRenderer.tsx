@@ -1163,7 +1163,9 @@ const AssistantMessageView = memo(function AssistantMessageView({
     for (let i = 0; i < content.length; i++) {
       if (content[i].type !== 'reasoning') continue
       for (let j = i + 1; j < content.length; j++) {
-        // 任何其他 content 类型（包括空 text、tool 等）都说明思考已结束
+        // 空 text 只是占位:session.text.started 先建出 text:'',随后才补字;不算思考结束。
+        const next = content[j]
+        if (next.type === 'text' && !next.text.trim()) continue
         ended.add(content[i].id)
         break
       }

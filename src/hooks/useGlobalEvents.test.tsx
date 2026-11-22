@@ -2,6 +2,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerSessionConsumer, useGlobalEvents } from './useGlobalEvents'
 import { messageStore } from '../store'
+import { abortSession } from '../api'
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void
@@ -112,6 +113,7 @@ vi.mock('../api', () => ({
   getPendingPermissions: getPendingPermissionsMock,
   getPendingQuestions: getPendingQuestionsMock,
   invalidateSessionMetaCache: vi.fn(),
+  abortSession: vi.fn(() => Promise.resolve(true)),
 }))
 
 vi.mock('../api/permission', () => ({
@@ -426,6 +428,33 @@ describe('useGlobalEvents', () => {
     // 用户手动 /compact 后必须得到反馈，否则会以为功能失效
     expect(notificationToastMock).toHaveBeenCalledWith('error', expect.any(String), 'Nothing to compact yet')
     expect(messageStore.markServerSessionsStale).not.toHaveBeenCalled()
+  })
+
+  it('interrupts the running turn and shows the divider when compaction starts', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    vi.mocked(abortSession).mockClear()
+
+    // 主对话仍在跑:压缩开始时应被立即中断,而不是等最后一个命令跑完
+    activeSessionStoreMock.getSnapshot.mockReturnValue({
+      statusMap: { 'local::ses_1': { type: 'busy' } },
+    } as never)
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'started', reason: 'auto' })
+
+    expect(activeSessionStoreMock.updateStatus).toHaveBeenCalledWith('local::ses_1', { type: 'idle' })
+    expect(vi.mocked(abortSession)).toHaveBeenCalledWith('ses_1', '/workspace', 'local')
+    // 分隔条立即前移,与压缩完成后的分界一致
+    expect(messageStore.recordCompactionResult).toHaveBeenCalledWith(
+      'local::ses_1',
+      expect.objectContaining({ at: expect.any(Number) }),
+    )
   })
 
   it('invalidates cached messages when a manual compaction succeeds', async () => {

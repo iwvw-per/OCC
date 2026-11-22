@@ -213,7 +213,7 @@ export function ChatSettings() {
 
         {/* 会话统计细分指标：仅在信息栏开启且会话统计打开时展示；支持按桌面/移动设备切换分别配置 */}
         {showInputStatusBar && inputStatusBarFields.sessionStats && (
-          <div className="rounded-lg border border-border-200/50 bg-bg-200/25 p-3 space-y-2 mt-1">
+          <div className="rounded-lg bg-bg-200/25 p-3 space-y-2 mt-1">
             <div className="flex items-center justify-between gap-3 pb-1 border-b border-border-200/40">
               <span className="text-ui-sm font-medium text-text-300">
                 {t('chat.sessionStatsDevice')}

@@ -466,7 +466,9 @@
     "ariaLabel": "工作状态",
     "railToggle": "显示或隐藏工作状态面板",
     "context": {
-      "label": "上下文"
+      "label": "上下文",
+      "compact": "压缩",
+      "compactAriaLabel": "压缩上下文"
     },
     "section": {
       "session": "会话",

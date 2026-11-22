@@ -61,6 +61,8 @@ export interface WorkStatusSectionContext {
   serverId?: string
   contextLimit: number
   onScrollToMessage: (messageId: string) => void
+  /** 面板上的「压缩」按钮:立即中断当前轮次并触发压缩命令(缺省时不渲染该按钮) */
+  onCompact?: () => void
 }
 
 // ─── 会话：上下文占用 + 成本 ──────────────────
@@ -68,6 +70,7 @@ export interface WorkStatusSectionContext {
 export const WorkStatusSessionSection = memo(function WorkStatusSessionSection({
   sessionId,
   contextLimit,
+  onCompact,
 }: WorkStatusSectionContext) {
   const { t } = useTranslation('chat')
   /**
@@ -81,6 +84,11 @@ export const WorkStatusSessionSection = memo(function WorkStatusSessionSection({
   const cost = stats.totalCost > 0 ? stats.totalCost : null
 
   const rounded = percent === null ? null : Math.round(percent)
+  const compactButton = onCompact ? (
+    <WorkStatusRowAction onClick={onCompact} ariaLabel={t('workStatus.context.compactAriaLabel')}>
+      {t('workStatus.context.compact')}
+    </WorkStatusRowAction>
+  ) : null
   const meterColor =
     rounded === null
       ? 'hsl(var(--success-100))'
@@ -101,6 +109,7 @@ export const WorkStatusSessionSection = memo(function WorkStatusSessionSection({
             label={t('workStatus.context.label')}
             value={
               <>
+                {compactButton}
                 <WorkStatusValue>
                   {percent === null ? '\u2014' : `${Math.min(percent, 999).toFixed(1)}%`}
                 </WorkStatusValue>
@@ -113,7 +122,12 @@ export const WorkStatusSessionSection = memo(function WorkStatusSessionSection({
       ) : (
         <WorkStatusRow
           label={t('workStatus.context.label')}
-          value={<WorkStatusValue tone="muted">—</WorkStatusValue>}
+          value={
+            <>
+              {compactButton}
+              <WorkStatusValue tone="muted">—</WorkStatusValue>
+            </>
+          }
         />
       )}
     </WorkStatusSection>

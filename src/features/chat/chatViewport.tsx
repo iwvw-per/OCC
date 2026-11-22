@@ -133,7 +133,13 @@ function computeChatViewport(input: ComputedViewportInput): Omit<ChatViewportVal
     sidebarHardMinWidth,
   } = input
 
-  const overlayPanels = viewportWidth < CHAT_VIEWPORT_MOBILE_BREAKPOINT
+  // 触摸优先设备(手机)横屏时宽度会超过竖屏断点(如 844x390),若只看宽度会退化成
+  // 「docked 侧栏 + 桌面布局」。用短边再兜一层:短边仍小于断点即视为手机,保持 overlay。
+  // 非触摸设备(桌面窄窗)不受影响,仍按宽度判定,避免桌面小窗被改成抽屉。
+  const shortEdge = Math.min(viewportWidth, viewportHeight)
+  const overlayPanels =
+    viewportWidth < CHAT_VIEWPORT_MOBILE_BREAKPOINT ||
+    (touchCapable && shortEdge < CHAT_VIEWPORT_MOBILE_BREAKPOINT)
   const interactionMode: ChatInteractionMode = overlayPanels ? 'touch' : 'pointer'
   const sidebarMinWidth = sidebarHardMinWidth ?? SIDEBAR_HARD_MIN_WIDTH
 

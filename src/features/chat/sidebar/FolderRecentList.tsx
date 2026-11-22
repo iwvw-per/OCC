@@ -17,6 +17,7 @@ import { ExpandableSection, Spinner, NativeTooltip } from '../../../components/u
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { useDelayedRender, useSessions, useVcsInfo } from '../../../hooks'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
+import { useLongPress } from '../../../hooks/useLongPress'
 import { useInView } from '../../../hooks/useInView'
 import { useDirectory } from '../../../contexts/useDirectory'
 import { getDirectoryName, normalizeToForwardSlash } from '../../../utils'
@@ -697,12 +698,8 @@ function FolderRecentSection({
   // 触摸端没有 hover，行内 hover 才出现的 + / 打开 / 移除按钮都够不到，
   // 长按菜单是这些操作的唯一入口。
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const touchMovedRef = useRef(false)
   // 长按弹出菜单后，抬手会补一个 click 命中行内按钮，需吞掉这一次点击，
   // 否则菜单打开的同时项目被展开/收起。
-  const suppressClickRef = useRef(false)
-
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
       if (isEditMode || !project.worktree) return
@@ -713,44 +710,19 @@ function FolderRecentSection({
     [isEditMode, project.worktree],
   )
 
-  const handleProjectTouchStart = useCallback(
-    (e: React.TouchEvent) => {
-      if (!preferTouchUi || isEditMode || !project.worktree) return
-      const touch = e.touches[0]
-      const x = touch?.clientX ?? 0
-      const y = touch?.clientY ?? 0
-      touchMovedRef.current = false
-      suppressClickRef.current = false
-      longPressTimer.current = setTimeout(() => {
-        if (touchMovedRef.current) return
-        suppressClickRef.current = true
-        hapticTap('medium')
-        setContextMenu({ x, y })
-      }, 500)
+  const {
+    onTouchStart: handleProjectTouchStart,
+    onTouchMove: handleProjectTouchMove,
+    onTouchEnd: handleProjectTouchEnd,
+    onTouchCancel: handleProjectTouchCancel,
+    suppressClickRef,
+  } = useLongPress({
+    enabled: preferTouchUi && !isEditMode && !!project.worktree,
+    onLongPress: ({ x, y }) => {
+      hapticTap('medium')
+      setContextMenu({ x, y })
     },
-    [preferTouchUi, isEditMode, project.worktree],
-  )
-
-  const handleProjectTouchMove = useCallback(() => {
-    touchMovedRef.current = true
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
-  }, [])
-
-  const handleProjectTouchEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (longPressTimer.current) clearTimeout(longPressTimer.current)
-    }
-  }, [])
+  })
 
   const canOpenDirectory = isTauri() && !isTauriMobile() && !!project.worktree
   const handleOpenDirectory = useCallback(async () => {
@@ -969,7 +941,7 @@ function FolderRecentSection({
           onTouchStart={handleProjectTouchStart}
           onTouchMove={handleProjectTouchMove}
           onTouchEnd={handleProjectTouchEnd}
-          onTouchCancel={handleProjectTouchEnd}
+          onTouchCancel={handleProjectTouchCancel}
           data-project-row
           className={cn(
             'group/folder relative flex w-full items-center transition-colors duration-150 select-none',

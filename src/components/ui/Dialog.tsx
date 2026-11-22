@@ -367,20 +367,20 @@ export function Dialog({
             <>
               {/* Header */}
               {(title || showCloseButton) && (
-                <div className="flex items-center justify-between px-5 py-4 border-b border-border-100/50">
-                  <div id={title ? titleId : undefined} className="text-ui-lg font-semibold text-text-100">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-border-100/50">
+                  <div id={title ? titleId : undefined} className="text-ui-base font-semibold text-text-100">
                     {title}
                   </div>
                   {showCloseButton && (
-                    <NativeTooltip>
+                    <NativeTooltip openOnFocus={false}>
                       <button
                         type="button"
                         onClick={requestClose}
                         aria-label={t('common:close')}
-                        className="hidden md:block p-2 text-text-400 hover:text-text-200 hover:bg-bg-100 rounded-md transition-colors"
+                        className="hidden md:block p-1.5 text-text-400 hover:text-text-200 hover:bg-bg-100 rounded-md transition-colors"
                         title={t('common:close')}
                       >
-                        <CloseIcon size={18} />
+                        <CloseIcon size={16} />
                       </button>
                     </NativeTooltip>
                   )}

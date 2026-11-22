@@ -24,6 +24,7 @@ function renderSection() {
       sessionId={PARENT}
       contextLimit={200_000}
       onScrollToMessage={() => {}}
+      onCompact={() => {}}
     />,
   )
 }

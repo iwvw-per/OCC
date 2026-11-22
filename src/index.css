@@ -978,7 +978,7 @@ body {
  * 用于 RightPanel 和 BottomPanel 的统一视觉规范
  */
 
-@media (max-width: 768px) {
+@media (hover: none) and (pointer: coarse) {
   /*
    * 移动端触摸目标最小尺寸 - 只对独立按钮生效，不影响紧凑组件内部。
    *
@@ -990,18 +990,20 @@ body {
   button:not(.touch-target-sm):not([role='tab']):not([role='switch']):not([role='checkbox']):not(
       [role='radio']
     ):not([role='menuitemcheckbox']):not([role='menuitemradio']):not([data-compact]) {
-    min-height: 32px;
+    min-height: 40px;
   }
 
   /*
-   * 侧栏内的图标按钮在小屏上放大到 36×36：原 size-6(24px) 的按钮相邻
+   * 侧栏内的图标按钮在小屏上放大到 40×40：原 size-6(24px) 的按钮相邻
    * 只隔 2px，手指很容易点错。只作用于侧栏，避免影响其他密集工具栏。
    */
   [data-sidebar] [data-icon-button] {
-    min-width: 2.25rem;
-    min-height: 2.25rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
   }
+}
 
+@media (max-width: 768px) {
   /*
    * 移动端小屏空间有限，隐藏设置面板里所有说明/描述文本。
    * 由组件在描述节点上标注 data-setting-desc，桌面端不受影响。

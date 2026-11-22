@@ -1015,7 +1015,7 @@ function renderInlineTokensToReact(tokens: unknown[], _isReasoning: boolean): Re
           alt={String(item.text ?? '')}
           width={dimensions?.width}
           height={dimensions?.height}
-          loading="eager"
+          loading="lazy"
           decoding="async"
           className="block max-w-full rounded-md"
         />

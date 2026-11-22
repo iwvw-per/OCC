@@ -45,6 +45,7 @@ export interface AppShell {
   toggleRightPanel: () => void
   openSidebar: () => void
   closeSidebar: () => void
+  openRightPanel: () => void
 }
 
 export function useAppShell(options: UseAppShellOptions): AppShell {
@@ -106,6 +107,14 @@ export function useAppShell(options: UseAppShellOptions): AppShell {
     layoutStore.openRightPanel()
   }, [isMobilePanelLayout, options, rightPanelOpen])
 
+  // 从屏幕右边缘内滑开右栏时用:与 toggleRightPanel 打开分支同语义,
+  // 但已打开时是空操作(手势只负责打开,关闭由右栏自身的右滑完成)。
+  const openRightPanel = useCallback(() => {
+    if (!isMobilePanelLayout || rightPanelOpen) return
+    if (options.sidebarExpanded) layoutStore.setSidebarExpandedTransient(false)
+    layoutStore.openRightPanel()
+  }, [isMobilePanelLayout, options.sidebarExpanded, rightPanelOpen])
+
   // 桌面端把应用顶栏并入标题栏：仅当聚焦 pane 是 single（非 split，或 split 中被全屏）
   // 时传入 Header handlers，让 DesktopTitlebar 内嵌渲染 Header 内容。
   const focusedIsSingleMode = !options.isSplit || options.fullscreenPaneId === options.focusedPaneId
@@ -152,5 +161,6 @@ export function useAppShell(options: UseAppShellOptions): AppShell {
     toggleRightPanel,
     openSidebar,
     closeSidebar,
+    openRightPanel,
   }
 }

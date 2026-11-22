@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckIcon, AlertCircleIcon, CloseIcon, HandIcon, QuestionIcon } from '../../../components/Icons'
 import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { notificationStore } from '../../../store/notificationStore'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
+import { useLongPress } from '../../../hooks/useLongPress'
 import { formatNotificationTime } from './sidebarUtils'
 import type { NotificationEntry } from '../../../store/notificationStore'
 import type { ApiSession } from '../../../api'
@@ -37,38 +38,20 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
   const [showActions, setShowActions] = useState(false)
   const [hasFocusWithin, setHasFocusWithin] = useState(false)
   const itemRef = useRef<HTMLDivElement>(null)
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const touchMoved = useRef(false)
 
   const config = notifTypeConfig[entry.type]
   const Icon = config.icon
   const actionsVisible = preferTouchUi ? showActions : false
 
-  const handleTouchStart = useCallback(() => {
-    if (!preferTouchUi) return
-    touchMoved.current = false
-    longPressTimer.current = setTimeout(() => {
-      if (!touchMoved.current) {
-        setShowActions(true)
-      }
-    }, 500)
-  }, [preferTouchUi])
-
-  const handleTouchMove = useCallback(() => {
-    if (!preferTouchUi) return
-    touchMoved.current = true
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
-  }, [preferTouchUi])
-
-  const handleTouchEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
-  }, [])
+  const {
+    onTouchStart: handleTouchStart,
+    onTouchMove: handleTouchMove,
+    onTouchEnd: handleTouchEnd,
+    onTouchCancel: handleTouchCancel,
+  } = useLongPress({
+    enabled: preferTouchUi,
+    onLongPress: () => setShowActions(true),
+  })
 
   useEffect(() => {
     if (!showActions) return
@@ -84,14 +67,6 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
       document.removeEventListener('touchstart', handleClickOutside)
     }
   }, [showActions])
-
-  useEffect(() => {
-    return () => {
-      if (longPressTimer.current) {
-        clearTimeout(longPressTimer.current)
-      }
-    }
-  }, [])
 
   const handleClick = () => {
     if (showActions) {
@@ -120,6 +95,7 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
       data-haptic="light"
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
       onFocusCapture={() => {
         setHasFocusWithin(true)
       }}

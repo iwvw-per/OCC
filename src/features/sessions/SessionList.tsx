@@ -14,6 +14,7 @@ import { formatRelativeTime } from '../../utils/dateUtils'
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
 import { IconButton, Spinner, NativeTooltip } from '../../components/ui'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
+import { useLongPress } from '../../hooks/useLongPress'
 import { useSessionActiveEntry } from '../../store/activeSessionStore'
 import { notificationStore, useHasUnreadCompletedNotification } from '../../store/notificationStore'
 import { SessionChildrenSlot } from '../chat/sidebar/SessionChildrenSlot'
@@ -444,8 +445,6 @@ function SessionListItemComponent({
   const [showActions, setShowActions] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const touchMoved = useRef(false)
 
   // 回调经 ref 转发：memo 比较忽略回调身份（父级每次重渲都会重建行内闭包），
   // 这里始终读取最新一版，避免 memo 命中时拿到过期闭包。
@@ -586,46 +585,28 @@ function SessionListItemComponent({
   )
 
   // 长按触摸手势：打开右键菜单（位置取触点坐标）
-  const handleTouchStart = useCallback(
-    (e: React.TouchEvent) => {
-      if (!preferTouchUi) return
-      if (!isEditMode && !isEditing) {
-        const serverId = activeSessionKey ? splitSessionKey(activeSessionKey).serverId : serverStore.getActiveServerId()
-        prefetchSessionMessages(session.id, session.directory, serverId)
-      }
-      const touch = e.touches[0]
-      const x = touch?.clientX ?? 0
-      const y = touch?.clientY ?? 0
-      touchMoved.current = false
-      longPressTimer.current = setTimeout(() => {
-        if (!touchMoved.current && contextMenuEnabled && !isEditMode) {
-          hapticTap('medium')
-          setShowActions(false)
-          setContextMenu({ x, y })
-        } else if (!touchMoved.current) {
-          hapticTap('medium')
-          setShowActions(true)
-        }
-      }, 500)
+  const {
+    onTouchStart: handleTouchStart,
+    onTouchMove: handleTouchMove,
+    onTouchEnd: handleTouchEnd,
+    onTouchCancel: handleTouchCancel,
+  } = useLongPress({
+    enabled: preferTouchUi,
+    onStart: () => {
+      if (isEditMode || isEditing) return
+      const serverId = activeSessionKey ? splitSessionKey(activeSessionKey).serverId : serverStore.getActiveServerId()
+      prefetchSessionMessages(session.id, session.directory, serverId)
     },
-    [preferTouchUi, isEditMode, isEditing, activeSessionKey, session.id, session.directory, contextMenuEnabled],
-  )
-
-  const handleTouchMove = useCallback(() => {
-    if (!preferTouchUi) return
-    touchMoved.current = true
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
-  }, [preferTouchUi])
-
-  const handleTouchEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
-  }, [])
+    onLongPress: ({ x, y }) => {
+      hapticTap('medium')
+      if (contextMenuEnabled && !isEditMode) {
+        setShowActions(false)
+        setContextMenu({ x, y })
+      } else {
+        setShowActions(true)
+      }
+    },
+  })
 
   // 点击外部收起操作按钮
   useEffect(() => {
@@ -649,13 +630,6 @@ function SessionListItemComponent({
       inputRef.current.select()
     }
   }, [isEditing])
-
-  // 清理定时器
-  useEffect(() => {
-    return () => {
-      if (longPressTimer.current) clearTimeout(longPressTimer.current)
-    }
-  }, [])
 
   const handleClick = (e?: React.MouseEvent) => {
     if (isEditMode) {
@@ -943,6 +917,7 @@ function SessionListItemComponent({
       onTouchStart={!isEditMode ? handleTouchStart : undefined}
       onTouchMove={!isEditMode ? handleTouchMove : undefined}
       onTouchEnd={!isEditMode ? handleTouchEnd : undefined}
+      onTouchCancel={!isEditMode ? handleTouchCancel : undefined}
       className={cn(
         'group relative flex items-start',
         itemPaddingClass,

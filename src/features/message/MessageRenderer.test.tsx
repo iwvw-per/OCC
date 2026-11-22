@@ -48,7 +48,9 @@ vi.mock('../../components/ui', () => ({
 
 vi.mock('./parts', () => ({
   TextPartView: ({ part }: { part: { text: string } }) => <div>{part.text}</div>,
-  ReasoningPartView: () => null,
+  ReasoningPartView: ({ part, isStreaming }: { part: { id: string }; isStreaming?: boolean }) => (
+    <div data-testid={`reasoning-${part.id}`} data-streaming={isStreaming ? 'true' : 'false'} />
+  ),
   ToolPartView: () => null,
   SyntheticTextPartView: () => null,
   MessageErrorView: () => null,
@@ -116,6 +118,61 @@ function createUserTextMessage(text: string): Message {
   ]
   return message
 }
+
+describe('MessageRenderer reasoning streaming gate', () => {
+  it('keeps reasoning streaming when only an empty placeholder text part follows', () => {
+    const message = createAssistantMessage()
+    message.isStreaming = true
+    message.content = [
+      {
+        id: 'reason-1',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: 'reasoning',
+        text: 'thinking about it',
+        time: { start: 1 },
+      },
+      {
+        id: 'text-empty',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: 'text',
+        text: '',
+      },
+    ] as Content[]
+
+    render(<MessageRenderer message={message} />)
+
+    // 空 text 只是 session.text.started 的占位,不应把仍在流式的思考判为结束
+    expect(screen.getByTestId('reasoning-reason-1')).toHaveAttribute('data-streaming', 'true')
+  })
+
+  it('marks reasoning as finished once real content follows', () => {
+    const message = createAssistantMessage()
+    message.isStreaming = true
+    message.content = [
+      {
+        id: 'reason-2',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: 'reasoning',
+        text: 'thinking about it',
+        time: { start: 1 },
+      },
+      {
+        id: 'text-real',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: 'text',
+        text: 'final answer',
+      },
+    ] as Content[]
+
+    render(<MessageRenderer message={message} />)
+
+    expect(screen.getByTestId('reasoning-reason-2')).toHaveAttribute('data-streaming', 'false')
+  })
+})
 
 describe('MessageRenderer assistant fork', () => {
   beforeEach(() => {

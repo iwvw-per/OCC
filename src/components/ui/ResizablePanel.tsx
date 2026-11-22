@@ -1,11 +1,13 @@
 import { memo, useState, useCallback, useRef, useLayoutEffect, useEffect } from 'react'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
+import { useOverlayDialogA11y } from '../../hooks/useOverlayDialogA11y'
 
 const ANIMATION_EASE = 'ease-[cubic-bezier(0.25,1,0.5,1)]'
 const ANIMATION_DURATION = 'duration-300'
 /** 右侧 overlay 面板右滑关闭：轴锁定 / 横向偏置 / 触发阈值（与左侧栏手势一致） */
 const OVERLAY_SWIPE_LOCK_PX = 10
 const OVERLAY_SWIPE_HORIZONTAL_BIAS = 1.25
+/** 底部 overlay 面板下滑关闭:拖到低于最小高度这么多即视为关闭意图 */
 const OVERLAY_SWIPE_CLOSE_PX = 80
 
 interface ResizablePanelProps {
@@ -43,6 +45,8 @@ export const ResizablePanel = memo(function ResizablePanel({
   const rafRef = useRef<number>(0)
   const currentSizeRef = useRef(size)
   const isResizingRef = useRef(isResizing)
+
+  useOverlayDialogA11y({ isOpen: overlay && isOpen, onClose, containerRef: panelRef })
   const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight
   const effectiveMaxSize =
     position === 'bottom' ? Math.min(maxSize, Math.floor(viewportHeight * (touchCapable ? 0.62 : 0.56))) : maxSize
@@ -152,11 +156,13 @@ export const ResizablePanel = memo(function ResizablePanel({
       setIsResizing(true)
       const startY = e.touches[0].clientY
       const startHeight = panel.getBoundingClientRect().height
+      let rawHeight = startHeight
 
       const handleTouchMove = (moveEvent: TouchEvent) => {
         const touchY = moveEvent.touches[0].clientY
         const deltaY = startY - touchY
-        const nextHeight = Math.min(Math.max(startHeight + deltaY, minSize), Math.max(minSize, effectiveMaxSize))
+        rawHeight = startHeight + deltaY
+        const nextHeight = Math.min(Math.max(rawHeight, minSize), Math.max(minSize, effectiveMaxSize))
         panel.style.height = `${nextHeight}px`
         currentSizeRef.current = nextHeight
       }
@@ -167,6 +173,12 @@ export const ResizablePanel = memo(function ResizablePanel({
         document.removeEventListener('touchmove', handleTouchMove)
         document.removeEventListener('touchend', handleTouchEnd)
         touchHandlersRef.current = { move: null, end: null }
+
+        if (overlay && rawHeight < minSize - OVERLAY_SWIPE_CLOSE_PX) {
+          panel.style.height = `${effectiveSize}px`
+          onClose()
+          return
+        }
         onSizeChange(currentSizeRef.current)
       }
 
@@ -175,7 +187,7 @@ export const ResizablePanel = memo(function ResizablePanel({
       document.addEventListener('touchmove', handleTouchMove, { passive: false })
       document.addEventListener('touchend', handleTouchEnd)
     },
-    [position, minSize, effectiveMaxSize, onSizeChange],
+    [position, minSize, effectiveMaxSize, effectiveSize, onSizeChange, overlay, onClose],
   )
 
   useEffect(() => {
@@ -273,13 +285,20 @@ export const ResizablePanel = memo(function ResizablePanel({
               transition-opacity ${ANIMATION_DURATION} ease-out
               ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
             `}
-            style={position === 'right' ? { top: 'calc(var(--overlay-safe-top, 0px) + var(--desktop-titlebar-height, 0px))', left: 0, right: 0, bottom: 0 } : undefined}
+            style={{
+              top: 'calc(var(--overlay-safe-top, 0px) + var(--desktop-titlebar-height, 0px))',
+              left: 0,
+              right: 0,
+              bottom: 0,
+            }}
             onClick={onClose}
           />
         )}
 
         <div
           ref={panelRef}
+          role="dialog"
+          aria-modal="true"
           className={`
             ${containerClass} ${mobileBaseClass}
             transition-transform ${ANIMATION_DURATION} ${ANIMATION_EASE}

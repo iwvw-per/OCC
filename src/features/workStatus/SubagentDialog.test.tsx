@@ -52,6 +52,7 @@ function renderSection(onScrollToMessage = vi.fn()) {
       serverId="server-a"
       contextLimit={200_000}
       onScrollToMessage={onScrollToMessage}
+      onCompact={() => {}}
     />,
   )
 }

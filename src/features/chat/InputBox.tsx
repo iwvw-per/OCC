@@ -1889,6 +1889,8 @@ function InputBoxComponent({
                         onFocus={handleFocus}
                         onBlur={handleBlur}
                         disabled={inputDisabled}
+                        enterKeyHint={sendOnEnter ? 'send' : 'enter'}
+                        autoCapitalize="sentences"
                         placeholder={isCompact ? t('inputBox.replyToAgentMobile') : t('inputBox.replyToAgent')}
                         className={`w-full resize-none focus:outline-none focus:ring-0 bg-transparent text-text-100 placeholder:text-text-400 custom-scrollbar ${isCompact ? 'px-3' : 'px-4'}`}
                         style={{

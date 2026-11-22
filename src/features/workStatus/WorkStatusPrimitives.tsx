@@ -13,9 +13,11 @@ import { ChevronDownIcon } from '../../components/Icons'
 import { workStatusStore } from '../../store/workStatusStore'
 
 /** 板块是面板的直接兄弟节点，分隔线用 :not(:first-child)。
- *  注意 Tailwind 任意变体必须带 &，写成 [&:not(:first-child)] 才会生成规则。 */
+ *  注意 Tailwind 任意变体必须带 &，写成 [&:not(:first-child)] 才会生成规则。
+ *  分隔线走伪元素而非 border,好让线横向外扩掉滚动容器的 p-2.5,
+ *  在面板上呈现通栏,而正文仍保持内缩。 */
 const SECTION_CLASS =
-  'flex flex-col [&:not(:first-child)]:mt-2.5 [&:not(:first-child)]:border-t [&:not(:first-child)]:border-border-200/40 [&:not(:first-child)]:pt-2.5'
+  'relative flex flex-col [&:not(:first-child)]:mt-2.5 [&:not(:first-child)]:pt-2.5 [&:not(:first-child)]:before:absolute [&:not(:first-child)]:before:content-[\'\'] [&:not(:first-child)]:before:inset-x-[-0.625rem] [&:not(:first-child)]:before:top-0 [&:not(:first-child)]:before:h-px [&:not(:first-child)]:before:bg-border-200/40'
 
 const HEADING_CLASS = 'text-ui-sm font-semibold text-text-100'
 
@@ -232,7 +234,23 @@ export function WorkStatusRowAction({
   disabled?: boolean
   ariaLabel?: string
 }) {
-  const toneClass = tone === 'default' ? 'bg-bg-300 text-text-400' : TONE_CLASS[tone]
+  // 语义色只放文字,hover 反馈交给交互词汇表(底色),避免看起来像状态标签。
+  const toneText =
+    tone === 'warning'
+      ? 'text-warning-100'
+      : tone === 'error'
+        ? 'text-danger-100'
+        : tone === 'info'
+          ? 'text-info-100'
+          : 'text-text-400'
+  const toneHover =
+    tone === 'warning'
+      ? interactive.warning
+      : tone === 'error'
+        ? interactive.danger
+        : tone === 'info'
+          ? interactive.accent
+          : interactive.subtle
   return (
     <button
       type="button"
@@ -244,9 +262,12 @@ export function WorkStatusRowAction({
         onClick()
       }}
       className={cn(
-        'shrink-0 rounded-full px-1.5 py-px text-ui-xs font-medium leading-4 transition-opacity',
-        'hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50',
-        toneClass,
+        'shrink-0 rounded-md px-1.5 py-0.5 text-ui-xs font-medium leading-4',
+        'outline outline-1 -outline-offset-1 outline-border-200/50',
+        'focus-visible:outline-accent-main-100',
+        toneText,
+        toneHover,
+        interactive.disabled,
       )}
     >
       {children}

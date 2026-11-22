@@ -396,6 +396,7 @@ function App() {
     toggleRightPanel: handleToggleRightPanel,
     openSidebar: handleOpenSidebar,
     closeSidebar: handleCloseSidebar,
+    openRightPanel: handleOpenRightPanel,
   } = shell
 
   const mainSwipe = useMainSwipe({
@@ -403,6 +404,7 @@ function App() {
     sidebarExpanded,
     rightPanelOpen,
     onOpenSidebar: handleOpenSidebar,
+    onOpenRightPanel: handleOpenRightPanel,
   })
 
   const focusedDirectory = focusedRouteDirectory || ''
@@ -682,7 +684,7 @@ function App() {
                 onProjectDialogClose={closeProjectDialog}
               />
 
-              {/* 主界面：移动端挂左右滑动手势（右滑开侧栏、左滑开右栏）。 */}
+              {/* 主界面：移动端挂滑动手势（右滑开侧栏、从右边缘左滑开右栏）。 */}
               {isMobilePanelLayout ? (
                 <div
                   className="relative flex min-h-0 min-w-0 flex-1"

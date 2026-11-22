@@ -4,7 +4,7 @@ import { SidePanel } from './sidebar/SidePanel'
 import { ProjectDialog } from './ProjectDialog'
 import { useMultiServerStore } from '../../store/multiServerStore'
 import { notificationStore } from '../../store/notificationStore'
-import { useDirectory } from '../../hooks'
+import { useDirectory, useOverlayDialogA11y } from '../../hooks'
 import { isAbsoluteDirectory, isSameDirectory, normalizeToForwardSlash } from '../../utils'
 import { canUseNativeDirectoryPicker } from '../../utils/nativeFileIntegration'
 import { getDesktopPlatform } from '../../utils/tauri'
@@ -35,7 +35,6 @@ interface SidebarProps {
   onOpenSettings?: () => void
   projectDialogOpen?: boolean
   onProjectDialogClose?: () => void
-  mobileInline?: boolean
 }
 
 export const Sidebar = memo(function Sidebar({
@@ -49,7 +48,6 @@ export const Sidebar = memo(function Sidebar({
   onOpenSettings,
   projectDialogOpen,
   onProjectDialogClose,
-  mobileInline = false,
 }: SidebarProps) {
   const { t } = useTranslation(['chat', 'common'])
   const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false)
@@ -80,6 +78,9 @@ export const Sidebar = memo(function Sidebar({
   const currentWidthRef = useRef(layout.sidebar.openWidth)
   const rafRef = useRef<number>(0)
   const transitionResizeTimerRef = useRef<number | null>(null)
+  const overlayPanelRef = useRef<HTMLDivElement>(null)
+
+  useOverlayDialogA11y({ isOpen: isOverlay && isOpen, onClose, containerRef: overlayPanelRef })
 
   // 订阅多服务器焦点：focusedServerId 变化时本组件需重渲染，
   // 下方 ProjectDialog 的 serverId 才能跟着更新
@@ -334,36 +335,6 @@ export const Sidebar = memo(function Sidebar({
   }, [onClose])
 
   if (isOverlay) {
-    if (mobileInline) {
-      return (
-        <>
-          <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-100 [contain:strict]">
-            <SidePanel
-              onNewSession={onNewSession}
-              onSelectSession={handleSelectSession}
-              onCloseMobile={onClose}
-              selectedSessionId={selectedSessionId}
-              onAddProject={openProjectDialog}
-              isMobile={true}
-              isExpanded={true}
-              onToggleSidebar={onClose}
-              contextLimit={contextLimit}
-              onOpenSettings={onOpenSettings}
-            />
-          </div>
-
-          <ProjectDialog
-            key={`mobile-${projectDialogKey}-${Number(isProjectDialogVisible)}`}
-            isOpen={isProjectDialogVisible}
-            onClose={closeProjectDialog}
-            onSelect={handleAddProject}
-            initialPath={projectDialogInitialPath}
-            serverId={focusedServerId ?? undefined}
-          />
-        </>
-      )
-    }
-
     return (
       <>
         <div
@@ -380,6 +351,9 @@ export const Sidebar = memo(function Sidebar({
         />
 
         <div
+          ref={overlayPanelRef}
+          role="dialog"
+          aria-modal="true"
           onTouchStart={handleSidebarTouchStart}
           onTouchMove={handleSidebarTouchMove}
           onTouchEnd={handleSidebarTouchEnd}

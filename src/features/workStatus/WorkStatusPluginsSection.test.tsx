@@ -27,7 +27,13 @@ function plugin(overrides: Partial<PluginStatus> & Pick<PluginStatus, 'id'>): Pl
 
 function renderSection() {
   return render(
-    <WorkStatusPluginsSection sessionId="s1" directory="/proj" contextLimit={0} onScrollToMessage={() => {}} />,
+    <WorkStatusPluginsSection
+      sessionId="s1"
+      directory="/proj"
+      contextLimit={0}
+      onScrollToMessage={() => {}}
+      onCompact={() => {}}
+    />,
   )
 }
 

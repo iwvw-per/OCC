@@ -466,7 +466,9 @@
     "ariaLabel": "Work status",
     "railToggle": "Show or hide the work status panel",
     "context": {
-      "label": "Context"
+      "label": "Context",
+      "compact": "Compact",
+      "compactAriaLabel": "Compact context"
     },
     "section": {
       "session": "Session",

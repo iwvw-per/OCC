@@ -1,9 +1,9 @@
 // ============================================
-// useMainSwipe — 移动端主界面右滑开侧栏
+// useMainSwipe — 移动端主界面滑动手势
 //
 // 只处理横向手势（纵向滚动对话放行），且仅在两个抽屉都未打开时生效
-// （抽屉打开后由抽屉自身负责关闭手势）。左滑不接管：移动端对话区常有
-// 横向可滚动内容，左滑开右栏容易误触。
+// （抽屉打开后由抽屉自身负责关闭手势）。右栏只认从右边缘起手的左滑：移动端对话区常有
+// 横向可滚动内容，不限定起点时容易误触。
 //
 // ⚠️ 起点落在**可横向滚动的元素**内时必须放弃接管。
 //
@@ -16,6 +16,7 @@ import { useCallback, useRef } from 'react'
 import type React from 'react'
 import { hapticTap } from '../utils/haptics'
 
+const RIGHT_EDGE_PX = 24
 const SWIPE_AXIS_PX = 12
 const SWIPE_TRIGGER_PX = 60
 
@@ -47,6 +48,7 @@ export interface UseMainSwipeOptions {
   sidebarExpanded: boolean
   rightPanelOpen: boolean
   onOpenSidebar: () => void
+  onOpenRightPanel?: () => void
 }
 
 export interface MainSwipeHandlers {
@@ -61,8 +63,14 @@ export function useMainSwipe({
   sidebarExpanded,
   rightPanelOpen,
   onOpenSidebar,
+  onOpenRightPanel,
 }: UseMainSwipeOptions): MainSwipeHandlers {
-  const gesture = useRef<{ startX: number; startY: number; axis: 'x' | 'y' | null } | null>(null)
+  const gesture = useRef<{
+    startX: number
+    startY: number
+    axis: 'x' | 'y' | null
+    fromRightEdge: boolean
+  } | null>(null)
 
   const onTouchStart = useCallback(
     (e: React.TouchEvent) => {
@@ -77,7 +85,12 @@ export function useMainSwipe({
         gesture.current = null
         return
       }
-      gesture.current = { startX: touch.clientX, startY: touch.clientY, axis: null }
+      gesture.current = {
+        startX: touch.clientX,
+        startY: touch.clientY,
+        axis: null,
+        fromRightEdge: touch.clientX >= window.innerWidth - RIGHT_EDGE_PX,
+      }
     },
     [enabled, rightPanelOpen, sidebarExpanded],
   )
@@ -102,12 +115,18 @@ export function useMainSwipe({
       if (!swipe || swipe.axis !== 'x') return
       const touch = e.changedTouches[0]
       if (!touch) return
-      if (touch.clientX - swipe.startX >= SWIPE_TRIGGER_PX) {
+      const deltaX = touch.clientX - swipe.startX
+      if (deltaX >= SWIPE_TRIGGER_PX) {
         hapticTap('medium')
         onOpenSidebar()
+        return
+      }
+      if (swipe.fromRightEdge && deltaX <= -SWIPE_TRIGGER_PX && onOpenRightPanel) {
+        hapticTap('medium')
+        onOpenRightPanel()
       }
     },
-    [onOpenSidebar],
+    [onOpenSidebar, onOpenRightPanel],
   )
 
   return { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd }

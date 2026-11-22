@@ -510,6 +510,10 @@ export const ChatPane = memo(function ChatPane({
   // 分屏时把重派生降到低优先级渲染车道。聚焦 pane 在流式期间必须保持实时，
   // 不能延迟（用户正在看）；非聚焦 pane 即使正在流式也走延迟：多对话并发时
   // 让未在看的那个把 CPU 让给聚焦 pane，聚焦切换或流式结束后自然追平。
+  const handleCompactFromPanel = useCallback(() => {
+    void handleCommand('/compact')
+  }, [handleCommand])
+
   const shouldDeferMessages = displayMode === 'split' && messages.length > 20 && (!isStreaming || !isFocused)
   const messageView = useMemo(() => ({ sessionId: routeSessionId, messages }), [routeSessionId, messages])
   const deferredMessageView = useDeferredValue(shouldDeferMessages ? messageView : null)
@@ -1524,6 +1528,7 @@ export const ChatPane = memo(function ChatPane({
               contextLimit={contextLimit ?? 0}
               visible={workStatusVisible}
               onScrollToMessage={handleOutlineScrollToMessage}
+              onCompact={handleCompactFromPanel}
             />
           )}
         </div>

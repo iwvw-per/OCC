@@ -23,7 +23,7 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { isEphemeralSession } from '../utils/ephemeralSessions'
 import { contextWindowKey, looksLikeContextOverflow, recordContextOverflow } from '../utils/contextWindowObservation'
 import { makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../utils/sessionKey'
-import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions, invalidateSessionMetaCache } from '../api'
+import { subscribeToServerEvents, getSession, getSessionStatus, getPendingPermissions, getPendingQuestions, invalidateSessionMetaCache, abortSession } from '../api'
 import { onSeqGap } from '../api/events'
 import { reportSessionViewed } from '../api/sessionView'
 import { recoverPendingInbox } from '../api/inboxRecovery'
@@ -1224,7 +1224,18 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           if (isEphemeralSession(data.sessionID)) return
           const scopedId = scope(data.sessionID)
           // started 只是开始信号：标记一下并等待结果，不提示也不刷新。
-          if (data.status === 'started') return
+          if (data.status === 'started') {
+            // 开始即中断:压缩不该排在最后一个命令之后,分隔条同步前移到末尾。
+            const runningStatus = activeSessionStore.getSnapshot().statusMap[scopedId]
+            if (runningStatus && runningStatus.type !== 'idle') {
+              activeSessionStore.updateStatus(scopedId, { type: 'idle' })
+              messageStore.handleSessionIdle(scopedId)
+              const directory = activeSessionStore.getSessionMeta(scopedId)?.directory
+              void abortSession(data.sessionID, directory, serverId).catch(() => {})
+            }
+            messageStore.recordCompactionResult(scopedId, { at: Date.now() })
+            return
+          }
 
           // 失败：后端明确拒绝（如 "Nothing to compact yet"）。必须提示，
           // 否则用户点 /compact 后界面毫无反应，会误以为功能坏掉。

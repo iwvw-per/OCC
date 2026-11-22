@@ -29,9 +29,10 @@ function stubDevice({ touch }: { touch: boolean }) {
   })
 }
 
-function renderAt(width: number, options: { touch?: boolean } = {}) {
+function renderAt(width: number, options: { touch?: boolean; height?: number } = {}) {
   stubDevice({ touch: options.touch ?? false })
   Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width })
+  Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: options.height ?? 768 })
   return renderHook(() =>
     useChatViewportController({
       sidebarExpanded: true,
@@ -46,6 +47,7 @@ function renderAt(width: number, options: { touch?: boolean } = {}) {
 
 afterEach(() => {
   Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1024 })
+  Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 768 })
 })
 
 describe('sidebar default width', () => {
@@ -96,5 +98,25 @@ describe('narrow windows', () => {
   it('keeps the default width when there is enough room', () => {
     const { result } = renderAt(1200)
     expect(result.current.value.layout.sidebar.openWidth).toBe(SIDEBAR_DEFAULT)
+  })
+})
+
+describe('mobile overlay layout', () => {
+  it('keeps overlay on a landscape touch phone whose width exceeds the breakpoint', () => {
+    // 844x390:宽度已过 768,但短边仍是手机尺寸 —— 不能退化成 docked 桌面布局
+    const { result } = renderAt(844, { touch: true, height: 390 })
+    expect(result.current.value.interaction.sidebarBehavior).toBe('overlay')
+  })
+
+  it('does not switch a narrow desktop window to overlay', () => {
+    // 非触摸的桌面窄窗仍按宽度判定:844 >= 768 → docked
+    const { result } = renderAt(844, { touch: false, height: 390 })
+    expect(result.current.value.interaction.sidebarBehavior).toBe('docked')
+  })
+
+  it('keeps a touch tablet in docked layout', () => {
+    // 1024x768 触摸:短边 768 不小于断点 → docked
+    const { result } = renderAt(1024, { touch: true, height: 768 })
+    expect(result.current.value.interaction.sidebarBehavior).toBe('docked')
   })
 })

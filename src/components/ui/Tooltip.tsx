@@ -151,6 +151,9 @@ export interface HintTooltipProps {
   className?: string
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /** 是否因聚焦而打开(键盘可达性需要,默认开)。
+   *  关闭用于「打开即被程序化聚焦」的触发点,避免焦点一动就冒出提示。 */
+  openOnFocus?: boolean
   children: ReactNode
 }
 
@@ -171,6 +174,7 @@ export function HintTooltip({
   className,
   open,
   onOpenChange,
+  openOnFocus = true,
   children,
 }: HintTooltipProps) {
   const touchDisabled = useTooltipsDisabledOnTouch()
@@ -179,7 +183,9 @@ export function HintTooltip({
   return (
     <TooltipRootScoped delayDuration={delayDuration}>
       <TooltipRoot open={open} onOpenChange={onOpenChange} delayDuration={delayDuration}>
-        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipTrigger asChild onFocus={openOnFocus ? undefined : event => event.preventDefault()}>
+          {children}
+        </TooltipTrigger>
         <TooltipContent
           side={side}
           align={align}
@@ -221,6 +227,8 @@ export interface NativeTooltipProps {
   side?: 'top' | 'right' | 'bottom' | 'left'
   align?: 'start' | 'center' | 'end'
   delayDuration?: number
+  /** 透传给 HintTooltip;关闭后聚焦触发器不再自动弹出提示 */
+  openOnFocus?: boolean
 }
 
 /**
@@ -229,7 +237,7 @@ export interface NativeTooltipProps {
  * 用于渐进式替换大量 `title=` 提示:包裹元素即可,不用改元素本身,
  * 也无需手动搬运 title 文案。title 为空时原样渲染子元素。
  */
-export function NativeTooltip({ children, description, shortcut, side, align, delayDuration }: NativeTooltipProps) {
+export function NativeTooltip({ children, description, shortcut, side, align, delayDuration, openOnFocus }: NativeTooltipProps) {
   const touchDisabled = useTooltipsDisabledOnTouch()
   const title = children.props.title
   if (!title) return children
@@ -244,6 +252,7 @@ export function NativeTooltip({ children, description, shortcut, side, align, de
       side={side}
       align={align}
       delayDuration={delayDuration}
+      openOnFocus={openOnFocus}
     >
       {cloneElement(children, { title: undefined })}
     </HintTooltip>

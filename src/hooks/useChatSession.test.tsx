@@ -79,6 +79,7 @@ vi.mock('../store', () => ({
     removeMessage: vi.fn(),
     getIdleGeneration: vi.fn(() => 0),
     handleSessionIdle: vi.fn(),
+    recordCompactionResult: vi.fn(),
   },
   useSessionFamily: (sessionId: string | null) => useSessionFamilyMock(sessionId),
   useSessionState: (sessionId: string | null) => useSessionStateMock(sessionId),

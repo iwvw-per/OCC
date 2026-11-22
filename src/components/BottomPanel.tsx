@@ -232,7 +232,7 @@ export const BottomPanel = memo(function BottomPanel({ directory, serverId, clas
         position="bottom"
         isOpen={bottomPanelOpen}
         overlay={interaction.bottomPanelBehavior === 'overlay'}
-        overlayBackdrop={false}
+        overlayBackdrop
         size={bottomPanelHeight}
         maxSize={layout.bottomPanel.maxHeight}
         onSizeChange={h => layoutStore.setBottomPanelHeight(h)}
