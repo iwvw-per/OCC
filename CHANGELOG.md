@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.2.11] - 2026-11-22
+
+- fix(mobile): keep circular buttons square on touch (cb31c597)
+
 ## [v2.2.10] - 2026-11-22
 
 - perf(sidebar): fix O(N²) re-render on expand; isolate search input (448a4df9)
