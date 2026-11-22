@@ -3003,7 +3003,7 @@ dependencies = [
 
 [[package]]
 name = "occ"
-version = "2.2.9"
+version = "2.2.10"
 dependencies = [
  "futures-util",
  "log",

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.2.10] - 2026-11-22
+
+- perf(sidebar): fix O(N²) re-render on expand; isolate search input (448a4df9)
+- perf(bundle): keep lazy-only components out of the eager entry (a8627db6)
+
 ## [v2.2.9] - 2026-11-22
 
 - feat(mobile): edge-swipe right panel, shared long-press, overlay a11y & PWA icons (6faa22b1)
