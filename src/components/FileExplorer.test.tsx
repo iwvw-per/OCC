@@ -24,7 +24,7 @@ const {
   downloadFileContentMock: vi.fn(),
 }))
 
-vi.mock('../hooks', () => ({
+vi.mock('../hooks/useFileExplorer', () => ({
   useFileExplorer: (options?: unknown) => useFileExplorerMock(options),
 }))
 

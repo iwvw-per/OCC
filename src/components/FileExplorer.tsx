@@ -6,7 +6,7 @@
 
 import { memo, useCallback, useMemo, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useFileExplorer, type FileTreeNode } from '../hooks'
+import { useFileExplorer, type FileTreeNode } from '../hooks/useFileExplorer'
 import { useVerticalSplitResize } from '../hooks/useVerticalSplitResize'
 import { layoutStore, type PreviewFile } from '../store/layoutStore'
 import {

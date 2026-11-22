@@ -6,7 +6,6 @@
 // 导出前对克隆节点做净化：隐藏操作栏、悬停态等交互元素，避免把按钮
 // 也画进图片；并把背景色补上，否则透明背景在浅色/深色环境下看不清。
 
-import { toPng } from 'html-to-image'
 import { saveData } from './downloadUtils'
 
 /** 导出时从克隆节点移除的元素选择器 */
@@ -38,6 +37,9 @@ function resolveBackground(node: HTMLElement): string {
 export async function exportNodeAsImage(node: HTMLElement, options: ExportNodeImageOptions): Promise<void> {
   const backgroundColor = options.backgroundColor ?? resolveBackground(node)
 
+  // html-to-image 只在「导出为图片」这一用户动作里用得到(约 34KB 源码),
+  // 静态导入会让它随消息渲染器进入首屏包。改为动作发生时再按需拉取。
+  const { toPng } = await import('html-to-image')
   const dataUrl = await toPng(node, {
     pixelRatio: options.pixelRatio ?? 2,
     backgroundColor,

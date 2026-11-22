@@ -52,25 +52,6 @@ export { Tabs, TabsList, TabsTrigger, TabsContent } from './Tabs'
 export { ScrollArea } from './ScrollArea'
 export { SmoothHeight } from './SmoothHeight'
 export { ResizablePanel } from './ResizablePanel'
-export {
-  Breadcrumb,
-  BreadcrumbList,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-  BreadcrumbEllipsis,
-} from './Breadcrumb'
-export type {
-  BreadcrumbProps,
-  BreadcrumbListProps,
-  BreadcrumbItemProps,
-  BreadcrumbLinkProps,
-  BreadcrumbPageProps,
-  BreadcrumbSeparatorProps,
-  BreadcrumbEllipsisProps,
-} from './Breadcrumb'
-
 // 浮层
 export { Dialog } from './Dialog'
 export { ConfirmDialog } from './ConfirmDialog'
