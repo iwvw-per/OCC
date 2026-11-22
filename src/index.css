@@ -987,9 +987,15 @@ body {
    * 得到一个竖长的选框（归档面板、工作状态面板都受影响）。
    * 选择类控件的可点区域应由外层 label/行提供，不该靠拉伸控件本身。
    */
-  button:not(.touch-target-sm):not([role='tab']):not([role='switch']):not([role='checkbox']):not(
-      [role='radio']
-    ):not([role='menuitemcheckbox']):not([role='menuitemradio']):not([data-compact]) {
+  button:not(.touch-target-sm):not(.rounded-full):not(.chat-fab):not([role='tab']):not([role='switch']):not(
+      [role='checkbox']
+    ):not([role='radio']):not([role='menuitemcheckbox']):not([role='menuitemradio']):not([data-compact]) {
+    /*
+     * 只加 min-height 会把「宽高相等 + 按尺寸取圆角」的圆形按钮拉成椭圆:
+     * 发送/停止 FAB(.chat-fab,展开态 30px → 30×40)、侧栏 size-6 圆按钮
+     * (24px → 24×40)。圆形按钮的可点区域本就等于它自己,要放大必须等比
+     * (同时加 min-width),只加高只会变形。这里直接豁免,保留设计尺寸。
+     */
     min-height: 40px;
   }
 
