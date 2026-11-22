@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.2.12] - 2026-11-22
+
+- fix(chat): 压缩开始时不再中断(含服务端自动压缩) (e443f2f5)
+
 ## [v2.2.11] - 2026-11-22
 
 - fix(mobile): keep circular buttons square on touch (cb31c597)
