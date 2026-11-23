@@ -56,13 +56,39 @@ export default defineConfig({
           // 语言 grammar（@shikijs/langs/*）由 dynamic import 自动拆分
           if ((id.includes('shiki') || id.includes('@shikijs/')) && !id.includes('@shikijs/langs'))
             return 'vendor-shiki'
-          if (id.includes('marked') || id.includes('dompurify') || id.includes('morphdom') || id.includes('katex')) return 'vendor-markdown'
+          if (id.includes('marked') || id.includes('dompurify') || id.includes('morphdom') || id.includes('katex'))
+            return 'vendor-markdown'
 
           if (id.includes('@tauri-apps/')) return 'vendor-tauri'
 
           // Radix / floating-ui 是稳定且跨页面共用的一组依赖，独立成 chunk
           // 可避免它们随业务代码每次发版一起失效。
           if (id.includes('@radix-ui/') || id.includes('@floating-ui/')) return 'vendor-radix'
+
+          // 稳定依赖单独成 chunk:它们几乎不随业务迭代变化,拆出后发版不会让这些库的
+          // 浏览器缓存失效(此前它们全落在 entry,每次发版 hash 都会变)。
+          if (
+            id.includes('node_modules/react-dom/') ||
+            id.includes('node_modules/react/') ||
+            id.includes('node_modules/scheduler/')
+          )
+            return 'vendor-react'
+          if (
+            id.includes('node_modules/motion-dom/') ||
+            id.includes('node_modules/motion-utils/') ||
+            id.includes('node_modules/framer-motion/') ||
+            id.includes('node_modules/motion/')
+          )
+            return 'vendor-motion'
+          if (id.includes('node_modules/@tanstack/')) return 'vendor-tanstack'
+          if (
+            id.includes('node_modules/i18next/') ||
+            id.includes('node_modules/react-i18next/') ||
+            id.includes('node_modules/i18next-browser-languagedetector/')
+          )
+            return 'vendor-i18n'
+          if (id.includes('node_modules/zod/')) return 'vendor-zod'
+          if (id.includes('node_modules/lucide-react/')) return 'vendor-icons'
         },
       },
     },

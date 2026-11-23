@@ -1533,7 +1533,7 @@ const UnifiedDiffView = memo(function UnifiedDiffView({
         className={`pr-2 pl-2 leading-[var(--fs-code-line-height)] text-[length:var(--fs-code)] whitespace-pre ${getLineBgClass(line.type)}`}
         style={{ height: lineHeight }}
       >
-        <LineContent line={{ ...line, lineNo }} tokens={tokens} />
+        <LineContent line={line} lineNo={lineNo} tokens={tokens} />
       </div>,
     )
   }
@@ -1707,7 +1707,7 @@ const WrappedUnifiedDiffView = memo(function WrappedUnifiedDiffView({
           className="min-w-0 flex-1 px-2 leading-[var(--fs-code-line-height)] text-[length:var(--fs-code)] whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
           style={{ minHeight: lineHeight }}
         >
-          <LineContent line={{ ...line, lineNo }} tokens={tokens} />
+          <LineContent line={line} lineNo={lineNo} tokens={tokens} />
         </div>
       </div>,
     )
@@ -1735,8 +1735,17 @@ const WrappedUnifiedDiffView = memo(function WrappedUnifiedDiffView({
 
 type HighlightToken = HighlightTokens[number][number]
 
-const LineContent = memo(function LineContent({ line, tokens }: { line: DiffLine; tokens: HighlightTokens | null }) {
-  const lineTokens = tokens && line.lineNo ? tokens[line.lineNo - 1] : null
+const LineContent = memo(function LineContent({
+  line,
+  lineNo,
+  tokens,
+}: {
+  line: DiffLine
+  lineNo?: number
+  tokens: HighlightTokens | null
+}) {
+  const resolvedLineNo = lineNo ?? line.lineNo
+  const lineTokens = tokens && resolvedLineNo ? tokens[resolvedLineNo - 1] : null
 
   // 有 word diff 标记时：在语法着色基础上叠加增删背景
   if (line.wordDiffSegments) {

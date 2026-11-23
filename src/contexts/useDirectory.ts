@@ -1,6 +1,6 @@
 import { useCallback, useContext } from 'react'
 import type { ApiPath } from '../api'
-import { layoutStore, useLayoutStore } from '../store/layoutStore'
+import { layoutStore, useLayoutSelector } from '../store/layoutStore'
 import { DirectoryContext, type DirectoryContextValue, type SavedDirectory } from './DirectoryContext.shared'
 
 export function useDirectory(): DirectoryContextValue {
@@ -27,7 +27,7 @@ export function usePathInfo(): ApiPath | null {
 }
 
 export function useSidebarExpanded(): [boolean, (expanded: boolean) => void] {
-  const { sidebarExpanded } = useLayoutStore()
+  const sidebarExpanded = useLayoutSelector(s => s.sidebarExpanded)
   const setSidebarExpanded = useCallback((expanded: boolean) => {
     layoutStore.setSidebarExpanded(expanded)
   }, [])

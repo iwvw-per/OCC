@@ -6,7 +6,17 @@
  * compact viewport wrapper.
  */
 
-import { memo, useRef, useEffect, useState, useCallback, useMemo, useDeferredValue, useSyncExternalStore } from 'react'
+import {
+  memo,
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useDeferredValue,
+  useSyncExternalStore,
+  type ComponentProps,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ChatArea, Header, PermissionDialog, QuestionDialog, type ChatAreaHandle } from '.'
@@ -88,6 +98,9 @@ interface ChatPaneProps {
 // Layout/presentation stay fixed; enableCollapsedInputDock is inherited from the
 // app viewport so the desktop "collapse input dock" setting still works in split.
 // ============================================
+/** 稳定的空提问列表:避免每次 render 新建 [] 击穿 ChatArea 的 memo。 */
+const EMPTY_INLINE_QUESTIONS: NonNullable<ComponentProps<typeof ChatArea>['inlineQuestions']> = []
+
 const PANE_VIEWPORT: ChatViewportValue = {
   presentation: {
     surfaceVariant: 'compact',
@@ -1349,7 +1362,7 @@ export const ChatPane = memo(function ChatPane({
                 bottomPadding={inputBoxHeight}
                 onVisibleMessageIdsChange={handleVisibleIdsChange}
                 onAtBottomChange={setIsAtBottom}
-                inlineQuestions={inlineToolRequests ? inlineQuestionEntries : []}
+                inlineQuestions={inlineToolRequests ? inlineQuestionEntries : EMPTY_INLINE_QUESTIONS}
               />
             )}
           </ErrorBoundary>

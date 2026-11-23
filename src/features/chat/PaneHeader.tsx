@@ -23,7 +23,7 @@ import { cn } from '../../utils/cn'
 import { interactive } from '../../utils/interaction'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { useSessionState } from '../../store'
-import { layoutStore, useLayoutStore } from '../../store/layoutStore'
+import { layoutStore, useLayoutSelector } from '../../store/layoutStore'
 import { messageStore } from '../../store'
 import { updateSession } from '../../api'
 import { useDirectory } from '../../contexts/useDirectory'
@@ -72,7 +72,8 @@ export function PaneHeader({
   const viewport = useChatViewport()
   const sessionState = useSessionState(sessionId)
   const { currentDirectory } = useDirectory()
-  const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
+  const rightPanelOpen = useLayoutSelector(s => s.rightPanelOpen)
+  const bottomPanelOpen = useLayoutSelector(s => s.bottomPanelOpen)
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)

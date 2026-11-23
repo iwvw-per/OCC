@@ -12,7 +12,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { getPtyConnectUrlAsync, updatePtySession } from '../api/pty'
 import { useTheme } from '../hooks'
-import { layoutStore, useLayoutStore } from '../store/layoutStore'
+import { layoutStore, useLayoutSelector } from '../store/layoutStore'
 import { useInputCapabilities } from '../hooks/useInputCapabilities'
 import { logger } from '../utils/logger'
 import { parsePtyFrame } from '../utils/ptyProtocol'
@@ -366,7 +366,8 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
   const [hasBeenActive, setHasBeenActive] = useState(isActive)
   const { preferTouchUi, hasTouch, hasCoarsePointer } = useInputCapabilities()
   const { manualTerminalTitles } = useTheme()
-  const { terminalCopyOnSelect, terminalRightClickPaste } = useLayoutStore()
+  const terminalCopyOnSelect = useLayoutSelector(s => s.terminalCopyOnSelect)
+  const terminalRightClickPaste = useLayoutSelector(s => s.terminalRightClickPaste)
   const touchCapable = hasTouch || hasCoarsePointer
   const manualTerminalTitlesRef = useRef(manualTerminalTitles)
   const terminalCopyOnSelectRef = useRef(terminalCopyOnSelect)

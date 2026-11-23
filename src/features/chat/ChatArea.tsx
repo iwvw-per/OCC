@@ -25,6 +25,7 @@ import {
   useVirtualizer,
   elementScroll,
   defaultRangeExtractor,
+  type Range,
   type VirtualItem,
   type Virtualizer,
 } from '@tanstack/react-virtual'
@@ -55,7 +56,13 @@ import { useTheme } from '../../hooks/useTheme'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
 import { computePrependRestoreScrollTop } from './chatPageModel'
-import { estimateTimelineItemSize, processActiveLabel, processReasoningCount, processStepCount, sessionCacheKey } from './chatAreaTimeline'
+import {
+  estimateTimelineItemSize,
+  processActiveLabel,
+  processReasoningCount,
+  processStepCount,
+  sessionCacheKey,
+} from './chatAreaTimeline'
 import { chatContentMaxWidthStyle, getContentPaddingClass } from './contentWidth'
 import { getChatWidthDragging, subscribeChatWidthDrag } from './chatWidthDrag'
 import { getChatMorphing, subscribeChatMorphing } from './chatMorph'
@@ -336,11 +343,7 @@ const VirtualRow = memo(
                   stepCount={processStepCount(item.children)}
                   reasoningCount={processReasoningCount(item.children)}
                   activeLabel={item.isActive ? processActiveLabel(item.children) : undefined}
-                  onExpand={
-                    item.userMessageId && onHydrateTurn
-                      ? () => onHydrateTurn(item.userMessageId!)
-                      : undefined
-                  }
+                  onExpand={item.userMessageId && onHydrateTurn ? () => onHydrateTurn(item.userMessageId!) : undefined}
                   /**
                    * 这一轮的过程内容是否还在服务端。
                    *
@@ -715,6 +718,44 @@ export const ChatArea = memo(
         prependPinnedRef.current = []
       }
 
+      /**
+       * 稳定化 virtualizer 选项。
+       *
+       * tanstack-virtual 的测量 memo 以「严格引用」比较选项(getMeasurementOptions
+       * 的 deps 含 getItemKey):只要这些函数每帧新建,getMeasurementOptions 每帧重跑
+       * 并把 pendingMin 重置为 null,getMeasurements 便每帧从索引 0 全量重建 —— 长会话下
+       * 是 O(count)/帧,且与流式帧率叠加。
+       *
+       * 把会逐帧变化的值(timeline / effectiveOverscan / autoMarkAuto)放进 ref,回调本身
+       * 保持稳定引用,库即可利用 resizeItem 设置的 pendingMin 做增量测量。
+       */
+      const timelineRef = useRef(timeline)
+      timelineRef.current = timeline
+      const effectiveOverscanRef = useRef(effectiveOverscan)
+      effectiveOverscanRef.current = effectiveOverscan
+      const autoMarkAutoRef = useRef(autoMarkAuto)
+      autoMarkAutoRef.current = autoMarkAuto
+
+      const stableEstimateSize = useCallback(
+        (index: number) => estimateTimelineItemSize(timelineRef.current[index]),
+        [],
+      )
+      const stableGetItemKey = useCallback((i: number) => timelineRef.current[i]?.key ?? `removed:${i}`, [])
+      const stableScrollToFn = useCallback<typeof elementScroll>((offset, options, instance) => {
+        if (contentRef.current) contentRef.current.style.height = `${instance.getTotalSize()}px`
+        autoMarkAutoRef.current(scrollRef.current)
+        elementScroll(offset, options, instance)
+      }, [])
+      const stableRangeExtractor = useCallback((range: Range) => {
+        const indexes = defaultRangeExtractor({ ...range, overscan: effectiveOverscanRef.current })
+        return mergeVirtualRangeIndexes(
+          indexes,
+          resizePinnedRef.current,
+          hotPinnedRef.current,
+          prependPinnedRef.current,
+        )
+      }, [])
+
       // 冷启动估在底部：有 cache 用 cache 总高，否则 estimate*count + paddingEnd。
       // 不用 MAX_SAFE_INTEGER（单列 range 不会向前扩，只会渲染最后一项）。
       const estimatedBottomOffset = useMemo(() => {
@@ -734,17 +775,13 @@ export const ChatArea = memo(
         getScrollElement: () => scrollRef.current,
         initialOffset: estimatedBottomOffset,
         initialMeasurementsCache: initialCacheRef.current,
-        estimateSize: index => estimateTimelineItemSize(timeline[index]),
-        getItemKey: i => timeline[i]?.key ?? `removed:${i}`,
+        estimateSize: stableEstimateSize,
+        getItemKey: stableGetItemKey,
         // 输入框占位放在消息区外（retry/error 之后），避免重试提示被压到输入框下面
         paddingEnd: 0,
         scrollEndThreshold: 80,
         // 预写 total height，避免浏览器把新 offset clamp 到旧高度（oc 同款）
-        scrollToFn: (offset, options, instance) => {
-          if (contentRef.current) contentRef.current.style.height = `${instance.getTotalSize()}px`
-          autoMarkAuto(scrollRef.current)
-          elementScroll(offset, options, instance)
-        },
+        scrollToFn: stableScrollToFn,
         anchorTo: 'end',
         followOnAppend: false,
         // 实际生效的是下方 rangeExtractor 里的 renderOverscan（6→15）；
@@ -752,15 +789,7 @@ export const ChatArea = memo(
         overscan: 15,
         directDomUpdates: true,
         directDomUpdatesMode: 'transform',
-        rangeExtractor: range => {
-          const indexes = defaultRangeExtractor({ ...range, overscan: effectiveOverscan })
-          return mergeVirtualRangeIndexes(
-            indexes,
-            resizePinnedRef.current,
-            hotPinnedRef.current,
-            prependPinnedRef.current,
-          )
-        },
+        rangeExtractor: stableRangeExtractor,
       })
 
       // 一次性 overrides（resizeItem + shouldAdjust）——对齐 oc
@@ -856,9 +885,7 @@ export const ChatArea = memo(
       //   → D' = H' - S' = H - S = D
       // 所以只要把它恢复回去，视口就精确回到原来的内容上。它只需要
       // scrollHeight/scrollTop 两个数字，与虚拟列表渲染了哪些行无关。
-      const prependAnchor = useRef<
-        { key: string; offset: number; distanceFromBottom: number } | undefined
-      >(undefined)
+      const prependAnchor = useRef<{ key: string; offset: number; distanceFromBottom: number } | undefined>(undefined)
       const prependFrame = useRef<number | undefined>(undefined)
       // 异步加载在途。期间不允许新的加载，且不接受用户手势取消
       // （否则锚点会在内容到达前被丢掉，视口跳一下）。

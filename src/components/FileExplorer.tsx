@@ -25,13 +25,7 @@ import { Spinner } from './ui/Spinner'
 import { FileContextMenu, type FileContextMenuTarget } from './FileContextMenu'
 import { HtmlFilePreviewFrame } from './HtmlFilePreviewFrame'
 import { PreviewTabsBar, type PreviewTabsBarItem } from './PreviewTabsBar'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from './ui/Breadcrumb'
+import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from './ui/Breadcrumb'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { useFullscreenLayer } from '../contexts'
 import { getMaterialIconUrl } from '../utils/materialIcons'
@@ -152,7 +146,9 @@ export const FileExplorer = memo(function FileExplorer({
   const [searchResults, setSearchResults] = useState<TextSearchMatch[]>([])
   const [fileResults, setFileResults] = useState<string[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
-  const [fileContextMenu, setFileContextMenu] = useState<FileContextMenuTarget & { x: number; y: number } | null>(null)
+  const [fileContextMenu, setFileContextMenu] = useState<(FileContextMenuTarget & { x: number; y: number }) | null>(
+    null,
+  )
   // 长按弹出菜单后，抬手会补一次 click，需吞掉，否则菜单打开的同时文件被打开/展开。
   const suppressClickRef = useRef(false)
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -192,7 +188,13 @@ export const FileExplorer = memo(function FileExplorer({
     clearPreview,
     fileStatus,
     refresh,
-  } = useFileExplorer({ directory, autoLoad: true, sessionId: sessionId || undefined, serverId, consumerId: `file-explorer-${panelTabId}` })
+  } = useFileExplorer({
+    directory,
+    autoLoad: true,
+    sessionId: sessionId || undefined,
+    serverId,
+    consumerId: `file-explorer-${panelTabId}`,
+  })
 
   // 当 previewFile 改变时加载预览
   useEffect(() => {
@@ -239,7 +241,14 @@ export const FileExplorer = memo(function FileExplorer({
       event.preventDefault()
       event.stopPropagation()
       const name = path.split(/[/\\]/).pop() || path
-      setFileContextMenu({ x: event.clientX, y: event.clientY, path, absolute: resolvedAbsolute ?? undefined, name, isDirectory })
+      setFileContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        path,
+        absolute: resolvedAbsolute ?? undefined,
+        name,
+        isDirectory,
+      })
     },
     [resolveAbsolutePath],
   )
@@ -657,7 +666,9 @@ const TextSearchResults = memo(function TextSearchResults({
   )
 
   if (isLoading && !hasFiles && !hasText) {
-    return <div className="flex items-center justify-center h-20 text-text-400 text-ui-caption">{t('common:loading')}</div>
+    return (
+      <div className="flex items-center justify-center h-20 text-text-400 text-ui-caption">{t('common:loading')}</div>
+    )
   }
 
   if (error && !hasFiles && !hasText) {
@@ -776,9 +787,7 @@ const TextSearchResults = memo(function TextSearchResults({
           })}
         </>
       )}
-      {isLoading && (
-        <div className="px-2 py-1.5 text-center text-ui-sm text-text-500">{t('common:loading')}</div>
-      )}
+      {isLoading && <div className="px-2 py-1.5 text-center text-ui-sm text-text-500">{t('common:loading')}</div>}
     </div>
   )
 })
@@ -929,7 +938,35 @@ const FileTreeItem = memo(function FileTreeItem({
       )}
     </div>
   )
-})
+}, areFileTreeItemPropsEqual)
+
+/**
+ * 自定义 memo 比较器:文件树的 expandedPaths/fileStatus 在每次展开/状态刷新时都会被
+ * 换成新引用(整树 props 引用必然变化),用默认浅比较会让 memo 失效、整棵树重渲染。
+ * 这里只比较本节点真正关心的派生值(是否展开、自身 status)与其余 props 引用。
+ */
+function areFileTreeItemPropsEqual(prev: FileTreeItemProps, next: FileTreeItemProps): boolean {
+  if (prev.node !== next.node || prev.depth !== next.depth || prev.touchFriendly !== next.touchFriendly) {
+    return false
+  }
+  if (
+    prev.onClick !== next.onClick ||
+    prev.onContextMenu !== next.onContextMenu ||
+    prev.onTouchStart !== next.onTouchStart ||
+    prev.onTouchMove !== next.onTouchMove ||
+    prev.onTouchEnd !== next.onTouchEnd ||
+    prev.consumeSuppressedClick !== next.consumeSuppressedClick
+  ) {
+    return false
+  }
+  const path = next.node.path
+  if (prev.expandedPaths.has(path) !== next.expandedPaths.has(path)) return false
+  const normalized = path.replace(/\\/g, '/')
+  const prevStatus = prev.fileStatus.get(path) || prev.fileStatus.get(normalized)
+  const nextStatus = next.fileStatus.get(path) || next.fileStatus.get(normalized)
+  if (prevStatus !== nextStatus) return false
+  return true
+}
 
 // ============================================
 // File Preview
@@ -1178,10 +1215,20 @@ function FilePreview({
         rightActions={
           content ? (
             <>
-              <IconButton size="xs" onClick={openFullscreen} title={t('contentBlock.fullscreen')} aria-label={t('contentBlock.fullscreen')}>
+              <IconButton
+                size="xs"
+                onClick={openFullscreen}
+                title={t('contentBlock.fullscreen')}
+                aria-label={t('contentBlock.fullscreen')}
+              >
                 <MaximizeIcon size={12} />
               </IconButton>
-              <IconButton size="xs" onClick={handleDownload} title={`${t('common:save')} ${fileName}`} aria-label={`${t('common:save')} ${fileName}`}>
+              <IconButton
+                size="xs"
+                onClick={handleDownload}
+                title={`${t('common:save')} ${fileName}`}
+                aria-label={`${t('common:save')} ${fileName}`}
+              >
                 <DownloadIcon size={12} />
               </IconButton>
             </>
@@ -1478,17 +1525,11 @@ function ImagePreview({ dataUrl, fileName }: ImagePreviewProps) {
     <div className="flex flex-col h-full">
       {/* Zoom toolbar */}
       <div className="shrink-0 flex items-center justify-center gap-1.5 px-2 py-1 border-b border-border-100/30 bg-bg-100/50 text-ui-xs">
-        <button
-          onClick={zoomOut}
-          className="px-1.5 py-0.5 rounded hover:bg-bg-200 text-text-300 transition-colors"
-        >
+        <button onClick={zoomOut} className="px-1.5 py-0.5 rounded hover:bg-bg-200 text-text-300 transition-colors">
           −
         </button>
         <span className="w-10 text-center text-text-400 tabular-nums">{Math.round(scale * 100)}%</span>
-        <button
-          onClick={zoomIn}
-          className="px-1.5 py-0.5 rounded hover:bg-bg-200 text-text-300 transition-colors"
-        >
+        <button onClick={zoomIn} className="px-1.5 py-0.5 rounded hover:bg-bg-200 text-text-300 transition-colors">
           +
         </button>
         <span className="w-px h-3 bg-border-200 mx-1" />
@@ -1670,7 +1711,13 @@ interface MarkdownFilePreviewProps {
   targetRanges?: readonly TargetLineRange[]
 }
 
-function MarkdownFilePreview({ text, isResizing = false, targetLine, targetKey, targetRanges }: MarkdownFilePreviewProps) {
+function MarkdownFilePreview({
+  text,
+  isResizing = false,
+  targetLine,
+  targetKey,
+  targetRanges,
+}: MarkdownFilePreviewProps) {
   const { t } = useTranslation(['components', 'common'])
   const [mode, setMode] = useState<'preview' | 'code'>(targetLine ? 'code' : 'preview')
 

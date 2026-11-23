@@ -73,6 +73,7 @@ vi.mock('../store/layoutStore', () => ({
     getState: () => ({ sidebarProjectSortField: 'updated', sidebarProjectSortDesc: true }),
   },
   useLayoutStore: () => ({ sidebarExpanded: true }),
+  useLayoutSelector: (selector: (s: { sidebarExpanded: boolean }) => unknown) => selector({ sidebarExpanded: true }),
 }))
 
 vi.mock('../store/multiServerStore', () => ({

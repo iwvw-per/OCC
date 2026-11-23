@@ -74,9 +74,7 @@ function lastAssistantHasLiveTool(message: {
 }): boolean {
   const content = message.content ?? []
   return content.some(
-    part =>
-      part.type === 'tool' &&
-      (part.state?.status === 'running' || part.state?.status === 'pending'),
+    part => part.type === 'tool' && (part.state?.status === 'running' || part.state?.status === 'pending'),
   )
 }
 
@@ -112,7 +110,14 @@ export function useSessionRunning(sessionId: string | null | undefined): boolean
     const version = messageStore.getSessionChangeVersion(sessionId)
     const state = messageStore.getSessionState(sessionId)
     if (!state) return `${version}:0`
-    const last = state.messages.filter(m => m.info.role === 'assistant').at(-1)
+    const last = (() => {
+      // 反向扫描取末条 assistant:避免 filter 全量分配数组(流式期间每帧调用)
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]
+        if (m.info.role === 'assistant') return m
+      }
+      return undefined
+    })()
     const running = isSessionRunning({
       localStreaming: state.isStreaming,
       lastAssistant: last,

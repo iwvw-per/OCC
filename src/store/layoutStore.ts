@@ -247,6 +247,47 @@ export interface PersistedTerminalLayoutMap {
   directories: Record<string, PersistedTerminalDirectoryLayout>
 }
 
+/**
+ * 比较「当前终端目录」的落盘载荷是否与上次一致。
+ *
+ * notify() 会被大量与终端无关的布局变化触发(侧栏、面板尺寸等),每次都对整份
+ * terminal layout(含所有目录的 scrollback buffer)做 JSON.parse + stringify + 写盘
+ * 是纯浪费。这里做结构比较,一致就跳过这条昂贵路径 —— 注意不会改变「变化时同步写」的
+ * 既有语义(测试依赖同步落盘)。
+ */
+function isSamePersistedTerminalDirectoryLayout(
+  a: PersistedTerminalDirectoryLayout | null,
+  b: PersistedTerminalDirectoryLayout,
+): boolean {
+  if (!a) return false
+  if (a.order.bottom.length !== b.order.bottom.length || a.order.right.length !== b.order.right.length) return false
+  for (let i = 0; i < a.order.bottom.length; i++) if (a.order.bottom[i] !== b.order.bottom[i]) return false
+  for (let i = 0; i < a.order.right.length; i++) if (a.order.right[i] !== b.order.right[i]) return false
+  if (a.activeTabId.bottom !== b.activeTabId.bottom || a.activeTabId.right !== b.activeTabId.right) return false
+
+  const aSessions = a.sessions ?? {}
+  const bSessions = b.sessions ?? {}
+  const bKeys = Object.keys(bSessions)
+  if (Object.keys(aSessions).length !== bKeys.length) return false
+  for (const key of bKeys) {
+    const x = aSessions[key]
+    const y = bSessions[key]
+    if (!x || !y) return false
+    if (
+      x.title !== y.title ||
+      x.shellTitle !== y.shellTitle ||
+      x.customTitle !== y.customTitle ||
+      x.buffer !== y.buffer ||
+      x.scrollY !== y.scrollY ||
+      x.cursor !== y.cursor ||
+      x.rows !== y.rows ||
+      x.cols !== y.cols
+    )
+      return false
+  }
+  return true
+}
+
 const PANEL_POSITIONS: PanelPosition[] = ['bottom', 'right']
 const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = ['files', 'changes', 'mcp', 'skill', 'worktree']
 
@@ -404,6 +445,8 @@ export class LayoutStore {
   }
   private subscribers = new Set<Subscriber>()
   private currentTerminalDirectory: string | null = null
+  private lastTerminalPersistDirectory: string | null = null
+  private lastTerminalPersistPayload: PersistedTerminalDirectoryLayout | null = null
 
   private persistPanelLayout() {
     try {
@@ -435,36 +478,53 @@ export class LayoutStore {
     }
   }
 
+  private buildTerminalDirectoryLayout(): PersistedTerminalDirectoryLayout {
+    return {
+      order: {
+        bottom: this.getTabsForPosition('bottom').map(tab => tab.id),
+        right: this.getTabsForPosition('right').map(tab => tab.id),
+      },
+      activeTabId: { ...this.state.activeTabId },
+      sessions: Object.fromEntries(
+        this.state.panelTabs
+          .filter((tab): tab is PanelTab & { type: 'terminal' } => tab.type === 'terminal')
+          .map(tab => [
+            tab.id,
+            {
+              title: tab.title,
+              shellTitle: tab.shellTitle,
+              customTitle: tab.customTitle,
+              buffer: tab.buffer,
+              scrollY: tab.scrollY,
+              cursor: tab.cursor,
+              rows: tab.rows,
+              cols: tab.cols,
+            },
+          ]),
+      ),
+    }
+  }
+
   private persistTerminalLayout() {
     if (!this.currentTerminalDirectory) return
+    const directory = this.currentTerminalDirectory
+    const payload = this.buildTerminalDirectoryLayout()
+
+    // 该目录的终端载荷未变 → 跳过整份 map 的 parse / stringify / 写盘。
+    // notify() 会被大量与终端无关的布局变化触发,这里是主要收益点。
+    if (
+      this.lastTerminalPersistDirectory === directory &&
+      isSamePersistedTerminalDirectoryLayout(this.lastTerminalPersistPayload, payload)
+    ) {
+      return
+    }
 
     try {
       const layoutMap = this.readTerminalLayoutMap()
-      layoutMap.directories[this.currentTerminalDirectory] = {
-        order: {
-          bottom: this.getTabsForPosition('bottom').map(tab => tab.id),
-          right: this.getTabsForPosition('right').map(tab => tab.id),
-        },
-        activeTabId: { ...this.state.activeTabId },
-        sessions: Object.fromEntries(
-          this.state.panelTabs
-            .filter((tab): tab is PanelTab & { type: 'terminal' } => tab.type === 'terminal')
-            .map(tab => [
-              tab.id,
-              {
-                title: tab.title,
-                shellTitle: tab.shellTitle,
-                customTitle: tab.customTitle,
-                buffer: tab.buffer,
-                scrollY: tab.scrollY,
-                cursor: tab.cursor,
-                rows: tab.rows,
-                cols: tab.cols,
-              },
-            ]),
-        ),
-      }
+      layoutMap.directories[directory] = payload
       localStorage.setItem(STORAGE_KEY_TERMINAL_LAYOUT, JSON.stringify(layoutMap))
+      this.lastTerminalPersistDirectory = directory
+      this.lastTerminalPersistPayload = payload
     } catch {
       // ignore
     }
@@ -1659,4 +1719,21 @@ layoutStore.subscribe(() => {
 
 export function useLayoutStore() {
   return useSyncExternalStore(cb => layoutStore.subscribe(cb), getSnapshot, getSnapshot)
+}
+
+/**
+ * 只订阅 layout snapshot 的某一「标量或稳定引用」切片。
+ *
+ * `useLayoutStore()` 订阅整个 store:任一布局/终端状态变化都会通知所有消费组件重渲染。
+ * 这里用 selector + `useSyncExternalStore` 的 `Object.is` 判定,仅当所选切片真正变化时
+ * 才重渲染调用方。
+ *
+ * 注意:selector 必须返回原始值或稳定引用;若每次返回新对象,比较恒不等会造成无限重渲染。
+ */
+export function useLayoutSelector<T>(selector: (snapshot: LayoutSnapshot) => T): T {
+  return useSyncExternalStore(
+    cb => layoutStore.subscribe(cb),
+    () => selector(getSnapshot()),
+    () => selector(getSnapshot()),
+  )
 }

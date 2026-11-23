@@ -4,7 +4,7 @@ import { PathAutoIcon, PathUnixIcon, PathWindowsIcon } from '../../../components
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/Select'
 import { usePathMode, useTheme, useModels } from '../../../hooks'
 import { themeStore, type ReasoningDisplayMode, type CompletedAtFormat } from '../../../store/themeStore'
-import { useLayoutStore, layoutStore } from '../../../store/layoutStore'
+import { useLayoutSelector, layoutStore } from '../../../store/layoutStore'
 import { useHiddenModelKeys, aiRenameModelStore, useAiRenameModelKey } from '../../../store'
 import {
   largeTextPasteStore,
@@ -74,7 +74,7 @@ export function ChatSettings() {
     renderUserMarkdown,
     setRenderUserMarkdown,
   } = useTheme()
-  const { sendOnEnter } = useLayoutStore()
+  const sendOnEnter = useLayoutSelector(s => s.sendOnEnter)
   const { behavior: largePasteBehavior } = useLargeTextPasteSettings()
   const { models, isLoading: modelsLoading } = useModels()
   const hiddenModelKeys = useHiddenModelKeys()

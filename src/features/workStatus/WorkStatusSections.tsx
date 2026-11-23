@@ -61,7 +61,7 @@ export interface WorkStatusSectionContext {
   serverId?: string
   contextLimit: number
   onScrollToMessage: (messageId: string) => void
-  /** 面板上的「压缩」按钮:立即中断当前轮次并触发压缩命令(缺省时不渲染该按钮) */
+  /** 面板上的「压缩」按钮:在后台触发压缩命令,不打断当前正在生成的轮次(缺省时不渲染该按钮) */
   onCompact?: () => void
 }
 

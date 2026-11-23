@@ -1176,16 +1176,18 @@ export function useChatSession({
             return false
           }
 
-          // 命令也可能启动一轮生成（如 /compact 之后继续、自定义命令模板）：
-          // 同样先本地乐观置忙；纯本地命令（不发消息）不会被任何事件佐证，超时后自动回收。
-          // 同上：补 directory，供项目行归类 busy 会话。
-          if (effectiveDirectory) activeSessionStore.setSessionMeta(sessionId, undefined, effectiveDirectory)
-
-          // 压缩不应接在最后一个命令之后继续:主对话正在跑时先掐掉当前轮次
-          if (sessionId === routeSessionId && isSessionBusy) {
-            await handleAbort()
+          // 空 / 畸形 sessionId 守卫:resolveSessionTarget 会把 `''` 或 `::xxx`
+          // 解析成空串,下游会拼出 `/session//compact`(405)而不是报错。
+          if (!splitSessionKey(sessionId).sessionId) {
+            handleError('execute command', new Error('Invalid session id'))
+            return false
           }
 
+          if (effectiveDirectory) activeSessionStore.setSessionMeta(sessionId, undefined, effectiveDirectory)
+
+          // 手动压缩在**后台**进行,不打断当前正在生成的那一轮(与「自动压缩」一致)。
+          // 之前这里会先 handleAbort() 掐掉当前轮次:表现为「一点压缩就把最后一个对话
+          // 打断」,且中断后服务端常拒绝这次压缩,用户必须再点一次才生效。
           activeSessionStore.applyOptimisticBusy(sessionId)
 
           if (sessionId) messageStore.recordCompactionResult(sessionId, { at: Date.now() })
@@ -1199,8 +1201,10 @@ export function useChatSession({
             paneServerId,
           ).catch(err => {
             handleError('execute command', err)
-            // 失败回收乐观 busy：压缩没跑起来，不应让项目行一直显示运行中
-            if (sessionId) activeSessionStore.updateStatus(sessionId, { type: 'idle' })
+            // 失败回收乐观 busy:但正在流式时不要置 idle(会打断当前轮次)
+            if (sessionId && !messageStore.getIsStreaming(sessionId)) {
+              activeSessionStore.updateStatus(sessionId, { type: 'idle' })
+            }
           })
 
           return true
@@ -1230,8 +1234,6 @@ export function useChatSession({
       handleNewChat,
       paneServerId,
       onWorkDirectoryUsed,
-      handleAbort,
-      isSessionBusy,
     ],
   )
 

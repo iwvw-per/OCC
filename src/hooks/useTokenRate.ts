@@ -23,6 +23,9 @@ import { useEffect, useState } from 'react'
 import { messageStore } from '../store'
 import { splitTurns, turnThroughput } from './stepThroughput'
 
+/** 流式期间速率最多每 200ms 重算一次(整轮聚合,无需跟每帧 token) */
+const TOKEN_RATE_STREAMING_INTERVAL_MS = 200
+
 export interface TokenRateState {
   tokensPerSec: number
   /** 是否存在可计算的已完成轮次 */
@@ -39,12 +42,14 @@ export function useTokenRate(sessionId: string | null): TokenRateState {
       return
     }
 
-    const update = () => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const compute = () => {
       const messages = messageStore.getVisibleMessages(sessionId)
       const turns = splitTurns(messages)
 
-          // 正在生成的那一轮里，最后一条 assistant 还没有 streamed，其样本为 null，
-          // 聚合结果会缺样本 → 跳过它，继续显示上一轮的稳定值。
+      // 正在生成的那一轮里，最后一条 assistant 还没有 streamed，其样本为 null，
+      // 聚合结果会缺样本 → 跳过它，继续显示上一轮的稳定值。
       for (let i = turns.length - 1; i >= 0; i--) {
         const rate = turnThroughput(turns[i])
         if (rate == null) continue
@@ -55,9 +60,30 @@ export function useTokenRate(sessionId: string | null): TokenRateState {
       setState(prev => (prev.hasData || prev.tokensPerSec !== 0 ? { tokensPerSec: 0, hasData: false } : prev))
     }
 
+    // 流式期间 store 每帧通知一次,但速率是整轮聚合,200ms 粒度足够;
+    // 非流式(结束/切换会话)立即结算,避免结束时数字滞后。
+    const update = () => {
+      if (!messageStore.getIsStreaming(sessionId)) {
+        if (timer) {
+          clearTimeout(timer)
+          timer = null
+        }
+        compute()
+        return
+      }
+      if (timer) return
+      timer = setTimeout(() => {
+        timer = null
+        compute()
+      }, TOKEN_RATE_STREAMING_INTERVAL_MS)
+    }
+
     const unsubscribe = messageStore.subscribeSession(sessionId, update)
     update()
-    return unsubscribe
+    return () => {
+      unsubscribe()
+      if (timer) clearTimeout(timer)
+    }
   }, [sessionId])
 
   return state

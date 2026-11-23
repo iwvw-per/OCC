@@ -482,6 +482,31 @@ describe('useGlobalEvents', () => {
     )
   })
 
+  it('does not idle or finalize a streaming turn when a manual compaction starts (A)', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    activeSessionStoreMock.getSnapshot.mockReturnValue({
+      statusMap: { 'local::ses_1': { type: 'busy' } },
+    } as never)
+    // 该会话确有一轮正在流式输出:压缩开始不得把它定稿/置 idle
+    vi.mocked(messageStore.getIsStreaming).mockReturnValueOnce(true)
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'started', reason: 'manual' })
+
+    expect(activeSessionStoreMock.updateStatus).not.toHaveBeenCalled()
+    expect(messageStore.handleSessionIdle).not.toHaveBeenCalled()
+    expect(messageStore.recordCompactionResult).toHaveBeenCalledWith(
+      'local::ses_1',
+      expect.objectContaining({ at: expect.any(Number) }),
+    )
+  })
+
   it('invalidates cached messages when a manual compaction succeeds', async () => {
     let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
     subscribeToEventsMock.mockImplementation(cb => {

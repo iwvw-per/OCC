@@ -176,12 +176,23 @@ export const ContentBlock = memo(function ContentBlock({
     return { additions, deletions }
   }, [isDiff, diff, providedDiffStats])
 
+  // 渲染节流:超出视口的 diff/代码块只占位、不挂载。
+  // 多 diff 回合里每个块都要算行 diff + 语法高亮 + DOM,离屏块本就不该做这些。
+  // 首次进入视口后才挂载,之后保持挂载(避免滚动时反复重建、高度跳动)。
+  const { ref: observeBody, inView } = useInView({ rootMargin: '800px 0px', triggerOnce: true })
+
   const resolvedDiff = useMemo(() => {
     if (!diff) return null
     if (typeof diff === 'object') return diff
     return extractContentFromUnifiedDiff(diff)
   }, [diff])
-  const diffViewerData = useDiffViewerData(resolvedDiff?.before ?? '', resolvedDiff?.after ?? '', lang, false, isDiff)
+  const diffViewerData = useDiffViewerData(
+    resolvedDiff?.before ?? '',
+    resolvedDiff?.after ?? '',
+    lang,
+    false,
+    isDiff && inView,
+  )
 
   const fullscreenTitleExtra = useMemo(
     () =>
@@ -249,10 +260,6 @@ export const ContentBlock = memo(function ContentBlock({
   ])
   const { isOpen: fullscreenOpen, open: openFullscreen } = useFullscreenLayer(fullscreenLayer)
 
-  // 渲染节流：超出视口的 diff/代码块只占位、不挂载。
-  // 多 diff 回合里每个块都要算行 diff + 语法高亮 + DOM，离屏块本就不该做这些。
-  // 首次进入视口后才挂载，之后保持挂载（避免滚动时反复重建、高度跳动）。
-  const { ref: observeBody, inView } = useInView({ rootMargin: '800px 0px', triggerOnce: true })
   const showBody = (hasContent && !collapsed) || (isLoading && !hasContent)
   const { contentRef, layoutOpen, keepMounted, panelClassName } = useCompositorExpand(showBody)
   const shouldRenderContent = useDelayedRender(keepMounted)

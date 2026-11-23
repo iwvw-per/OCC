@@ -34,8 +34,28 @@ export interface UnifiedLine extends DiffLine {
   newLineNo?: number
 }
 
-export function computePairedLines(before: string, after: string, skipWordDiff: boolean): PairedLine[] {
+/**
+ * `diffLines` 是 Myers diff(近似 O(n·d));同一对 (before, after) 会被 split(paired)
+ * 与 unified 两个视图各算一次。这里用「最近一次」缓存复用结果 —— 两个消费函数都只读
+ * `changes`、不修改,因此共享安全。
+ */
+let sharedDiffBefore = ''
+let sharedDiffAfter = ''
+let sharedDiffChanges: ReturnType<typeof diffLines> | null = null
+
+function diffLinesShared(before: string, after: string): ReturnType<typeof diffLines> {
+  if (sharedDiffChanges && sharedDiffBefore === before && sharedDiffAfter === after) {
+    return sharedDiffChanges
+  }
   const changes = diffLines(before, after)
+  sharedDiffBefore = before
+  sharedDiffAfter = after
+  sharedDiffChanges = changes
+  return changes
+}
+
+export function computePairedLines(before: string, after: string, skipWordDiff: boolean): PairedLine[] {
+  const changes = diffLinesShared(before, after)
   const result: PairedLine[] = []
   const beforeLines = before.split('\n')
   const afterLines = after.split('\n')
@@ -119,7 +139,7 @@ export function computePairedLines(before: string, after: string, skipWordDiff: 
 }
 
 export function computeUnifiedLines(before: string, after: string): UnifiedLine[] {
-  const changes = diffLines(before, after)
+  const changes = diffLinesShared(before, after)
   const result: UnifiedLine[] = []
   const beforeLines = before.split('\n')
   const afterLines = after.split('\n')

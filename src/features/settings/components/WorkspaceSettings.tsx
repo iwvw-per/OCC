@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '../../../hooks'
-import { layoutStore, useLayoutStore, type ChildSessionsDisplayMode } from '../../../store'
+import { layoutStore, useLayoutSelector, type ChildSessionsDisplayMode } from '../../../store'
 import { Toggle, SegmentedControl, SettingRow, SettingsSection } from './SettingsUI'
 
 export function WorkspaceSettings() {
@@ -15,14 +15,12 @@ export function WorkspaceSettings() {
     manualTerminalTitles,
     setManualTerminalTitles,
   } = useTheme()
-  const {
-    sidebarFolderRecents,
-    sidebarFolderRecentsShowDiff,
-    sidebarChildSessions,
-    terminalCopyOnSelect,
-    terminalRightClickPaste,
-    wakeLock,
-  } = useLayoutStore()
+  const sidebarFolderRecents = useLayoutSelector(s => s.sidebarFolderRecents)
+  const sidebarFolderRecentsShowDiff = useLayoutSelector(s => s.sidebarFolderRecentsShowDiff)
+  const sidebarChildSessions = useLayoutSelector(s => s.sidebarChildSessions)
+  const terminalCopyOnSelect = useLayoutSelector(s => s.terminalCopyOnSelect)
+  const terminalRightClickPaste = useLayoutSelector(s => s.terminalRightClickPaste)
+  const wakeLock = useLayoutSelector(s => s.wakeLock)
 
   const toggleManualTerminalTitles = () => {
     const next = !manualTerminalTitles

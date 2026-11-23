@@ -6,7 +6,7 @@
 // ============================================
 
 import { useCallback, useEffect, useRef } from 'react'
-import { layoutStore, useLayoutStore } from '../store'
+import { layoutStore, useLayoutSelector } from '../store'
 import type { ChatViewportValue } from '../features/chat/chatViewport'
 import { getDesktopPlatform, usesCustomDesktopTitlebar } from '../utils/tauri'
 
@@ -49,7 +49,8 @@ export interface AppShell {
 }
 
 export function useAppShell(options: UseAppShellOptions): AppShell {
-  const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
+  const rightPanelOpen = useLayoutSelector(s => s.rightPanelOpen)
+  const rightPanelWidth = useLayoutSelector(s => s.rightPanelWidth)
   const isMobilePanelLayout = options.chatViewport.interaction.sidebarBehavior === 'overlay'
   const { setSidebarExpanded } = options
 

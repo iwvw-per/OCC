@@ -6,7 +6,7 @@ import { useState, useCallback, useEffect, useMemo, useRef, useSyncExternalStore
 import { getPath, type ApiPath } from '../api'
 import { useRouter } from '../hooks/useRouter'
 import { handleError, isAbsoluteDirectory, normalizeToForwardSlash, getDirectoryName, isSameDirectory } from '../utils'
-import { layoutStore, useLayoutStore } from '../store/layoutStore'
+import { layoutStore, useLayoutSelector } from '../store/layoutStore'
 import { serverStore } from '../store/serverStore'
 import { multiServerStore, useMultiServerStore } from '../store/multiServerStore'
 import { isTauri } from '../utils/tauri'
@@ -24,7 +24,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   const { directory: urlDirectory, setDirectory: setUrlDirectory } = useRouter()
 
   // 从 layoutStore 获取 sidebarExpanded
-  const { sidebarExpanded } = useLayoutStore()
+  const sidebarExpanded = useLayoutSelector(s => s.sidebarExpanded)
 
   // 项目列表 / 最近使用记录：数据与桶绑定由 storage/appData 统一管理
   // （createStore 保证单写入口 + 显式 serverId，切换主机自动 rebind）。

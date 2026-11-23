@@ -18,7 +18,7 @@ import { interactive } from '../../utils/interaction'
 import { ShareDialog } from './ShareDialog'
 import { OpenDirectoryButton } from './OpenDirectoryButton'
 import { messageStore, useHeaderSessionMeta, usePaneLayout, usePaneController } from '../../store'
-import { useLayoutStore, layoutStore } from '../../store/layoutStore'
+import { useLayoutSelector, layoutStore } from '../../store/layoutStore'
 import { useWorkStatusPanelVisible } from '../workStatus/workStatusVisibilityStore'
 import { ContextUsageRing } from './ContextUsageRing'
 import { ContextDetailsDialog } from './sidebar/ContextDetailsDialog'
@@ -150,7 +150,8 @@ export function Header({
 }: HeaderProps) {
   const { t } = useTranslation('chat')
   const { sessionId, sessionDirectory, sessionTitle: currentSessionTitle } = useHeaderSessionMeta()
-  const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
+  const rightPanelOpen = useLayoutSelector(s => s.rightPanelOpen)
+  const bottomPanelOpen = useLayoutSelector(s => s.bottomPanelOpen)
   const workStatus = useWorkStatus()
   const { refresh } = useSessionContext()
   const { currentDirectory } = useDirectory()

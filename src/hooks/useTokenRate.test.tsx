@@ -9,6 +9,7 @@ vi.mock('../store', () => ({
   messageStore: {
     getVisibleMessages: vi.fn(() => []),
     subscribeSession: vi.fn(() => () => {}),
+    getIsStreaming: vi.fn(() => false),
   },
 }))
 

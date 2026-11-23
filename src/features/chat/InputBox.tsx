@@ -47,7 +47,7 @@ import { inputDraftStore } from '../../store/inputDraftStore'
 import { themeStore } from '../../store/themeStore'
 import { notificationStore } from '../../store/notificationStore'
 import { largeTextPasteStore, useLargeTextPasteSettings } from '../../store/largeTextPasteStore'
-import { useLayoutStore } from '../../store/layoutStore'
+import { useLayoutSelector } from '../../store/layoutStore'
 import { useChatViewport } from './chatViewport'
 import { setChatMorphing } from './chatMorph'
 import { chatContentMaxWidthStyle, getContentPaddingClass } from './contentWidth'
@@ -245,7 +245,7 @@ function InputBoxComponent({
   topAccessory,
 }: InputBoxProps) {
   const { t } = useTranslation('chat')
-  const { sendOnEnter } = useLayoutStore()
+  const sendOnEnter = useLayoutSelector(s => s.sendOnEnter)
   // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages。
   //
   // ⚠️ 能力「未知」不等于「不支持」。模型列表尚未加载完（或加载失败）时

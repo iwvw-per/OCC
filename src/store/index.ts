@@ -19,7 +19,7 @@ export {
 export { childSessionStore, useChildSessions, useSessionFamily } from './childSessionStore'
 export type { ChildSessionInfo } from './childSessionStore'
 
-export { layoutStore, useLayoutStore, exportLayoutBackup, importLayoutBackup } from './layoutStore'
+export { layoutStore, useLayoutStore, useLayoutSelector, exportLayoutBackup, importLayoutBackup } from './layoutStore'
 export type { LayoutBackup, ChildSessionsDisplayMode } from './layoutStore'
 
 export { changeScopeStore, useSessionChangeScope } from './changeScopeStore'

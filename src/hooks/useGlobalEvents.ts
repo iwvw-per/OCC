@@ -1234,14 +1234,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             // 「会话压缩失败」。自动压缩的收尾交给后续状态事件处理。
             if (data.reason === 'auto') return
 
-            // 用户手动触发(/compact 或面板的「压缩」按钮):收敛 handleCommand 的
-            // 乐观置忙,并把压缩分隔条前移到末尾。这里同样**不能** interrupt:
-            // handleCommand 已在派发前中断过真正在跑的那一轮,再发一次就会把刚刚
-            // 入队、已经开始的压缩直接打断(现象同上)。
+            // 用户手动触发(/compact 或面板的「压缩」按钮):压缩在后台进行,可能
+            // 还有一轮正在跑。这里**只前移分隔条**,不置 idle、更不 handleSessionIdle ——
+            // 后者会把仍在流式的消息就地定稿,表现就是「点压缩就把对话打断」。
+            // 乐观置忙仅在确认没有一轮在跑时才收敛。
             const runningStatus = activeSessionStore.getSnapshot().statusMap[scopedId]
-            if (runningStatus && runningStatus.type !== 'idle') {
+            if (runningStatus && runningStatus.type !== 'idle' && !messageStore.getIsStreaming(scopedId)) {
               activeSessionStore.updateStatus(scopedId, { type: 'idle' })
-              messageStore.handleSessionIdle(scopedId)
             }
             messageStore.recordCompactionResult(scopedId, { at: Date.now() })
             return

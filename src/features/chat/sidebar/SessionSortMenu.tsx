@@ -11,12 +11,13 @@ import { useTranslation } from 'react-i18next'
 import { ClockIcon, CalendarPlusIcon, SortIcon, SortDescIcon, CheckIcon } from '../../../components/Icons'
 import { DropdownMenu, IconButton } from '../../../components/ui'
 import { interactive } from '../../../utils/interaction'
-import { useLayoutStore, layoutStore } from '../../../store'
+import { useLayoutSelector, layoutStore } from '../../../store'
 import type { SessionSortField } from '../../../utils'
 
 export function SessionSortMenu() {
   const { t } = useTranslation('chat')
-  const { sidebarProjectSortField, sidebarProjectSortDesc } = useLayoutStore()
+  const sidebarProjectSortField = useLayoutSelector(s => s.sidebarProjectSortField)
+  const sidebarProjectSortDesc = useLayoutSelector(s => s.sidebarProjectSortDesc)
   const [isOpen, setIsOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)

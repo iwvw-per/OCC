@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LayoutStore } from './layoutStore'
 
 const STORAGE_KEY_PANEL_LAYOUT = 'opencode-panel-layout'
@@ -247,6 +247,27 @@ describe('LayoutStore panel and terminal layout', () => {
       rows: 24,
       cols: 80,
     })
+  })
+
+  it('does not rewrite the terminal layout when an unrelated layout change notifies', () => {
+    const store = new LayoutStore()
+    store.syncTerminalSessions('dir-a', [{ id: 'term-a1', title: 'A1', status: 'connected' }])
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem')
+    setItemSpy.mockClear()
+
+    // 与终端无关的布局变化:不应再次整份序列化并写入 terminal layout
+    store.setSidebarExpanded(!store.getSidebarExpanded())
+
+    const terminalWrites = setItemSpy.mock.calls.filter(([key]) => key === 'opencode-terminal-layout')
+    expect(terminalWrites).toHaveLength(0)
+
+    // 反证:真正的终端变化仍然要同步写盘(确认 spy 接线有效,不是假阳性)
+    store.updateTerminalSnapshot('term-a1', { buffer: 'pwd\r\n', scrollY: 0, cursor: 5, rows: 24, cols: 80 })
+    const afterChange = setItemSpy.mock.calls.filter(([key]) => key === 'opencode-terminal-layout')
+    expect(afterChange.length).toBeGreaterThan(0)
+
+    setItemSpy.mockRestore()
   })
 
   it('persists terminal clipboard interaction preferences', () => {

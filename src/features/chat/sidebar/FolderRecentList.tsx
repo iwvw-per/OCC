@@ -22,7 +22,7 @@ import { useInView } from '../../../hooks/useInView'
 import { useDirectory } from '../../../contexts/useDirectory'
 import { getDirectoryName, normalizeToForwardSlash } from '../../../utils'
 import { formatRelativeDay } from '../../../utils/dateUtils'
-import { layoutStore, useLayoutStore } from '../../../store'
+import { layoutStore, useLayoutSelector } from '../../../store'
 import { canOpenDirectoryNatively } from '../../../utils/nativeFileIntegration'
 import { isTauri, isTauriMobile } from '../../../utils/tauri'
 import { uiErrorHandler } from '../../../utils'
@@ -189,7 +189,7 @@ export function FolderRecentList({
 }: FolderRecentListProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { preferTouchUi } = useInputCapabilities()
-  const { sidebarFolderRecentsShowDiff } = useLayoutStore()
+  const sidebarFolderRecentsShowDiff = useLayoutSelector(s => s.sidebarFolderRecentsShowDiff)
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteSession | null>(null)
   const [isDeletingSession, setIsDeletingSession] = useState(false)
   const allBusySessions = useBusySessions()

@@ -26,6 +26,7 @@ const {
   useSessionStateMock,
   activeSessionStatusMap,
   loadSessionMock,
+  abortSessionMock,
 } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   summarizeSessionMock: vi.fn(),
@@ -59,6 +60,7 @@ const {
   ),
   activeSessionStatusMap: {} as Record<string, { type: string; attempt?: number; message?: string; next?: number }>,
   loadSessionMock: vi.fn(() => Promise.resolve()),
+  abortSessionMock: vi.fn((..._args: unknown[]) => Promise.resolve(true)),
 }))
 
 const autoApproveState = vi.hoisted(() => ({
@@ -80,6 +82,7 @@ vi.mock('../store', () => ({
     getIdleGeneration: vi.fn(() => 0),
     handleSessionIdle: vi.fn(),
     recordCompactionResult: vi.fn(),
+    getIsStreaming: vi.fn(() => false),
   },
   useSessionFamily: (sessionId: string | null) => useSessionFamilyMock(sessionId),
   useSessionState: (sessionId: string | null) => useSessionStateMock(sessionId),
@@ -166,7 +169,8 @@ vi.mock('../store/notificationEventSettingsStore', () => ({
 vi.mock('../api', () => ({
   sendMessageAsync: sendMessageAsyncMock,
   getSessionMessages: vi.fn(),
-  abortSession: vi.fn(),
+  abortSession: (sessionId: string, directory?: string, serverId?: string) =>
+    abortSessionMock(sessionId, directory, serverId),
   getSelectableAgents: (...args: unknown[]) => getSelectableAgentsMock(...args),
   getPendingPermissions: vi.fn(() => Promise.resolve([])),
   getPendingQuestions: vi.fn(() => Promise.resolve([])),
@@ -302,6 +306,37 @@ describe('useChatSession handleCommand', () => {
     )
     expect(settled).toBe(true)
     expect(commandResult).toBe(true)
+  })
+
+  it('does not abort the running turn when a manual compact is dispatched (A)', async () => {
+    summarizeSessionMock.mockReturnValue(new Promise<boolean>(() => {}))
+    activeSessionStatusMap['session-1'] = { type: 'busy' }
+    abortSessionMock.mockClear()
+
+    const { result } = renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    await act(async () => {
+      await result.current.handleCommand('/compact')
+    })
+
+    // 手动压缩在后台进行:不得掐掉正在跑的那一轮
+    expect(abortSessionMock).not.toHaveBeenCalled()
+    expect(summarizeSessionMock).toHaveBeenCalledWith(
+      'session-1',
+      { providerID: 'provider-1', modelID: 'model-1' },
+      '/workspace/demo',
+      'local',
+    )
   })
 
   it('treats api commands as sent before execution finishes', async () => {
