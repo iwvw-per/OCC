@@ -49,4 +49,34 @@ describe('activeSessionStore 的权威 idle 记录', () => {
     const meta = activeSessionStore.getSessionMeta(key)
     expect(meta).toMatchObject({ title: 't', directory: '/d', idleAt: 555 })
   })
+
+  /**
+   * idleAt 只用于「判断 /api/session/active 残留」。开新轮后它不再代表最新结论:
+   * 若不清掉,残留判据(idleAt >= 最近一条消息)会把**这一轮真实的运行**误判成
+   * 残留(折叠项目行反而不转圈)。因此 busy/retry 与本地乐观置忙都必须作废它。
+   */
+  it('开新轮(服务端 busy)会作废旧的权威 idle', () => {
+    const key = 'test::ses_reset_busy'
+    activeSessionStore.setSessionIdleAt(key, 5000)
+    expect(activeSessionStore.getSessionMeta(key)?.idleAt).toBe(5000)
+
+    activeSessionStore.updateStatus(key, { type: 'busy' })
+    expect(activeSessionStore.getSessionMeta(key)?.idleAt).toBeUndefined()
+  })
+
+  it('进入 retry 会作废旧的权威 idle', () => {
+    const key = 'test::ses_reset_retry'
+    activeSessionStore.setSessionIdleAt(key, 5000)
+
+    activeSessionStore.updateStatus(key, { type: 'retry', attempt: 1, message: 'x', next: 0 })
+    expect(activeSessionStore.getSessionMeta(key)?.idleAt).toBeUndefined()
+  })
+
+  it('本地乐观置忙会作废旧的权威 idle', () => {
+    const key = 'test::ses_reset_optimistic'
+    activeSessionStore.setSessionIdleAt(key, 5000)
+
+    activeSessionStore.applyOptimisticBusy(key)
+    expect(activeSessionStore.getSessionMeta(key)?.idleAt).toBeUndefined()
+  })
 })

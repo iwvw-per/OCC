@@ -732,6 +732,89 @@ it('does not idle or finalize a streaming turn when a manual compaction starts (
     expect(getSessionStatusMock).toHaveBeenCalledWith(undefined, 'local', { fresh: true })
   })
 
+  it('reconcile drops /session/active entries already settled by an authoritative idle', async () => {
+    // 回归:周期性对账(以及重连)无条件采信 /api/session/active,会把一条已结束、
+    // 却被该接口残留成 running 的会话**每 60s 重新加回** busy 集合 —— 折叠的项目行
+    // 于是永久转圈,而会话其实早就结束了(刷新后 fetchActiveScopeData 会过滤掉它,
+    // 所以表现为「不刷新一直转圈,刷新就好」)。
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionStatusMock.mockResolvedValue({ ses_done: { type: 'busy' } })
+    // 该会话已收到过权威 idle(记录在案),且本地已加载消息(最近一条 created=4000):
+    // idleAt=5000 不早于它 → 是残留。
+    activeSessionStoreMock.getSessionMeta.mockImplementation((sessionId?: string) => ({
+      title: 'Done',
+      directory: '/workspace',
+      idleAt: sessionId === 'local::ses_done' ? 5000 : undefined,
+    }))
+    vi.mocked(messageStore.getSessionState).mockImplementation((key: string) =>
+      key === 'local::ses_done' ? ({ messages: [{ info: { time: { created: 4000 } } }] } as never) : undefined,
+    )
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onReconnected?.('network')
+
+    await waitFor(() => {
+      expect(activeSessionStoreMock.replaceServerStatus).toHaveBeenCalledWith('local', {})
+    })
+    vi.mocked(messageStore.getSessionState).mockReturnValue(undefined)
+  })
+
+  it('reconcile keeps a running session whose idle record cannot be corroborated (no local messages)', async () => {
+    // 回归(OCR 评审):后台会话只经 /active 轮询暴露、本地未加载消息时 latestMessageAt=0,
+    // 若不设前提,任何 idleAt 都会命中残留判据,把「另一台设备新起的一轮」静默丢弃
+    // (折叠行看不到运行)。无可比对基准时不下结论 → 保留为运行中。
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionStatusMock.mockResolvedValue({ ses_bg: { type: 'busy' } })
+    activeSessionStoreMock.getSessionMeta.mockImplementation((sessionId?: string) => ({
+      title: 'Bg',
+      directory: '/workspace',
+      idleAt: sessionId === 'local::ses_bg' ? 5000 : undefined,
+    }))
+    vi.mocked(messageStore.getSessionState).mockReturnValue(undefined)
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onReconnected?.('network')
+
+    await waitFor(() => {
+      expect(activeSessionStoreMock.replaceServerStatus).toHaveBeenCalledWith('local', {
+        'local::ses_bg': { type: 'busy' },
+      })
+    })
+  })
+
+  it('reconcile keeps genuinely running sessions with no idle record', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionStatusMock.mockResolvedValue({ ses_live: { type: 'busy' } })
+    activeSessionStoreMock.getSessionMeta.mockReturnValue({ title: 'Live', directory: '/workspace' })
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onReconnected?.('network')
+
+    await waitFor(() => {
+      expect(activeSessionStoreMock.replaceServerStatus).toHaveBeenCalledWith('local', {
+        'local::ses_live': { type: 'busy' },
+      })
+    })
+  })
+
   it('ignores stale initialization responses after directories change', async () => {
     const statusDeferreds: Array<ReturnType<typeof createDeferred<Record<string, { type: string }>>>> = []
     getPendingPermissionsMock.mockResolvedValue([])

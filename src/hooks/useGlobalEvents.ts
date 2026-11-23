@@ -384,6 +384,47 @@ function removePendingByRequestId<T extends { id: string }>(
   }
 }
 
+/**
+ * 该会话本地已知的最近一条消息的创建时间;会话未加载消息时返回 0。
+ */
+function latestMessageAt(sessionKey: string): number {
+  const state = messageStore.getSessionState(sessionKey)
+  if (!state || state.messages.length === 0) return 0
+  let latest = 0
+  for (const message of state.messages) {
+    const created = message.info.time?.created ?? 0
+    if (created > latest) latest = created
+  }
+  return latest
+}
+
+/**
+ * `/api/session/active` 里的这条是否已被权威 idle 证伪(残留 running)。
+ *
+ * 该接口会把已结束的会话残留成 running(实测 2026-10-31,见 fetchActiveScopeData
+ * 的说明):只要过程中有一条 assistant 缺 `time.completed`,它就永远挂在 active 里。
+ * 判据:该会话记录过权威 idle,且 idle 时间不早于本地最近一条消息 —— 说明那次 idle
+ * 属于当前(或更晚)的轮次,active 里这条是残留,不能当作运行中。
+ *
+ * ⚠️ 仅在**本地有消息可比对**时才判残留。会话未加载消息时 latestMessageAt 为 0,
+ * `idleAt >= 0` 恒真,拿它判残留会误伤「另一台设备新起一轮、只经 /active 轮询暴露、
+ * 且 busy 事件恰好丢失」的后台会话 —— 表现为折叠行反而不转圈。没有基准就不下结论,
+ * 宁可暂时保留(与「不确定就别判死」一致)。
+ *
+ * ⚠️ 另一面:开新轮时必须作废旧 idleAt(见 activeSessionStore.updateStatus /
+ * applyOptimisticBusy),否则上一轮的 idleAt 会把这一轮真实运行判成残留。
+ *
+ * 统一在这里收口:初始化/重连(fetchActiveScopeData)与周期对账(reconcileServerStatus)
+ * 是仅有的两个「无条件采信 /active」的地方,两条路径必须用同一判据。
+ */
+function isResidualActiveStatus(sessionKey: string): boolean {
+  const idleAt = activeSessionStore.getSessionMeta(sessionKey)?.idleAt
+  if (idleAt == null) return false
+  const lastMessageAt = latestMessageAt(sessionKey)
+  if (lastMessageAt === 0) return false
+  return idleAt >= lastMessageAt
+}
+
 async function fetchActiveScopeData(directories: string[] | undefined, serverId: string) {
   const scopes = directories && directories.length > 0 ? directories : [undefined]
 
@@ -442,25 +483,13 @@ async function fetchActiveScopeData(directories: string[] | undefined, serverId:
    * 一条消息，就说明那次 idle 属于更早的轮次，不能据此判死（否则新一轮刚发出、
    * 快照尚未更新的瞬间会被误判成已结束）。
    */
-  const latestMessageAt = (sessionKey: string): number => {
-    const state = messageStore.getSessionState(sessionKey)
-    if (!state || state.messages.length === 0) return 0
-    let latest = 0
-    for (const message of state.messages) {
-      const created = message.info.time?.created ?? 0
-      if (created > latest) latest = created
-    }
-    return latest
-  }
-
   for (const [sid, status] of Object.entries(statusMap)) {
     const scopedId = makeSessionKey(serverId, sid)
     if (status.type === 'idle') {
       mergedStatusMap[scopedId] = status
       continue
     }
-    const idleAt = activeSessionStore.getSessionMeta(scopedId)?.idleAt
-    if (idleAt != null && idleAt >= latestMessageAt(scopedId)) {
+    if (isResidualActiveStatus(scopedId)) {
       // 该会话已被权威记录的 idle 收尾，active 里的这条是残留
       mergedStatusMap[scopedId] = { type: 'idle' }
       continue
@@ -806,7 +835,21 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           if (disposed || currentVersion !== reconcileVersions.get(serverId)) return
           const scoped: SessionStatusMap = {}
           for (const [sid, status] of Object.entries(statusMap)) {
-            scoped[makeSessionKey(serverId, sid)] = status
+            const scopedId = makeSessionKey(serverId, sid)
+            /**
+             * ⚠️ 不能无条件采信 /active 的「在跑」。
+             *
+             * 该接口会把已结束的会话**残留**成 running(判据见 isResidualActiveStatus)。
+             * 这里每 60s 跑一次;若原样喂给 replaceServerStatus,就会把那条残留反复
+             * 重新加回 busy 集合 —— 折叠的项目行于是**永久**转圈,直到整页刷新
+             * (而 fetchActiveScopeData 的初始化路径本来就会把它过滤掉,所以刷新即好,
+             * 这个「不刷新就一直转圈」的形态正是本条漏网导致的)。
+             *
+             * 被证伪的条目一律不写入:留给下方「服务端不认为在跑」的分支用
+             * settleByAuthoritativeIdle 收尾并补 idleAt。
+             */
+            if (status.type !== 'idle' && isResidualActiveStatus(scopedId)) continue
+            scoped[scopedId] = status
           }
           activeSessionStore.replaceServerStatus(serverId, scoped)
           /**

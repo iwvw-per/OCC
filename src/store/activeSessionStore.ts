@@ -581,10 +581,14 @@ class ActiveSessionStore {
       }
     } else if (status.type === 'retry') {
       this.deferredIdleSessions.delete(sessionId)
+      // 开新轮(或进入重试)意味着一轮正在进行,上一轮的 idle 结论作废:
+      // 否则「残留 running」判据会拿旧 idleAt 把这条真实运行误判成残留。
+      this.clearSessionIdleAt(sessionId)
       this.markEvidence(sessionId)
       newMap[sessionId] = { ...status }
     } else {
       this.deferredIdleSessions.delete(sessionId)
+      this.clearSessionIdleAt(sessionId)
       this.markEvidence(sessionId)
       newMap[sessionId] = { type: 'busy' }
     }
@@ -602,6 +606,10 @@ class ActiveSessionStore {
    * 一直没有任何佐证的条目会被回收，避免项目行永远显示「正在运行」。
    */
   applyOptimisticBusy(sessionId: string) {
+    // 本地发起新一轮:无条件作废上一轮的 idle 结论(见 updateStatus 的说明)。
+    // 放在早退之前:idleAt 只影响「残留 running」的启发式判定,与 busy 状态无关,
+    // 清掉它是幂等的,不该因为「已由服务端确认在跑」就跳过。
+    this.clearSessionIdleAt(sessionId)
     if (this.serverBusySessions.has(sessionId)) return
     this.optimisticBusyAt.set(sessionId, Date.now())
     if (this.state.statusMap[sessionId]?.type === 'busy') {
@@ -753,6 +761,24 @@ class ActiveSessionStore {
     if (existing?.idleAt != null && existing.idleAt >= idleAt) return
     this.sessionMeta.set(sessionId, { ...(existing ?? {}), idleAt })
     this.notify()
+  }
+
+  /**
+   * 作废该会话的权威 idle 记录。
+   *
+   * idleAt 的唯一用途是「判断 /api/session/active 里的 running 是不是残留」。
+   * 一旦该会话开新轮(updateStatus busy/retry 或本地乐观置忙),上一轮的 idle
+   * 就不再代表最新结论:若保留,那个残留判据会把**这一轮真实的运行**误判成残留
+   * (折叠行反而不转圈)。因此开新轮即清除,等这一轮结束再写入新的 idleAt。
+   *
+   * 只清 idleAt,不动 title/directory。
+   */
+  clearSessionIdleAt(sessionId: string) {
+    const existing = this.sessionMeta.get(sessionId)
+    if (!existing || existing.idleAt == null) return
+    const next = { ...existing }
+    delete next.idleAt
+    this.sessionMeta.set(sessionId, next)
   }
 
   getBusySessions(): ActiveSessionEntry[] {
