@@ -56,6 +56,7 @@ import { ChatViewportProvider, canUseSplitPane, useChatViewportMaybe, type ChatV
 import { ChatWidthControls } from './ChatWidthControls'
 import { useChatPageViewModel } from './useChatPageViewModel'
 import { PaneInputDock } from './PaneInputDock'
+import { QueuedInboxBar } from './QueuedInboxBar'
 import { SessionNavigationContext } from '../../contexts/SessionNavigationContext'
 import { useDirectory } from '../../contexts/useDirectory'
 import { usesCustomDesktopTitlebar } from '../../utils/tauri'
@@ -437,6 +438,10 @@ export const ChatPane = memo(function ChatPane({
     hasMoreHistory,
     hasTrimmedHistory,
     compactedAt,
+    compactionRunning,
+    compactionDelta,
+    queuedInbox,
+    handleCancelQueued,
     retryStatus,
     effectiveDirectory,
     sessionLoadedFromSkeleton,
@@ -1352,6 +1357,8 @@ export const ChatPane = memo(function ChatPane({
                 hasMoreHistory={hasMoreHistory}
                 hasTrimmedHistory={hasTrimmedHistory}
                 compactedAt={compactedAt}
+                compactionRunning={compactionRunning}
+                compactionDelta={compactionDelta}
                 onLoadMore={loadMoreHistory}
                 onHydrateTurn={hydrateTurn}
                 onUndo={handleUndoWithAnimation}
@@ -1378,6 +1385,11 @@ export const ChatPane = memo(function ChatPane({
       />
 
       <PaneInputDock
+        topAccessory={
+          queuedInbox && queuedInbox.length > 0 ? (
+            <QueuedInboxBar items={queuedInbox} onCancel={handleCancelQueued} />
+          ) : undefined
+        }
         inputBoxWrapperRef={inputBoxWrapperRef}
         hostSlideSwitching={hostSlideState.switching}
         showCompactShell={showCompactShell}

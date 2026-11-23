@@ -379,7 +379,8 @@ function connectViaV2(conn: ServerConnection) {
         if (myGeneration !== conn.generation) break
         resetHeartbeat(conn)
         // 缺口检测必须在映射之前：seq 只在原始事件上，映射后就丢了。
-        // 构成缺口的事件直接丢弃（数据不可信，等快照重拉）。
+        // (缺口事件照常应用,只通知观察者去重拉快照。)
+        // 返回 true 只代表「重复投递」→ 丢弃;缺口本身不走这里(见 checkSeqGap),
         if (checkSeqGap(conn, event)) continue
         const globalEvent = v2EventToGlobalEvent(event)
         if (globalEvent) broadcastEvent(conn, globalEvent)
@@ -799,6 +800,20 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     const props = (payload as { properties?: SessionViewedPayload }).properties
     if (props && typeof props.sessionID === 'string' && typeof props.idle === 'number') {
       callbacks.onSessionViewed?.(props)
+    }
+    return
+  }
+  if ((payload.type as string) === EventTypes.SESSION_INBOX_DELIVERED) {
+    const props = (payload as { properties?: { sessionID?: unknown; inboxID?: unknown } }).properties
+    if (props && typeof props.sessionID === 'string' && typeof props.inboxID === 'string') {
+      callbacks.onInboxDelivered?.({ sessionID: props.sessionID, inboxID: props.inboxID })
+    }
+    return
+  }
+  if ((payload.type as string) === EventTypes.SESSION_COMPACTION_DELTA) {
+    const props = (payload as { properties?: { sessionID?: unknown; text?: unknown } }).properties
+    if (props && typeof props.sessionID === 'string' && typeof props.text === 'string') {
+      callbacks.onSessionCompactionDelta?.({ sessionID: props.sessionID, text: props.text })
     }
     return
   }

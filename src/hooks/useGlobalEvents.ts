@@ -35,6 +35,7 @@ import type { EventCallbacks } from '../types/api/event'
 import type { SessionCompactedPayload } from '../types/api/event'
 import { replyPermission } from '../api/permission'
 import { stripMessageSummaryDiffs, sanitizeStreamPart } from '../api/sanitize'
+import { toPartDeltaInput } from './partDeltaInput'
 import { autoApproveStore } from '../store/autoApproveStore'
 import type { ApiMessage, ApiPart, ApiPermissionRequest, ApiQuestionRequest, ApiSession } from '../api/types'
 import type { SessionStatusMap } from '../types/api/session'
@@ -1040,17 +1041,16 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           }
         },
 
-        onPartDelta: data => {
-          const scopedId = scope(data.sessionID)
+onPartDelta: data => {
+          // partID / field 必须**直接使用** v2 映射给出的那份(它已按 ordinal 预拼)。
+          // 旧实现用 assistantMessageID + ordinal 重算,而映射并不转发 ordinal,
+          // 运行期拼出 `${id}-text-undefined`,永远匹配不到 part → 增量全部进
+          // pending 缓冲后被丢弃(表现为「不流式、整段一次出现」)。
+          const input = toPartDeltaInput(data)
+          if (!input) return
+          const scopedId = scope(input.sessionID)
           activeSessionStore.touchSession(scopedId)
-          // store 按 v1 形状索引 part：partID = `${messageID}-text-${ordinal}`
-          messageStore.handlePartDelta({
-            sessionID: scopedId,
-            messageID: data.assistantMessageID,
-            partID: `${data.assistantMessageID}-text-${data.ordinal}`,
-            field: 'text',
-            delta: data.delta ?? '',
-          })
+          messageStore.handlePartDelta({ ...input, sessionID: scopedId })
           scheduleScroll(scopedId)
         },
 
@@ -1061,8 +1061,16 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         // 用户消息入队后被撤销（v2 session.inbox.cancelled）：移除本地占位，
         // 否则会留下一条永远不会被处理的用户消息。
         onMessageRemoved: data => {
-          messageStore.removeMessage(scope(data.sessionID), data.messageID)
-          scheduleScroll(scope(data.sessionID))
+          const scopedId = scope(data.sessionID)
+          messageStore.removeMessage(scopedId, data.messageID)
+          // 被撤销的入队项也要从「排队中」摘掉
+          messageStore.removeQueuedInbox(scopedId, data.messageID)
+          scheduleScroll(scopedId)
+        },
+
+        /** 入队项被 runner 取走:摘掉「排队中」 */
+        onInboxDelivered: data => {
+          messageStore.removeQueuedInbox(scope(data.sessionID), data.inboxID)
         },
 
         /**
@@ -1083,6 +1091,8 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             text: data.text,
             createdAt: data.created,
           })
+          // 同时登记进「排队中」:enqueued 只代表入队,被取走时会收到 delivered。
+          messageStore.enqueueQueuedInbox(scopedId, { id: data.inboxID, text: data.text, createdAt: data.created })
           scheduleScroll(scopedId)
         },
 
@@ -1238,11 +1248,13 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
             // 还有一轮正在跑。这里**只前移分隔条**,不置 idle、更不 handleSessionIdle ——
             // 后者会把仍在流式的消息就地定稿,表现就是「点压缩就把对话打断」。
             // 乐观置忙仅在确认没有一轮在跑时才收敛。
-            const runningStatus = activeSessionStore.getSnapshot().statusMap[scopedId]
-            if (runningStatus && runningStatus.type !== 'idle' && !messageStore.getIsStreaming(scopedId)) {
-              activeSessionStore.updateStatus(scopedId, { type: 'idle' })
-            }
-            messageStore.recordCompactionResult(scopedId, { at: Date.now() })
+            // 压缩可能要 30~60s。只标记「正在压缩」,让界面立刻有反馈;
+            // **不**推进 compactedAt —— 分隔条必须等压缩真正完成才出现,否则
+            // 用户会把「刚开始」误读成「已完成」。状态收敛交给服务端 status。
+            messageStore.setCompactionRunning(scopedId, true)
+            // started 里带压缩边界 id(= 压缩消息 id):提前落下,圆环不必等消息
+            // 列表重拉就能立刻作废「压缩前」的实测值。
+            if (data.inputID) messageStore.setCompactionBoundary(scopedId, data.inputID)
             return
           }
 
@@ -1250,6 +1262,9 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // 否则用户点 /compact 后界面毫无反应，会误以为功能坏掉。
           // 自动压缩失败不打扰用户（后台行为，下一轮仍会重试）。
           if (data.status === 'failed') {
+            messageStore.setCompactionRunning(scopedId, false)
+            // 压缩没成功:撤掉 started 落下的边界,让压缩前的实测值重新生效。
+            messageStore.clearCompactionBoundary(scopedId)
             if (data.reason === 'auto') return
             notificationStore.toast(
               'error',
@@ -1269,6 +1284,7 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           // compaction part 这条路径（message.part.updated）不带摘要规模：
           // 此时只推进 compactedAt（分隔条），规模等重拉消息后由 message.list
           // 的 compaction 条目补上。写 0 会把圆环误算成 0。
+          messageStore.setCompactionRunning(scopedId, false)
           const hasSize = data.summaryChars !== undefined || data.recentChars !== undefined
           messageStore.recordCompactionResult(scopedId, {
             ...(hasSize ? { summaryChars: data.summaryChars, recentChars: data.recentChars } : {}),
@@ -1279,6 +1295,17 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           }
           messageStore.markServerSessionsStale(sessionKeyToServerId(scopedId))
           dispatchToConsumers(scopedId, cb => cb.onSessionCompacted?.(data))
+        },
+
+        /**
+         * 压缩摘要流式增量(v2 `session.compaction.delta`,ephemeral)。
+         *
+         * 压缩要 30~60s,期间只有「正在压缩…」转圈太单薄;把摘要尾部实时显示
+         * 出来,用户能确认「确实在跑」。压缩结束时随 compactionRunning 一起清空。
+         */
+        onSessionCompactionDelta: data => {
+          if (isEphemeralSession(data.sessionID)) return
+          messageStore.appendCompactionDelta(scope(data.sessionID), data.text)
         },
 
         onSessionUsageUpdated: data => {

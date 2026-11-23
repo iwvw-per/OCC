@@ -54,6 +54,7 @@ import {
 } from './chatPageModel'
 import { useTheme } from '../../hooks/useTheme'
 import { LoadingState } from '../../components/ui/LoadingState'
+import { Spinner } from '../../components/ui/Spinner'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
 import { computePrependRestoreScrollTop } from './chatPageModel'
 import {
@@ -122,6 +123,10 @@ interface ChatAreaProps {
   hasTrimmedHistory?: boolean
   /** 最近一次已完成压缩的时间戳；有值时在消息流末尾显示「历史已压缩」分隔条 */
   compactedAt?: number
+  /** 该会话是否正在压缩;为真时在消息流末尾显示「正在压缩…」提示 */
+  compactionRunning?: boolean
+  /** 压缩摘要的流式尾部文本(仅用于「正在压缩」时的实时反馈) */
+  compactionDelta?: string
   onLoadMore?: () => void | Promise<void>
   /** 展开被压缩的历史轮次时，按需回拉该轮完整过程内容 */
   onHydrateTurn?: (turnUserMessageId: string) => void | Promise<void>
@@ -463,6 +468,8 @@ export const ChatArea = memo(
         hasMoreHistory = false,
         hasTrimmedHistory = false,
         compactedAt,
+        compactionRunning,
+        compactionDelta,
         onLoadMore,
         onHydrateTurn,
         onUndo,
@@ -1548,6 +1555,32 @@ export const ChatArea = memo(
             {/* 压缩分隔条：仅在「最后一次压缩晚于当前最后一条消息」时显示在消息流末尾。
                 一旦用户又发了新消息，说明压缩点已经不在末尾，分隔条自然消失，
                 避免它一直悬在最新对话下方造成误解。 */}
+            {/* 压缩进行中:给出「正在压缩…」反馈。压缩可能持续几十秒,没有反馈
+                用户会以为点击没生效而反复点。completed/failed 事件到达后自动消失。 */}
+            {compactionRunning && (
+              <div className={`w-full mx-auto ${paddingClass}`} style={chatContentMaxWidthStyle}>
+                <div
+                  className="flex items-center gap-3 py-2 text-ui-sm text-text-400"
+                  data-compaction-running
+                >
+                  <span className="flex-1 h-px bg-border-200/70" />
+                  <span className="shrink-0 leading-none flex items-center gap-1.5">
+                    <Spinner size="xs" />
+                    {t('message:system.compacting')}
+                  </span>
+                  <span className="flex-1 h-px bg-border-200/70" />
+                </div>
+                {compactionDelta ? (
+                  <div
+                    className="mx-auto mb-2 max-h-16 overflow-hidden whitespace-pre-wrap break-words rounded-lg bg-bg-200/60 px-3 py-2 text-ui-sm text-text-300"
+                    data-compaction-delta
+                  >
+                    {compactionDelta}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
             {shouldShowCompactionDivider(visibleMessages, compactedAt) && (
               <div className={`w-full mx-auto ${paddingClass}`} style={chatContentMaxWidthStyle}>
                 <div className="flex items-center gap-3 py-2 text-ui-sm text-text-400" data-compaction-divider>

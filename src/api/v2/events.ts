@@ -98,6 +98,26 @@ function normalizeQuestionRequest(request: Record<string, unknown>): Record<stri
 }
 
 /**
+ * ⚠️ 与官方 `/api/event` 的 `V2Event` 联合(100 个 type)对齐时的已知偏差。
+ *
+ * 下面这些 `case` 在当前 v2 原生传输上**永远不会命中**(服务端不推),保留只为兼容
+ * 其它传输(aiagent 网关 / 旧 SDK 事件名)。改动本文件时不要把它们当作「已验证的活路径」:
+ *
+ *   - `session.updated`         → 官方联合只有 `session.created` / `session.metadata.updated`
+ *   - `session.usage.recorded`  → 只在 durable 日志联合里,不进 `/api/event`(见该 case 注释)
+ *   - `message.part.updated`    → 官方 v2 用 `session.text.*` / `session.reasoning.*`
+ *     (原「压缩 part」路径依赖的 `tail_start_id` 在当前服务端已不存在)
+ *   - `question.*` / `question.v2.*` → v2 已改用 `form.created/replied/cancelled`(本文件也已映射)
+ *   - `lsp.updated`             → 官方联合里没有
+ *
+ * 反向的缺口(官方有、这里没接)集中在:`session.compaction.delta`、
+ * `session.inbox.delivered/delivery.changed`、`session.step.first-token`、
+ * `session.tool.input.delta/ended`、`session.revert.*`、`session.permissions`、
+ * `session.agent.selected` / `session.model.selected`、`session.shell.*`。
+ * 其中前四项已按需接入(见对应 case),其余靠消息列表标记或整页重拉收敛。
+ */
+
+/**
  * 把 v2 的 V2Event 映射为 v1 GlobalEvent。
  * @param raw v2 事件对象
  */
@@ -226,14 +246,11 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
     //
     // interrupted 带 reason（user | shutdown | superseded | inactivity）：
     // 用户主动停止和「服务端重启打断」在界面上是两回事，带上它才能区分。
-    case 'session.execution.succeeded': {
-      const outcome = str(data.outcome)
-      return globalEvent(directory, EventTypes.SESSION_IDLE, {
-        sessionID,
-        timestamp: eventCreated,
-        ...(outcome === 'failed' ? { outcome: 'failed' as const } : {}),
-      })
-    }
+    // ⚠️ 官方 `session.execution.succeeded` 的 data 只有 `{ sessionID }`:
+    // 旧实现读 `data.outcome`(不存在),那条 `outcome === 'failed'` 分支永远
+    // 不触发,是死代码。失败走独立的 `session.execution.failed`。
+    case 'session.execution.succeeded':
+      return globalEvent(directory, EventTypes.SESSION_IDLE, { sessionID, timestamp: eventCreated })
     case 'session.execution.interrupted': {
       const reason = str(data.reason)
       return globalEvent(directory, EventTypes.SESSION_IDLE, {
@@ -284,6 +301,14 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         created,
         text: str(payload.text) ?? '',
       })
+    }
+
+    // 入队项被 runner 取走(开始执行)。与 enqueued 配对:界面据此摘掉「排队中」。
+    // 不接它的话,一条已经开跑的消息会一直挂着「排队中」。
+    case 'session.inbox.delivered': {
+      const inboxID = str(data.inboxID) ?? ''
+      if (!inboxID) return null
+      return globalEvent(directory, EventTypes.SESSION_INBOX_DELIVERED, { sessionID, inboxID })
     }
 
     case 'session.inbox.cancelled': {
@@ -671,12 +696,18 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         requestID: str(data.requestID) ?? str(data.id) ?? '',
       })
 
+    // 官方载荷形状:pty.created/updated = `{ info }`,pty.exited = `{ id, exitCode }`。
+    // 旧实现一律发 `{ info: data.pty ?? data }`:created/updated 会多套一层
+    // (`{ info: { info: ... } }`),exited 又把 `{ id, exitCode }` 塞进 info —— 形状全错。
     case 'pty.created':
-      return globalEvent(directory, EventTypes.PTY_CREATED, { info: data.pty ?? data })
+      return globalEvent(directory, EventTypes.PTY_CREATED, { info: rec(data.info ?? data.pty ?? data) })
     case 'pty.updated':
-      return globalEvent(directory, EventTypes.PTY_UPDATED, { info: data.pty ?? data })
+      return globalEvent(directory, EventTypes.PTY_UPDATED, { info: rec(data.info ?? data.pty ?? data) })
     case 'pty.exited':
-      return globalEvent(directory, EventTypes.PTY_EXITED, { info: data.pty ?? data })
+      return globalEvent(directory, EventTypes.PTY_EXITED, {
+        id: str(data.id) ?? '',
+        ...(num(data.exitCode) != null ? { exitCode: num(data.exitCode) } : {}),
+      })
     case 'pty.deleted':
       return globalEvent(directory, EventTypes.PTY_DELETED, { id: str(data.id) ?? '' })
 
@@ -702,6 +733,8 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         sessionID,
         status: 'started',
         reason: str(data.reason),
+        // 压缩边界 id(= 压缩消息 id)。上游 schema 明确提供,别丢。
+        ...(str(data.inputID) ? { inputID: str(data.inputID) } : {}),
       })
     // v2 压缩成功：携带压缩摘要文本，落定后需要刷新消息列表才能看到压缩分隔与
     // 精简后的历史。失败（如 "Nothing to compact yet"）同样要提示，否则用户点了
@@ -722,6 +755,11 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
         recentChars: (str(data.recent) ?? '').length,
         time: eventCreated ?? Date.now(),
       })
+    case 'session.compaction.delta': {
+      const text = str(data.text) ?? str(data.delta) ?? ''
+      if (!sessionID || !text) return null
+      return globalEvent(directory, EventTypes.SESSION_COMPACTION_DELTA, { sessionID, text })
+    }
     case 'session.compaction.failed':
       return globalEvent(directory, EventTypes.SESSION_COMPACTED, {
         sessionID,
@@ -744,6 +782,10 @@ export function v2EventToGlobalEvent(raw: unknown): GlobalEvent | null {
      * 实测该事件在当前后端（v2.2.0）的普通对话流里**不出现**，属于低频路径；
      * 接它是为了在真的出现时不被静默丢弃。
      */
+    // ⚠️ 死路:该事件只存在于 durable 日志联合,不在官方 `/api/event` 的 V2Event 里,
+    // 服务端永不推送;OCC 也不读 durable replay(`api/seqGap.ts` 记载该端点不回放历史)。
+    // 因此下游 `compactionUsage` 快照在当前传输上恒为空 —— 「压缩后上下文」改为用
+    // 消息列表里的压缩记录 id 做**位置边界**(见 messageStore.setCompactionBoundary)。
     case 'session.usage.recorded': {
       const tokens = adaptTokenUsage(data.tokens)
       if (!tokens) return null

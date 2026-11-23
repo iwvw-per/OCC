@@ -266,6 +266,21 @@ export async function nativeListInbox(serverId: string | undefined, sessionID: s
 }
 
 /**
+ * 原生撤销一条**尚未投递**的入队项(v2 `session.inbox.cancel`)。
+ *
+ * 与 `nativeListInbox` 配对:列表给出「还在排队的有哪些」,这里把它们撤掉。
+ * 服务端随后推 `session.inbox.cancelled`,本地以该事件(或队列快照)收敛。
+ */
+export async function nativeCancelInbox(
+  serverId: string | undefined,
+  sessionID: string,
+  inboxID: string,
+): Promise<void> {
+  const client = getV2Client(serverId)
+  await client.session.inbox.cancel({ sessionID, inboxID })
+}
+
+/**
  * 原生获取会话活跃上下文（v2 session.context）。
  *
  * 返回「最后一次压缩之后」的消息，也就是**真正发给模型的那一段**。用它算上下文

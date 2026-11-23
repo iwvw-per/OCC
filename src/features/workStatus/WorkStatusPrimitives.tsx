@@ -200,6 +200,16 @@ export function WorkStatusRows({ children, className }: { children: ReactNode; c
   return <div className={cn('flex flex-col', className)}>{children}</div>
 }
 
+/**
+ * 板块内**嵌套分组**用的滚动行容器。
+ *
+ * ⚠️ 必须显式写 `overflow-x-hidden`。只写 `overflow-y-auto` 时,按 CSS 规则另一轴
+ * 会被算成 `auto`;而嵌套板块的分隔线用的是 `before:inset-x-[-0.625rem]`(为了在
+ * 面板里做通栏而外扩的横向负边距),会横向溢出 —— 表现就是「这些分组能左右滚动」。
+ * 面板本体有 overflow-x-hidden 兜底,但嵌套在行容器里的分组没有。
+ */
+export const WORK_STATUS_SCROLL_ROWS = 'max-h-56 overflow-y-auto overflow-x-hidden'
+
 export type WorkStatusTone = 'default' | 'muted' | 'success' | 'error' | 'warning' | 'info'
 
 const TONE_CLASS: Record<Exclude<WorkStatusTone, 'default' | 'muted'>, string> = {

@@ -11,6 +11,7 @@ import {
   nativeUpdateSession,
   nativeRemoveSession,
   nativeInterruptSession,
+  nativeCancelInbox,
   nativeBackgroundSession,
   nativeRevertMessage,
   nativeUnrevertSession,
@@ -390,6 +391,23 @@ export async function deleteSession(sessionId: string, _directory?: string, serv
 /**
  * 中止 session
  */
+/**
+ * 撤销一条尚未投递的入队用户消息(v2 `session.inbox.cancel`)。
+ *
+ * 为什么需要:排队中的消息在界面上给出「取消」入口。此前用户只有两条路 ——
+ * 中止整个会话(代价太大),或眼睁睁看它在前一轮结束后被执行。
+ */
+export async function cancelInboxItem(
+  sessionId: string,
+  inboxID: string,
+  _directory?: string,
+  serverId?: string,
+): Promise<boolean> {
+  const target = resolveSessionTarget(sessionId, serverId)
+  await nativeCancelInbox(target.serverId, target.sessionId, inboxID)
+  return true
+}
+
 export async function abortSession(sessionId: string, _directory?: string, serverId?: string): Promise<boolean> {
   const target = resolveSessionTarget(sessionId, serverId)
   return nativeInterruptSession(target.serverId, target.sessionId)

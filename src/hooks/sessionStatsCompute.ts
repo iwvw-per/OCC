@@ -102,7 +102,7 @@ export function computeSessionStats(
   contextLimit: number = 0,
   compactionUsage?: CompactionUsageHint,
   sessionUsage?: { tokens: TokenUsage; cost: number },
-  _compactionMarker?: CompactionMarker,
+  compactionMarker?: CompactionMarker,
   contextUsageSnapshot?: { tokens: TokenUsage; cost: number; at: number },
 ): SessionStats {
   // v2 的 assistant 消息在流式/出错时 tokens 可能缺省（undefined）；防御性读取，
@@ -233,7 +233,13 @@ export function computeSessionStats(
   const lastTurnIsCompactionSummary = Boolean(
     lastAssistant && (lastAssistant.info as AssistantMessageInfo).summary,
   )
+  const compactionBoundaryId = compactionMarker?.id
+  const measuredPredatesCompaction =
+    compactionBoundaryId != null &&
+    lastAssistantWithTokens != null &&
+    lastAssistantWithTokens.id < compactionBoundaryId
   const compactionAfterMeasured =
+    measuredPredatesCompaction ||
     (compactionAt !== null && typeof lastMeasuredAt === 'number' && lastMeasuredAt < compactionAt) ||
     lastTurnIsCompactionSummary
   const measuredContext =
@@ -301,6 +307,7 @@ const sessionStatsMemo = new WeakMap<
     contextLimit: number
     compactionAt?: number
     markerAt?: number
+    markerId?: string
     snapshotKey?: string
     usageKey?: string
     stats: SessionStats
@@ -329,6 +336,9 @@ export function computeSessionStatsCached(
     // 压缩标记的 `at` 单独参与缓存键：v2 的压缩只更新标记（不发事件），
     // 若只比 compactionUsage.at，marker 变化永远不会让缓存失效。
     cached.markerAt === compactionMarker?.at &&
+    // marker 的 id(压缩边界)也要进缓存键:压缩进行中只更新 id、at 可能不变,
+    // 不比 id 的话圆环会停在缓存里的旧值。
+    cached.markerId === compactionMarker?.id &&
     // 上下文快照在后到达（backfill 是异步的）：不参与缓存键的话，
     // 快照落地后圆环会一直停在字符估算值上。
     cached.snapshotKey === snapshotKey &&
@@ -348,6 +358,7 @@ export function computeSessionStatsCached(
     contextLimit,
     compactionAt: compactionUsage?.at,
     markerAt: compactionMarker?.at,
+    markerId: compactionMarker?.id,
     snapshotKey,
     usageKey,
     stats,

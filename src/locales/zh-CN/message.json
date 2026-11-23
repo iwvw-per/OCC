@@ -117,6 +117,7 @@
     "retryable": "可重试",
     "statusCode": "状态码：{{code}}",
     "contextCompacted": "历史已压缩",
+    "compacting": "正在压缩…",
     "autoPrefix": "自动",
     "filesChanged": "{{count}} 个文件变更",
     "filesChanged_other": "{{count}} 个文件变更"

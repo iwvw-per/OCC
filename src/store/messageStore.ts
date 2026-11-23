@@ -31,7 +31,7 @@ import {
   finalizeStreamingMessages,
   computeTrimCount,
 } from './messageToolSettle'
-import type { RevertState, RevertHistoryItem, SessionState, SendRollbackSnapshot } from './messageStoreTypes'
+import type { RevertState, RevertHistoryItem, QueuedInboxItem, SessionState, SendRollbackSnapshot } from './messageStoreTypes'
 
 // Re-export types for consumers
 export type { RevertState, RevertHistoryItem, SessionState, SendRollbackSnapshot } from './messageStoreTypes'
@@ -67,6 +67,10 @@ const MAX_SESSION_MESSAGE_BYTES = 12 * 1024 * 1024
 const MAX_SESSION_MESSAGE_COUNT = 20_000
 /** D5：单会话乱序 delta 待回放键上限（超出丢最旧，防无界增长） */
 const MAX_PENDING_DELTAS = 256
+/** 「正在压缩」实时摘要只保留的尾部字符数(纯展示,不保存整份摘要) */
+const COMPACTION_DELTA_KEEP = 1200
+/** 单会话「排队中」最多保留条数(纯 UI 投影,有界即可) */
+const QUEUED_INBOX_MAX = 20
 
 /**
  * 用量总量（各字段之和）。
@@ -762,7 +766,7 @@ class MessageStore {
       shareUrl?: string
       loadError?: MessageError
       compactedAt?: number
-      compactionMarker?: { at: number; summaryChars: number; recentChars: number }
+      compactionMarker?: { at: number; id?: string; summaryChars: number; recentChars: number }
       /** 会话绑定的模型（服务端权威） */
       model?: { providerID: string; modelID: string; variant?: string }
       /** 会话绑定的 agent（服务端权威） */
@@ -1030,7 +1034,7 @@ class MessageStore {
    */
   recordCompactionResult(
     sessionId: string,
-    options: { summaryChars?: number; recentChars?: number; tokens?: TokenUsage; cost?: number; at?: number },
+    options: { summaryChars?: number; recentChars?: number; id?: string; tokens?: TokenUsage; cost?: number; at?: number },
   ) {
     sessionId = this.resolveKey(sessionId)
     const state = this.sessions.get(sessionId)
@@ -1039,6 +1043,9 @@ class MessageStore {
     if (options.summaryChars !== undefined || options.recentChars !== undefined) {
       state.compactionMarker = {
         at,
+        // 完成事件不带 id(started 才带):必须保留 started 落下的边界,否则
+        // 「完成 → 消息列表重拉」之间会有一段边界丢失的空窗,圆环会闪回旧值。
+        id: options.id ?? state.compactionMarker?.id,
         summaryChars: options.summaryChars ?? 0,
         recentChars: options.recentChars ?? 0,
       }
@@ -1048,6 +1055,120 @@ class MessageStore {
       state.compactionUsage = { tokens: options.tokens, cost: options.cost, at }
     }
     if (state.compactedAt === undefined || at > state.compactedAt) state.compactedAt = at
+    this.notify([sessionId])
+  }
+
+  /**
+   * 标记某会话是否正在压缩。
+   *
+   * 压缩可能要 30~60s(要把整段对话发给模型生成摘要)。期间必须有可见反馈,
+   * 否则用户会以为点击没生效而反复点。完成 / 失败 / 会话结束都会清除。
+   */
+  setCompactionRunning(sessionId: string, running: boolean) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state || state.compactionRunning === running) return
+    state.compactionRunning = running
+    // 压缩结束:清掉摘要流式文本,避免残留到下一轮。
+    if (!running) state.compactionDelta = undefined
+    this.notify([sessionId])
+  }
+
+  /**
+   * 追加压缩摘要的流式增量(`session.compaction.delta`)。
+   *
+   * 只保留**末尾** `COMPACTION_DELTA_KEEP` 个字符:目的是给「正在压缩」一个
+   * 持续更新的内容反馈,而不是保存整份摘要(摘要可达数千字符,多会话并发时
+   * 全量保存纯属浪费)。保留尾部才能让界面看起来一直在推进。
+   */
+  appendCompactionDelta(sessionId: string, text: string) {
+    if (!text) return
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    const next = (state.compactionDelta ?? '') + text
+    state.compactionDelta = next.length > COMPACTION_DELTA_KEEP ? next.slice(-COMPACTION_DELTA_KEEP) : next
+    this.notify([sessionId])
+  }
+
+  /**
+   * 只落「压缩边界 id」,不动 compactedAt(分隔条必须等压缩完成才出现)。
+   *
+   * 边界来自 `session.compaction.started.inputID`(= 压缩消息 id)。用它比较消息
+   * id 的先后,就能在压缩还没跑完时立刻判定「最后一条带 tokens 的 assistant 是
+   * 压缩前的」,从而让圆环立即作废旧值。
+   */
+  setCompactionBoundary(sessionId: string, id: string) {
+    if (!id) return
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+    const prev = state.compactionMarker
+    if (prev?.id === id) return
+    state.compactionMarker = {
+      at: prev?.at ?? 0,
+      id,
+      summaryChars: prev?.summaryChars ?? 0,
+      recentChars: prev?.recentChars ?? 0,
+    }
+    this.notify([sessionId])
+  }
+
+  /**
+   * 压缩失败时撤掉边界。
+   *
+   * 否则 `started` 落下的边界会残留:压缩其实没执行,压缩前的实测值仍然有效,
+   * 却被判成「压缩之前」而清成未知 —— 这时显示旧值才是对的。
+   */
+  clearCompactionBoundary(sessionId: string) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    const prev = state?.compactionMarker
+    if (!state || !prev?.id) return
+    state.compactionMarker = { ...prev, id: undefined }
+    this.notify([sessionId])
+  }
+
+  /**
+   * 记录一条「已入队、尚未投递」的用户消息(`session.inbox.enqueued`)。
+   *
+   * 幂等:同一 inboxID 重复到达(enqueued 是 durable,重连会补发)只保留一条。
+   * 有界:单会话最多 QUEUED_INBOX_MAX 条,超出丢最旧的(纯 UI 投影,丢一点不致命)。
+   */
+  enqueueQueuedInbox(sessionId: string, item: QueuedInboxItem) {
+    if (!item.id) return
+    sessionId = this.resolveKey(sessionId, true)
+    const state = this.ensureSession(sessionId)
+    const list = state.queuedInbox ? [...state.queuedInbox] : []
+    const at = list.findIndex(q => q.id === item.id)
+    if (at >= 0) list[at] = item
+    else list.push(item)
+    while (list.length > QUEUED_INBOX_MAX) list.shift()
+    state.queuedInbox = list
+    this.notify([sessionId])
+  }
+
+  /** 用服务端队列快照整体替换(`session.inbox.list`,重连恢复用) */
+  setQueuedInbox(sessionId: string, items: QueuedInboxItem[]) {
+    sessionId = this.resolveKey(sessionId, true)
+    const state = this.ensureSession(sessionId)
+    const bounded = items.length > QUEUED_INBOX_MAX ? items.slice(-QUEUED_INBOX_MAX) : items
+    const prev = state.queuedInbox
+    // 内容一致就不通知,避免重连时不必要地整片重渲
+    if (prev && prev.length === bounded.length && prev.every((q, i) => q.id === bounded[i].id)) return
+    state.queuedInbox = bounded.length ? bounded : undefined
+    this.notify([sessionId])
+  }
+
+  /** 入队项被取走 / 被撤销:从「排队中」移除(`session.inbox.delivered` / `.cancelled`) */
+  removeQueuedInbox(sessionId: string, inboxID: string) {
+    sessionId = this.resolveKey(sessionId)
+    const state = this.sessions.get(sessionId)
+    const list = state?.queuedInbox
+    if (!state || !list?.length) return
+    const rest = list.filter(q => q.id !== inboxID)
+    if (rest.length === list.length) return
+    state.queuedInbox = rest.length ? rest : undefined
     this.notify([sessionId])
   }
 
@@ -1316,7 +1437,7 @@ class MessageStore {
       revertState?: ApiSession['revert'] | null
       shareUrl?: string
       compactedAt?: number
-      compactionMarker?: { at: number; summaryChars: number; recentChars: number }
+      compactionMarker?: { at: number; id?: string; summaryChars: number; recentChars: number }
     },
   ) {
     sessionId = this.resolveKey(sessionId, true)
@@ -1335,6 +1456,13 @@ class MessageStore {
         isStreaming: previous.isStreaming || next.isStreaming,
       }
     })
+    // 收敛:出现在服务端消息列表里的入队项已经投递完成,从「排队中」摘掉。
+    // (delivered 事件丢失时靠这一条保证最终一致,「排队中」不会挂死。)
+    if (state.queuedInbox?.length) {
+      const present = new Set(state.messages.map(m => m.info.id))
+      const rest = state.queuedInbox.filter(item => !present.has(item.id))
+      state.queuedInbox = rest.length ? rest : undefined
+    }
     state.loadState = 'loaded'
     state.loadError = undefined
     state.hasMoreHistory = options?.hasMoreHistory ?? false
@@ -1821,7 +1949,10 @@ class MessageStore {
     }
     const part = msg.content[partIndex]
 
-    if (!(data.field === 'text' && 'text' in part)) return // Mutable 修改：直接拼接 text，不做不可变拷贝。
+    // text / reasoning 的正文都落在 part.text 上,两者都要追加。
+    // (旧实现只放行 field==='text',reasoning 增量被静默丢弃 → 思考内容不流式。)
+    // Mutable 修改:直接拼接 text,不做不可变拷贝。
+    if ((data.field !== 'text' && data.field !== 'reasoning') || !('text' in part)) return
     // 一帧内可能收到多个 delta，只有最后的状态会被 React 看到。
     // flushDirtyMessages() 会在 notify 的 rAF 回调中统一生成新引用。
 
@@ -1852,7 +1983,7 @@ class MessageStore {
     sessionKey: string,
     data: { messageID: string; partID: string; field: string; delta: string },
   ) {
-    if (data.field !== 'text') return
+    if (data.field !== 'text' && data.field !== 'reasoning') return
     let bySession = this.pendingDeltas.get(sessionKey)
     if (!bySession) {
       bySession = new Map<string, string>()
@@ -1885,7 +2016,7 @@ class MessageStore {
 
     for (const [key, delta] of bySession) {
       const [messageID, partID, field] = key.split('\0')
-      if (field !== 'text') continue
+      if (field !== 'text' && field !== 'reasoning') continue
       const msgIndex = messageIndex.get(messageID)
       if (msgIndex === undefined) {
         remaining.set(key, delta)
@@ -1968,6 +2099,7 @@ class MessageStore {
     if (!state) return
 
     state.isStreaming = false
+    state.compactionRunning = false
     const completedAt = Date.now()
     const { messages, changed } = finalizeStreamingMessages(state.messages, completedAt)
     if (changed) state.messages = messages

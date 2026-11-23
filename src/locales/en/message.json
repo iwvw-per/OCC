@@ -143,6 +143,7 @@
     "retryable": "Retryable",
     "statusCode": "Status: {{code}}",
     "contextCompacted": "History compacted",
+    "compacting": "Compacting…",
     "autoPrefix": "auto-",
     "filesChanged": "{{count}} file changed",
     "filesChanged_other": "{{count}} files changed"

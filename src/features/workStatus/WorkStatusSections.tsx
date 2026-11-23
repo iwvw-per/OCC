@@ -45,6 +45,7 @@ import {
   WorkStatusRows,
   WorkStatusSection,
   WorkStatusValue,
+  WORK_STATUS_SCROLL_ROWS,
 } from './WorkStatusPrimitives'
 import { collectBackgroundJobs, excludeRegisteredSubagentJobs, type BackgroundJob } from './backgroundJobs'
 import { BackgroundJobDialog } from './BackgroundJobDialog'
@@ -292,7 +293,7 @@ export const WorkStatusSubagentsSection = memo(function WorkStatusSubagentsSecti
         id="subagents"
         summary={runningCount > 0 ? `${runningCount}/${children.length}` : String(children.length)}
       >
-        <WorkStatusRows className="max-h-56 overflow-y-auto">
+        <WorkStatusRows className={WORK_STATUS_SCROLL_ROWS}>
           {active.map(renderRow)}
           {completed.length > 0 ? (
             // 默认收起（workStatusStore 对未登记的 id 缺省为 false），展开态照常持久化
@@ -480,7 +481,7 @@ export const WorkStatusBackgroundJobsSection = memo(function WorkStatusBackgroun
           ) : undefined
         }
       >
-        <WorkStatusRows className="max-h-56 overflow-y-auto">
+        <WorkStatusRows className={WORK_STATUS_SCROLL_ROWS}>
           {running.length > 0 ? (
             <WorkStatusCollapsibleSection
               id="backgroundJobs-running"
@@ -767,7 +768,7 @@ export const WorkStatusPluginsSection = memo(function WorkStatusPluginsSection({
         </WorkStatusRowAction>
       }
     >
-      <WorkStatusRows className="max-h-56 overflow-y-auto">
+      <WorkStatusRows className={WORK_STATUS_SCROLL_ROWS}>
         {sorted.map(plugin => {
           const failed = plugin.state.status === 'failed'
           // package 类型把版本放右侧；有更新可装时单独标出来

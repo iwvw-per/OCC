@@ -33,6 +33,7 @@ describe('findCompactionMarker', () => {
     const marker = findCompactionMarker([compactionEntry()])
 
     expect(marker?.at).toBe(1_700_000_000_000)
+    expect(marker?.id).toBe('msg_compaction')
     expect(marker?.summaryChars).toBeGreaterThan(0)
     expect(marker?.recentChars).toBe(4000)
   })

@@ -81,6 +81,11 @@ export interface CompactionTokenUsage {
 
 export interface SessionCompactedPayload {
   sessionID: string
+  /**
+   * 服务端给出的压缩边界 id(`session.compaction.started.inputID`,= 压缩消息 id)。
+   * 用它可提前作废「压缩前」的实测上下文,不必等消息列表重拉。
+   */
+  inputID?: string
   status: 'started' | 'completed' | 'failed'
   reason?: 'auto' | 'manual'
   error?: string
@@ -137,8 +142,19 @@ export type SessionDiffPayload = SDKEventSessionDiff['properties']
 /** message.part.delta 载荷（v2 原生） */
 export interface PartDeltaPayload {
   sessionID: string
-  assistantMessageID: string
-  ordinal: number
+  /** 目标消息 id(v2 映射后的字段名;原始字段是 assistantMessageID)。 */
+  messageID?: string
+  /**
+   * 目标 part id。v2 映射按 `${messageID}-{text|reasoning}-${ordinal}` **预拼好**,
+   * 消费端必须直接使用 —— 映射不转发 ordinal,重算会得到 `...-text-undefined`。
+   */
+  partID?: string
+  /** 目标 part 字段:`text` 或 `reasoning`。 */
+  field?: string
+  /** @deprecated 旧形状:消息 id(等价 messageID) */
+  assistantMessageID?: string
+  /** @deprecated 旧形状:段序号。新形状请用 partID。 */
+  ordinal?: number
   delta?: string
 }
 
@@ -236,8 +252,12 @@ export const EventTypes = {
   SESSION_STATUS: 'session.status',
   SESSION_DIFF: 'session.diff',
   SESSION_COMPACTED: 'session.compacted',
+  /** v2 压缩摘要的流式文本(`session.compaction.delta`):给「正在压缩」实时内容 */
+  SESSION_COMPACTION_DELTA: 'session.compaction.delta',
   /** v2 用户消息入队（session.inbox.enqueued）：让所有端实时看到这条用户消息 */
   SESSION_INBOX_ENQUEUED: 'session.inbox.enqueued',
+  /** v2 入队项被 runner 取走(session.inbox.delivered):「排队中」应摘掉 */
+  SESSION_INBOX_DELIVERED: 'session.inbox.delivered',
   /** v2 会话累计用量（tokens / cost），不随消息裁剪变化 */
   SESSION_USAGE_UPDATED: 'session.usage.updated',
   /**
@@ -348,8 +368,10 @@ export const EventTypes = {
   | 'session.usage.updated'
   | 'session.viewed'
   | 'session.compaction.usage'
+  | 'session.compaction.delta'
   | 'session.step.streamed'
   | 'session.inbox.enqueued'
+  | 'session.inbox.delivered'
   | 'session.synthetic'
   | 'shell.created'
   | 'shell.exited'
@@ -368,6 +390,8 @@ export interface EventCallbacks {
   /** v2 用户消息入队（session.inbox.enqueued）：让所有端实时看到这条用户消息 */
   onInboxEnqueued?: (data: InboxEnqueuedPayload) => void
   onPartRemoved?: (data: PartRemovedPayload) => void
+  /** v2 入队项被取走(`session.inbox.delivered`):从「排队中」移除 */
+  onInboxDelivered?: (data: { sessionID: string; inboxID: string }) => void
   /** 整条消息被移除（v2 session.inbox.cancelled：入队后被撤销的用户消息） */
   onMessageRemoved?: (data: { sessionID: string; messageID: string }) => void
   onServerConnected?: (data: ServerConnectedPayload) => void
@@ -423,6 +447,8 @@ export interface EventCallbacks {
   onSessionIdle?: (data: SessionIdlePayload) => void
   /** 会话压缩结束（v2）：成功/失败都回调，用于提示与刷新消息 */
   onSessionCompacted?: (data: SessionCompactedPayload) => void
+  /** 压缩摘要流式增量(v2 `session.compaction.delta`,ephemeral) */
+  onSessionCompactionDelta?: (data: { sessionID: string; text: string }) => void
   onSessionUsageUpdated?: (data: SessionUsagePayload) => void
   /** 已读水位变化（v2 `session.viewed`）：其它端读了会话，本端应同步已读 */
   onSessionViewed?: (data: SessionViewedPayload) => void

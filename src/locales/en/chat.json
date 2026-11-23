@@ -574,5 +574,10 @@
     }
   },
   "resumeRefreshing": "Updating…",
-  "resumeUpdated": "Up to date"
+  "resumeUpdated": "Up to date",
+  "queuedInbox": {
+    "title": "Queued ({{count}})",
+    "cancel": "Cancel",
+    "attachmentOnly": "(attachment only)"
+  }
 }

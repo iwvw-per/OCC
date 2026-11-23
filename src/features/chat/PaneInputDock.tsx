@@ -4,7 +4,7 @@
 // 从 ChatPane.tsx 抽出。纯展示 + 转发回调，不持有业务状态。
 // ============================================
 
-import type { RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Trans } from 'react-i18next'
 import { InputBox, type InputBoxProps } from './InputBox'
 import { WelcomeHero, WelcomeProjectPill } from './welcome/WelcomeHero'
@@ -25,6 +25,12 @@ export interface PaneInputDockProps {
   onWelcomeSelectProject: (path: string) => void
   onWelcomeClearProject: () => void
   onWelcomeAddProject: () => void
+  /**
+   * 输入框上方的附件区(绝对定位于框体上方)。
+   *
+   * 目前由「排队中」消息条使用;缺省时回退到欢迎态的项目胶囊。
+   */
+  topAccessory?: ReactNode
 }
 
 export function PaneInputDock({
@@ -42,6 +48,7 @@ export function PaneInputDock({
   onWelcomeSelectProject,
   onWelcomeClearProject,
   onWelcomeAddProject,
+  topAccessory,
 }: PaneInputDockProps) {
   return (
     <div
@@ -91,7 +98,9 @@ export function PaneInputDock({
           {...inputBoxProps}
           hideFooter={showWelcome}
           topAccessory={
-            !showCompactShell ? (
+            // 会话内的上层附件(如「排队中」消息条)优先于欢迎态项目胶囊。
+            topAccessory ??
+            (!showCompactShell ? (
               <WelcomeProjectPill
                 active={showWelcome}
                 directory={welcomeDirectory}
@@ -99,7 +108,7 @@ export function PaneInputDock({
                 onClearProject={onWelcomeClearProject}
                 onAddProject={onWelcomeAddProject}
               />
-            ) : undefined
+            ) : undefined)
           }
         />
       )}

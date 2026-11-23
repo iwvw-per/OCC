@@ -548,6 +548,15 @@ export async function adaptMessagePageAsync(raw: unknown): Promise<{
 export interface CompactionMarker {
   /** 压缩完成时间（消息的 time.created） */
   at: number
+  /**
+   * 这条压缩记录的 id(`msg_...`)。
+   *
+   * 用作「压缩边界」的位置判据:opencode 的消息 id 是 `msg_` + 升序编码的时间戳
+   * (packages/schema/src/identifier.ts),字符串比较即创建先后。用位置而非时间,
+   * 是因为走网关骨架投影时消息的 `time.created` 会被换成轮次时间,与压缩记录的
+   * `time.created` 不同源,比较必然误判。
+   */
+  id?: string
   /** 压缩摘要字符数 */
   summaryChars: number
   /** 保留的近期消息字符数 */
@@ -565,6 +574,7 @@ export function findCompactionMarker(data: unknown[]): CompactionMarker | undefi
     if (marker && created <= marker.at) continue
     marker = {
       at: created,
+      id: str(m.id) || undefined,
       // 轮次骨架路径下，主机 Agent 会把摘要 / 保留消息的**全文**换成字符数
       // （`summaryChars` / `recentChars`），只留计数以省带宽；两条路径都要支持。
       summaryChars: num(m.summaryChars) ?? (str(m.summary) ?? '').length,

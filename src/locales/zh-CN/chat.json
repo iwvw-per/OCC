@@ -574,5 +574,10 @@
     }
   },
   "resumeRefreshing": "正在更新…",
-  "resumeUpdated": "已更新到最新"
+  "resumeUpdated": "已更新到最新",
+  "queuedInbox": {
+    "title": "排队中({{count}})",
+    "cancel": "取消",
+    "attachmentOnly": "(仅附件)"
+  }
 }

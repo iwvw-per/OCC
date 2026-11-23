@@ -13,6 +13,7 @@ import { v2EventToGlobalEvent } from './events'
 import { EventTypes } from '../../types/api/event'
 import { messageStore } from '../../store/messageStore'
 import { sanitizeStreamPart } from '../sanitize'
+import { toPartDeltaInput } from '../../hooks/partDeltaInput'
 
 /** 模拟 events.ts 的 handleEventForSubscriber 拆包分发，把合成事件喂给 messageStore。 */
 function dispatchToStore(g: NonNullable<ReturnType<typeof v2EventToGlobalEvent>>) {
@@ -28,8 +29,11 @@ function dispatchToStore(g: NonNullable<ReturnType<typeof v2EventToGlobalEvent>>
       break
     }
     case EventTypes.MESSAGE_PART_DELTA: {
-      messageStore.handlePartDelta(payload.properties as never)
-      break
+      // ⚠️ 必须走真实消费端映射(useGlobalEvents.onPartDelta 用的正是这个函数):
+      // 直接把 payload.properties 喂 store 会绕开 partID 归一化 —— 这个盲区
+      // 正是「增量落不到 part」长期未被发现的原因。
+      const input = toPartDeltaInput(payload.properties as never)
+      if (input) messageStore.handlePartDelta(input)
     }
   }
 }
@@ -80,6 +84,32 @@ describe('v2 事件流 → messageStore 集成（对话流式渲染）', () => {
     expect(msg.info.agent).toBe('build')
     expect(msg.content).toHaveLength(1)
     expect(msg.content[0]).toMatchObject({ id: 'msg_asst_1-text-0', type: 'text', text: '你好，世界' })
+  })
+
+  it('reasoning 增量同样流式落到 reasoning part(真实消费端映射)', () => {
+    dispatchToStore(v2EventToGlobalEvent(v2StepStarted())!)
+    dispatchToStore(
+      v2EventToGlobalEvent({
+        type: 'session.reasoning.started',
+        data: { sessionID: SESSION_ID, assistantMessageID: 'msg_asst_1', ordinal: 0 },
+        location: { directory: '/w' },
+      })!,
+    )
+    dispatchToStore(
+      v2EventToGlobalEvent({
+        type: 'session.reasoning.delta',
+        data: { sessionID: SESSION_ID, assistantMessageID: 'msg_asst_1', ordinal: 0, delta: '想' },
+      })!,
+    )
+    dispatchToStore(
+      v2EventToGlobalEvent({
+        type: 'session.reasoning.delta',
+        data: { sessionID: SESSION_ID, assistantMessageID: 'msg_asst_1', ordinal: 0, delta: '一下' },
+      })!,
+    )
+
+    const parts = messageStore.getSessionState(SESSION_ID)!.messages[0].content
+    expect(parts[0]).toMatchObject({ id: 'msg_asst_1-reasoning-0', type: 'reasoning', text: '想一下' })
   })
 
   it('多段文本（不同 ordinal）生成独立 part，互不串扰', () => {

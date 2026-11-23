@@ -17,6 +17,7 @@
 
 import { nativeListInbox } from './v2NativeSession'
 import { messageStore } from '../store/messageStore'
+import type { QueuedInboxItem } from '../store/messageStoreTypes'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { makeSessionKey } from '../utils/sessionKey'
 import { rawSessionIdOfKey } from '../store/messagePartMerge'
@@ -58,6 +59,7 @@ export async function recoverPendingInbox(serverId: string): Promise<void> {
       if (!bareId) return
       try {
         const items = await nativeListInbox(serverId, bareId)
+        const queued: QueuedInboxItem[] = []
         for (const item of items) {
           const entry = rec(item)
           if (entry.type !== 'user') continue
@@ -66,11 +68,15 @@ export async function recoverPendingInbox(serverId: string): Promise<void> {
           const payload = rec(entry.payload)
           const text = str(payload.text) ?? ''
           const createdAt = num(rec(entry.time).created) ?? Date.now()
-          // 空文本且无附件：没有可渲染内容，跳过（纯图片消息由 files 表达，
-          // 这里不处理附件，等它投递后走正常消息路径）
+          // 队列视角:纯图片消息(text 为空)也要出现在「排队中」,否则用户看不到、
+          // 也没法取消它。
+          queued.push({ id: inboxID, text, createdAt })
+          // 消息本体:空文本且暂不处理附件时没有可渲染内容,跳过(等投递后走正常路径)
           if (!text) continue
           messageStore.upsertRemoteUserMessage(sessionKey, { messageId: inboxID, text, createdAt })
         }
+        // 队列以服务端快照为准(断连期间 delivered/cancelled 可能丢失)
+        messageStore.setQueuedInbox(sessionKey, queued)
         activeSessionStore.touchSession(makeSessionKey(serverId, bareId))
       } catch (error) {
         logger.warn('[inboxRecovery] failed to recover pending inbox', { sessionKey, error })

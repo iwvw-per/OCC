@@ -94,4 +94,16 @@ describe('WorkStatusSubagentsSection', () => {
     const groupToggle = screen.getByText('workStatus.subagent.completedGroup').closest('button')
     expect(groupToggle).toHaveAttribute('aria-expanded', 'false')
   })
+  it('嵌套分组的滚动容器禁止横向滚动(分隔线负边距会横向外溢)', () => {
+    register('c1', 'running')
+    register('c2', 'idle')
+
+    const { container } = renderSection()
+    const scroller = container.querySelector('[class*="max-h-56"]')
+    expect(scroller).not.toBeNull()
+    // 只写 overflow-y-auto 时另一轴会被算成 auto,而嵌套板块的 before:inset-x-[-.625rem]
+    // 会横向溢出 → 出现左右滚动条。这里锁住显式的 overflow-x-hidden。
+    expect(scroller!.className).toContain('overflow-x-hidden')
+  })
+
 })

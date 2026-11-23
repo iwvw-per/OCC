@@ -94,6 +94,7 @@ const {
     removeSession: vi.fn(),
     replaceServerStatus: vi.fn(),
     getSnapshot: vi.fn(() => ({ statusMap: {} })),
+    touchSession: vi.fn(),
   },
   autoApproveStoreMock: {
     fullAutoMode: 'off' as 'off' | 'session' | 'global',
@@ -152,6 +153,14 @@ vi.mock('../store', () => ({
     hasUnsettledAssistant: vi.fn(() => false),
     settleByAuthoritativeIdle: vi.fn(() => false),
     recordCompactionResult: vi.fn(),
+    setCompactionRunning: vi.fn(),
+    appendCompactionDelta: vi.fn(),
+    upsertRemoteUserMessage: vi.fn(),
+    enqueueQueuedInbox: vi.fn(),
+    removeQueuedInbox: vi.fn(),
+    setQueuedInbox: vi.fn(),
+    setCompactionBoundary: vi.fn(),
+    clearCompactionBoundary: vi.fn(),
     recordSessionUsage: vi.fn(),
     getSessionState: vi.fn(() => null),
     updateSessionMetadata: vi.fn(),
@@ -453,36 +462,29 @@ describe('useGlobalEvents', () => {
     expect(activeSessionStoreMock.updateStatus).not.toHaveBeenCalled()
     expect(messageStore.recordCompactionResult).not.toHaveBeenCalled()
   })
-  it('does not re-interrupt a manual compaction it just started (regression)', async () => {
+it('does not re-interrupt a manual compaction it just started (regression)', async () => {
     let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
     subscribeToEventsMock.mockImplementation(cb => {
       callbacks = cb
       return vi.fn()
     })
     vi.mocked(abortSession).mockClear()
-
-    // 用户手动压缩:handleCommand 已经中断过当前轮次、并乐观置忙。
-    // 此时 started 事件若再次 interrupt,会把刚开始的压缩直接打断
-    // (服务端回 session.compaction.failed / aborted,界面同时弹成功+失败两个 toast)。
-    activeSessionStoreMock.getSnapshot.mockReturnValue({
-      statusMap: { 'local::ses_1': { type: 'busy' } },
-    } as never)
+    vi.mocked(messageStore.setCompactionRunning).mockClear()
+    vi.mocked(messageStore.recordCompactionResult).mockClear()
 
     renderHook(() => useGlobalEvents())
     await waitFor(() => expect(callbacks).toBeDefined())
 
     callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'started', reason: 'manual' })
 
+    // 不 interrupt、不置 idle、不提前推进分隔条 —— 只标「正在压缩」
     expect(vi.mocked(abortSession)).not.toHaveBeenCalled()
-    // 仍然把本地状态收回 idle 并前移分隔条
-    expect(activeSessionStoreMock.updateStatus).toHaveBeenCalledWith('local::ses_1', { type: 'idle' })
-    expect(messageStore.recordCompactionResult).toHaveBeenCalledWith(
-      'local::ses_1',
-      expect.objectContaining({ at: expect.any(Number) }),
-    )
+    expect(activeSessionStoreMock.updateStatus).not.toHaveBeenCalled()
+    expect(messageStore.recordCompactionResult).not.toHaveBeenCalled()
+    expect(messageStore.setCompactionRunning).toHaveBeenCalledWith('local::ses_1', true)
   })
 
-  it('does not idle or finalize a streaming turn when a manual compaction starts (A)', async () => {
+it('does not idle or finalize a streaming turn when a manual compaction starts (A)', async () => {
     let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
     subscribeToEventsMock.mockImplementation(cb => {
       callbacks = cb
@@ -493,6 +495,8 @@ describe('useGlobalEvents', () => {
     } as never)
     // 该会话确有一轮正在流式输出:压缩开始不得把它定稿/置 idle
     vi.mocked(messageStore.getIsStreaming).mockReturnValueOnce(true)
+    vi.mocked(messageStore.setCompactionRunning).mockClear()
+    vi.mocked(messageStore.recordCompactionResult).mockClear()
 
     renderHook(() => useGlobalEvents())
     await waitFor(() => expect(callbacks).toBeDefined())
@@ -501,10 +505,104 @@ describe('useGlobalEvents', () => {
 
     expect(activeSessionStoreMock.updateStatus).not.toHaveBeenCalled()
     expect(messageStore.handleSessionIdle).not.toHaveBeenCalled()
-    expect(messageStore.recordCompactionResult).toHaveBeenCalledWith(
-      'local::ses_1',
-      expect.objectContaining({ at: expect.any(Number) }),
-    )
+    // 关键回归:开始压缩时**不能**推进 compactedAt(否则界面直接显示「历史已压缩」)
+    expect(messageStore.recordCompactionResult).not.toHaveBeenCalled()
+    expect(messageStore.setCompactionRunning).toHaveBeenCalledWith('local::ses_1', true)
+  })
+
+  it('clears the compacting indicator when a manual compaction completes', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    vi.mocked(messageStore.setCompactionRunning).mockClear()
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'completed', reason: 'manual' })
+
+    expect(messageStore.setCompactionRunning).toHaveBeenCalledWith('local::ses_1', false)
+  })
+
+  it('clears the compacting indicator when a compaction fails', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    vi.mocked(messageStore.setCompactionRunning).mockClear()
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'failed', reason: 'manual', error: 'x' })
+
+    expect(messageStore.setCompactionRunning).toHaveBeenCalledWith('local::ses_1', false)
+  })
+
+  it('压缩 started 带 inputID 时落下边界;失败时撤掉边界', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    vi.mocked(messageStore.setCompactionBoundary).mockClear()
+    vi.mocked(messageStore.clearCompactionBoundary).mockClear()
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompacted?.({
+      sessionID: 'ses_1',
+      status: 'started',
+      reason: 'manual',
+      inputID: 'msg_c',
+    })
+    expect(messageStore.setCompactionBoundary).toHaveBeenCalledWith('local::ses_1', 'msg_c')
+
+    callbacks!.onSessionCompacted?.({ sessionID: 'ses_1', status: 'failed', reason: 'manual', error: 'x' })
+    expect(messageStore.clearCompactionBoundary).toHaveBeenCalledWith('local::ses_1')
+  })
+
+  it('入队/投递:排队项随 enqueued 登记、delivered 摘除', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    vi.mocked(messageStore.enqueueQueuedInbox).mockClear()
+    vi.mocked(messageStore.removeQueuedInbox).mockClear()
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onInboxEnqueued?.({ sessionID: 'ses_1', inboxID: 'msg_q', created: 123, text: 'hi' })
+    expect(messageStore.enqueueQueuedInbox).toHaveBeenCalledWith('local::ses_1', {
+      id: 'msg_q',
+      text: 'hi',
+      createdAt: 123,
+    })
+
+    callbacks!.onInboxDelivered?.({ sessionID: 'ses_1', inboxID: 'msg_q' })
+    expect(messageStore.removeQueuedInbox).toHaveBeenCalledWith('local::ses_1', 'msg_q')
+  })
+
+  it('compaction.delta 走 appendCompactionDelta(压缩摘要实时反馈)', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    vi.mocked(messageStore.appendCompactionDelta).mockClear()
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionCompactionDelta?.({ sessionID: 'ses_1', text: '## Objective' })
+
+    expect(messageStore.appendCompactionDelta).toHaveBeenCalledWith('local::ses_1', '## Objective')
   })
 
   it('invalidates cached messages when a manual compaction succeeds', async () => {

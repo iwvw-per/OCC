@@ -20,7 +20,7 @@ function v2Page() {
     data: [
       // desc（最新在前），与 v2 message.list 一致
       {
-        id: 'msg_after',
+        id: 'msg_c3',
         type: 'assistant',
         time: { created: COMPACTION_AT + 60_000 },
         agent: 'build',
@@ -28,7 +28,7 @@ function v2Page() {
         content: [{ type: 'text', text: 'after compaction' }],
       },
       {
-        id: 'msg_compaction',
+        id: 'msg_b2',
         type: 'compaction',
         status: 'completed',
         reason: 'manual',
@@ -41,7 +41,7 @@ function v2Page() {
         tokens: { input: 342_383, output: 2443, reasoning: 0, cache: { read: 577_024, write: 0 } },
       },
       {
-        id: 'msg_before',
+        id: 'msg_a1',
         type: 'assistant',
         time: { created: COMPACTION_AT - 60_000 },
         agent: 'build',
@@ -59,6 +59,7 @@ describe('compaction marker end-to-end', () => {
     expect(page.compactedAt).toBe(COMPACTION_AT)
     expect(page.compaction).toEqual({
       at: COMPACTION_AT,
+      id: 'msg_b2',
       summaryChars: 5442,
       recentChars: 92_322,
     })
@@ -73,7 +74,7 @@ describe('compaction marker end-to-end', () => {
     const afterMessages = [
       {
         info: {
-          id: 'msg_after',
+          id: 'msg_c3',
           role: 'assistant',
           sessionID: 's',
           time: { created: COMPACTION_AT + 60_000 },

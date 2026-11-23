@@ -82,6 +82,7 @@ vi.mock('../store', () => ({
     getIdleGeneration: vi.fn(() => 0),
     handleSessionIdle: vi.fn(),
     recordCompactionResult: vi.fn(),
+    setCompactionRunning: vi.fn(),
     getIsStreaming: vi.fn(() => false),
   },
   useSessionFamily: (sessionId: string | null) => useSessionFamilyMock(sessionId),

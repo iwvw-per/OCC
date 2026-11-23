@@ -774,3 +774,77 @@ describe('session.usage.recorded（压缩用量的耐久记录）', () => {
     expect(p).toBeNull()
   })
 })
+
+describe('v2 事件载荷形状(与官方 schema 对齐)', () => {
+  it('pty.created:info 就是 Pty 本体,不多套一层', () => {
+    const p = payloadOf({
+      type: 'pty.created',
+      data: { info: { id: 'pty_1', command: 'bash', status: 'running' } },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.PTY_CREATED)
+    expect(p?.properties.info).toEqual({ id: 'pty_1', command: 'bash', status: 'running' })
+  })
+
+  it('pty.exited:官方是 { id, exitCode },不是 info', () => {
+    const p = payloadOf({
+      type: 'pty.exited',
+      data: { id: 'pty_1', exitCode: 0 },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.PTY_EXITED)
+    expect(p?.properties).toEqual({ id: 'pty_1', exitCode: 0 })
+  })
+
+  it('execution.succeeded:官方 data 只有 sessionID,不臆造 outcome', () => {
+    const p = payloadOf({
+      type: 'session.execution.succeeded',
+      data: { sessionID: 'ses_1' },
+      created: 123,
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_IDLE)
+    expect(p?.properties).toEqual({ sessionID: 'ses_1', timestamp: 123 })
+    expect('outcome' in (p?.properties ?? {})).toBe(false)
+  })
+
+  it('compaction.started:透出 inputID(压缩边界)', () => {
+    const p = payloadOf({
+      type: 'session.compaction.started',
+      data: { sessionID: 'ses_1', reason: 'manual', inputID: 'msg_c' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_COMPACTED)
+    expect(p?.properties).toMatchObject({ sessionID: 'ses_1', status: 'started', reason: 'manual', inputID: 'msg_c' })
+  })
+})
+
+describe('session.compaction.delta → 压缩摘要流式', () => {
+  it('映射为 SESSION_COMPACTION_DELTA,带 sessionID + text', () => {
+    const p = payloadOf({
+      type: 'session.compaction.delta',
+      data: { sessionID: 'ses_1', text: '## Objective' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_COMPACTION_DELTA)
+    expect(p?.properties).toEqual({ sessionID: 'ses_1', text: '## Objective' })
+  })
+
+  it('空文本不上报(避免无意义的 store 通知)', () => {
+    expect(
+      payloadOf({ type: 'session.compaction.delta', data: { sessionID: 'ses_1', text: '' }, location: { directory: '/w' } }),
+    ).toBeNull()
+  })
+})
+
+describe('session.inbox.delivered → 排队状态收敛', () => {
+  it('映射为 SESSION_INBOX_DELIVERED,带 sessionID + inboxID', () => {
+    const p = payloadOf({
+      type: 'session.inbox.delivered',
+      data: { sessionID: 'ses_1', inboxID: 'msg_q' },
+      location: { directory: '/w' },
+    })
+    expect(p?.type).toBe(EventTypes.SESSION_INBOX_DELIVERED)
+    expect(p?.properties).toEqual({ sessionID: 'ses_1', inboxID: 'msg_q' })
+  })
+})

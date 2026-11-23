@@ -39,6 +39,7 @@ import {
   summarizeSession,
   updateSession,
   forkSession,
+  cancelInboxItem,
   extractUserMessageContent,
   type ApiPermissionRequest,
   type ApiSession,
@@ -47,6 +48,7 @@ import {
   type ModelInfo,
 } from '../api'
 import { describeSendFailure } from '../api/sendFailure'
+import { recoverPendingInbox } from '../api/inboxRecovery'
 import { getMessageText, isUserMessage, type AssistantMessageInfo, type Message as UIMessage } from '../types/message'
 import { clipboardErrorHandler, copyTextToClipboard, createErrorHandler } from '../utils'
 import { logger } from '../utils/logger'
@@ -87,6 +89,9 @@ const EMPTY_SESSION_STATE = {
   directory: '',
   title: null,
   compactedAt: undefined as number | undefined,
+  compactionRunning: false,
+  compactionDelta: undefined as string | undefined,
+  queuedInbox: undefined,
   model: undefined as { providerID: string; modelID: string; variant?: string } | undefined,
   agent: undefined as string | undefined,
 } as const
@@ -191,6 +196,9 @@ export function useChatSession({
   const hasTrimmedHistory = perSessionState.hasTrimmedHistory
   const sessionLoadedFromSkeleton = perSessionState.loadedFromSkeleton
   const compactedAt = perSessionState.compactedAt
+  const compactionRunning = perSessionState.compactionRunning === true
+  const compactionDelta = perSessionState.compactionDelta
+  const queuedInbox = perSessionState.queuedInbox
   const loadState = routeSessionId ? perSessionState.loadState : ('idle' as const)
   const loadError = routeSessionId ? perSessionState.loadError : undefined
 
@@ -1190,7 +1198,10 @@ export function useChatSession({
           // 打断」,且中断后服务端常拒绝这次压缩,用户必须再点一次才生效。
           activeSessionStore.applyOptimisticBusy(sessionId)
 
-          if (sessionId) messageStore.recordCompactionResult(sessionId, { at: Date.now() })
+          // 立刻给出「正在压缩」反馈。这里**不**推进 compactedAt:压缩才刚开始,
+          // 推进分隔条会让人误以为已经「历史已压缩」—— 那正是「点一下就看到
+          // 压缩完成样式、其实还没跑」的成因。分隔条只由 completed 事件推进。
+          messageStore.setCompactionRunning(sessionId, true)
 
           // Commands should count as sent once they are accepted for execution.
           // Do not keep the draft alive until the long-running compaction finishes.
@@ -1201,6 +1212,8 @@ export function useChatSession({
             paneServerId,
           ).catch(err => {
             handleError('execute command', err)
+            // 请求失败:压缩没跑起来,清掉「正在压缩」提示
+            if (sessionId) messageStore.setCompactionRunning(sessionId, false)
             // 失败回收乐观 busy:但正在流式时不要置 idle(会打断当前轮次)
             if (sessionId && !messageStore.getIsStreaming(sessionId)) {
               activeSessionStore.updateStatus(sessionId, { type: 'idle' })
@@ -1235,6 +1248,25 @@ export function useChatSession({
       paneServerId,
       onWorkDirectoryUsed,
     ],
+  )
+
+  /**
+   * 取消一条「排队中」的消息(v2 `session.inbox.cancel`)。
+   *
+   * 乐观移除:先摘掉排队项让按钮立刻生效;失败则拉一次队列快照回滚。
+   * 服务端成功后推 `session.inbox.cancelled`,消息本体会由该事件移除。
+   */
+  const handleCancelQueued = useCallback(
+    (inboxID: string) => {
+      if (!routeSessionId) return
+      messageStore.removeQueuedInbox(routeSessionId, inboxID)
+      void cancelInboxItem(routeSessionId, inboxID, effectiveDirectory, paneServerId).catch(err => {
+        handleError('cancel queued message', err)
+        const serverId = sessionKeyToServerId(routeSessionId)
+        if (serverId) void recoverPendingInbox(serverId)
+      })
+    },
+    [routeSessionId, effectiveDirectory, paneServerId, handleError],
   )
 
   // Undo with animation
@@ -1417,6 +1449,10 @@ export function useChatSession({
     hasTrimmedHistory,
     sessionLoadedFromSkeleton,
     compactedAt,
+    compactionRunning,
+    compactionDelta,
+    queuedInbox,
+    handleCancelQueued,
     retryStatus,
     agents,
     selectedAgent,

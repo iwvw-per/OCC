@@ -270,6 +270,63 @@ describe('messageStore', () => {
     expect(messageStore.getSessionState('session-1')?.compactedAt).toBe(5000)
   })
 
+  it('setCompactionBoundary 只落边界 id,不动 compactedAt(分隔条不能提前出现)', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+
+    messageStore.setCompactionBoundary('session-1', 'msg_comp')
+    const state = messageStore.getSessionState('session-1')
+    expect(state?.compactionMarker?.id).toBe('msg_comp')
+    // 关键:压缩「还没完成」,绝不能推进分隔条
+    expect(state?.compactedAt).toBeUndefined()
+
+    // 重复/空 id:幂等,且不新建会话
+    messageStore.setCompactionBoundary('session-1', 'msg_comp')
+    messageStore.setCompactionBoundary('session-1', '')
+    expect(messageStore.getSessionState('session-1')?.compactionMarker?.id).toBe('msg_comp')
+
+    // 完成事件带规模时,id 由消息列表权威补上,规模落进同一 marker
+    messageStore.recordCompactionResult('session-1', { summaryChars: 10, recentChars: 2, id: 'msg_comp', at: 7000 })
+    const after = messageStore.getSessionState('session-1')
+    expect(after?.compactionMarker).toMatchObject({ id: 'msg_comp', summaryChars: 10, recentChars: 2 })
+    expect(after?.compactedAt).toBe(7000)
+    expect(messageStore.getSessionState('session-does-not-exist')).toBeUndefined()
+  })
+
+  it('压缩完成事件不带 id 时,保留 started 落下的边界 id', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hi')])
+    messageStore.setCompactionBoundary('session-1', 'msg_c')
+
+    // 完成事件只带规模,不带 id —— 不能因此把边界抹掉(否则圆环会闪回旧值)
+    messageStore.recordCompactionResult('session-1', { summaryChars: 5, recentChars: 1, at: 9000 })
+
+    expect(messageStore.getSessionState('session-1')?.compactionMarker).toMatchObject({
+      id: 'msg_c',
+      at: 9000,
+      summaryChars: 5,
+      recentChars: 1,
+    })
+  })
+
+  it('appendCompactionDelta 只保留尾部,压缩结束即清空', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hi')])
+    messageStore.setCompactionRunning('session-1', true)
+
+    messageStore.appendCompactionDelta('session-1', 'abc')
+    messageStore.appendCompactionDelta('session-1', 'def')
+    expect(messageStore.getSessionState('session-1')?.compactionDelta).toBe('abcdef')
+
+    messageStore.appendCompactionDelta('session-1', 'x'.repeat(2000))
+    const capped = messageStore.getSessionState('session-1')?.compactionDelta ?? ''
+    expect(capped.length).toBe(1200)
+    expect(capped.endsWith('x')).toBe(true)
+
+    messageStore.setCompactionRunning('session-1', false)
+    expect(messageStore.getSessionState('session-1')?.compactionDelta).toBeUndefined()
+
+    messageStore.appendCompactionDelta('session-does-not-exist', 'z')
+    expect(messageStore.getSessionState('session-does-not-exist')).toBeUndefined()
+  })
+
   it('records server cumulative usage and ignores unknown sessions', () => {
     messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
     const tokens = { input: 4000, output: 800, reasoning: 0, cache: { read: 100, write: 20 } }
@@ -1551,5 +1608,53 @@ describe('settleByAuthoritativeIdle：外部权威时间 + 悬空工具兜底', 
     const part = messageStore.getSessionState('session-1')!.messages[0].content[0]
     expect(part.type).toBe('tool')
     expect(part.type === 'tool' ? part.state.status : null).toBe('interrupted')
+  })
+})
+
+describe('压缩边界在失败路径上的时序', () => {
+  it('压缩失败:撤掉边界,压缩前的实测值恢复有效', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hi')])
+    messageStore.setCompactionBoundary('session-1', 'msg_c')
+    expect(messageStore.getSessionState('session-1')?.compactionMarker?.id).toBe('msg_c')
+
+    messageStore.clearCompactionBoundary('session-1')
+    expect(messageStore.getSessionState('session-1')?.compactionMarker?.id).toBeUndefined()
+
+    // 幂等:没有边界时调用不报错、不建档
+    messageStore.clearCompactionBoundary('session-1')
+    messageStore.clearCompactionBoundary('session-does-not-exist')
+    expect(messageStore.getSessionState('session-does-not-exist')).toBeUndefined()
+  })
+})
+
+describe('排队中(queued inbox)', () => {
+  it('enqueue/set/remove 幂等,setMessages 会收敛已投递项', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hi')])
+
+    messageStore.enqueueQueuedInbox('session-1', { id: 'q1', text: 'a', createdAt: 1 })
+    messageStore.enqueueQueuedInbox('session-1', { id: 'q2', text: 'b', createdAt: 2 })
+    // 同 id 覆盖而不重复(enqueued 是 durable,重连会补发)
+    messageStore.enqueueQueuedInbox('session-1', { id: 'q1', text: 'a2', createdAt: 1 })
+    expect(messageStore.getSessionState('session-1')?.queuedInbox?.map(q => q.id)).toEqual(['q1', 'q2'])
+    expect(messageStore.getSessionState('session-1')?.queuedInbox?.[0].text).toBe('a2')
+
+    messageStore.removeQueuedInbox('session-1', 'q1')
+    expect(messageStore.getSessionState('session-1')?.queuedInbox?.map(q => q.id)).toEqual(['q2'])
+
+    // 重连恢复:用服务端队列快照整体替换
+    messageStore.setQueuedInbox('session-1', [{ id: 'q3', text: 'c', createdAt: 3 }])
+    expect(messageStore.getSessionState('session-1')?.queuedInbox?.map(q => q.id)).toEqual(['q3'])
+
+    // 收敛:该消息已出现在服务端消息列表 → 不再是「排队中」
+    messageStore.setMessages('session-1', [createMessageWithParts('q3', 'c')])
+    expect(messageStore.getSessionState('session-1')?.queuedInbox).toBeUndefined()
+
+    // 空数组也清空
+    messageStore.setQueuedInbox('session-1', [])
+    expect(messageStore.getSessionState('session-1')?.queuedInbox).toBeUndefined()
+
+    // 不存在的会话:不建档
+    messageStore.removeQueuedInbox('session-does-not-exist', 'x')
+    expect(messageStore.getSessionState('session-does-not-exist')).toBeUndefined()
   })
 })

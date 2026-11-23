@@ -471,3 +471,69 @@ describe('contextPercent 在窗口未知时为 null（不猜默认窗口）', ()
     expect(known.contextPercent).toBeCloseTo(10, 1)
   })
 })
+
+describe('压缩边界按消息 id 的位置判定(对齐上游 lastAssistantWithUsage)', () => {
+  const tokens = (input: number): TokenUsage => ({
+    input,
+    output: 0,
+    reasoning: 0,
+    cache: { read: 0, write: 0 },
+  })
+
+  it('压缩完成后,压缩前的实测值立即作废(不再钉在旧水位)', () => {
+    const messages = [userMessage('msg_u1', 'hello', 0), assistantMessage('msg_a2', 10, tokens(58_000))]
+    const stats = computeSessionStats(messages, 100_000, undefined, undefined, {
+      at: BASE + 20,
+      id: 'msg_m5',
+      summaryChars: 100,
+      recentChars: 0,
+    })
+    // 最后一条实测值(58k)位置在压缩记录之前,不能代表压缩后的上下文
+    expect(stats.contextUsed).toBeNull()
+    expect(stats.contextPercent).toBeNull()
+  })
+
+  it('压缩之后的新一轮实测值照常生效', () => {
+    const messages = [
+      userMessage('msg_u1', 'hello', 0),
+      assistantMessage('msg_a2', 10, tokens(58_000)),
+      userMessage('msg_u6', 'again', 30),
+      assistantMessage('msg_z9', 40, tokens(6_000)),
+    ]
+    const stats = computeSessionStats(messages, 100_000, undefined, undefined, {
+      at: BASE + 20,
+      id: 'msg_m5',
+      summaryChars: 100,
+      recentChars: 0,
+    })
+    expect(stats.contextUsed).toBe(6_000)
+    expect(stats.contextPercent).toBe(6)
+  })
+
+  it('仅压缩边界 id 变化时缓存也失效(圆环不能停在旧值)', () => {
+    const messages = [userMessage('msg_u1', 'hello', 0), assistantMessage('msg_a2', 10, tokens(58_000))]
+
+    // 第一次:还没有边界 → 用实测值(58k),并写进缓存
+    const before = computeSessionStatsCached(messages, 100_000, undefined, undefined, {
+      at: BASE + 20,
+      summaryChars: 1,
+      recentChars: 0,
+    })
+    expect(before.contextUsed).toBe(58_000)
+
+    // 第二次:同 at、同 messages 引用,只多了边界 id → 必须重算(不能命中缓存)
+    const after = computeSessionStatsCached(messages, 100_000, undefined, undefined, {
+      at: BASE + 20,
+      id: 'msg_m5',
+      summaryChars: 1,
+      recentChars: 0,
+    })
+    expect(after.contextUsed).toBeNull()
+  })
+
+  it('没有边界 id 时保持旧行为', () => {
+    const messages = [userMessage('msg_u1', 'hello', 0), assistantMessage('msg_a2', 10, tokens(58_000))]
+    const stats = computeSessionStats(messages, 100_000)
+    expect(stats.contextUsed).toBe(58_000)
+  })
+})

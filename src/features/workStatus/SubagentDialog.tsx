@@ -224,7 +224,7 @@ export const SubagentDialog = memo(function SubagentDialog({
               {prompt ? (
                 <div className="flex flex-col gap-1">
                   <span className="text-ui-xs text-text-500">{t('chat:workStatus.subagent.detailPrompt')}</span>
-                  <div className="max-h-40 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md border border-border-200/50 bg-bg-200/40 px-3 py-2 text-ui-sm text-text-200">
+                  <div className="max-h-40 overflow-y-auto overflow-x-hidden custom-scrollbar whitespace-pre-wrap break-words rounded-md border border-border-200/50 bg-bg-200/40 px-3 py-2 text-ui-sm text-text-200">
                     {prompt}
                   </div>
                 </div>
@@ -233,7 +233,7 @@ export const SubagentDialog = memo(function SubagentDialog({
               {reply ? (
                 <div className="flex flex-col gap-1">
                   <span className="text-ui-xs text-text-500">{t('chat:workStatus.subagent.detailReply')}</span>
-                  <div className="max-h-96 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md border border-border-200/50 bg-bg-100 px-3 py-2 text-ui-sm text-text-200">
+                  <div className="max-h-96 overflow-y-auto overflow-x-hidden custom-scrollbar whitespace-pre-wrap break-words rounded-md border border-border-200/50 bg-bg-100 px-3 py-2 text-ui-sm text-text-200">
                     {reply}
                   </div>
                 </div>

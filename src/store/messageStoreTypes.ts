@@ -20,6 +20,18 @@ export interface RevertHistoryItem {
   agent?: string
 }
 
+/**
+ * 已入队但**尚未投递**的用户消息(`session.inbox.enqueued` → `.delivered`)。
+ *
+ * 只用它做「排队中 / 可取消」这一层 UI:消息本体是乐观插入到消息流里的
+ * (`upsertRemoteUserMessage`),这里只是队列视角的投影。
+ */
+export interface QueuedInboxItem {
+  id: string
+  text: string
+  createdAt: number
+}
+
 export interface SessionState {
   /** 所有消息（包括被撤销的） */
   messages: Message[]
@@ -60,6 +72,15 @@ export interface SessionState {
   isStale: boolean
   /** 最近一次已完成压缩的时间戳（用于消息流末尾的压缩分隔条） */
   compactedAt?: number
+  /** 该会话是否正在压缩(用于「正在压缩…」提示) */
+  compactionRunning?: boolean
+  /**
+   * 压缩摘要的流式尾部文本(`session.compaction.delta`,ephemeral)。
+   * 只留末尾若干字符:用于「正在压缩」的实时内容反馈,压缩结束即清空。
+   */
+  compactionDelta?: string
+  /** 尚未投递的入队用户消息(排队中),按入队顺序 */
+  queuedInbox?: QueuedInboxItem[]
   /**
    * 会话级累计用量（服务端 `session.usage.updated`）。
    *
@@ -97,7 +118,7 @@ export interface SessionState {
    * 字符规模，用于推算压缩后的上下文：旧轮次已被摘要取代，把它们再算进上下文
    * 会让圆环停在压缩前的高水位 —— 这正是「压缩完占用没变」的原因。
    */
-  compactionMarker?: { at: number; summaryChars: number; recentChars: number }
+  compactionMarker?: { at: number; id?: string; summaryChars: number; recentChars: number }
   /**
    * 会话在服务端绑定的模型与 agent。
    *
@@ -191,6 +212,15 @@ export interface SessionStateSnapshot {
   title: string | null
   /** 最近一次已完成压缩的时间戳；有值时消息流末尾展示压缩分隔条 */
   compactedAt?: number
+  /** 该会话是否正在压缩(用于「正在压缩…」提示) */
+  compactionRunning?: boolean
+  /**
+   * 压缩摘要的流式尾部文本(`session.compaction.delta`,ephemeral)。
+   * 只留末尾若干字符:用于「正在压缩」的实时内容反馈,压缩结束即清空。
+   */
+  compactionDelta?: string
+  /** 尚未投递的入队用户消息(排队中),按入队顺序 */
+  queuedInbox?: QueuedInboxItem[]
   /** 会话绑定的模型（服务端权威，无痕/新设备据此恢复选择） */
   model?: { providerID: string; modelID: string; variant?: string }
   /** 会话绑定的 agent（服务端权威） */
