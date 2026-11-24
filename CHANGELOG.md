@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.2.16] - 2026-11-24
+
+- fix(message): 命令执行卡片不再显示「已中断」标记 (26854f62)
+
 ## [v2.2.15] - 2026-11-23
 
 - fix(sidebar): 折叠项目行不再被 /api/session/active 残留 running 永久点亮 (82bd1720)
