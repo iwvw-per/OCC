@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "OCC",
-  "version": "2.2.16",
+  "version": "2.2.17",
   "identifier": "com.occ.app",
   "build": {
     "frontendDist": "../dist",
