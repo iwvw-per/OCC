@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useDelayedRender } from '../../hooks/useDelayedRender'
+import { LAYER_POPUP } from '../../constants/layers'
 
 type DropdownPosition = 'top' | 'bottom'
 type DropdownAlign = 'left' | 'right'
@@ -48,7 +49,7 @@ export function DropdownMenu({
   mobileFullWidth = false,
   constrainToRef,
   clampToViewport = false,
-  zIndex = 100,
+  zIndex = LAYER_POPUP,
   className = '',
   menuRef,
   children,

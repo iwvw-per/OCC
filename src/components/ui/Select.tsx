@@ -1,6 +1,7 @@
 import { forwardRef } from 'react'
 import * as SelectPrimitive from '@radix-ui/react-select'
 import { cn } from '../../utils/cn'
+import { LAYER_POPUP } from '../../constants/layers'
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from '../Icons'
 
 /**
@@ -41,13 +42,15 @@ SelectTrigger.displayName = 'SelectTrigger'
 export const SelectContent = forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = 'popper', ...props }, ref) => (
+>(({ className, children, position = 'popper', style, ...props }, ref) => (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
       position={position}
+      // 层级统一走 LAYER_POPUP(必须高于 Dialog):见 constants/layers.ts 的说明。
+      style={{ zIndex: LAYER_POPUP, ...style }}
       className={cn(
-        'relative z-[200] max-h-72 min-w-[8rem] overflow-hidden rounded-xl border border-border-200/60 glass p-1 shadow-lg',
+        'relative max-h-72 min-w-[8rem] overflow-hidden rounded-xl border border-border-200/60 glass p-1 shadow-lg',
         'overlay-surface',
         position === 'popper' && 'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
         className,

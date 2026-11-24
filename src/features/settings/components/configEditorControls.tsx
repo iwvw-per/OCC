@@ -8,6 +8,7 @@ import { asStringArray, hasOwn, isRecord, tx, useLang } from './configEditorUtil
 import { cn } from '../../../utils/cn'
 import { NativeTooltip } from '../../../components/ui/Tooltip'
 import { interactive } from '../../../utils/interaction'
+import { LAYER_POPUP } from '../../../constants/layers'
 
 let draftIDSeed = 0
 
@@ -453,8 +454,8 @@ export function Select({
             id={menuId}
             ref={menuRef}
             role="listbox"
-            className="fixed z-[400] max-h-64 overflow-y-auto rounded-lg border border-border-200 glass flex flex-col gap-0.5 p-1 shadow-lg custom-scrollbar"
-            style={pos}
+            className="fixed max-h-64 overflow-y-auto rounded-lg border border-border-200 glass flex flex-col gap-0.5 p-1 shadow-lg custom-scrollbar"
+            style={{ ...pos, zIndex: LAYER_POPUP }}
           >
             {filtered.length === 0 && (
               <div className="px-3 py-2.5 text-ui-sm text-text-400">{tx('No matches', '无匹配项', lang)}</div>

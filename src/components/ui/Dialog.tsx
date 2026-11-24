@@ -6,6 +6,7 @@ import { NativeTooltip } from './Tooltip'
 import { useDelayedRender } from '../../hooks/useDelayedRender'
 import { useBackClose } from '../../hooks/useBackClose'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { LAYER_DIALOG } from '../../constants/layers'
 
 interface DialogProps {
   isOpen: boolean
@@ -303,8 +304,9 @@ export function Dialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[300]"
+      className="fixed inset-0"
       style={{
+        zIndex: LAYER_DIALOG,
         backgroundColor: isVisible ? 'hsl(var(--always-black) / 0.2)' : 'hsl(var(--always-black) / 0)',
         transition: 'background-color 150ms ease-out',
       }}

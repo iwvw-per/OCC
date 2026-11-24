@@ -1,6 +1,7 @@
 import { memo, useState, useCallback, useRef, useLayoutEffect, useEffect } from 'react'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { useOverlayDialogA11y } from '../../hooks/useOverlayDialogA11y'
+import { LAYER_PANEL } from '../../constants/layers'
 
 const ANIMATION_EASE = 'ease-[cubic-bezier(0.25,1,0.5,1)]'
 const ANIMATION_DURATION = 'duration-300'
@@ -265,16 +266,17 @@ export const ResizablePanel = memo(function ResizablePanel({
 
     const mobileBaseClass =
       position === 'right'
-        ? 'fixed left-0 right-0 z-[100] w-full bg-bg-100'
-        : 'fixed bottom-0 left-0 right-0 z-[100] shadow-lg rounded-t-xl border-t border-border-200 bg-bg-100'
+        ? 'fixed left-0 right-0 w-full bg-bg-100'
+        : 'fixed bottom-0 left-0 right-0 shadow-lg rounded-t-xl border-t border-border-200 bg-bg-100'
 
     const mobilePanelStyle =
       position === 'right'
         ? ({
+            zIndex: LAYER_PANEL,
             top: 'calc(var(--overlay-safe-top, 0px) + var(--desktop-titlebar-height, 0px))',
             height: 'calc(100% - var(--overlay-safe-top, 0px) - var(--desktop-titlebar-height, 0px))',
           } as React.CSSProperties)
-        : ({ height: `${effectiveSize}px` } as React.CSSProperties)
+        : ({ zIndex: LAYER_PANEL, height: `${effectiveSize}px` } as React.CSSProperties)
 
     return (
       <>

@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { getInternalDragPreviewElement, getInternalDragSnapshot, subscribeInternalDrag } from '../lib/internalDragCore'
+import { LAYER_DRAG } from '../constants/layers'
 
 export function InternalDragLayer() {
   const [visible, setVisible] = useState(false)
@@ -51,8 +52,9 @@ export function InternalDragLayer() {
   return createPortal(
     <div
       ref={hostRef}
-      className="fixed z-[10000] pointer-events-none opacity-80 shadow-lg"
+      className="fixed pointer-events-none opacity-80 shadow-lg"
       style={{
+        zIndex: LAYER_DRAG,
         left: 0,
         top: 0,
         willChange: 'transform',

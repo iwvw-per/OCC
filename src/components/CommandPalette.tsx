@@ -10,6 +10,7 @@ import { SearchIcon } from './Icons'
 import { formatKeybinding, parseKeybinding } from '../store/keybindingStore'
 import { useDelayedRender } from '../hooks/useDelayedRender'
 import { scrollItemIntoView } from '../utils/scrollUtils'
+import { LAYER_DIALOG } from '../constants/layers'
 
 // ============================================
 // Types
@@ -195,8 +196,9 @@ export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProp
 
   return createPortal(
     <div
-      className="command-palette-safe-top fixed inset-0 z-[300] flex items-start justify-center px-3"
+      className="command-palette-safe-top fixed inset-0 flex items-start justify-center px-3"
       style={{
+        zIndex: LAYER_DIALOG,
         backgroundColor: isVisible ? 'hsl(var(--always-black) / 0.2)' : 'hsl(var(--always-black) / 0)',
         transition: 'background-color 150ms ease-out',
       }}

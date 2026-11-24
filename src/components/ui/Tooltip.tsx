@@ -10,6 +10,7 @@ import {
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { cn } from '../../utils/cn'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
+import { LAYER_TOOLTIP } from '../../constants/layers'
 
 /**
  * 触摸端不展示自绘提示。
@@ -64,13 +65,14 @@ export const TooltipTrigger = TooltipPrimitive.Trigger
 export const TooltipContent = forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
->(({ className, sideOffset = 6, ...props }, ref) => (
+>(({ className, sideOffset = 6, style, ...props }, ref) => (
   <TooltipPrimitive.Portal>
     <TooltipPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
+      style={{ zIndex: LAYER_TOOLTIP, ...style }}
       className={cn(
-        'z-[300] max-w-[min(320px,80vw)] rounded-lg border border-border-200/60 bg-tooltip px-2 py-1',
+        'max-w-[min(320px,80vw)] rounded-lg border border-border-200/60 bg-tooltip px-2 py-1',
         'text-ui-sm leading-relaxed text-tooltip-foreground shadow-lg',
         // 开合动画由 index.css 的 .overlay-tooltip 驱动(位移淡入,不缩放)。
         'overlay-tooltip',

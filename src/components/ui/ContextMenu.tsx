@@ -11,6 +11,7 @@
 
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { LAYER_CONTEXT_MENU } from '../../constants/layers'
 
 export interface ContextMenuPosition {
   x: number
@@ -38,7 +39,7 @@ export function ContextMenu({
   minWidth = 200,
   maxWidth = 320,
   margin = 8,
-  zIndex = 9999,
+  zIndex = LAYER_CONTEXT_MENU,
   children,
   'aria-label': ariaLabel,
 }: ContextMenuProps) {

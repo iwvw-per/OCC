@@ -11,6 +11,7 @@ import {
 import { highlightHtmlInWorker } from '../../../lib/shikiWorkerClient'
 import { fieldClass } from './configEditorControls'
 import { SegmentedControl, SettingRow, SettingsSection, SettingsCardRow } from './SettingsUI'
+import { LAYER_POPUP } from '../../../constants/layers'
 
 const PREVIEW_CODE = `// greet user by name
 function greet(name: string): string {
@@ -209,8 +210,8 @@ function CodeBlockThemeSelect({
             ref={menuRef}
             role="listbox"
             aria-label={ariaLabel}
-            className="fixed z-[400] max-h-64 overflow-y-auto rounded-lg border border-border-200 glass flex flex-col gap-0.5 p-1 shadow-lg custom-scrollbar"
-            style={pos}
+            className="fixed max-h-64 overflow-y-auto rounded-lg border border-border-200 glass flex flex-col gap-0.5 p-1 shadow-lg custom-scrollbar"
+            style={{ ...pos, zIndex: LAYER_POPUP }}
           >
             {!hasResults && (
               <div className="px-3 py-2.5 text-ui-sm text-text-400">{t('common:noMatches')}</div>
