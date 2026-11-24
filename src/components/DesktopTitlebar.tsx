@@ -162,7 +162,11 @@ export function DesktopTitlebar({
       style={{ height: DESKTOP_TITLEBAR_HEIGHT, zIndex: DESKTOP_TITLEBAR_Z_INDEX }}
     >
       {/* ---- 左侧：平台占位 + 导航（非 Windows 全高侧栏模式） ---- */}
-      <div className={`flex h-full shrink-0 ${platform === 'macos' ? 'items-center gap-1' : 'items-stretch'}`}>
+      {/* ⚠️ 必须 items-center:IconButton 是固定 size-8,若用 items-stretch,
+          在 44px 标题栏里会被顶到上方(实测上 0 / 下 12),与居中的标题与窗口控制
+          按钮错位。窄屏(<768)Windows 会把导航控件放回标题栏左侧,正是这个分支,
+          故与侧栏顶部工具栏(items-center gap-1)保持同一对齐。 */}
+      <div className="flex h-full shrink-0 items-center gap-1">
         {platform === 'macos' ? (
           <div className="h-full shrink-0" style={{ width: DESKTOP_MACOS_TRAFFIC_LIGHTS_WIDTH }} />
         ) : (

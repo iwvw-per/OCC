@@ -66,6 +66,19 @@ describe('DesktopTitlebar', () => {
     expect(screen.getByRole('button', { name: 'desktopTitlebar.close' })).toBeInTheDocument()
   })
 
+  it('vertically centers the titlebar nav controls (narrow Windows)', () => {
+    installWindowApiMock()
+    render(<DesktopTitlebar />)
+
+    // 窄屏(<768)Windows 会把导航控件放回标题栏左侧。固定 size-8 的 IconButton
+    // 必须居中:items-stretch 会把它顶到 44px 标题栏上方(实测上 0 / 下 12),
+    // 与居中的标题、窗口控制按钮错位。
+    const back = screen.getByRole('button', { name: 'desktopTitlebar.goBack' })
+    const group = back.parentElement as HTMLElement
+    expect(group.className).toContain('items-center')
+    expect(group.className).not.toContain('items-stretch')
+  })
+
   it('calls the Tauri window API from the controls', () => {
     const win = installWindowApiMock()
     render(<DesktopTitlebar />)
