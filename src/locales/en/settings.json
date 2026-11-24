@@ -538,7 +538,18 @@
     "autoUpdateInterval30": "30 min",
     "autoUpdateInterval60": "1 hour",
     "autoUpdateInterval180": "3 hours",
-    "autoUpdateInterval720": "12 hours"
+    "autoUpdateInterval720": "12 hours",
+    "updateProxyCardTitle": "Download route",
+    "updateProxyCardDesc": "GitHub is often unreachable in some regions, leaving update checks spinning and installs failing. Pick a mirror; it falls back to direct automatically.",
+    "updateProxy": "Acceleration proxy",
+    "updateProxyDesc": "Auto: try direct first, then built-in mirrors. A chosen proxy is tried first, then direct.",
+    "updateProxyAuto": "Auto (direct first)",
+    "updateProxyNone": "No proxy",
+    "updateProxyCustom": "Custom…",
+    "updateProxyCustomPrefix": "Custom proxy prefix",
+    "updateProxyCustomPrefixDesc": "e.g. https://gh-proxy.com/ — final URL = prefix + original GitHub URL.",
+    "updateAllRoutesFailed": "All download routes failed",
+    "manifestUnreachable": "Failed to fetch the update manifest"
   },
   "scheduledTasks": {
     "title": "Scheduled Tasks",

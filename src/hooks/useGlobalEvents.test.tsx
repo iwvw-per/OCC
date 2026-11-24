@@ -1432,6 +1432,49 @@ it('does not idle or finalize a streaming turn when a manual compaction starts (
     expect(markSessionNotificationsReadMock).toHaveBeenCalledWith('local::ses_shared', 'completed')
   })
 
+  it('does not play a completion sound when a directly opened child subagent finishes', async () => {
+    // 用户反馈：子代理完成任务后不应该响提示音。
+    // 直接点开子会话查看时，此前会走「当前会话」分支照常播 completed —— 子代理只是
+    // 主对话内部一步，响一声会让人误以为整件事结束了。
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getFocusedSessionIdMock.mockReturnValue('local::child-session')
+    getSessionInfoMock.mockReturnValue({ sessionId: 'local::child-session' } as never)
+    activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: { 'local::child-session': { type: 'busy' } } })
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    callbacks!.onSessionStatus?.({ sessionID: 'child-session', status: { type: 'idle' } })
+
+    expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
+    expect(notificationPushMock).not.toHaveBeenCalled()
+    // 状态仍要落定：子代理面板/Working 列表不会卡在运行中
+    expect(activeSessionStoreMock.updateStatus).toHaveBeenCalledWith('local::child-session', { type: 'idle' })
+  })
+
+  it('still plays the completion sound for a normal session that is open', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getFocusedSessionIdMock.mockReturnValue('local::main-session')
+    // settleSessionIdle 会先读快照拿 wasBusy,再调 updateStatus 判断是否真正清除
+    activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: { 'local::main-session': { type: 'busy' } } })
+    activeSessionStoreMock.updateStatus.mockReturnValue(true)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    callbacks!.onSessionStatus?.({ sessionID: 'main-session', status: { type: 'idle' } })
+
+    expect(playNotificationSoundDedupedMock).toHaveBeenCalledWith('completed')
+  })
+
   it('removes notifications when a session is deleted', async () => {
     let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
     subscribeToEventsMock.mockImplementation(cb => {

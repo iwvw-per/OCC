@@ -167,8 +167,44 @@ describe('UpdateStore', () => {
     expect(hasUpdateAvailable(store.getSnapshot())).toBe(false)
   })
 
-  it('canary 版本走列表接口并取语义最大的 prerelease', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
+  it('直连失败时自动回退到内置加速代理（更新总出错的修复）', async () => {
+    // 模拟：api.github.com 直连被墙（抛网络错误），代理可用。
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.startsWith('https://api.github.com/')) throw new Error('network error')
+      return {
+        ok: true,
+        json: async () => [
+          { tag_name: 'v2.2.18', html_url: 'https://example.com', prerelease: false, draft: false },
+        ],
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const store = new UpdateStore('2.2.17')
+    await store.checkForUpdates({ force: true })
+
+    // 第一次直连失败，后续请求必须带上某个代理前缀
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1)
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/^https:\/\/(gh-proxy\.com|gh-proxy\.org|ghfast\.top)\//)
+    expect(store.getSnapshot().latestRelease?.version).toBe('2.2.18')
+    expect(store.getSnapshot().error).toBeNull()
+  })
+
+  it('所有线路都失败时，错误信息列出每条线路', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error('blocked')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const store = new UpdateStore('2.2.17')
+    await store.checkForUpdates({ force: true })
+
+    const error = store.getSnapshot().error ?? ''
+    expect(error).toContain('direct')
+    expect(error).toContain('gh-proxy.com')
+  })
+
+  it('canary 版本走列表接口并取语义最大的 prerelease', async () => {    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => [
         {

@@ -24,7 +24,7 @@ import { hapticStore, useHapticSettings, HAPTIC_INTENSITY_ORDER } from '../../..
 import { hapticsSupported, hapticTap } from '../../../utils/haptics'
 import { liveUpdateSupported } from '../../../utils/liveUpdate'
 import { Toggle, SettingRow, SettingField, SettingsSection, SettingsCardRow, SegmentedControl } from './SettingsUI'
-import { BUILTIN_SOUNDS, SOUND_OPTIONS, isSoundSupported, playSound } from '../../../utils/soundPlayer'
+import { BUILTIN_SOUNDS, SOUND_OPTIONS, isSoundSupported, playSound, preloadBuiltinSound } from '../../../utils/soundPlayer'
 import { cn } from '../../../utils/cn'
 import { interactive } from '../../../utils/interaction'
 import type { NotificationType } from '../../../store/notificationStore'
@@ -208,6 +208,11 @@ function EventSoundCard({
       mountedRef.current = false
     }
   }, [])
+
+  // 预热该事件可选的内置音效：采样音频需 fetch + decode，提前解码后点试听即刻发声。
+  useEffect(() => {
+    for (const sid of soundOptions) preloadBuiltinSound(sid)
+  }, [soundOptions])
 
   const handlePreview = useCallback(() => {
     if (eventConfig.soundId === 'none') return

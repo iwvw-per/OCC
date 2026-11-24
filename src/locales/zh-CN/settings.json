@@ -538,7 +538,18 @@
     "autoUpdateInterval30": "30 分钟",
     "autoUpdateInterval60": "1 小时",
     "autoUpdateInterval180": "3 小时",
-    "autoUpdateInterval720": "12 小时"
+    "autoUpdateInterval720": "12 小时",
+    "updateProxyCardTitle": "更新线路",
+    "updateProxyCardDesc": "GitHub 直连常被墙，检查更新会一直转圈、安装更新总失败。选一条加速线路，失败会自动回退到直连。",
+    "updateProxy": "加速代理",
+    "updateProxyDesc": "自动：直连失败后依次尝试内置代理；指定代理则优先走它，失败回退直连。",
+    "updateProxyAuto": "自动（直连优先）",
+    "updateProxyNone": "不使用代理",
+    "updateProxyCustom": "自定义…",
+    "updateProxyCustomPrefix": "自定义代理前缀",
+    "updateProxyCustomPrefixDesc": "形如 https://gh-proxy.com/，最终地址 = 前缀 + 原始 GitHub 地址。",
+    "updateAllRoutesFailed": "所有下载线路都失败",
+    "manifestUnreachable": "取不到更新清单"
   },
   "scheduledTasks": {
     "title": "定时任务",

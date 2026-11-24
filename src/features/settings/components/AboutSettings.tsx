@@ -24,7 +24,18 @@ import {
 import { saveData } from '../../../utils/downloadUtils'
 import { exportSettingsBackup, importSettingsBackup, previewBackupMeta } from '../../../utils/settingsBackup'
 import { isTauri } from '../../../utils/tauri'
+import {
+  BUILTIN_UPDATE_PROXIES,
+  updateProxySettingsStore,
+  type UpdateProxyId,
+  type UpdateProxySettings,
+} from '../../../store/updateProxySettings'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/Select'
 import { SettingRow, SettingsSection, SegmentedControl, Toggle } from './SettingsUI'
+
+function useUpdateProxySettings(): UpdateProxySettings {
+  return useSyncExternalStore(updateProxySettingsStore.subscribe, updateProxySettingsStore.get, updateProxySettingsStore.get)
+}
 
 function useUpdaterProgress(): UpdaterProgress {
   return useSyncExternalStore(desktopUpdater.subscribe, desktopUpdater.getSnapshot, desktopUpdater.getSnapshot)
@@ -58,6 +69,7 @@ export function AboutSettings() {
   const [backupBusy, setBackupBusy] = useState<'export' | 'import' | null>(null)
   const [backupError, setBackupError] = useState<string | null>(null)
   const [autoUpdate, setAutoUpdate] = useState(autoUpdateSettingsStore.get())
+  const proxySettings = useUpdateProxySettings()
 
   const canAutoUpdate = isDesktopUpdaterAvailable()
   const canAndroidUpdate = isAndroidUpdaterAvailable()
@@ -89,6 +101,24 @@ export function AboutSettings() {
     autoUpdateSettingsStore.commit(prev => ({ ...prev, intervalMinutes: minutes as AutoUpdateIntervalMinutes }))
   }, [])
 
+  const handleProxyChange = useCallback(async (value: string) => {
+    const proxy = value as UpdateProxyId
+    const needsPrefix = proxy === 'custom' && !updateProxySettingsStore.get().customPrefix
+    updateProxySettingsStore.commit(prev => ({ ...prev, proxy }))
+    // 换了线路立刻重查一次，用户能马上看到是否通（否则要等 12h 或手动点）
+    if (!needsPrefix) void updateStore.checkForUpdates({ force: true })
+  }, [])
+
+  const handleCustomPrefixCommit = useCallback((value: string) => {
+    let prefix = value.trim()
+    if (!prefix) return
+    // 允许用户粘贴不带协议的域名（ghproxy.example.com/），补 https:// 更省事
+    if (!/^https?:\/\//i.test(prefix)) prefix = `https://${prefix}`
+    if (!prefix.endsWith('/')) prefix = `${prefix}/`
+    updateProxySettingsStore.commit(prev => ({ ...prev, proxy: 'custom', customPrefix: prefix }))
+    void updateStore.checkForUpdates({ force: true })
+  }, [])
+
   // 从「安装未知应用」设置页返回后推进更新状态（否则界面会停在「等待授权」）
   useEffect(() => watchAndroidUpdateResume(), [])
 
@@ -97,8 +127,14 @@ export function AboutSettings() {
   }, [])
 
   const handleAutoUpdate = useCallback(() => {
-    // 把该 release 自己的 latest.json 传给 Rust：canary 清单在其 tag 路径下，
-    // 静态 endpoint（releases/latest）解析不到。
+    /**
+     * 把「原始清单地址」交给 desktopUpdater：那里会按线路顺序取回清单、**改写
+     * asset 地址**，再交给 Rust 安装。只改清单地址而不改 asset 地址的话安装包仍然
+     * 直连 —— 典型表现就是「检查能过、下载必失败」。
+     *
+     * 为什么传原始地址而不是第 0 条：desktopUpdater 内部与检查更新共用同一份
+     * 线路链（getRouteChain），两处不会分叉。
+     */
     void desktopUpdater.installLatest(latestRelease ? getReleaseManifestUrl(latestRelease) : undefined)
   }, [latestRelease])
 
@@ -290,6 +326,44 @@ export function AboutSettings() {
           </SettingRow>
         </SettingsSection>
       ) : null}
+
+      {/*
+        更新线路：GitHub 直连常被墙，「检查更新」会一直转圈、「安装更新」总是失败。
+        这里让用户选一个加速代理（失败自动回退直连），并提供自定义前缀。
+      */}
+      <SettingsSection title={t('about.updateProxyCardTitle')} description={t('about.updateProxyCardDesc')}>
+        <SettingRow label={t('about.updateProxy')} description={t('about.updateProxyDesc')}>
+          <Select value={proxySettings.proxy} onValueChange={handleProxyChange}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper">
+              <SelectItem value="auto">{t('about.updateProxyAuto')}</SelectItem>
+              <SelectItem value="none">{t('about.updateProxyNone')}</SelectItem>
+              {BUILTIN_UPDATE_PROXIES.map(item => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.id}
+                </SelectItem>
+              ))}
+              <SelectItem value="custom">{t('about.updateProxyCustom')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        {proxySettings.proxy === 'custom' && (
+          <SettingRow label={t('about.updateProxyCustomPrefix')} description={t('about.updateProxyCustomPrefixDesc')}>
+            <input
+              type="text"
+              defaultValue={proxySettings.customPrefix}
+              placeholder="https://gh-proxy.com/"
+              onBlur={event => handleCustomPrefixCommit(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') handleCustomPrefixCommit((event.target as HTMLInputElement).value)
+              }}
+              className="h-8 w-56 min-w-0 rounded-md border border-border-200 bg-transparent px-2.5 text-ui-caption text-text-100 placeholder:text-text-500 hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 focus-visible:outline-none"
+            />
+          </SettingRow>
+        )}
+      </SettingsSection>
 
       <SettingsSection plain title={t('about.backupCardTitle')} description={t('about.backupCardDesc')}>
         <input

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { isTauriMock, isTauriMobileMock, invokeMock, relaunchMock } = vi.hoisted(() => ({
+const { isTauriMock, isTauriMobileMock, invokeMock, relaunchMock, stageManifestMock } = vi.hoisted(() => ({
   isTauriMock: vi.fn(() => true),
   isTauriMobileMock: vi.fn(() => false),
   invokeMock: vi.fn(),
   relaunchMock: vi.fn(),
+  stageManifestMock: vi.fn(async (_content: Record<string, unknown>) => 'file:///tmp/manifest.json'),
 }))
 
 vi.mock('../utils/tauri', () => ({
@@ -17,6 +18,10 @@ vi.mock('@tauri-apps/api/core', () => ({
     onmessage: ((event: unknown) => void) | null = null
   },
   invoke: (...args: unknown[]) => invokeMock(...args),
+}))
+
+vi.mock('../utils/manifestStaging', () => ({
+  stageRewrittenManifest: (content: Record<string, unknown>) => stageManifestMock(content),
 }))
 
 vi.mock('@tauri-apps/plugin-process', () => ({
@@ -108,8 +113,38 @@ describe('DesktopUpdater', () => {
     expect(updater.getSnapshot().error).toBe('network down')
   })
 
-  it('deduplicates concurrent install requests', async () => {
-    let resolveInstall: ((value: { installedVersion: string | null }) => void) | undefined
+  it('rewrites the manifest asset urls when the route is a proxy', async () => {
+    // 回归：只把清单地址换成代理、不改写 asset，会导致「检查能过、下载必失败」。
+    // 走代理时先把清单取回来，把 asset 地址一起改写，再把改写结果交给 Rust。
+    const manifest = {
+      version: '2.2.18',
+      platforms: {
+        'windows-x86_64': { url: 'https://github.com/iwvw-per/OCC/releases/download/v2.2.18/a.exe', signature: 's' },
+      },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => manifest })),
+    )
+    invokeMock.mockResolvedValue({ installedVersion: '2.2.18' })
+
+    const updater = new DesktopUpdater()
+    // 直接给一条「已走代理」的清单地址
+    await updater.installLatest('https://gh-proxy.com/https://github.com/iwvw-per/OCC/releases/download/v2.2.18/latest.json')
+
+    // 交给 Rust 的是本地改写后的清单
+    expect(invokeMock).toHaveBeenCalledWith(
+      'updater_install',
+      expect.objectContaining({ manifestUrl: 'file:///tmp/manifest.json' }),
+    )
+    expect(stageManifestMock).toHaveBeenCalled()
+    const staged = stageManifestMock.mock.calls.at(-1)?.[0] as {
+      platforms: Record<string, { url: string }>
+    }
+    expect(staged.platforms['windows-x86_64'].url.startsWith('https://gh-proxy.com/https://github.com/')).toBe(true)
+  })
+
+  it('deduplicates concurrent install requests', async () => {    let resolveInstall: ((value: { installedVersion: string | null }) => void) | undefined
     invokeMock.mockImplementation(
       () =>
         new Promise<{ installedVersion: string | null }>(resolve => {

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import i18n from '../i18n'
+import { applyRoute, getRouteChain, type UpdateRoute } from '../utils/updateRoutes'
 
 export interface UpdateRelease {
   version: string
@@ -53,6 +54,29 @@ const CANARY_RELEASE_SCAN_LIMIT = 5
 // 产品线隔离后，稳定通道也必须走列表接口（/latest 只返回最新一个、无法按主版本
 // 过滤）。per_page 需要能覆盖该主版本的全部 release，取 20 以兼顾 v1/v2 各迭代。
 const STABLE_RELEASE_SCAN_LIMIT = 20
+/**
+ * 单条线路的请求超时：被墙的线路往往表现为「连接挂着不返回」，没有超时就会让
+ * 「检查更新」一直转圈（TCP 建连超时可能长达一两分钟）。10 秒足够覆盖慢速但
+ * 可用的线路，也让回退到代理足够快。
+ */
+const RELEASE_REQUEST_TIMEOUT_MS = 10_000
+
+/** 给 Promise 套一层超时：超时即 reject，用于「一条线路卡死不影响整体」 */
+function raceTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs)
+    promise.then(
+      value => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      error => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
 export const RELEASES_API_URL = `${RELEASES_ROOT_URL}/latest`
 export const RELEASES_PAGE_URL = `https://github.com/${RELEASE_REPO}/releases/latest`
 
@@ -154,6 +178,16 @@ export function getReleaseManifestUrl(release: UpdateRelease): string {
   return `https://github.com/${RELEASE_REPO}/releases/download/${release.tagName}/latest.json`
 }
 
+/**
+ * 按当前线路设置生成安装用的候选清单 URL 列表（按尝试顺序）。
+ *
+ * 前项是线路首选地址，其余为备用。Rust 侧会逐条尝试（见 desktopUpdater）。
+ */
+export function getManifestCandidates(release: UpdateRelease): string[] {
+  const manifestUrl = getReleaseManifestUrl(release)
+  return getRouteChain().map(route => applyRoute(manifestUrl, route))
+}
+
 function loadPersistedState(): PersistedUpdateState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -250,6 +284,8 @@ export class UpdateStore {
   private state: UpdateState
   private subscribers = new Set<Subscriber>()
   private inflightCheck: Promise<void> | null = null
+  /** 最近一次成功取回 Release 列表所用的线路（诊断用） */
+  lastRouteId: string | null = null
 
   constructor(currentVersion?: string) {
     const persisted = loadPersistedState()
@@ -323,16 +359,12 @@ export class UpdateStore {
         // /releases/latest 只返回最新一个、无法区分 v1(1.x)/v2(2.x)。
         // canary 通道取预发布与正式版的最大者（/latest 解析不到 prerelease）。
         const scanLimit = this.state.currentChannel === 'canary' ? CANARY_RELEASE_SCAN_LIMIT : STABLE_RELEASE_SCAN_LIMIT
-        const requestUrl = `${RELEASES_ROOT_URL}?per_page=${scanLimit}`
+        const apiUrl = `${RELEASES_ROOT_URL}?per_page=${scanLimit}`
 
-        const response = await fetch(requestUrl, {
-          headers: { Accept: 'application/vnd.github+json' },
-        })
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-
-        const payload = await response.json()
+        // 按用户设置的线路顺序逐个尝试：直连被墙时自动换内置代理。
+        // 每条线路独立计时，避免一条挂死后把「检查更新」整体拖到超时。
+        const routes = getRouteChain()
+        const payload = await this.fetchReleaseList(apiUrl, routes)
         const release = Array.isArray(payload)
           ? pickRelease(payload, this.state.currentChannel, this.state.currentVersion)
           : // 兜底：单个 release 对象时视为与当前主版本一致（仅当主版本匹配才接受）
@@ -353,6 +385,36 @@ export class UpdateStore {
     })()
 
     return this.inflightCheck
+  }
+
+  /**
+   * 按线路顺序取 Release 列表，返回第一个成功的结果。
+   *
+   * 为什么不用 `AbortSignal.timeout`：桌面端 WebView（尤其旧的 WebKitGTK）不一定
+   * 支持；用 Promise.race 保证一条线路卡死不会拖住整次检查。
+   */
+  private async fetchReleaseList(apiUrl: string, routes: UpdateRoute[]): Promise<unknown> {
+    const failures: string[] = []
+    for (const route of routes) {
+      const startedAt = Date.now()
+      try {
+        const response = await raceTimeout(
+          fetch(applyRoute(apiUrl, route), { headers: { Accept: 'application/vnd.github+json' } }),
+          RELEASE_REQUEST_TIMEOUT_MS,
+        )
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const payload = await raceTimeout(response.json(), RELEASE_REQUEST_TIMEOUT_MS)
+        // 命中线路记入诊断信息：安装更新会复用同一顺序，出问题时用户能看出走的是哪条
+        this.lastRouteId = route.id
+        if (import.meta.env.DEV && route.id !== 'direct') {
+          console.info(`[updateStore] release list via ${route.id} (${Date.now() - startedAt}ms)`)
+        }
+        return payload
+      } catch (error) {
+        failures.push(`${route.id}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    throw new Error(i18n.t('settings:about.updateAllRoutesFailed') + ': ' + failures.join(' | '))
   }
 
   hideToastForCurrentVersion(): void {

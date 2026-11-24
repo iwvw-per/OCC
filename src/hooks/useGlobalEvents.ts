@@ -993,6 +993,18 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
         const cleared = activeSessionStore.updateStatus(scopedId, { type: 'idle' })
         if (!wasBusy || !cleared) return
 
+        /**
+         * 子 agent 会话不播完成提示音。
+         *
+         * 子代理是主对话内部的一步:用户在等的是**主会话**的结论,子代理跑完马上
+         * 还会继续下一段,单独响一声只会让人误以为整件事结束了(尤其是直接点开
+         * 子会话查看时,这个分支此前会照常播)。完成/出错事件只对主会话有意义。
+         */
+        if (isChildSession(scopedId)) {
+          dispatchToConsumers(scopedId, cb => cb.onSessionIdle?.(scopedId))
+          return
+        }
+
         if (belongsToCurrentSession(scopedId)) {
           // 正在看的会话：补一次标记已读。
           // 推送条件读的 focusedSessionId 更新是异步的，点开会话瞬间若会话
@@ -1005,9 +1017,9 @@ export function useGlobalEvents(directoriesByServer?: ReadonlyMap<string, readon
           if (isSessionDirectlyOpen(scopedId) && soundStore.getSnapshot().currentSessionEnabled) {
             playNotificationSoundDeduped('completed')
           }
-        } else if (!isChildSession(scopedId)) {
-          // 子 agent 会话：不在侧栏出现（除非用户显式打开子会话开关），
-          // 推通知只会产生点不到也清不掉的孤儿未读点。跳过。
+        } else {
+          // 走到这里必定不是子 agent 会话（已在上面提前 return）：
+          // 没有推送就没人能点开清除的未读点，因此仍需推一条完成通知。
           const meta = activeSessionStore.getSessionMeta(scopedId)
           const sessionLabel = meta?.title || rawSessionId.slice(0, 8)
           notificationStore.push(
@@ -1445,7 +1457,13 @@ onPartDelta: data => {
                   meta?.directory,
                 )
               }
-            } else if (isSessionDirectlyOpen(scopedId) && soundStore.getSnapshot().currentSessionEnabled) {
+            } else if (
+              // 子 agent 报错不播提示音：它是主对话内部的一步，主会话随后会自己
+              // 收尾（成功或失败）并给出结论，这里单独响一声只会误报「整件事失败」。
+              !isChildSession(scopedId) &&
+              isSessionDirectlyOpen(scopedId) &&
+              soundStore.getSnapshot().currentSessionEnabled
+            ) {
               playNotificationSoundDeduped('error')
             }
           }

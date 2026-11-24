@@ -37,6 +37,10 @@
     "fs:default",
     "fs:allow-read-file",
     "fs:allow-write-file",
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$APPLOCALDATA/updater-manifest-*.json" }]
+    },
     "opener:default",
     {
       "identifier": "opener:allow-open-path",

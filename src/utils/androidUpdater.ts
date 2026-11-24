@@ -26,6 +26,7 @@ import { isTauri } from './tauri'
 import i18n from '../i18n'
 import type { UpdateRelease } from '../store/updateStore'
 import { RELEASE_REPO } from '../store/updateStore'
+import { applyRoute, getRouteChain } from './updateRoutes'
 
 export type AndroidUpdatePhase =
   | 'idle'
@@ -149,6 +150,57 @@ export class AndroidUpdater {
 
   getSnapshot = (): AndroidUpdateProgress => this.progress
 
+  /**
+   * 按线路顺序下载 APK：任一条成功即返回。
+   *
+   * 与桌面端共用同一份线路设置（见 updateRoutes）。Android 也必须回退，否则
+   * 「能用代理检查更新、却装不上包」—— APK 直连 github.com 同样会被墙。
+   */
+  private async downloadWithRoutes(apkUrl: string, fileName: string): Promise<AndroidDownloadResult> {
+    const routes = getRouteChain()
+    const failures: string[] = []
+
+    for (let index = 0; index < routes.length; index += 1) {
+      const route = routes[index]
+      const isLast = index === routes.length - 1
+      const { Channel } = await import('@tauri-apps/api/core')
+      const channel = new Channel<DownloadEvent>()
+      let total: number | null = null
+      let downloaded = 0
+      channel.onmessage = event => {
+        if (event.event === 'Started') {
+          total = event.data?.contentLength ?? null
+          this.setProgress({ phase: 'downloading', downloadedBytes: 0, totalBytes: total })
+          return
+        }
+        if (event.event === 'Progress') {
+          downloaded += event.data?.chunkLength ?? 0
+          this.setProgress({ phase: 'downloading', downloadedBytes: downloaded, totalBytes: total })
+          return
+        }
+        this.setProgress({ phase: 'installing' })
+      }
+
+      try {
+        return await invoke<AndroidDownloadResult>('android_download_apk', {
+          url: applyRoute(apkUrl, route),
+          // 文件名必须与 pickApkUrl 里的资产名一致，否则无法判断「下的是哪个包」
+          fileName,
+          onEvent: channel,
+          options: { timeout: DOWNLOAD_TIMEOUT_MS },
+        })
+      } catch (error) {
+        failures.push(`${route.id}: ${error instanceof Error ? error.message : String(error)}`)
+        if (isLast) {
+          throw new Error(`${i18n.t('settings:about.updateAllRoutesFailed')}: ${failures.join(' | ')}`)
+        }
+        this.setProgress({ phase: 'downloading', downloadedBytes: 0, totalBytes: null, error: null })
+      }
+    }
+
+    throw new Error(i18n.t('settings:about.updateAllRoutesFailed') + ': ' + failures.join(' | '))
+  }
+
   private setProgress(next: Partial<AndroidUpdateProgress>): void {
     this.progress = { ...this.progress, ...next }
     this.listeners.forEach(listener => listener(this.progress))
@@ -173,31 +225,7 @@ export class AndroidUpdater {
 
         this.setProgress({ phase: 'downloading', downloadedBytes: 0, totalBytes: null, error: null })
 
-        const { Channel } = await import('@tauri-apps/api/core')
-        const channel = new Channel<DownloadEvent>()
-        let total: number | null = null
-        let downloaded = 0
-        channel.onmessage = event => {
-          if (event.event === 'Started') {
-            total = event.data?.contentLength ?? null
-            this.setProgress({ phase: 'downloading', downloadedBytes: 0, totalBytes: total })
-            return
-          }
-          if (event.event === 'Progress') {
-            downloaded += event.data?.chunkLength ?? 0
-            this.setProgress({ phase: 'downloading', downloadedBytes: downloaded, totalBytes: total })
-            return
-          }
-          this.setProgress({ phase: 'installing' })
-        }
-
-        const result = await invoke<AndroidDownloadResult>('android_download_apk', {
-          url,
-          // 文件名必须与 pickApkUrl 里的资产名一致，否则无法判断「下的是哪个包」
-          fileName: apkFileName(release, arch),
-          onEvent: channel,
-          options: { timeout: DOWNLOAD_TIMEOUT_MS },
-        })
+        const result = await this.downloadWithRoutes(url, apkFileName(release, arch) ?? '')
 
         this.setProgress({ phase: 'installing' })
 

@@ -3,15 +3,35 @@
 // ============================================
 //
 // 职责：
-// 1. 内置音效生成（Web Audio API，零资源文件）
+// 1. 内置音效播放（真实采样音频，Vite 打包为静态资源）
 // 2. 自定义音频播放（用户上传的音频 Blob）
 // 3. 音量控制（统一映射到 0-100 滑条语义）
 // 4. 试听 & 真实播放共用一套逻辑
 //
 // 音量语义：0 = 静音，50 = 正常基准，100 = 安全最大
+//
+// ⚠️ 历史：内置音效原本用 Web Audio 现场合成（裸 OscillatorNode 直连 destination，
+// 只用 gain 做指数衰减）。听感「发闷、刺耳、有'噗'声」，原因是合成路径缺少
+// 波形整形与抗混叠处理：方波/锯齿方波自带大量高次谐波，指数收尾到 0.001 在曲线上
+// 是不连续的一阶导数，听感即爆音/电流声。现改为**真实采样音频**（45ms~0.9s 的
+// 短音效，合计约 52KB），从根本上解决音质问题。
 
 import type { NotificationType } from '../store/notificationStore'
 import { logger } from './logger'
+
+// 内置音效资源：Vite 会把它们打包为带 hash 的静态文件并返回 URL。
+import chimeUrl from '../assets/sounds/chime.mp3'
+import successUrl from '../assets/sounds/success.mp3'
+import bellUrl from '../assets/sounds/bell.mp3'
+import knockUrl from '../assets/sounds/knock.mp3'
+import alertUrl from '../assets/sounds/alert.mp3'
+import tapUrl from '../assets/sounds/tap.mp3'
+import pingUrl from '../assets/sounds/ping.mp3'
+import bubbleUrl from '../assets/sounds/bubble.mp3'
+import popUrl from '../assets/sounds/pop.mp3'
+import errorUrl from '../assets/sounds/error.mp3'
+import buzzUrl from '../assets/sounds/buzz.mp3'
+import warningUrl from '../assets/sounds/warning.mp3'
 
 // ============================================
 // 内置音效 ID
@@ -37,6 +57,22 @@ export const BUILTIN_SOUNDS = {
 } as const
 
 export type BuiltinSoundId = keyof typeof BUILTIN_SOUNDS
+
+/** 内置音效 → 采样音频 URL */
+const BUILTIN_SOUND_URLS: Record<BuiltinSoundId, string> = {
+  'builtin:chime': chimeUrl,
+  'builtin:success': successUrl,
+  'builtin:bell': bellUrl,
+  'builtin:knock': knockUrl,
+  'builtin:alert': alertUrl,
+  'builtin:tap': tapUrl,
+  'builtin:ping': pingUrl,
+  'builtin:bubble': bubbleUrl,
+  'builtin:pop': popUrl,
+  'builtin:error': errorUrl,
+  'builtin:buzz': buzzUrl,
+  'builtin:warning': warningUrl,
+}
 
 // 每类事件推荐的默认音效
 export const DEFAULT_SOUNDS: Record<NotificationType, BuiltinSoundId> = {
@@ -99,208 +135,57 @@ function volumeToGain(volume: number): number {
 }
 
 // ============================================
-// 内置音效生成器（Web Audio API 合成）
+// 内置音效：解码缓存
 // ============================================
+//
+// 采样音频体积很小(单个 3~6KB),但每次播放都走 fetch + decodeAudioData 会引入
+// 明显延迟(提示音必须在事件到达的当帧响起)。这里按 URL 缓存解码结果:
+//   - 播放时若已缓存,直接建 BufferSource 播放;
+//   - 未缓存则先发起加载,解码完成后播放,之后命中缓存。
 
-type SynthFn = (ctx: AudioContext, dest: AudioNode) => void
+const decodedBuiltin = new Map<string, AudioBuffer>()
+const loadingBuiltin = new Map<string, Promise<AudioBuffer | null>>()
 
-const synthMap: Record<BuiltinSoundId, SynthFn> = {
-  // ---- completed ----
-  'builtin:chime': (ctx, dest) => {
-    // 柔和的双音和弦
-    const now = ctx.currentTime
-    ;[523.25, 659.25].forEach((freq, i) => {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(freq, now)
-      gain.gain.setValueAtTime(0, now + i * 0.05)
-      gain.gain.linearRampToValueAtTime(1, now + i * 0.05 + 0.04)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5 + i * 0.05)
-      osc.connect(gain).connect(dest)
-      osc.start(now + i * 0.05)
-      osc.stop(now + 0.6)
-    })
-  },
+function loadBuiltinBuffer(url: string): Promise<AudioBuffer | null> {
+  const cached = decodedBuiltin.get(url)
+  if (cached) return Promise.resolve(cached)
+  const inflight = loadingBuiltin.get(url)
+  if (inflight) return inflight
 
-  'builtin:success': (ctx, dest) => {
-    // 上升三音
-    const now = ctx.currentTime
-    ;[440, 554.37, 659.25].forEach((freq, i) => {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(freq, now + i * 0.1)
-      gain.gain.setValueAtTime(0, now + i * 0.1)
-      gain.gain.linearRampToValueAtTime(0.8, now + i * 0.1 + 0.03)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.35)
-      osc.connect(gain).connect(dest)
-      osc.start(now + i * 0.1)
-      osc.stop(now + i * 0.1 + 0.4)
-    })
-  },
+  const task = (async (): Promise<AudioBuffer | null> => {
+    const ctx = getAudioContext()
+    if (!ctx) return null
+    try {
+      const response = await fetch(url)
+      if (!response.ok) return null
+      const arrayBuffer = await response.arrayBuffer()
+      const buffer = await ctx.decodeAudioData(arrayBuffer)
+      decodedBuiltin.set(url, buffer)
+      return buffer
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        logger.warn('[SoundPlayer] Failed to load builtin sound:', url, err)
+      }
+      return null
+    } finally {
+      loadingBuiltin.delete(url)
+    }
+  })()
 
-  'builtin:bell': (ctx, dest) => {
-    // 清脆铃声
-    const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(880, now)
-    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.02)
-    osc.frequency.exponentialRampToValueAtTime(880, now + 0.08)
-    gain.gain.setValueAtTime(0.9, now)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6)
-    osc.connect(gain).connect(dest)
-    osc.start(now)
-    osc.stop(now + 0.65)
-  },
+  loadingBuiltin.set(url, task)
+  return task
+}
 
-  // ---- permission ----
-  'builtin:knock': (ctx, dest) => {
-    // 两下敲击
-    const now = ctx.currentTime
-    ;[0, 0.15].forEach(offset => {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'triangle'
-      osc.frequency.setValueAtTime(200, now + offset)
-      osc.frequency.exponentialRampToValueAtTime(80, now + offset + 0.1)
-      gain.gain.setValueAtTime(0.8, now + offset)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.15)
-      osc.connect(gain).connect(dest)
-      osc.start(now + offset)
-      osc.stop(now + offset + 0.2)
-    })
-  },
-
-  'builtin:alert': (ctx, dest) => {
-    // 紧促双音提醒
-    const now = ctx.currentTime
-    ;[0, 0.12].forEach(offset => {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'square'
-      osc.frequency.setValueAtTime(600, now + offset)
-      gain.gain.setValueAtTime(0.3, now + offset)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.1)
-      osc.connect(gain).connect(dest)
-      osc.start(now + offset)
-      osc.stop(now + offset + 0.15)
-    })
-  },
-
-  'builtin:tap': (ctx, dest) => {
-    // 轻拍
-    const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'triangle'
-    osc.frequency.setValueAtTime(350, now)
-    osc.frequency.exponentialRampToValueAtTime(150, now + 0.06)
-    gain.gain.setValueAtTime(0.7, now)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
-    osc.connect(gain).connect(dest)
-    osc.start(now)
-    osc.stop(now + 0.15)
-  },
-
-  // ---- question ----
-  'builtin:ping': (ctx, dest) => {
-    // 清脆 ping
-    const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(1046.5, now)
-    gain.gain.setValueAtTime(0.6, now)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3)
-    osc.connect(gain).connect(dest)
-    osc.start(now)
-    osc.stop(now + 0.35)
-  },
-
-  'builtin:bubble': (ctx, dest) => {
-    // 气泡上升音
-    const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(400, now)
-    osc.frequency.exponentialRampToValueAtTime(900, now + 0.15)
-    gain.gain.setValueAtTime(0.5, now)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25)
-    osc.connect(gain).connect(dest)
-    osc.start(now)
-    osc.stop(now + 0.3)
-  },
-
-  'builtin:pop': (ctx, dest) => {
-    // 短促 pop
-    const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(800, now)
-    osc.frequency.exponentialRampToValueAtTime(400, now + 0.06)
-    gain.gain.setValueAtTime(0.7, now)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1)
-    osc.connect(gain).connect(dest)
-    osc.start(now)
-    osc.stop(now + 0.12)
-  },
-
-  // ---- error ----
-  'builtin:error': (ctx, dest) => {
-    // 下降双音错误
-    const now = ctx.currentTime
-    ;[0, 0.15].forEach((offset, i) => {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'sawtooth'
-      const freq = i === 0 ? 400 : 300
-      osc.frequency.setValueAtTime(freq, now + offset)
-      osc.frequency.exponentialRampToValueAtTime(freq * 0.6, now + offset + 0.15)
-      gain.gain.setValueAtTime(0.25, now + offset)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.2)
-      osc.connect(gain).connect(dest)
-      osc.start(now + offset)
-      osc.stop(now + offset + 0.25)
-    })
-  },
-
-  'builtin:buzz': (ctx, dest) => {
-    // 嗡嗡震动
-    const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'sawtooth'
-    osc.frequency.setValueAtTime(150, now)
-    gain.gain.setValueAtTime(0.3, now)
-    gain.gain.setValueAtTime(0.1, now + 0.05)
-    gain.gain.setValueAtTime(0.3, now + 0.1)
-    gain.gain.setValueAtTime(0.1, now + 0.15)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3)
-    osc.connect(gain).connect(dest)
-    osc.start(now)
-    osc.stop(now + 0.35)
-  },
-
-  'builtin:warning': (ctx, dest) => {
-    // 警告音（上下交替）
-    const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'square'
-    osc.frequency.setValueAtTime(500, now)
-    osc.frequency.setValueAtTime(400, now + 0.1)
-    osc.frequency.setValueAtTime(500, now + 0.2)
-    gain.gain.setValueAtTime(0.2, now)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35)
-    osc.connect(gain).connect(dest)
-    osc.start(now)
-    osc.stop(now + 0.4)
-  },
+/**
+ * 预加载某个内置音效(试听/进入设置页时调用),失败静默。
+ *
+ * 首帧播放虽然会在解码后补放,但首次点击试听仍会有几十毫秒延迟;
+ * 提前预热能让试听与真实提示音都即时发声。
+ */
+export function preloadBuiltinSound(soundId: string): void {
+  if (!soundId.startsWith('builtin:')) return
+  const url = BUILTIN_SOUND_URLS[soundId as BuiltinSoundId]
+  if (url) void loadBuiltinBuffer(url)
 }
 
 // ============================================
@@ -316,14 +201,25 @@ function playBuiltinSound(soundId: BuiltinSoundId, volume: number): void {
     ctx.resume().catch(() => {})
   }
 
-  const masterGain = ctx.createGain()
-  masterGain.gain.setValueAtTime(volumeToGain(volume), ctx.currentTime)
-  masterGain.connect(ctx.destination)
-
-  const synth = synthMap[soundId]
-  if (synth) {
-    synth(ctx, masterGain)
+  const start = (buffer: AudioBuffer) => {
+    const source = ctx.createBufferSource()
+    const gainNode = ctx.createGain()
+    source.buffer = buffer
+    gainNode.gain.setValueAtTime(volumeToGain(volume), ctx.currentTime)
+    source.connect(gainNode).connect(ctx.destination)
+    source.start(0)
   }
+
+  const url = BUILTIN_SOUND_URLS[soundId]
+  const cached = decodedBuiltin.get(url)
+  if (cached) {
+    start(cached)
+    return
+  }
+  // 首次播放:等解码完成再响,而不是静默失败;之后都走缓存。
+  void loadBuiltinBuffer(url).then(buffer => {
+    if (buffer) start(buffer)
+  })
 }
 
 // ============================================
