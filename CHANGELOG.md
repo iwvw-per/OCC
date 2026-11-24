@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.2.18] - 2026-11-24
+
+- fix(update): 更新支持 GitHub 加速线路并修复「检查能过、下载必失败」 (8ae2dcc4)
+
 ## [v2.2.17] - 2026-11-24
 
 - fix(titlebar): 窄屏 Windows 标题栏左侧导航图标竖向错位 (f8f861e2)

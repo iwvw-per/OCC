@@ -1,6 +1,6 @@
 [package]
 name = "occ"
-version = "2.2.17"
+version = "2.2.18"
 description = "OpenCode UI - Tauri Mobile App"
 authors = ["lehhair"]
 license = "GPL-3.0-only"
