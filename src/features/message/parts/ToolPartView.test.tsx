@@ -168,7 +168,7 @@ describe('ToolPartView running duration', () => {
     expect(container.firstElementChild?.className).toContain('pt-1')
   })
 
-  it('shows an interrupted marker and duration for reconciled tool parts', () => {
+  it('shows duration but no interrupted marker for reconciled tool parts', () => {
     const part = createRunningToolPart()
     part.state = {
       ...part.state,
@@ -179,7 +179,7 @@ describe('ToolPartView running duration', () => {
 
     render(<ToolPartView part={part} />)
 
-    expect(screen.getByText('Interrupted')).toBeInTheDocument()
+    expect(screen.queryByText('Interrupted')).not.toBeInTheDocument()
     expect(screen.getByText('2.5s')).toBeInTheDocument()
   })
 })

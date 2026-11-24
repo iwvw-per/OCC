@@ -421,9 +421,6 @@ export const ToolPartView = memo(function ToolPartView({
           }
           meta={
             <>
-              {isInterrupted && (
-                <span className="shrink-0 text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
-              )}
               {showDuration && (
                 <span
                   className={`text-ui-xs tabular-nums ${isError ? 'text-danger-100/70' : isActive ? 'reasoning-shimmer-text' : 'text-text-500'}`}
@@ -477,9 +474,6 @@ export const ToolPartView = memo(function ToolPartView({
             }
             meta={
               <>
-                {isInterrupted && (
-                  <span className="text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
-                )}
                 {showDuration && (
                   <span className={`text-ui-xs tabular-nums ${isActive ? 'reasoning-shimmer-text' : 'text-text-500'}`}>
                     {formatDuration(duration!)}
@@ -554,9 +548,6 @@ export const ToolPartView = memo(function ToolPartView({
           meta={
             <>
               {taskStopButton}
-              {isInterrupted && (
-                <span className="text-ui-xs font-medium text-warning-100">{t('toolPart.interrupted')}</span>
-              )}
               {showDuration && (
                 <span
                   className={`text-ui-xs tabular-nums transition-opacity duration-300 ${
