@@ -768,7 +768,9 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
                     pages: 60,
                   })
                   if (isStale() || older.messages.length === 0) return
-                  const entries = extractTurnOutlineEntries(older.messages.map(toUIMessage))
+                  const entries = extractTurnOutlineEntries(
+                    older.messages.map(message => toUIMessage(message, { serverId, sessionId: sid })),
+                  )
                   if (entries.length > 0) turnOutlineStore.merge(serverId, sid, entries)
                 } catch {
                   // 静默：大纲只是导航辅助，点轴时仍会按需续取

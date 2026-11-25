@@ -35,6 +35,17 @@ export interface Attachment {
   mime?: string // MIME 类型
   relativePath?: string // 相对路径（用于显示和 source.path）
 
+  /**
+   * 产生该附件的服务器（`aiagent:inst_xxx` / `local`）与所属会话。
+   *
+   * 多端同步场景：A 主机上产生的图片附件，url 是 `file:///A主机路径` 或 data URL，
+   * B 端拿到后无法直接加载（浏览器禁止页面读 file://，渲染层也拦 data:）。
+   * 有了这两个字段，B 端可以用 `getFileContent(path, directory, serverId)` 从
+   * **原主机**回读字节再转 data URL 显示。
+   */
+  serverId?: string
+  sessionId?: string
+
   // 文件内容（从 synthetic text part 获取）
   content?: string // 文件内容预览
 

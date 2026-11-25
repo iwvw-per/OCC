@@ -21,6 +21,7 @@ import { pinnedMessagesStore, buildPinnedMessageExcerpt, usePinnedMessage } from
 import { getMessageText } from '../../types/message'
 import { useCompositorExpand, useDisclosureScrollLock } from '../../hooks'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
+import { useRemoteAttachmentImage } from '../../hooks/useRemoteAttachmentImage'
 import { useNow } from '../../hooks/useNow'
 import { useTheme } from '../../hooks/useTheme'
 import { exportNodeAsImage } from '../../utils/imageExport'
@@ -1048,21 +1049,31 @@ const UserAttachmentChip = memo(function UserAttachmentChip({
   attachment: import('../../features/attachment/types').Attachment
 }) {
   const [imageFailed, setImageFailed] = useState(false)
-  const isImage = attachment.mime?.startsWith('image/') === true && !!attachment.url && !imageFailed
+  // 多端同步：A 主机的图片在 B 端不可达（file:// 无法读、data: 被拦截），
+  // 按附件来源的 serverId 从原主机回读字节再转 data URL。
+  const remoteSrc = useRemoteAttachmentImage({
+    url: attachment.url,
+    relativePath: attachment.relativePath,
+    mime: attachment.mime,
+    serverId: attachment.serverId,
+    sessionId: attachment.sessionId,
+  })
+  const imageSrc = attachment.url && !imageFailed ? (remoteSrc ?? attachment.url) : null
+  const isImage = attachment.mime?.startsWith('image/') === true && !!imageSrc
 
   if (isImage) {
     return (
       <NativeTooltip>
         <a
           data-user-attachment
-          href={attachment.url}
+          href={imageSrc ?? undefined}
           target="_blank"
           rel="noreferrer"
           title={attachment.displayName}
           className="block max-w-[240px] overflow-hidden rounded-lg border border-border-200 bg-bg-100"
         >
           <img
-            src={attachment.url}
+            src={imageSrc ?? undefined}
             alt={attachment.displayName}
             loading="lazy"
             onError={() => setImageFailed(true)}

@@ -76,3 +76,45 @@ describe('toApiMessageWithParts preserves lightweight stats', () => {
     expect(back.lightweight?.changedFiles?.[0]?.path).toBe('a.ts')
   })
 })
+
+/**
+ * 多端同步：用户图片附件必须带上来源（serverId + sessionId）。
+ *
+ * A 主机产生的图片 url 是 `file:///A主机路径` 或 data URL，B 端都加载不了。
+ * 只有把来源记在附件上，B 端才能用 `getFileContent(path, dir, serverId)`
+ * 从原主机回读。缺了这层信息，跨端只能退化成文件名 chip。
+ */
+describe('toUIMessage attachment origin', () => {
+  function userImageEnvelope(): ApiMessageWithParts {
+    return {
+      info: { id: 'u1', sessionID: 'ses-1', role: 'user', time: { created: 1 } },
+      parts: [
+        {
+          id: 'f1',
+          sessionID: 'ses-1',
+          messageID: 'u1',
+          type: 'file',
+          mime: 'image/png',
+          url: 'file:///home/user/shot.png',
+          filename: 'shot.png',
+          source: { type: 'file', path: '/home/user/shot.png' },
+        },
+      ],
+    } as unknown as ApiMessageWithParts
+  }
+
+  it('injects serverId/sessionId onto file attachments when origin is given', () => {
+    const ui = toUIMessage(userImageEnvelope(), { serverId: 'aiagent:inst_work', sessionId: 'ses-1' })
+    const attachments = (ui.info as { attachments?: Array<{ serverId?: string; sessionId?: string }> }).attachments
+    expect(attachments).toHaveLength(1)
+    expect(attachments?.[0].serverId).toBe('aiagent:inst_work')
+    expect(attachments?.[0].sessionId).toBe('ses-1')
+  })
+
+  it('leaves attachments without origin untouched', () => {
+    const ui = toUIMessage(userImageEnvelope())
+    const attachments = (ui.info as { attachments?: Array<{ serverId?: string }> }).attachments
+    expect(attachments).toHaveLength(1)
+    expect(attachments?.[0].serverId).toBeUndefined()
+  })
+})

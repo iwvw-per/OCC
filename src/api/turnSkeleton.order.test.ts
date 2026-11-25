@@ -60,7 +60,7 @@ describe('轮次投影的时间字段不能污染消息排序', () => {
   it('混入流式消息后，按 created 排序仍把回答放在本轮最后', () => {
     const { raw } = adaptTurnSkeleton([turn()])
     const page = adaptMessagePage({ data: raw })
-    const ui = page.messages.map(toUIMessage)
+    const ui = page.messages.map(message => toUIMessage(message))
 
     // 该轮的过程消息（流式建立，带真实时间，均晚于轮次起点、早于轮次结束）
     const processMessages = [1100, 1200, 1300].map((created, index) => ({

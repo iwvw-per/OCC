@@ -55,7 +55,7 @@ export function foldPartToContent(apiPart: ApiPart): Content | null {
 }
 
 /** 把用户消息里的 file/agent part 折叠为 Attachment 元信息（不进入 content）。 */
-function foldUserAttachment(apiPart: ApiPart): Attachment | null {
+function foldUserAttachment(apiPart: ApiPart, origin?: AttachmentOrigin): Attachment | null {
   if (apiPart.type === 'file') {
     const isFolder = apiPart.mime === 'application/x-directory'
     const sourcePath =
@@ -71,6 +71,7 @@ function foldUserAttachment(apiPart: ApiPart): Attachment | null {
       url: apiPart.url,
       mime: apiPart.mime,
       relativePath: sourcePath,
+      ...origin,
       textRange: apiPart.source?.text
         ? {
             value: apiPart.source.text.value,
@@ -99,7 +100,7 @@ function foldUserAttachment(apiPart: ApiPart): Attachment | null {
 }
 
 /** 折叠整条消息的 parts[] 为 content[]，并把用户附件挂到 info.attachments。 */
-export function foldPartsToContent(apiMessage: ApiMessageEnvelope): Content[] {
+export function foldPartsToContent(apiMessage: ApiMessageEnvelope, origin?: AttachmentOrigin): Content[] {
   const info = getEnvelopeInfo(apiMessage)
   const isUser = info.role === 'user'
   const content: Content[] = []
@@ -107,7 +108,7 @@ export function foldPartsToContent(apiMessage: ApiMessageEnvelope): Content[] {
     const folded = foldPartToContent(part)
     if (folded) content.push(folded)
     else if (isUser) {
-      const attachment = foldUserAttachment(part)
+      const attachment = foldUserAttachment(part, origin)
       if (attachment) pushAttachment(info, attachment)
     }
   }
@@ -120,10 +121,21 @@ function pushAttachment(info: ApiMessageWithParts['info'], attachment: Attachmen
   ;(info as UserMessageInfo).attachments = list
 }
 
-export function toUIMessage(apiMessage: ApiMessageEnvelope): Message {
+/**
+ * 附件来源（哪台服务器、哪个会话产生的）。
+ *
+ * 多端同步下 A 主机的图片附件在 B 端不可达；只有记下来源，B 端才能回读。
+ * 由调用方（messageStore）从当前会话的复合 key 解析后传入。
+ */
+export interface AttachmentOrigin {
+  serverId?: string
+  sessionId?: string
+}
+
+export function toUIMessage(apiMessage: ApiMessageEnvelope, origin?: AttachmentOrigin): Message {
   const message: Message = {
     info: getEnvelopeInfo(apiMessage) as MessageInfo,
-    content: foldPartsToContent(apiMessage),
+    content: foldPartsToContent(apiMessage, origin),
     isStreaming: false,
   }
   // 轻量投影响应：主机 Agent 剥掉了 reasoning 与工具大输出，只留对话与元数据壳，

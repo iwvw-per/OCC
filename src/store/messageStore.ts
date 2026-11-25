@@ -13,6 +13,7 @@ import type { Message, MessageError, Content, TextContent, TokenUsage } from '..
 import type { ApiMessageWithParts, ApiMessage, ApiPart, ApiSession, Attachment } from '../api/types'
 import { logger } from '../utils/logger'
 import { isUserUIMessage, toUIMessage, toUIMessageInfo, toUIPart } from '../utils/messageConversion'
+import type { AttachmentOrigin } from '../utils/messageConversion'
 import { compressMessageParts } from './turnCompression'
 import { sessionActivityStore } from './sessionActivityStore'
 import {
@@ -553,6 +554,19 @@ class MessageStore {
     if (!create) return sessionId
     this.rawSessionToKey.set(raw, sessionId)
     return sessionId
+  }
+
+  /**
+   * 从会话复合 key 解析附件来源（serverId + 原始 sessionId）。
+   *
+   * 多端同步：A 主机产生的图片附件在 B 端不可达，需要在折叠成 Attachment 时
+   * 记下「它来自哪台服务器/哪个会话」，B 端才能用 `getFileContent(path, dir, serverId)`
+   * 回读。裸 key（无 server 前缀）返回 undefined，表示按当前活动服务器处理。
+   */
+  private originOfKey(sessionKey: string): AttachmentOrigin | undefined {
+    const serverId = serverIdOfSessionKey(sessionKey)
+    if (!serverId) return undefined
+    return { serverId, sessionId: rawSessionIdOfKey(sessionKey) }
   }
 
   /**
@@ -1446,7 +1460,7 @@ class MessageStore {
     const previousById = new Map(previousMessages.map(message => [message.info.id, message]))
 
     state.messages = apiMessages.map(apiMessage => {
-      const next = toUIMessage(apiMessage)
+      const next = toUIMessage(apiMessage, this.originOfKey(sessionId))
       const previous = previousById.get(next.info.id)
       // 定稿（completed）强制采用服务端；仅流式/未完成时不回退更长 live
       if (!previous || !shouldPreserveLiveParts(previous, next)) return next
@@ -1566,7 +1580,7 @@ class MessageStore {
     const state = this.sessions.get(sessionId)
     if (!state) return
 
-    const newMessages = apiMessages.map(toUIMessage)
+    const newMessages = apiMessages.map(message => toUIMessage(message, this.originOfKey(sessionId)))
 
     // 去重
     const existingIds = new Set(state.messages.map(m => m.info.id))
@@ -1662,7 +1676,7 @@ class MessageStore {
       const incoming = byId.get(message.info.id)
       if (!incoming || !message.isCompressed) continue
       nextMessages[i] = {
-        ...toUIMessage(incoming),
+        ...toUIMessage(incoming, this.originOfKey(sessionId)),
         isStreaming: message.isStreaming,
       }
       changed = true
@@ -1709,7 +1723,7 @@ class MessageStore {
 
     const previousById = new Map(messages.map(message => [message.info.id, message]))
     const replacement = turnMessages.map(message => ({
-      ...toUIMessage(message),
+      ...toUIMessage(message, this.originOfKey(sessionId)),
       // 保留区间内原消息的流式标记（历史轮次正常都不在流式）
       isStreaming: previousById.get(message.info.id)?.isStreaming ?? false,
     }))
